@@ -105,7 +105,9 @@ class TestPrecomputedMicrostatesContext(unittest.TestCase):
         self.assertEqual(captured["ctx"].name, "active")
         np.testing.assert_array_equal(captured["ctx"].train_mask, precomputed.train_mask)
         np.testing.assert_array_equal(captured["ctx"].fixed_templates, precomputed.fixed_templates)
-        self.assertEqual(captured["ctx"].fixed_template_ch_names, precomputed.fixed_template_ch_names)
+        self.assertEqual(
+            captured["ctx"].fixed_template_ch_names, precomputed.fixed_template_ch_names
+        )
         self.assertEqual(captured["ctx"].fixed_template_labels, precomputed.fixed_template_labels)
 
     def test_extract_pac_features_recomputes_when_transform_mismatch(self):
@@ -131,15 +133,19 @@ class TestPrecomputedMicrostatesContext(unittest.TestCase):
             tfr_complex_transform="csd",
         )
 
-        with patch(
-            "eeg_pipeline.analysis.features.api.compute_complex_tfr",
-            return_value=tfr_recomputed,
-        ) as mock_compute_complex, patch(
-            "eeg_pipeline.analysis.features.api.get_tfr_config",
-            return_value=(4.0, 40.0, 6, None, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.api.compute_pac_comodulograms",
-            return_value=(None, None, None, pac_trials_df, None),
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.api.compute_complex_tfr",
+                return_value=tfr_recomputed,
+            ) as mock_compute_complex,
+            patch(
+                "eeg_pipeline.analysis.features.api.get_tfr_config",
+                return_value=(4.0, 40.0, 6, None, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.api.compute_pac_comodulograms",
+                return_value=(None, None, None, pac_trials_df, None),
+            ),
         ):
             _pac_df, _phase_freqs, _amp_freqs, out_trials, _out_time = _extract_pac_features(
                 ctx, precomputed_data=None, tfr_complex=tfr_in

@@ -63,9 +63,7 @@ def get_aligned_events(
     from eeg_pipeline.infra.paths import _find_clean_events_path, _resolve_deriv_root
 
     resolved_deriv_root = (
-        Path(deriv_root)
-        if deriv_root is not None
-        else _resolve_deriv_root(None, config, constants)
+        Path(deriv_root) if deriv_root is not None else _resolve_deriv_root(None, config, constants)
     )
 
     clean_events_path = _find_clean_events_path(
@@ -75,7 +73,7 @@ def get_aligned_events(
         config=config,
         constants=constants,
     )
-    
+
     if clean_events_path is None or not clean_events_path.exists():
         task_is_rest = bool(config.get("preprocessing.task_is_rest", False))
         if task_is_rest:
@@ -84,18 +82,14 @@ def get_aligned_events(
                 subject,
                 task,
             )
-            return pd.DataFrame(
-                {"trial_id": np.arange(1, len(epochs) + 1, dtype=int)}
-            )
+            return pd.DataFrame({"trial_id": np.arange(1, len(epochs) + 1, dtype=int)})
         message = (
             f"Clean events.tsv not found for sub-{subject}, task-{task}. "
             "Required when strict=True"
         )
         if strict:
             raise ValueError(message)
-        logger.warning(
-            f"Clean events.tsv not found for sub-{subject}, task-{task}"
-        )
+        logger.warning(f"Clean events.tsv not found for sub-{subject}, task-{task}")
         return None
 
     events_df = pd.read_csv(clean_events_path, sep="\t")
@@ -103,7 +97,7 @@ def get_aligned_events(
         events_df,
         context=f"Clean events.tsv for sub-{subject}, task-{task}",
     )
-    
+
     if len(events_df) != len(epochs):
         message = (
             f"Clean events.tsv length mismatch for sub-{subject}, task-{task}: "
@@ -113,7 +107,7 @@ def get_aligned_events(
             raise ValueError(message)
         logger.warning(message)
         return None
-    
+
     logger.info(f"Loaded clean events.tsv: {len(events_df)} rows (already aligned)")
     return events_df.reset_index(drop=True)
 

@@ -15,7 +15,6 @@ import pandas as pd
 
 from .base import get_config_value as _get_config_value
 
-
 ###################################################################
 # Predictor Type Validation
 ###################################################################
@@ -43,9 +42,14 @@ def assert_predictor_type_continuous(config: Any, *, context: str) -> None:
     ValueError
         If predictor_type is not a recognised value or is not 'continuous'.
     """
-    predictor_type = str(
-        _get_config_value(config, "behavior_analysis.predictor_type", "continuous") or "continuous"
-    ).strip().lower()
+    predictor_type = (
+        str(
+            _get_config_value(config, "behavior_analysis.predictor_type", "continuous")
+            or "continuous"
+        )
+        .strip()
+        .lower()
+    )
 
     if predictor_type not in _VALID_PREDICTOR_TYPES:
         raise ValueError(
@@ -114,7 +118,7 @@ def validate_baseline_window_pre_stimulus(
     strict: bool = False,
 ) -> Tuple[float, float]:
     """Check baseline window ends before stimulus onset.
-    
+
     Parameters
     ----------
     baseline_window : tuple or list
@@ -125,12 +129,12 @@ def validate_baseline_window_pre_stimulus(
         If True, raise ValueError when baseline extends past stimulus onset (t=0).
         If False (default), only log a warning. For scientifically valid baseline
         normalization, strict=True is recommended.
-        
+
     Returns
     -------
     tuple
         Validated tuple (tmin, baseline_end)
-        
+
     Raises
     ------
     ValueError
@@ -138,16 +142,16 @@ def validate_baseline_window_pre_stimulus(
         is not a tuple/list with at least 2 elements.
     """
     STIMULUS_ONSET = 0.0
-    
+
     if not isinstance(baseline_window, (tuple, list)) or len(baseline_window) < 2:
         raise ValueError(
             f"baseline_window must be a tuple or list with at least 2 elements, "
             f"got {type(baseline_window)}"
         )
-    
+
     tmin = float(baseline_window[0])
     baseline_end_value = float(baseline_window[1])
-    
+
     if baseline_end_value > STIMULUS_ONSET:
         msg = (
             f"Baseline window extends past stimulus onset: baseline_end={baseline_end_value:.3f}s > 0. "
@@ -158,5 +162,5 @@ def validate_baseline_window_pre_stimulus(
             raise ValueError(msg)
         elif logger:
             logger.warning(msg)
-    
+
     return (tmin, baseline_end_value)

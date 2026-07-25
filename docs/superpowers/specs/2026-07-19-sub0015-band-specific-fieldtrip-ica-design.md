@@ -2,25 +2,28 @@
 
 ## Objective
 
-Run three independent FieldTrip ICA decompositions for `sub-0015` using the six pre-ICA
-BrainVision Analyzer/MNE `proc-filt_raw.fif` runs, then compute the existing pain-study TFR
+Run three independent FieldTrip ICA decompositions for `sub-0015` using pre-ICA signals
+restricted to the final post-rejection trial set, then compute the existing pain-study TFR
 outputs separately for each decomposition.
 
 ## Input
 
-Use only:
+Use signal values only from:
 
 ```text
 /Volumes/KINGSTON/EEG_fMRI_data/derivatives/
 brainvision_analyzer_mne_preprocessing_sub-0015/preprocessed/eeg/sub-0015/eeg/
-sub-0015_task-thermalactive_run-<1-6>_proc-filt_raw.fif
+sub-0015_task-thermalactive_epo.fif
 ```
 
-Do not use the MNE ICA, `proc-ica`, or `proc-clean` derivatives in that directory.
+Use the saved MNE epoch-selection indices from
+`sub-0015_task-thermalactive_proc-clean_epo.fif` only as the final trial-rejection mask. This
+retains 59 of the 66 pre-ICA epochs while preserving the correct run, temperature, and pain
+labels. Do not use signal values from either `proc-ica_epo.fif` or `proc-clean_epo.fif`.
 
 ## Decompositions
 
-Fit independent `runica` models to the same 66 concatenated thermal trials:
+Fit independent `runica` models to the same 59 retained thermal trials:
 
 - Alpha: 6–14 Hz
 - Beta: 14–30 Hz

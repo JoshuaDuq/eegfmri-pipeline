@@ -22,7 +22,6 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 import pandas as pd
 
-
 ###################################################################
 # NamingSchema Class
 ###################################################################
@@ -63,47 +62,82 @@ class NamingSchema:
         return "_".join(parts)
 
     # Known stat suffixes (single token stats checked first, then compound)
-    KNOWN_STATS = frozenset({
-        # Single-token stats
-        "lzc", "pe", "mean", "std", "percent", "db", "slope", "auc", "ptp",
-        "index", "logdiff", "log10raw",
-        "logratio", "bandwidth", "entropy", "geff", "clust", "smallworld",
-        # Compound stats (checked by joining from the end)
-        "peak_latency", "peak_freq", "peak_power", "peak_ratio", "peak_residual",
-        "peak_height",
-        "center_freq", "edge_freq_95",
-        "erd_magnitude", "erd_duration", "ers_magnitude", "ers_duration",
-        "rebound_magnitude", "rebound_latency",
-        "percent_mean", "percent_std", "db_mean", "db_std",
-        "logratio_mean", "logratio_std", "latency_diff", "logdiff_activation",
-        "power_ratio", "log_ratio",
-    })
+    KNOWN_STATS = frozenset(
+        {
+            # Single-token stats
+            "lzc",
+            "pe",
+            "mean",
+            "std",
+            "percent",
+            "db",
+            "slope",
+            "auc",
+            "ptp",
+            "index",
+            "logdiff",
+            "log10raw",
+            "logratio",
+            "bandwidth",
+            "entropy",
+            "geff",
+            "clust",
+            "smallworld",
+            # Compound stats (checked by joining from the end)
+            "peak_latency",
+            "peak_freq",
+            "peak_power",
+            "peak_ratio",
+            "peak_residual",
+            "peak_height",
+            "center_freq",
+            "edge_freq_95",
+            "erd_magnitude",
+            "erd_duration",
+            "ers_magnitude",
+            "ers_duration",
+            "rebound_magnitude",
+            "rebound_latency",
+            "percent_mean",
+            "percent_std",
+            "db_mean",
+            "db_std",
+            "logratio_mean",
+            "logratio_std",
+            "latency_diff",
+            "logdiff_activation",
+            "power_ratio",
+            "log_ratio",
+        }
+    )
 
-    KNOWN_BANDS = frozenset({
-        "broadband",
-        "delta",
-        "theta",
-        "alpha",
-        "beta",
-        "gamma",
-        "low_beta",
-        "high_beta",
-        "low_gamma",
-        "high_gamma",
-        "delta_alpha",
-        "delta_theta",
-        "alpha_beta",
-        "alpha_beta_gamma",
-        "alpha_gamma",
-        "theta_alpha",
-        "theta_beta",
-        "theta_gamma",
-    })
+    KNOWN_BANDS = frozenset(
+        {
+            "broadband",
+            "delta",
+            "theta",
+            "alpha",
+            "beta",
+            "gamma",
+            "low_beta",
+            "high_beta",
+            "low_gamma",
+            "high_gamma",
+            "delta_alpha",
+            "delta_theta",
+            "alpha_beta",
+            "alpha_beta_gamma",
+            "alpha_gamma",
+            "theta_alpha",
+            "theta_beta",
+            "theta_gamma",
+        }
+    )
 
     @classmethod
     def _extract_stat_from_end(cls, parts: list[str]) -> tuple[str, int]:
         """Extract stat from the end of parts list.
-        
+
         Returns (stat_string, n_tokens_consumed).
         Tries compound stats first (2 tokens), then single token.
         """
@@ -163,7 +197,7 @@ class NamingSchema:
             "valid": True,
         }
 
-        remaining = parts[scope_idx + 1:]
+        remaining = parts[scope_idx + 1 :]
         if scope == "global":
             result["stat"] = "_".join(remaining)
         else:
@@ -304,15 +338,33 @@ def infer_feature_provenance(
     """Infer per-column statistical validity properties for downstream analyses."""
     df_attrs = dict(df_attrs or {})
 
-    analysis_mode = str(_config_get(config, "feature_engineering.analysis_mode", "group_stats")).strip().lower()
-    itpc_method = str(_config_get(config, "feature_engineering.itpc.method", "fold_global")).strip().lower()
-    conn_granularity_cfg = str(_config_get(config, "feature_engineering.connectivity.granularity", "trial")).strip().lower()
-    conn_phase_estimator_cfg = str(_config_get(config, "feature_engineering.connectivity.phase_estimator", "within_epoch")).strip().lower()
+    analysis_mode = (
+        str(_config_get(config, "feature_engineering.analysis_mode", "group_stats")).strip().lower()
+    )
+    itpc_method = (
+        str(_config_get(config, "feature_engineering.itpc.method", "fold_global")).strip().lower()
+    )
+    conn_granularity_cfg = (
+        str(_config_get(config, "feature_engineering.connectivity.granularity", "trial"))
+        .strip()
+        .lower()
+    )
+    conn_phase_estimator_cfg = (
+        str(_config_get(config, "feature_engineering.connectivity.phase_estimator", "within_epoch"))
+        .strip()
+        .lower()
+    )
 
-    conn_granularity = str(df_attrs.get("feature_granularity") or conn_granularity_cfg).strip().lower()
-    conn_phase_estimator = str(df_attrs.get("phase_estimator") or conn_phase_estimator_cfg).strip().lower()
+    conn_granularity = (
+        str(df_attrs.get("feature_granularity") or conn_granularity_cfg).strip().lower()
+    )
+    conn_phase_estimator = (
+        str(df_attrs.get("phase_estimator") or conn_phase_estimator_cfg).strip().lower()
+    )
     broadcast_warning = df_attrs.get("broadcast_warning")
-    microstate_template_source = str(df_attrs.get("microstate_template_source") or "").strip().lower()
+    microstate_template_source = (
+        str(df_attrs.get("microstate_template_source") or "").strip().lower()
+    )
 
     def group_props(group: str) -> Dict[str, Any]:
         group = str(group or "unknown").strip().lower()
@@ -350,10 +402,21 @@ def infer_feature_provenance(
             }
 
         if group in {"conn", "dconn"}:
-            broadcasted = conn_granularity in {"subject", "condition"} or conn_phase_estimator == "across_epochs"
-            analysis_unit = conn_granularity if conn_granularity in {"trial", "condition", "subject"} else "trial"
+            broadcasted = (
+                conn_granularity in {"subject", "condition"}
+                or conn_phase_estimator == "across_epochs"
+            )
+            analysis_unit = (
+                conn_granularity
+                if conn_granularity in {"trial", "condition", "subject"}
+                else "trial"
+            )
             trialwise_valid = not broadcasted
-            reason = "Connectivity is computed within-epoch per trial." if trialwise_valid else "Connectivity is aggregated across epochs and broadcast."
+            reason = (
+                "Connectivity is computed within-epoch per trial."
+                if trialwise_valid
+                else "Connectivity is aggregated across epochs and broadcast."
+            )
             return {
                 "analysis_unit": analysis_unit,
                 "broadcasted": broadcasted,
@@ -447,9 +510,7 @@ def save_features_organized(
         write_csv(df, csv_path, index=False)
 
     metadata_columns = {"condition", "trial", "epoch", "subject"}
-    feature_columns = [
-        column for column in df.columns if column not in metadata_columns
-    ]
+    feature_columns = [column for column in df.columns if column not in metadata_columns]
     manifest = generate_manifest(
         feature_columns,
         config=config,

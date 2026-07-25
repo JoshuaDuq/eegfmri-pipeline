@@ -95,9 +95,7 @@ def test_precomputed_psd_requires_baseline_for_event_related_compute(monkeypatch
 def test_psd_precompute_keeps_full_epoch_for_event_baseline(feature_category: str) -> None:
     class FullEpochPrecompute:
         def crop(self, *_args, **_kwargs):
-            raise AssertionError(
-                f"{feature_category} precomputed data must keep baseline samples"
-            )
+            raise AssertionError(f"{feature_category} precomputed data must keep baseline samples")
 
     cached = FullEpochPrecompute()
     ctx = SimpleNamespace(

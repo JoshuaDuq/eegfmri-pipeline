@@ -76,12 +76,9 @@ def resolve_temporal_feature_selection_impl(
     missing = [key for key in required_keys if key not in cfg_raw]
     if missing:
         raise ValueError(
-            "behavior_analysis.temporal.features is missing keys: "
-            f"{', '.join(missing)}."
+            "behavior_analysis.temporal.features is missing keys: " f"{', '.join(missing)}."
         )
-    cfg_enabled: Dict[str, bool] = {
-        feature: bool(cfg_raw[feature]) for feature in required_keys
-    }
+    cfg_enabled: Dict[str, bool] = {feature: bool(cfg_raw[feature]) for feature in required_keys}
 
     raw_filters: List[str] = []
     if selected_features is not None:
@@ -92,13 +89,19 @@ def resolve_temporal_feature_selection_impl(
         if ctx.feature_categories:
             raw_filters.extend([str(x) for x in ctx.feature_categories if str(x).strip()])
         if ctx.computation_features and "temporal" in ctx.computation_features:
-            raw_filters.extend([str(x) for x in (ctx.computation_features.get("temporal") or []) if str(x).strip()])
+            raw_filters.extend(
+                [str(x) for x in (ctx.computation_features.get("temporal") or []) if str(x).strip()]
+            )
 
     requested = _resolve_explicit_temporal_filters(raw_filters)
     if requested is None:
         requested = set(required_keys)
 
-    enabled = [feat for feat in ["power", "itpc", "erds"] if cfg_enabled.get(feat, False) and feat in requested]
+    enabled = [
+        feat
+        for feat in ["power", "itpc", "erds"]
+        if cfg_enabled.get(feat, False) and feat in requested
+    ]
     return enabled
 
 
@@ -113,9 +116,7 @@ def _resolve_temporal_target_label(ctx: Any) -> str:
     if explicit_target:
         return explicit_target
 
-    outcome_column_value = get_config_value(
-        ctx.config, "behavior_analysis.outcome_column", None
-    )
+    outcome_column_value = get_config_value(ctx.config, "behavior_analysis.outcome_column", None)
     outcome_column = str(outcome_column_value or "").strip()
     if outcome_column:
         return outcome_column
@@ -154,16 +155,15 @@ def stage_temporal_stats_impl(
     """Compute temporal statistics (power, ITPC, ERDS correlations)."""
     from eeg_pipeline.analysis.behavior.api import compute_temporal_from_context
     from eeg_pipeline.utils.analysis.stats.temporal import compute_itpc_temporal_from_context
+
     selected_temporal_features = resolve_temporal_feature_selection_fn(ctx, selected_features)
 
-    correction_method = str(
-        require_config_value(
-            ctx.config, "behavior_analysis.temporal.correction_method"
-        )
-    ).strip().lower()
-    fdr_alpha = float(
-        require_config_value(ctx.config, "behavior_analysis.statistics.fdr_alpha")
+    correction_method = (
+        str(require_config_value(ctx.config, "behavior_analysis.temporal.correction_method"))
+        .strip()
+        .lower()
     )
+    fdr_alpha = float(require_config_value(ctx.config, "behavior_analysis.statistics.fdr_alpha"))
     allow_iid_trials = bool(
         require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
     )
@@ -276,15 +276,24 @@ def stage_temporal_stats_impl(
                 df_temporal["sig_fdr"] = reject
                 df_temporal["p_primary"] = df_temporal["p_fdr"]
                 n_sig = int(reject.sum())
-                ctx.logger.info("Temporal FDR: %d/%d significant at alpha=%s", n_sig, len(p_vals), fdr_alpha)
+                ctx.logger.info(
+                    "Temporal FDR: %d/%d significant at alpha=%s", n_sig, len(p_vals), fdr_alpha
+                )
 
             elif correction_method == "bonferroni":
-                reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="bonferroni")
+                reject, p_corrected, _, _ = multipletests(
+                    p_vals, alpha=fdr_alpha, method="bonferroni"
+                )
                 df_temporal["p_bonferroni"] = p_corrected
                 df_temporal["sig_bonferroni"] = reject
                 df_temporal["p_primary"] = df_temporal["p_bonferroni"]
                 n_sig = int(reject.sum())
-                ctx.logger.info("Temporal Bonferroni: %d/%d significant at alpha=%s", n_sig, len(p_vals), fdr_alpha)
+                ctx.logger.info(
+                    "Temporal Bonferroni: %d/%d significant at alpha=%s",
+                    n_sig,
+                    len(p_vals),
+                    fdr_alpha,
+                )
 
             elif correction_method == "cluster":
                 if "p_cluster" in df_temporal.columns:
@@ -301,11 +310,20 @@ def stage_temporal_stats_impl(
                         )
                     df_temporal["p_primary"] = p_cluster_vals
                     if "cluster_significant" in df_temporal.columns:
-                        df_temporal["sig_cluster"] = df_temporal["cluster_significant"].fillna(False).astype(bool)
+                        df_temporal["sig_cluster"] = (
+                            df_temporal["cluster_significant"].fillna(False).astype(bool)
+                        )
                     else:
-                        df_temporal["sig_cluster"] = np.isfinite(p_cluster_vals) & (p_cluster_vals < fdr_alpha)
+                        df_temporal["sig_cluster"] = np.isfinite(p_cluster_vals) & (
+                            p_cluster_vals < fdr_alpha
+                        )
                     n_sig = int(df_temporal["sig_cluster"].sum())
-                    ctx.logger.info("Temporal cluster: %d/%d significant at alpha=%s", n_sig, len(p_cluster_vals), fdr_alpha)
+                    ctx.logger.info(
+                        "Temporal cluster: %d/%d significant at alpha=%s",
+                        n_sig,
+                        len(p_cluster_vals),
+                        fdr_alpha,
+                    )
                 else:
                     raise ValueError(
                         "Temporal cluster correction requested but no p_cluster column is present in temporal outputs. "
@@ -313,7 +331,9 @@ def stage_temporal_stats_impl(
                     )
 
             elif correction_method == "none":
-                ctx.logger.warning("Temporal: no multiple comparison correction applied (use with caution)")
+                ctx.logger.warning(
+                    "Temporal: no multiple comparison correction applied (use with caution)"
+                )
                 df_temporal["sig_raw"] = p_vals < fdr_alpha
                 df_temporal["p_primary"] = df_temporal["p_raw"]
 

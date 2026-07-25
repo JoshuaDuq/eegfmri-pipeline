@@ -4,7 +4,6 @@ import ast
 
 from tests import REPO_ROOT
 
-
 PACKAGE_INIT_FILES = (
     "eeg_pipeline/analysis/__init__.py",
     "eeg_pipeline/analysis/machine_learning/__init__.py",
@@ -50,8 +49,7 @@ def test_package_init_files_define_lazy_getattr_exports() -> None:
     for rel_path in PACKAGE_INIT_FILES:
         tree = _parse(rel_path)
         has_getattr = any(
-            isinstance(node, ast.FunctionDef) and node.name == "__getattr__"
-            for node in tree.body
+            isinstance(node, ast.FunctionDef) and node.name == "__getattr__" for node in tree.body
         )
         if not has_getattr:
             missing.append(rel_path)

@@ -19,63 +19,76 @@ from tests.pipelines_test_utils import DotConfig
 class TestMachineLearningValidityFixes(unittest.TestCase):
     def _import_ml_data(self):
         mne_home = Path(tempfile.mkdtemp())
-        with patch.dict(
-            os.environ,
-            {"HOME": str(mne_home), "MNE_DONTWRITE_HOME": "true"},
-            clear=False,
-        ), patch.dict(
-            sys.modules,
-            {
-                "eeg_pipeline.utils.config": types.SimpleNamespace(__path__=[]),
-                "eeg_pipeline.utils.config.loader": types.SimpleNamespace(
-                    ConfigDict=dict,
-                    get_config_value=lambda config, key, default=None: config.get(key, default)
-                    if hasattr(config, "get")
-                    else default,
-                    load_config=lambda *args, **kwargs: DotConfig({}),
-                ),
-                "mne": types.SimpleNamespace(
-                    pick_types=lambda *_args, **_kwargs: np.array([], dtype=int),
-                    Epochs=object,
-                ),
-                "eeg_pipeline.domain.features": types.ModuleType("eeg_pipeline.domain.features"),
-                "eeg_pipeline.domain.features.naming": types.SimpleNamespace(
-                    NamingSchema=type(
-                        "NamingSchema",
-                        (),
-                        {"parse": staticmethod(lambda *_args, **_kwargs: {"valid": False})},
-                    )
-                ),
-                "eeg_pipeline.infra": types.SimpleNamespace(__path__=[]),
-                "eeg_pipeline.infra.tsv": types.SimpleNamespace(
-                    read_table=lambda *_args, **_kwargs: pd.DataFrame(),
-                    read_tsv=lambda *_args, **_kwargs: pd.DataFrame(),
-                ),
-                "eeg_pipeline.infra.paths": types.SimpleNamespace(
-                    _find_clean_events_path=lambda *_args, **_kwargs: None,
-                    deriv_features_path=lambda deriv_root, subject: Path(deriv_root)
-                    / f"sub-{subject}"
-                    / "eeg"
-                    / "features",
-                    load_events_df=lambda *_args, **_kwargs: pd.DataFrame(),
-                ),
-                "eeg_pipeline.utils.data.epochs": types.SimpleNamespace(
-                    load_epochs_for_analysis=lambda *_args, **_kwargs: (None, None),
-                ),
-                "eeg_pipeline.utils.data.fmri_signature_targets": types.SimpleNamespace(
-                    find_run_column=lambda *_args, **_kwargs: None,
-                    load_fmri_signature_target_for_subject=lambda **_kwargs: (_ for _ in ()).throw(
-                        AssertionError("fMRI signature target helper should not be used in this test")
+        with (
+            patch.dict(
+                os.environ,
+                {"HOME": str(mne_home), "MNE_DONTWRITE_HOME": "true"},
+                clear=False,
+            ),
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.utils.config": types.SimpleNamespace(__path__=[]),
+                    "eeg_pipeline.utils.config.loader": types.SimpleNamespace(
+                        ConfigDict=dict,
+                        get_config_value=lambda config, key, default=None: (
+                            config.get(key, default) if hasattr(config, "get") else default
+                        ),
+                        load_config=lambda *args, **kwargs: DotConfig({}),
                     ),
-                ),
-                "mne_bids": types.SimpleNamespace(
-                    BIDSPath=type(
-                        "BIDSPath",
-                        (),
-                        {"__init__": lambda self, *args, **kwargs: setattr(self, "fpath", None)},
-                    )
-                )
-            },
+                    "mne": types.SimpleNamespace(
+                        pick_types=lambda *_args, **_kwargs: np.array([], dtype=int),
+                        Epochs=object,
+                    ),
+                    "eeg_pipeline.domain.features": types.ModuleType(
+                        "eeg_pipeline.domain.features"
+                    ),
+                    "eeg_pipeline.domain.features.naming": types.SimpleNamespace(
+                        NamingSchema=type(
+                            "NamingSchema",
+                            (),
+                            {"parse": staticmethod(lambda *_args, **_kwargs: {"valid": False})},
+                        )
+                    ),
+                    "eeg_pipeline.infra": types.SimpleNamespace(__path__=[]),
+                    "eeg_pipeline.infra.tsv": types.SimpleNamespace(
+                        read_table=lambda *_args, **_kwargs: pd.DataFrame(),
+                        read_tsv=lambda *_args, **_kwargs: pd.DataFrame(),
+                    ),
+                    "eeg_pipeline.infra.paths": types.SimpleNamespace(
+                        _find_clean_events_path=lambda *_args, **_kwargs: None,
+                        deriv_features_path=lambda deriv_root, subject: Path(deriv_root)
+                        / f"sub-{subject}"
+                        / "eeg"
+                        / "features",
+                        load_events_df=lambda *_args, **_kwargs: pd.DataFrame(),
+                    ),
+                    "eeg_pipeline.utils.data.epochs": types.SimpleNamespace(
+                        load_epochs_for_analysis=lambda *_args, **_kwargs: (None, None),
+                    ),
+                    "eeg_pipeline.utils.data.fmri_signature_targets": types.SimpleNamespace(
+                        find_run_column=lambda *_args, **_kwargs: None,
+                        load_fmri_signature_target_for_subject=lambda **_kwargs: (
+                            _ for _ in ()
+                        ).throw(
+                            AssertionError(
+                                "fMRI signature target helper should not be used in this test"
+                            )
+                        ),
+                    ),
+                    "mne_bids": types.SimpleNamespace(
+                        BIDSPath=type(
+                            "BIDSPath",
+                            (),
+                            {
+                                "__init__": lambda self, *args, **kwargs: setattr(
+                                    self, "fpath", None
+                                )
+                            },
+                        )
+                    ),
+                },
+            ),
         ):
             from eeg_pipeline.utils.data import machine_learning as ml_data
 
@@ -160,7 +173,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
         y = np.array([0, 1, 0, 1, 0, 1], dtype=int)
 
-        with patch.object(cnn.GroupShuffleSplit, "split", side_effect=RuntimeError("synthetic failure")):
+        with patch.object(
+            cnn.GroupShuffleSplit, "split", side_effect=RuntimeError("synthetic failure")
+        ):
             train_idx, val_idx = cnn._split_train_val_indices(
                 groups_train=groups,
                 y_train=y,
@@ -217,11 +232,14 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             (np.array([0, 1, 4, 5], dtype=int), np.array([2, 3], dtype=int)),
         ]
 
-        with patch.object(
-            orch,
-            "create_run_aware_inner_cv",
-            return_value=inner_splits,
-        ), patch.object(orch, "GridSearchCV", FailingGridSearch):
+        with (
+            patch.object(
+                orch,
+                "create_run_aware_inner_cv",
+                return_value=inner_splits,
+            ),
+            patch.object(orch, "GridSearchCV", FailingGridSearch),
+        ):
             with self.assertRaisesRegex(RuntimeError, "inner CV failed"):
                 orch._fit_within_subject_fold(
                     pipe=pipe,
@@ -553,7 +571,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         def _fake_load_subject(*_args, **_kwargs):
             return x_df.copy(), np.array([10.0, 20.0], dtype=float), "rating", meta_df.copy()
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             with self.assertRaisesRegex(ValueError, "Covariates include the selected target"):
                 ml_data.load_active_matrix(
                     subjects=["0001"],
@@ -604,7 +624,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         def _fake_load_subject(subject, *_args, **_kwargs):
             return subject_payloads[str(subject)]
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             _X, _y, groups, _feature_names, meta = ml_data.load_active_matrix(
                 subjects=["0001", "0002"],
                 task="task",
@@ -660,7 +682,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         def _fake_load_subject(subject, *_args, **_kwargs):
             return subject_payloads[str(subject)]
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             X, y, groups, feature_names, meta = ml_data.load_active_matrix(
                 subjects=["0001", "0002"],
                 task="task",
@@ -688,10 +712,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         feature_df = pd.DataFrame({"power_feature": [1.0]})
         feature_df.attrs["trial_id"] = np.array([7], dtype=int)
 
-        with patch.object(ml_data, "load_events_df", side_effect=_load_events_df), patch.object(
-            ml_data,
-            "_load_subject_feature_table",
-            return_value=(feature_df, ["power_feature"]),
+        with (
+            patch.object(ml_data, "load_events_df", side_effect=_load_events_df),
+            patch.object(
+                ml_data,
+                "_load_subject_feature_table",
+                return_value=(feature_df, ["power_feature"]),
+            ),
         ):
             _X_df, y, y_col, meta = ml_data._load_subject_ml_from_features(
                 subject="0001",
@@ -780,7 +807,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 task="task",
                 deriv_root=Path("/tmp/deriv"),
                 config=cfg,
-                    feature_families=["power"],
+                feature_families=["power"],
             )
 
     def test_load_active_matrix_does_not_require_runtime_trial_safe_mode_when_subject_tables_load(
@@ -845,7 +872,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ),
             )
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             with self.assertRaisesRegex(ValueError, "Requested covariates missing from meta"):
                 ml_data.load_active_matrix(
                     subjects=["0001"],
@@ -874,7 +903,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ),
             )
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             with self.assertRaisesRegex(ValueError, "Requested covariates missing from meta"):
                 ml_data.load_active_matrix(
                     subjects=["0001"],
@@ -908,7 +939,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ),
             )
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             X, y, groups, feature_names, meta = ml_data.load_active_matrix(
                 subjects=["0001"],
                 task="task",
@@ -982,10 +1015,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 }
             )
 
-            with patch.object(ml_data, "read_table", return_value=feature_df), patch.object(
-                ml_data,
-                "load_events_df",
-                return_value=events_df,
+            with (
+                patch.object(ml_data, "read_table", return_value=feature_df),
+                patch.object(
+                    ml_data,
+                    "load_events_df",
+                    return_value=events_df,
+                ),
             ):
                 with self.assertRaisesRegex(ValueError, "trial_id"):
                     ml_data._load_subject_ml_from_features(
@@ -1008,14 +1044,17 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             channels=types.SimpleNamespace(make_standard_montage=lambda name: f"montage:{name}")
         )
 
-        with patch.object(
-            ml_data,
-            "load_epochs_for_analysis",
-            return_value=(None, None),
-        ), patch.object(
-            ml_data,
-            "mne",
-            fake_mne,
+        with (
+            patch.object(
+                ml_data,
+                "load_epochs_for_analysis",
+                return_value=(None, None),
+            ),
+            patch.object(
+                ml_data,
+                "mne",
+                fake_mne,
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "No aligned epochs/events for sub-0001"):
                 ml_data.load_epochs_with_targets(
@@ -1035,17 +1074,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             captured["discovery_sources"] = kwargs.get("discovery_sources")
             return ["0001"]
 
-        with patch.dict(
-            sys.modules,
-            {
-                "eeg_pipeline.utils.data.subjects": types.SimpleNamespace(
-                    get_available_subjects=_fake_discovery
-                )
-            },
-        ), patch.object(
-            ml_data,
-            "load_epochs_for_analysis",
-            return_value=(None, None),
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.utils.data.subjects": types.SimpleNamespace(
+                        get_available_subjects=_fake_discovery
+                    )
+                },
+            ),
+            patch.object(
+                ml_data,
+                "load_epochs_for_analysis",
+                return_value=(None, None),
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "No aligned epochs/events for sub-0001"):
                 ml_data.load_epochs_with_targets(
@@ -1084,10 +1126,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.utils.data.epochs.load_epochs_for_analysis",
-            return_value=(_EpochsStub(), aligned_events),
-        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+        with (
+            patch(
+                "eeg_pipeline.utils.data.epochs.load_epochs_for_analysis",
+                return_value=(_EpochsStub(), aligned_events),
+            ),
+            patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)),
+        ):
             with self.assertRaisesRegex(ValueError, "Active window empty"):
                 ml_data.load_channels_mean_matrix(
                     subjects=["0001"],
@@ -1097,7 +1142,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     target="rating",
                 )
 
-    def test_load_channels_mean_matrix_rejects_empty_baseline_window_when_epochs_are_not_baselined(self):
+    def test_load_channels_mean_matrix_rejects_empty_baseline_window_when_epochs_are_not_baselined(
+        self,
+    ):
         from eeg_pipeline.utils.data import machine_learning as ml_data
 
         class _EpochsStub:
@@ -1121,10 +1168,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.utils.data.epochs.load_epochs_for_analysis",
-            return_value=(_EpochsStub(), aligned_events),
-        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+        with (
+            patch(
+                "eeg_pipeline.utils.data.epochs.load_epochs_for_analysis",
+                return_value=(_EpochsStub(), aligned_events),
+            ),
+            patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)),
+        ):
             with self.assertRaisesRegex(ValueError, "Baseline window empty"):
                 ml_data.load_channels_mean_matrix(
                     subjects=["0001"],
@@ -1163,11 +1213,14 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch.object(
-            ml_data,
-            "load_epochs_for_analysis",
-            return_value=(_EpochsStub(), aligned_events),
-        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+        with (
+            patch.object(
+                ml_data,
+                "load_epochs_for_analysis",
+                return_value=(_EpochsStub(), aligned_events),
+            ),
+            patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)),
+        ):
             _X, _y, _groups, _feature_names, meta = ml_data.load_channels_mean_matrix(
                 subjects=["0001"],
                 task="task",
@@ -1225,9 +1278,16 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         def _fake_load_subject(*_args, **_kwargs):
-            return x_df.copy(), np.array([10.0, 20.0], dtype=float), "vas_final_rating", meta_df.copy()
+            return (
+                x_df.copy(),
+                np.array([10.0, 20.0], dtype=float),
+                "vas_final_rating",
+                meta_df.copy(),
+            )
 
-        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+        with patch.object(
+            ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject
+        ):
             with self.assertRaisesRegex(ValueError, "Covariates include the selected target"):
                 ml_data.load_active_matrix(
                     subjects=["0001"],
@@ -1257,7 +1317,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ):
                 with self.assertRaisesRegex(
                     ValueError, "Baseline predictors include the selected target"
                 ):
@@ -1292,7 +1354,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ):
                 with self.assertRaisesRegex(
                     ValueError, "Baseline predictors include the selected target"
                 ):
@@ -1314,7 +1378,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "time_generalization_regression", side_effect=RuntimeError("boom")):
+            with patch.object(
+                orch, "time_generalization_regression", side_effect=RuntimeError("boom")
+            ):
                 with self.assertRaisesRegex(RuntimeError, "Time-generalization stage failed"):
                     orch.run_time_generalization(
                         subjects=["0001", "0002"],
@@ -1399,16 +1465,15 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch.object(tg, "load_epochs_with_targets", return_value=([], None)), patch.object(
-            tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare
-        ), patch.object(
-            tg, "find_common_channels_train_test", return_value=["Cz"]
-        ), patch.object(
-            tg, "get_min_channels_required", return_value=1
-        ), patch.object(
-            tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
-        ), patch.object(
-            tg, "build_time_windows", return_value=[(0.0, 0.1)]
+        with (
+            patch.object(tg, "load_epochs_with_targets", return_value=([], None)),
+            patch.object(tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare),
+            patch.object(tg, "find_common_channels_train_test", return_value=["Cz"]),
+            patch.object(tg, "get_min_channels_required", return_value=1),
+            patch.object(
+                tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
+            ),
+            patch.object(tg, "build_time_windows", return_value=[(0.0, 0.1)]),
         ):
             tg_r, tg_r2, window_centers = tg.time_generalization_regression(
                 deriv_root=Path("."),
@@ -1514,15 +1579,21 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch,
-                "_build_regression_model_spec",
-                return_value=("elasticnet", DummyRegressor(strategy="mean"), {}),
-            ), patch.object(
-                orch, "_fit_tuned_regression_estimator", side_effect=lambda **kwargs: kwargs["base_pipe"]
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.uncertainty.compute_prediction_intervals",
-                side_effect=_fake_compute_prediction_intervals,
+            with (
+                patch.object(
+                    orch,
+                    "_build_regression_model_spec",
+                    return_value=("elasticnet", DummyRegressor(strategy="mean"), {}),
+                ),
+                patch.object(
+                    orch,
+                    "_fit_tuned_regression_estimator",
+                    side_effect=lambda **kwargs: kwargs["base_pipe"],
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.uncertainty.compute_prediction_intervals",
+                    side_effect=_fake_compute_prediction_intervals,
+                ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "Insufficient valid uncertainty folds"):
                     orch._run_uncertainty_stage(
@@ -1575,15 +1646,21 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch,
-                "_build_regression_model_spec",
-                return_value=("elasticnet", DummyRegressor(strategy="mean"), {}),
-            ), patch.object(
-                orch, "_fit_tuned_regression_estimator", side_effect=lambda **kwargs: kwargs["base_pipe"]
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.uncertainty.compute_prediction_intervals",
-                side_effect=_fake_compute_prediction_intervals,
+            with (
+                patch.object(
+                    orch,
+                    "_build_regression_model_spec",
+                    return_value=("elasticnet", DummyRegressor(strategy="mean"), {}),
+                ),
+                patch.object(
+                    orch,
+                    "_fit_tuned_regression_estimator",
+                    side_effect=lambda **kwargs: kwargs["base_pipe"],
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.uncertainty.compute_prediction_intervals",
+                    side_effect=_fake_compute_prediction_intervals,
+                ),
             ):
                 output_path = orch._run_uncertainty_stage(
                     X=X,
@@ -1603,7 +1680,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             self.assertIn("test_index", pred_df.columns)
             self.assertIn("in_interval", pred_df.columns)
 
-            with open(Path(td) / "metrics" / "uncertainty_metrics.json", "r", encoding="utf-8") as f:
+            with open(
+                Path(td) / "metrics" / "uncertainty_metrics.json", "r", encoding="utf-8"
+            ) as f:
                 metrics = json.load(f)
             self.assertIn("subject_level", metrics)
             self.assertIn("mean_coverage", metrics["subject_level"])
@@ -1625,7 +1704,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        agg_r, per_subject, _, _ = compute_subject_level_r(pred_df, config=DotConfig({}), ci_method="fixed_effects")
+        agg_r, per_subject, _, _ = compute_subject_level_r(
+            pred_df, config=DotConfig({}), ci_method="fixed_effects"
+        )
         self.assertEqual(len(per_subject), 2)
         self.assertLess(abs(float(agg_r)), 0.2)
 
@@ -1681,12 +1762,15 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             captured["predict_arg"] = model_obj
             return lambda X_input: np.zeros(len(X_input), dtype=float)
 
-        with patch.object(si, "_check_shap_available", return_value=True), patch.object(
-            si,
-            "_extract_estimator_transform_and_feature_names",
-            return_value=(estimator, X, feature_names),
-        ), patch.object(si, "_create_predict_fn", side_effect=_fake_create_predict_fn), patch.dict(
-            sys.modules, {"shap": fake_shap}
+        with (
+            patch.object(si, "_check_shap_available", return_value=True),
+            patch.object(
+                si,
+                "_extract_estimator_transform_and_feature_names",
+                return_value=(estimator, X, feature_names),
+            ),
+            patch.object(si, "_create_predict_fn", side_effect=_fake_create_predict_fn),
+            patch.dict(sys.modules, {"shap": fake_shap}),
         ):
             si.compute_shap_values(
                 model=object(),
@@ -1726,9 +1810,11 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             X=X[4:6],
         )
 
-        with patch.object(si, "_check_shap_available", return_value=True), patch.object(
-            si, "GridSearchCV", _FailingGridSearch
-        ), patch.object(si, "compute_shap_values", return_value=shap_result):
+        with (
+            patch.object(si, "_check_shap_available", return_value=True),
+            patch.object(si, "GridSearchCV", _FailingGridSearch),
+            patch.object(si, "compute_shap_values", return_value=shap_result),
+        ):
             with self.assertRaisesRegex(RuntimeError, "inner CV failed"):
                 si.compute_shap_for_cv_folds(
                     model_factory=_Model,
@@ -1756,8 +1842,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         y = np.linspace(0.0, 1.0, 4)
         splits = [(np.array([0, 1], dtype=int), np.array([2, 3], dtype=int))]
 
-        with patch.object(si, "_check_shap_available", return_value=True), patch.object(
-            si, "compute_shap_values", side_effect=RuntimeError("shap failure")
+        with (
+            patch.object(si, "_check_shap_available", return_value=True),
+            patch.object(si, "compute_shap_values", side_effect=RuntimeError("shap failure")),
         ):
             with self.assertRaisesRegex(RuntimeError, "SHAP computation failed"):
                 si.compute_shap_for_cv_folds(
@@ -1798,17 +1885,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             failed_fold_count=0,
             n_folds_total=2,
         )
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
-                return_value=(result, pd.DataFrame()),
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                    return_value=(result, pd.DataFrame()),
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
@@ -1868,15 +1962,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
-                return_value=(result, pd.DataFrame()),
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                    return_value=(result, pd.DataFrame()),
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
@@ -1926,18 +2025,25 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             failed_fold_count=0,
             n_folds_total=2,
         )
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
-                return_value=(result, pd.DataFrame()),
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                    return_value=(result, pd.DataFrame()),
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
@@ -1992,17 +2098,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             failed_fold_count=0,
             n_folds_total=2,
         )
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
-                return_value=(result, pd.DataFrame()),
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                    return_value=(result, pd.DataFrame()),
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
@@ -2061,7 +2174,11 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             return y_true, y_pred, groups_ordered, [0, 1], [1, 1]
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(cv, "nested_loso_predictions_matrix", side_effect=_fake_nested_loso_predictions_matrix):
+            with patch.object(
+                cv,
+                "nested_loso_predictions_matrix",
+                side_effect=_fake_nested_loso_predictions_matrix,
+            ):
                 with self.assertRaisesRegex(RuntimeError, "required 0.750"):
                     cv.run_permutation_test(
                         X=X,
@@ -2099,19 +2216,19 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ["sub-0001", "sub-0001", "sub-0002", "sub-0002", "sub-0003", "sub-0003"],
                 dtype=object,
             )
-            meta = pd.DataFrame({"subject_id": groups, "trial_id": np.arange(len(groups), dtype=int)})
+            meta = pd.DataFrame(
+                {"subject_id": groups, "trial_id": np.arange(len(groups), dtype=int)}
+            )
 
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ):
                 out_dir = orch.run_model_comparison_ml(
                     subjects=["0001", "0002"],
                     task="task",
                     deriv_root=Path(td),
                     config=DotConfig(
-                        {
-                            "machine_learning": {
-                                "preprocessing": {"variance_threshold_grid": [0.0]}
-                            }
-                        }
+                        {"machine_learning": {"preprocessing": {"variance_threshold_grid": [0.0]}}}
                     ),
                     n_perm=8,
                     inner_splits=2,
@@ -2120,7 +2237,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+            with open(
+                out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8"
+            ) as f:
                 summary = json.load(f)
             self.assertIn("pairwise_inference", summary)
             self.assertTrue(summary["pairwise_inference"])
@@ -2139,7 +2258,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     ["f1"],
                     pd.DataFrame(
                         {
-                            "subject_id": np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object),
+                            "subject_id": np.array(
+                                ["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object
+                            ),
                             "trial_id": [0, 1, 2, 3],
                             "predictor": [44.0, 45.0, 46.0, 47.0],
                             "temperature": [44.0, 45.0, 46.0, 47.0],
@@ -2159,7 +2280,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     baseline_predictors=["predictor"],
                 )
-            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(
+                out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8"
+            ) as f:
                 summary = json.load(f)
             self.assertIn("delta_r2_inference", summary)
             self.assertIn("p_value", summary["delta_r2_inference"])
@@ -2171,10 +2294,14 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
         meta = pd.DataFrame({"subject_id": groups, "trial_id": [0, 1, 2, 3]})
-        cfg = DotConfig({"machine_learning": {"targets": {"strict_regression_target_continuous": True}}})
+        cfg = DotConfig(
+            {"machine_learning": {"targets": {"strict_regression_target_continuous": True}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ):
                 with self.assertRaisesRegex(ValueError, "regression target appears binary-like"):
                     orch.run_model_comparison_ml(
                         subjects=["0001", "0002"],
@@ -2203,10 +2330,14 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 "temperature": [44.0, 45.0, 46.0, 47.0],
             }
         )
-        cfg = DotConfig({"machine_learning": {"targets": {"strict_regression_target_continuous": True}}})
+        cfg = DotConfig(
+            {"machine_learning": {"targets": {"strict_regression_target_continuous": True}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ):
                 with self.assertRaisesRegex(ValueError, "regression target appears binary-like"):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
@@ -2289,40 +2420,47 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch.object(
-                orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
-            ), patch.object(
-                orch, "build_elasticnet_param_grid", return_value={}
-            ), patch.object(
-                orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
-            ), patch.object(
-                orch, "export_predictions", side_effect=_fake_export_predictions
-            ), patch.object(
-                orch, "export_indices", return_value=None
-            ), patch.object(
-                orch, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
-            ), patch.object(
-                orch,
-                "compute_subject_level_errors",
-                return_value={
-                    "mean_mae": 0.1,
-                    "ci_low_mae": 0.05,
-                    "ci_high_mae": 0.2,
-                    "mean_rmse": 0.2,
-                    "ci_low_rmse": 0.1,
-                    "ci_high_rmse": 0.3,
-                    "per_subject": [],
-                },
-            ), patch.object(
-                orch, "export_baseline_predictions", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch.object(
+                    orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
+                ),
+                patch.object(orch, "build_elasticnet_param_grid", return_value={}),
+                patch.object(
+                    orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
+                ),
+                patch.object(orch, "export_predictions", side_effect=_fake_export_predictions),
+                patch.object(orch, "export_indices", return_value=None),
+                patch.object(
+                    orch,
+                    "compute_subject_level_r",
+                    return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3),
+                ),
+                patch.object(
+                    orch,
+                    "compute_subject_level_errors",
+                    return_value={
+                        "mean_mae": 0.1,
+                        "ci_low_mae": 0.05,
+                        "ci_high_mae": 0.2,
+                        "mean_rmse": 0.2,
+                        "ci_low_rmse": 0.1,
+                        "ci_high_rmse": 0.3,
+                        "per_subject": [],
+                    },
+                ),
+                patch.object(orch, "export_baseline_predictions", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Insufficient valid within-subject regression permutations"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Insufficient valid within-subject regression permutations"
+                ):
                     orch.run_within_subject_regression_ml(
                         subjects=["0001", "0002"],
                         task="task",
@@ -2371,8 +2509,15 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             return y_true, y_pred, ["sub-0001", "sub-0002"], [0, 1], [1, 1]
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(cv, "nested_loso_predictions_matrix", side_effect=_fake_nested_loso_predictions_matrix), patch.object(
-                cv, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
+            with (
+                patch.object(
+                    cv,
+                    "nested_loso_predictions_matrix",
+                    side_effect=_fake_nested_loso_predictions_matrix,
+                ),
+                patch.object(
+                    cv, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
+                ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "Insufficient valid permutations"):
                     cv.run_permutation_test(
@@ -2455,30 +2600,28 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                             "use_ridgecv": False,
                             "alpha_grid": [0.01, 0.1, 1.0],
                             "default_alpha": 1.0,
-                        }
+                        },
                     }
                 },
             }
         )
 
-        with patch.object(tg, "load_epochs_with_targets", return_value=([], None)), patch.object(
-            tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare
-        ), patch.object(
-            tg, "find_common_channels_train_test", return_value=["Cz"]
-        ), patch.object(
-            tg, "get_min_channels_required", return_value=1
-        ), patch.object(
-            tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
-        ), patch.object(
-            tg, "_extract_window_features", side_effect=_fake_extract_window_features
-        ), patch.object(
-            tg, "build_time_windows", return_value=[(0.0, 0.1)]
-        ), patch.object(
-            tg, "safe_pearsonr", return_value=(0.5, 0.01)
-        ), patch.object(
-            tg, "r2_score", return_value=0.2
+        with (
+            patch.object(tg, "load_epochs_with_targets", return_value=([], None)),
+            patch.object(tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare),
+            patch.object(tg, "find_common_channels_train_test", return_value=["Cz"]),
+            patch.object(tg, "get_min_channels_required", return_value=1),
+            patch.object(
+                tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
+            ),
+            patch.object(tg, "_extract_window_features", side_effect=_fake_extract_window_features),
+            patch.object(tg, "build_time_windows", return_value=[(0.0, 0.1)]),
+            patch.object(tg, "safe_pearsonr", return_value=(0.5, 0.01)),
+            patch.object(tg, "r2_score", return_value=0.2),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Insufficient valid time-generalization fold coverage"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Insufficient valid time-generalization fold coverage"
+            ):
                 tg.time_generalization_regression(
                     deriv_root=Path("."),
                     subjects=["0001", "0002", "0003"],
@@ -2506,7 +2649,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 "n_folds_attempted": [3],
             }
         )
-        cfg = DotConfig({"machine_learning": {"analysis": {"shap": {"min_valid_fold_fraction": 0.8}}}})
+        cfg = DotConfig(
+            {"machine_learning": {"analysis": {"shap": {"min_valid_fold_fraction": 0.8}}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
             with patch(
@@ -2570,13 +2715,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             raise RuntimeError("synthetic fold failure")
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "_fit_tuned_regression_estimator", side_effect=lambda **kwargs: kwargs["base_pipe"]
-            ), patch(
-                "sklearn.inspection.permutation_importance",
-                side_effect=_fake_permutation_importance,
+            with (
+                patch.object(
+                    orch,
+                    "_fit_tuned_regression_estimator",
+                    side_effect=lambda **kwargs: kwargs["base_pipe"],
+                ),
+                patch(
+                    "sklearn.inspection.permutation_importance",
+                    side_effect=_fake_permutation_importance,
+                ),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Insufficient valid permutation-importance folds"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Insufficient valid permutation-importance folds"
+                ):
                     orch._run_permutation_importance_stage(
                         X=X,
                         y=y,
@@ -2653,40 +2805,47 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch.object(
-                orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
-            ), patch.object(
-                orch, "build_elasticnet_param_grid", return_value={}
-            ), patch.object(
-                orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
-            ), patch.object(
-                orch, "export_predictions", side_effect=_fake_export_predictions
-            ), patch.object(
-                orch, "export_indices", return_value=None
-            ), patch.object(
-                orch, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
-            ), patch.object(
-                orch,
-                "compute_subject_level_errors",
-                return_value={
-                    "mean_mae": 0.1,
-                    "ci_low_mae": 0.05,
-                    "ci_high_mae": 0.2,
-                    "mean_rmse": 0.2,
-                    "ci_low_rmse": 0.1,
-                    "ci_high_rmse": 0.3,
-                    "per_subject": [],
-                },
-            ), patch.object(
-                orch, "export_baseline_predictions", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch.object(
+                    orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
+                ),
+                patch.object(orch, "build_elasticnet_param_grid", return_value={}),
+                patch.object(
+                    orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
+                ),
+                patch.object(orch, "export_predictions", side_effect=_fake_export_predictions),
+                patch.object(orch, "export_indices", return_value=None),
+                patch.object(
+                    orch,
+                    "compute_subject_level_r",
+                    return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3),
+                ),
+                patch.object(
+                    orch,
+                    "compute_subject_level_errors",
+                    return_value={
+                        "mean_mae": 0.1,
+                        "ci_low_mae": 0.05,
+                        "ci_high_mae": 0.2,
+                        "mean_rmse": 0.2,
+                        "ci_low_rmse": 0.1,
+                        "ci_high_rmse": 0.3,
+                        "per_subject": [],
+                    },
+                ),
+                patch.object(orch, "export_baseline_predictions", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Insufficient valid within-subject regression permutations"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Insufficient valid within-subject regression permutations"
+                ):
                     orch.run_within_subject_regression_ml(
                         subjects=["0001", "0002"],
                         task="task",
@@ -2753,36 +2912,42 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 captured_groups_used["values"] = np.asarray(groups_used, dtype=object).tolist()
                 return {}
 
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch.object(
-                orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
-            ), patch.object(
-                orch, "build_elasticnet_param_grid", return_value={}
-            ), patch.object(
-                orch, "_fit_within_subject_fold", return_value=_FakeEstimator()
-            ), patch.object(
-                orch, "export_predictions", side_effect=_fake_export_predictions
-            ), patch.object(
-                orch, "export_indices", return_value=None
-            ), patch.object(
-                orch, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
-            ), patch.object(
-                orch,
-                "compute_subject_level_errors",
-                return_value={
-                    "mean_mae": 0.1,
-                    "ci_low_mae": 0.05,
-                    "ci_high_mae": 0.2,
-                    "mean_rmse": 0.2,
-                    "ci_low_rmse": 0.1,
-                    "ci_high_rmse": 0.3,
-                    "per_subject": [],
-                },
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
-            ), patch.object(
-                orch, "export_subject_selection_report", side_effect=_capture_subject_selection
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch.object(
+                    orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
+                ),
+                patch.object(orch, "build_elasticnet_param_grid", return_value={}),
+                patch.object(orch, "_fit_within_subject_fold", return_value=_FakeEstimator()),
+                patch.object(orch, "export_predictions", side_effect=_fake_export_predictions),
+                patch.object(orch, "export_indices", return_value=None),
+                patch.object(
+                    orch,
+                    "compute_subject_level_r",
+                    return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3),
+                ),
+                patch.object(
+                    orch,
+                    "compute_subject_level_errors",
+                    return_value={
+                        "mean_mae": 0.1,
+                        "ci_low_mae": 0.05,
+                        "ci_high_mae": 0.2,
+                        "mean_rmse": 0.2,
+                        "ci_low_rmse": 0.1,
+                        "ci_high_rmse": 0.3,
+                        "per_subject": [],
+                    },
+                ),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
+                patch.object(
+                    orch, "export_subject_selection_report", side_effect=_capture_subject_selection
+                ),
             ):
                 out_dir = orch.run_within_subject_regression_ml(
                     subjects=["0001", "0002"],
@@ -2845,14 +3010,18 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch.object(
-                orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch.object(
+                    orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
             ):
                 orch.run_within_subject_regression_ml(
                     subjects=["0001"],
@@ -2944,34 +3113,39 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch.object(
-                orch, "apply_fold_feature_harmonization", side_effect=_fake_harmonize
-            ), patch.object(
-                orch, "_fit_within_subject_fold", return_value=_FakeEstimator()
-            ), patch.object(
-                orch, "export_predictions", side_effect=_fake_export_predictions
-            ), patch.object(
-                orch, "export_indices", return_value=None
-            ), patch.object(
-                orch, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
-            ), patch.object(
-                orch,
-                "compute_subject_level_errors",
-                return_value={
-                    "mean_mae": 0.1,
-                    "ci_low_mae": 0.05,
-                    "ci_high_mae": 0.2,
-                    "mean_rmse": 0.2,
-                    "ci_low_rmse": 0.1,
-                    "ci_high_rmse": 0.3,
-                    "per_subject": [],
-                },
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch.object(orch, "apply_fold_feature_harmonization", side_effect=_fake_harmonize),
+                patch.object(orch, "_fit_within_subject_fold", return_value=_FakeEstimator()),
+                patch.object(orch, "export_predictions", side_effect=_fake_export_predictions),
+                patch.object(orch, "export_indices", return_value=None),
+                patch.object(
+                    orch,
+                    "compute_subject_level_r",
+                    return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3),
+                ),
+                patch.object(
+                    orch,
+                    "compute_subject_level_errors",
+                    return_value={
+                        "mean_mae": 0.1,
+                        "ci_low_mae": 0.05,
+                        "ci_high_mae": 0.2,
+                        "mean_rmse": 0.2,
+                        "ci_low_rmse": 0.1,
+                        "ci_high_rmse": 0.3,
+                        "per_subject": [],
+                    },
+                ),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
             ):
                 orch.run_within_subject_regression_ml(
                     subjects=["0001"],
@@ -3005,7 +3179,16 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         X = np.ones((8, 2, 3), dtype=float)
         y = np.array([0, 1, 0, 1, 0, 1, 0, 1], dtype=int)
         groups = np.array(
-            ["sub-0001", "sub-0001", "sub-0001", "sub-0001", "sub-0002", "sub-0002", "sub-0002", "sub-0002"],
+            [
+                "sub-0001",
+                "sub-0001",
+                "sub-0001",
+                "sub-0001",
+                "sub-0002",
+                "sub-0002",
+                "sub-0002",
+                "sub-0002",
+            ],
             dtype=object,
         )
         meta = pd.DataFrame(
@@ -3017,8 +3200,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
         folds = [
-            (0, np.array([0, 1, 4, 5], dtype=int), np.array([2, 3, 6, 7], dtype=int), "sub-0001", {}),
-            (1, np.array([2, 3, 6, 7], dtype=int), np.array([0, 1, 4, 5], dtype=int), "sub-0002", {}),
+            (
+                0,
+                np.array([0, 1, 4, 5], dtype=int),
+                np.array([2, 3, 6, 7], dtype=int),
+                "sub-0001",
+                {},
+            ),
+            (
+                1,
+                np.array([2, 3, 6, 7], dtype=int),
+                np.array([0, 1, 4, 5], dtype=int),
+                "sub-0002",
+                {},
+            ),
         ]
         fit_calls = {"n": 0}
 
@@ -3034,29 +3229,42 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         cfg = DotConfig(
             {
                 "machine_learning": {
-                    "classification": {"max_failed_fold_fraction": 0.25, "min_subjects_with_auc_for_inference": 1},
-                    "cv": {"min_valid_permutation_fraction": 0.0, "permutation_scheme": "within_subject"},
+                    "classification": {
+                        "max_failed_fold_fraction": 0.25,
+                        "min_subjects_with_auc_for_inference": 1,
+                    },
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.0,
+                        "permutation_scheme": "within_subject",
+                    },
                 }
             }
         )
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.cnn.fit_predict_cnn_binary_classifier",
-                side_effect=_fake_fit_predict_cnn_binary_classifier,
-            ), patch.object(
-                orch, "export_predictions", side_effect=lambda y_true, y_pred, groups_ordered, *_a, **_k: pd.DataFrame(
-                    {"y_true": y_true, "y_pred": y_pred, "subject_id": groups_ordered}
-                )
-            ), patch.object(
-                orch, "export_indices", return_value=None
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
-            ), patch.object(
-                orch, "_maybe_generate_mode_plots", return_value=None
+            with (
+                patch.object(
+                    orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
+                ),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.cnn.fit_predict_cnn_binary_classifier",
+                    side_effect=_fake_fit_predict_cnn_binary_classifier,
+                ),
+                patch.object(
+                    orch,
+                    "export_predictions",
+                    side_effect=lambda y_true, y_pred, groups_ordered, *_a, **_k: pd.DataFrame(
+                        {"y_true": y_true, "y_pred": y_pred, "subject_id": groups_ordered}
+                    ),
+                ),
+                patch.object(orch, "export_indices", return_value=None),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
+                patch.object(orch, "_maybe_generate_mode_plots", return_value=None),
             ):
                 results_dir = orch.run_within_subject_classification_ml(
                     subjects=["0001", "0002"],
@@ -3104,7 +3312,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
             return_value=(bad_result, pd.DataFrame()),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Insufficient valid classification permutations"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Insufficient valid classification permutations"
+            ):
                 orch._run_classification_permutations(
                     X=X,
                     y=y,
@@ -3154,7 +3364,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
             return_value=(fake_result, pd.DataFrame()),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Insufficient valid classification permutations"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Insufficient valid classification permutations"
+            ):
                 orch._run_classification_permutations(
                     X=X,
                     y=y,
@@ -3288,7 +3500,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(df.shape, (2, 1))
         self.assertEqual(cols, ["power_alpha_global_mean"])
 
-    def test_load_subject_feature_table_connectivity_requires_explicit_trial_granularity_when_strict(self):
+    def test_load_subject_feature_table_connectivity_requires_explicit_trial_granularity_when_strict(
+        self,
+    ):
         from eeg_pipeline.utils.data import machine_learning as ml_data
 
         cfg = DotConfig({"machine_learning": {"data": {"require_trial_ml_safe": True}}})
@@ -3340,14 +3554,19 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        def _drop_baseline_columns(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+        def _drop_baseline_columns(
+            X_train, X_test, groups_train, harmonization_mode, n_covariates=0
+        ):
             _ = (groups_train, harmonization_mode, n_covariates)
             keep = np.array([True, False], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "apply_fold_feature_harmonization", side_effect=_drop_baseline_columns
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(
+                    orch, "apply_fold_feature_harmonization", side_effect=_drop_baseline_columns
+                ),
             ):
                 with self.assertRaisesRegex(ValueError, "removed all baseline predictors"):
                     orch.run_incremental_validity_ml(
@@ -3435,22 +3654,26 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             return estimator
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)), patch.object(
-                orch, "GridSearchCV", _CaptureGrid
-            ), patch.object(
-                orch, "_fit_subject_weighted_inner_cv_estimator", side_effect=_capture_tuner
-            ), patch.object(
-                orch, "create_elasticnet_pipeline", return_value=DummyRegressor(strategy="mean")
-            ), patch.object(
-                orch, "create_ridge_pipeline", return_value=DummyRegressor(strategy="mean")
-            ), patch.object(
-                orch, "create_rf_pipeline", return_value=DummyRegressor(strategy="mean")
-            ), patch.object(
-                orch, "build_elasticnet_param_grid", return_value={}
-            ), patch.object(
-                orch, "build_ridge_param_grid", return_value={}
-            ), patch.object(
-                orch, "build_rf_param_grid", return_value={}
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch.object(orch, "GridSearchCV", _CaptureGrid),
+                patch.object(
+                    orch, "_fit_subject_weighted_inner_cv_estimator", side_effect=_capture_tuner
+                ),
+                patch.object(
+                    orch, "create_elasticnet_pipeline", return_value=DummyRegressor(strategy="mean")
+                ),
+                patch.object(
+                    orch, "create_ridge_pipeline", return_value=DummyRegressor(strategy="mean")
+                ),
+                patch.object(
+                    orch, "create_rf_pipeline", return_value=DummyRegressor(strategy="mean")
+                ),
+                patch.object(orch, "build_elasticnet_param_grid", return_value={}),
+                patch.object(orch, "build_ridge_param_grid", return_value={}),
+                patch.object(orch, "build_rf_param_grid", return_value={}),
             ):
                 orch.run_model_comparison_ml(
                     subjects=["0001", "0002", "0003"],
@@ -3505,11 +3728,14 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch.object(
-            ml_data,
-            "load_epochs_for_analysis",
-            return_value=(_EpochsStub(), aligned_events),
-        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+        with (
+            patch.object(
+                ml_data,
+                "load_epochs_for_analysis",
+                return_value=(_EpochsStub(), aligned_events),
+            ),
+            patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)),
+        ):
             _X, _y, _groups, _channels, meta = ml_data.load_epoch_tensor_matrix(
                 subjects=["0001"],
                 task="task",
@@ -3567,14 +3793,17 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             channels=types.SimpleNamespace(make_standard_montage=lambda name: f"montage:{name}")
         )
 
-        with patch.object(
-            ml_data,
-            "load_epochs_for_analysis",
-            return_value=(epochs, aligned),
-        ), patch.object(
-            ml_data,
-            "mne",
-            fake_mne,
+        with (
+            patch.object(
+                ml_data,
+                "load_epochs_for_analysis",
+                return_value=(epochs, aligned),
+            ),
+            patch.object(
+                ml_data,
+                "mne",
+                fake_mne,
+            ),
         ):
             tuples, common_channels = ml_data.load_epochs_with_targets(
                 deriv_root=Path("."),
@@ -3641,10 +3870,10 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 return np.full(len(X_pred), 1.0, dtype=float)
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "GridSearchCV", _CaptureGrid
-            ), patch(
-                "sklearn.metrics.r2_score", return_value=0.0
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "GridSearchCV", _CaptureGrid),
+                patch("sklearn.metrics.r2_score", return_value=0.0),
             ):
                 orch.run_incremental_validity_ml(
                     subjects=["0001", "0002", "0003"],
@@ -3715,10 +3944,10 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             return 0.2 if np.all(y_pred_arr == -1.0) else 0.6
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
-                orch, "GridSearchCV", _FakeGrid
-            ), patch(
-                "sklearn.metrics.r2_score", side_effect=_fake_r2_score
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "GridSearchCV", _FakeGrid),
+                patch("sklearn.metrics.r2_score", side_effect=_fake_r2_score),
             ):
                 out_dir = orch.run_incremental_validity_ml(
                     subjects=["0001", "0002", "0003"],
@@ -3733,7 +3962,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     baseline_predictors=["predictor"],
                 )
 
-            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(
+                out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8"
+            ) as f:
                 summary = json.load(f)
 
         self.assertAlmostEqual(float(summary["mean_fold_delta_r2"]), 0.4, places=8)
@@ -3971,8 +4202,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
         cfg = DotConfig({"machine_learning": {"classification": {"scoring": "accuracy"}}})
 
-        with patch.object(clf, "create_svm_pipeline", return_value=pipe), patch.object(
-            clf, "build_svm_param_grid", return_value={}
+        with (
+            patch.object(clf, "create_svm_pipeline", return_value=pipe),
+            patch.object(clf, "build_svm_param_grid", return_value={}),
         ):
             with self.assertRaisesRegex(RuntimeError, "only one class in training"):
                 clf.nested_loso_classification(
@@ -4001,10 +4233,15 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
         cfg = DotConfig({"machine_learning": {"classification": {"scoring": "accuracy"}}})
 
-        with patch.object(clf, "create_svm_pipeline", return_value=pipe), patch.object(
-            clf, "build_svm_param_grid", return_value={"clf__strategy": ["most_frequent"]}
+        with (
+            patch.object(clf, "create_svm_pipeline", return_value=pipe),
+            patch.object(
+                clf, "build_svm_param_grid", return_value={"clf__strategy": ["most_frequent"]}
+            ),
         ):
-            with self.assertRaisesRegex(RuntimeError, "inner CV requires at least 2 training groups"):
+            with self.assertRaisesRegex(
+                RuntimeError, "inner CV requires at least 2 training groups"
+            ):
                 clf.nested_loso_classification(
                     X=X,
                     y=y,
@@ -4031,8 +4268,11 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
         cfg = DotConfig({"machine_learning": {"classification": {"scoring": "accuracy"}}})
 
-        with patch.object(clf, "create_svm_pipeline", return_value=pipe), patch.object(
-            clf, "build_svm_param_grid", return_value={"clf__strategy": ["most_frequent"]}
+        with (
+            patch.object(clf, "create_svm_pipeline", return_value=pipe),
+            patch.object(
+                clf, "build_svm_param_grid", return_value={"clf__strategy": ["most_frequent"]}
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "StratifiedGroupKFold"):
                 clf.nested_loso_classification(
@@ -4105,13 +4345,16 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
         folds = [(1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", None)]
 
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
-            ), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
+            with (
+                patch.object(
+                    orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
+                ),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
             ):
                 with self.assertRaisesRegex(RuntimeError, "only one class in training"):
                     orch.run_within_subject_classification_ml(
@@ -4144,16 +4387,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
         folds = [(1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", None)]
 
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
-            ), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.cnn.fit_predict_cnn_binary_classifier",
-                side_effect=RuntimeError("synthetic cnn fold failure"),
+            with (
+                patch.object(
+                    orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
+                ),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.cnn.fit_predict_cnn_binary_classifier",
+                    side_effect=RuntimeError("synthetic cnn fold failure"),
+                ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "synthetic cnn fold failure"):
                     orch.run_within_subject_classification_ml(
@@ -4189,22 +4436,26 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
         folds = [(1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", None)]
         pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
-            ), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.create_svm_pipeline",
-                return_value=pipe,
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.build_svm_param_grid",
-                return_value={},
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.orchestration.GridSearchCV.fit",
-                side_effect=RuntimeError("synthetic inner cv failure"),
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.create_svm_pipeline",
+                    return_value=pipe,
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.build_svm_param_grid",
+                    return_value={},
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.orchestration.GridSearchCV.fit",
+                    side_effect=RuntimeError("synthetic inner cv failure"),
+                ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "synthetic inner cv failure"):
                     orch.run_within_subject_classification_ml(
@@ -4311,22 +4562,18 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch.object(tg, "load_epochs_with_targets", return_value=([], None)), patch.object(
-            tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare
-        ), patch.object(
-            tg, "find_common_channels_train_test", return_value=["Cz"]
-        ), patch.object(
-            tg, "get_min_channels_required", return_value=1
-        ), patch.object(
-            tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
-        ), patch.object(
-            tg, "_extract_window_features", side_effect=_fake_extract_window_features
-        ), patch.object(
-            tg, "build_time_windows", return_value=[(0.0, 0.1)]
-        ), patch.object(
-            tg, "safe_pearsonr", return_value=(0.5, 0.01)
-        ), patch.object(
-            tg, "r2_score", return_value=0.2
+        with (
+            patch.object(tg, "load_epochs_with_targets", return_value=([], None)),
+            patch.object(tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare),
+            patch.object(tg, "find_common_channels_train_test", return_value=["Cz"]),
+            patch.object(tg, "get_min_channels_required", return_value=1),
+            patch.object(
+                tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
+            ),
+            patch.object(tg, "_extract_window_features", side_effect=_fake_extract_window_features),
+            patch.object(tg, "build_time_windows", return_value=[(0.0, 0.1)]),
+            patch.object(tg, "safe_pearsonr", return_value=(0.5, 0.01)),
+            patch.object(tg, "r2_score", return_value=0.2),
         ):
             with self.assertRaisesRegex(ValueError, "requires run labels"):
                 tg.time_generalization_regression(
@@ -4385,15 +4632,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
-                return_value=(result, pd.DataFrame()),
-            ), patch.object(
-                orch, "export_subject_selection_report", return_value={}
-            ), patch.object(
-                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                    return_value=(result, pd.DataFrame()),
+                ),
+                patch.object(orch, "export_subject_selection_report", return_value={}),
+                patch.object(
+                    orch,
+                    "write_reproducibility_info",
+                    return_value=Path(td) / "reproducibility_info.json",
+                ),
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002", "0003"],
@@ -4432,7 +4684,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ):
                 with self.assertRaisesRegex(ValueError, "Missing baseline predictors"):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
@@ -4461,7 +4715,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ):
                 with self.assertRaisesRegex(ValueError, "requires explicit baseline predictors"):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
@@ -4490,15 +4746,17 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 "trial_id": [0, 1, 2, 3],
             }
         )
-        cfg = DotConfig({"machine_learning": {"incremental_validity": {"require_baseline_predictors": False}}})
+        cfg = DotConfig(
+            {"machine_learning": {"incremental_validity": {"require_baseline_predictors": False}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
-            ), patch.object(
-                orch, "create_elasticnet_pipeline", return_value=DummyRegressor(strategy="mean")
-            ), patch.object(
-                orch, "build_elasticnet_param_grid", return_value={}
+            with (
+                patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)),
+                patch.object(
+                    orch, "create_elasticnet_pipeline", return_value=DummyRegressor(strategy="mean")
+                ),
+                patch.object(orch, "build_elasticnet_param_grid", return_value={}),
             ):
                 out_dir = orch.run_incremental_validity_ml(
                     subjects=["0001", "0002"],
@@ -4513,7 +4771,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     baseline_predictors=["temperature"],
                 )
 
-            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(
+                out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8"
+            ) as f:
                 summary = json.load(f)
 
         self.assertEqual(summary["data"]["baseline_predictors"], ["intercept_only"])
@@ -4538,19 +4798,19 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ["sub-0001", "sub-0001", "sub-0002", "sub-0002", "sub-0003", "sub-0003"],
                 dtype=object,
             )
-            meta = pd.DataFrame({"subject_id": groups, "trial_id": np.arange(len(groups), dtype=int)})
+            meta = pd.DataFrame(
+                {"subject_id": groups, "trial_id": np.arange(len(groups), dtype=int)}
+            )
 
-            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)):
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ):
                 out_dir = orch.run_model_comparison_ml(
                     subjects=["0001", "0002", "0003"],
                     task="task",
                     deriv_root=Path(td),
                     config=DotConfig(
-                        {
-                            "machine_learning": {
-                                "preprocessing": {"variance_threshold_grid": [0.0]}
-                            }
-                        }
+                        {"machine_learning": {"preprocessing": {"variance_threshold_grid": [0.0]}}}
                     ),
                     n_perm=8,
                     inner_splits=2,
@@ -4559,7 +4819,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+            with open(
+                out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8"
+            ) as f:
                 summary = json.load(f)
 
         pairwise = summary.get("pairwise_inference", {})
@@ -4601,19 +4863,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 None,
             )
         ]
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.create_logistic_pipeline",
-                return_value=DummyClassifier(strategy="most_frequent"),
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.build_logistic_param_grid",
-                return_value={},
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.create_logistic_pipeline",
+                    return_value=DummyClassifier(strategy="most_frequent"),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.build_logistic_param_grid",
+                    return_value={},
+                ),
             ):
                 out_dir = orch.run_within_subject_classification_ml(
                     subjects=["0001"],
@@ -4667,7 +4934,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 None,
             )
         ]
-        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        cfg = DotConfig(
+            {"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}}
+        )
 
         calls = {"harmonize": 0}
 
@@ -4678,18 +4947,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             return X_train[:, keep], X_test[:, keep], keep
 
         with tempfile.TemporaryDirectory() as td:
-            with patch.object(
-                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
-            ), patch.object(
-                orch, "create_within_subject_folds", return_value=folds
-            ), patch.object(
-                orch, "apply_fold_feature_harmonization", side_effect=_fake_harmonize
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.create_logistic_pipeline",
-                return_value=DummyClassifier(strategy="most_frequent"),
-            ), patch(
-                "eeg_pipeline.analysis.machine_learning.classification.build_logistic_param_grid",
-                return_value={},
+            with (
+                patch.object(
+                    orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+                ),
+                patch.object(orch, "create_within_subject_folds", return_value=folds),
+                patch.object(orch, "apply_fold_feature_harmonization", side_effect=_fake_harmonize),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.create_logistic_pipeline",
+                    return_value=DummyClassifier(strategy="most_frequent"),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.machine_learning.classification.build_logistic_param_grid",
+                    return_value={},
+                ),
             ):
                 orch.run_within_subject_classification_ml(
                     subjects=["0001"],

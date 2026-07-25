@@ -23,7 +23,9 @@ class NoOpProgressReporter:
     def subject_done(self, subject: str, success: bool = True) -> None:
         return
 
-    def complete(self, success: bool, duration: float | None = None, outputs: list[str] | None = None) -> None:
+    def complete(
+        self, success: bool, duration: float | None = None, outputs: list[str] | None = None
+    ) -> None:
         return
 
     def error(self, code: str, message: str, suggestion: str | None = None) -> None:

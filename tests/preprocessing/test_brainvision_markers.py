@@ -40,6 +40,16 @@ def test_sanitize_vas_marker_text_rejects_other_v1_marker_types() -> None:
         sanitize_vas_marker_text(marker_text, n_samples=10)
 
 
+def test_sanitize_vas_marker_text_supports_eeg_only_recordings() -> None:
+    marker_text = "[Marker Infos]\n" "Mk1=Stim_on,S  1,1,1,0\n" "Mk2=Vas_on,V  1,2,1,0\n"
+
+    result = sanitize_vas_marker_text(marker_text, n_samples=10)
+
+    assert result.volume_count == 0
+    assert result.vas_count == 1
+    assert "Mk2=Vas_on,VAS_ON,2,1,0" in result.text
+
+
 def test_sanitize_vas_marker_text_rejects_already_sanitized_input() -> None:
     marker_text = "[Marker Infos]\n" "Mk1=Volume,V  1,1,1,0\n" "Mk2=Vas_on,VAS_ON,2,1,0\n"
 

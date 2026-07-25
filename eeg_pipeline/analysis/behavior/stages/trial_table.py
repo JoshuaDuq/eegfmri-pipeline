@@ -30,7 +30,11 @@ def write_trial_table_impl(
     """Write trial table and metadata to disk."""
     from eeg_pipeline.utils.data.trial_table import save_trial_table
 
-    fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
+    fmt = (
+        str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv"))
+        .strip()
+        .lower()
+    )
     suffix = trial_table_suffix_from_context_fn(ctx)
     fname = f"trials{suffix}"
     out_dir = trial_table_output_dir_fn(ctx)
@@ -74,7 +78,11 @@ def try_reuse_cached_trial_table_impl(
     validate_trial_table_contract_metadata_fn: Callable[[Any, Path, pd.DataFrame], None],
 ) -> Optional[tuple[Path, pd.DataFrame]]:
     """Reuse existing trial-table artifact when input hash is unchanged."""
-    fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
+    fmt = (
+        str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv"))
+        .strip()
+        .lower()
+    )
     suffix = trial_table_suffix_from_context_fn(ctx)
     fname = f"trials{suffix}"
     out_dir = trial_table_output_dir_fn(ctx)
@@ -135,7 +143,6 @@ def stage_trial_table_impl(
     contract = result.metadata.setdefault("contract", {})
     contract["input_hash"] = str(input_hash)
     return write_trial_table_fn(ctx, result)
-
 
 
 def stage_predictor_residual_impl(

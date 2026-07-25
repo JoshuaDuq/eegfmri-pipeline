@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 
-def infer_feature_type_impl(feature: str, config: Any, *, feature_column_prefixes: Sequence[str]) -> str:
+def infer_feature_type_impl(
+    feature: str, config: Any, *, feature_column_prefixes: Sequence[str]
+) -> str:
     from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
 
     registry = get_feature_registry(config)

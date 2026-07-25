@@ -38,24 +38,28 @@ class TestCliInfoHelp(unittest.TestCase):
             output_json=True,
         )
 
-        with patch(
-            "eeg_pipeline.cli.commands.info_helpers._discover_fmri_events_columns_and_values",
-            return_value={
-                "columns": ["trial_label", "stimulus_family"],
-                "values": {
-                    "trial_label": ["pain", "rest"],
-                    "stimulus_family": ["thermal"],
+        with (
+            patch(
+                "eeg_pipeline.cli.commands.info_helpers._discover_fmri_events_columns_and_values",
+                return_value={
+                    "columns": ["trial_label", "stimulus_family"],
+                    "values": {
+                        "trial_label": ["pain", "rest"],
+                        "stimulus_family": ["thermal"],
+                    },
+                    "subject": "0001",
+                    "task": "pain",
                 },
-                "subject": "0001",
-                "task": "pain",
-            },
-        ), patch(
-            "eeg_pipeline.utils.config.loader.get_condition_column_candidates",
-            return_value=[],
-        ), patch(
-            "sys.stdout",
-            new_callable=StringIO,
-        ) as stdout:
+            ),
+            patch(
+                "eeg_pipeline.utils.config.loader.get_condition_column_candidates",
+                return_value=[],
+            ),
+            patch(
+                "sys.stdout",
+                new_callable=StringIO,
+            ) as stdout,
+        ):
             _handle_fmri_conditions_mode(args, config={})
 
         payload = json.loads(stdout.getvalue())

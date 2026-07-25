@@ -8,7 +8,6 @@ from eeg_pipeline.domain.features.registry import (
     get_feature_registry,
 )
 
-
 __all__ = [
     "NamingSchema",
     "FeatureRegistry",

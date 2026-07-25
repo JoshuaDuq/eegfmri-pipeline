@@ -8,7 +8,6 @@ import numpy as np
 
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 REST_INCOMPATIBLE_FEATURE_CATEGORIES = frozenset({"erp", "erds", "itpc", "phase"})
 _MISSING = object()
 
@@ -125,9 +124,7 @@ def valid_rest_analysis_segment_masks(
     return {
         name: np.asarray(mask, dtype=bool)
         for name, mask in masks.items()
-        if mask is not None
-        and np.any(mask)
-        and str(name).strip().lower() != "baseline"
+        if mask is not None and np.any(mask) and str(name).strip().lower() != "baseline"
     }
 
 

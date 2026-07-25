@@ -57,7 +57,9 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
         fake_nib = types.SimpleNamespace(save=lambda img, path: None, load=lambda path: "img")
         fake_plotting = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
         fake_reporting = types.SimpleNamespace(
-            run_fmri_plotting_and_report=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("plot-fail"))
+            run_fmri_plotting_and_report=lambda **kwargs: (_ for _ in ()).throw(
+                RuntimeError("plot-fail")
+            )
         )
 
         with patch.dict(
@@ -111,13 +113,16 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
         )
         fake_nib = types.SimpleNamespace(save=lambda img, path: None, load=lambda path: "img")
 
-        with patch.dict(
-            sys.modules,
-            {
-                "fmri_pipeline.analysis.contrast_builder": fake_builder,
-                "nibabel": fake_nib,
-            },
-        ), patch("pathlib.Path.write_text", side_effect=RuntimeError("no-write")):
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "fmri_pipeline.analysis.contrast_builder": fake_builder,
+                    "nibabel": fake_nib,
+                },
+            ),
+            patch("pathlib.Path.write_text", side_effect=RuntimeError("no-write")),
+        ):
             with self.assertRaisesRegex(RuntimeError, "no-write"):
                 pipeline.process_subject(
                     "0001",

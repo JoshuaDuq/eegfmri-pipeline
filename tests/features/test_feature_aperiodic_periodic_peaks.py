@@ -148,7 +148,10 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         empty_mask = np.zeros(times.shape, dtype=bool)
         precomputed.windows = TimeWindows(
             masks={"analysis": analysis_mask, "active": empty_mask},
-            ranges={"analysis": (float(times[0]), float(times[-1] + (1.0 / precomputed.sfreq))), "active": (float(times[0]), float(times[-1] + (1.0 / precomputed.sfreq)))},
+            ranges={
+                "analysis": (float(times[0]), float(times[-1] + (1.0 / precomputed.sfreq))),
+                "active": (float(times[0]), float(times[-1] + (1.0 / precomputed.sfreq))),
+            },
             times=times,
             name="active",
         )
@@ -171,16 +174,24 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         precomputed = self._build_precomputed()
         precomputed.config["feature_engineering"]["aperiodic"]["subtract_evoked"] = True
         precomputed.config["feature_engineering"]["analysis_mode"] = "trial_ml_safe"
-        precomputed.train_mask = np.array([True, True, True, True, True, False, False, False, False, False], dtype=bool)
+        precomputed.train_mask = np.array(
+            [True, True, True, True, True, False, False, False, False, False], dtype=bool
+        )
 
         seen_masks = []
 
-        def _fake_subtract_evoked(data, condition_labels=None, train_mask=None, min_trials_per_condition=2):
+        def _fake_subtract_evoked(
+            data, condition_labels=None, train_mask=None, min_trials_per_condition=2
+        ):
             del condition_labels, min_trials_per_condition
-            seen_masks.append(None if train_mask is None else np.asarray(train_mask, dtype=bool).copy())
+            seen_masks.append(
+                None if train_mask is None else np.asarray(train_mask, dtype=bool).copy()
+            )
             return data
 
-        with patch("eeg_pipeline.utils.analysis.spectral.subtract_evoked", new=_fake_subtract_evoked):
+        with patch(
+            "eeg_pipeline.utils.analysis.spectral.subtract_evoked", new=_fake_subtract_evoked
+        ):
             df, cols, _qc = extract_aperiodic_from_precomputed(precomputed, ["alpha"])
 
         self.assertFalse(df.empty)
@@ -233,7 +244,9 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
                 train_mask,
                 analysis_mode,
             )
-            captured["labels"] = None if condition_labels is None else np.asarray(condition_labels).copy()
+            captured["labels"] = (
+                None if condition_labels is None else np.asarray(condition_labels).copy()
+            )
             return {
                 "aperiodic_active_alpha_global_slope": np.zeros(n_epochs, dtype=float),
                 "__qc__": {"slopes": [0.0], "offsets": [0.0], "r2": [1.0]},
@@ -252,18 +265,23 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
             analysis_mode="group_stats",
         )
 
-        with patch(
-            "eeg_pipeline.analysis.features.aperiodic.validate_extractor_inputs",
-            return_value=(True, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.aperiodic.pick_eeg_channels",
-            return_value=(np.array([0], dtype=int), ["Cz"]),
-        ), patch(
-            "eeg_pipeline.analysis.features.aperiodic._rebuild_window_masks",
-            return_value=({"active": np.ones(times.shape[0], dtype=bool)}, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.aperiodic._extract_aperiodic_for_segment",
-            side_effect=_fake_extract_segment,
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.aperiodic.validate_extractor_inputs",
+                return_value=(True, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.aperiodic.pick_eeg_channels",
+                return_value=(np.array([0], dtype=int), ["Cz"]),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.aperiodic._rebuild_window_masks",
+                return_value=({"active": np.ones(times.shape[0], dtype=bool)}, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.aperiodic._extract_aperiodic_for_segment",
+                side_effect=_fake_extract_segment,
+            ),
         ):
             df, cols, _qc = extract_aperiodic_features(ctx, bands=["alpha"])
 

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import csv
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 import mne
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 PULSE_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
@@ -56,7 +59,18 @@ def validate_pulse_markers(
     *,
     recording_id: str,
 ) -> PulseMarkerMetrics:
-    """Validate that Analyzer R markers cover a run at a physiological rate."""
+    """Validate that Analyzer R markers cover a run at a physiological rate.
+
+    ``minimum_bpm`` serves two roles: it bounds the plausible median heart rate, and it
+    sets the slowest rate used to derive the minimum expected marker count. Widening it
+    to admit slower participants therefore also relaxes the count floor.
+
+    ``marker_fraction`` compares the observed marker count against the count implied by
+    the 20th-percentile inter-beat interval. Estimating the beat period from a short
+    interval biases the expected count high, so a complete marker set scores below 1.0;
+    the shortfall grows with heart-rate variability (roughly 0.96 at 5% variability and
+    0.83 at 20%). Choose ``minimum_marker_fraction`` with that headroom in mind.
+    """
     if not recording_id.strip():
         raise ValueError("recording_id must not be empty.")
 
@@ -116,8 +130,9 @@ def validate_pulse_marker_recordings(
     criteria: PulseMarkerCriteria,
     *,
     output_path: Path,
+    strict: bool = True,
 ) -> Path:
-    """Validate runs, write their QC table, then surface any invalid inputs."""
+    """Validate EEG source recordings to ensure robust marker-locked cardiac artifact QC."""
     rows = []
     errors = []
     for recording_id, raw in recordings:
@@ -171,7 +186,14 @@ def validate_pulse_marker_recordings(
         writer.writerows(rows)
 
     if errors:
-        raise ValueError("Invalid BrainVision Analyzer pulse markers: " + " | ".join(errors))
+        error_msg = "Invalid BrainVision Analyzer pulse markers: " + " | ".join(errors)
+        if strict:
+            raise ValueError(error_msg)
+        else:
+            logger.warning(
+                "Pulse marker strict validation disabled. Proceeding with errors: %s", error_msg
+            )
+
     return output_path
 
 

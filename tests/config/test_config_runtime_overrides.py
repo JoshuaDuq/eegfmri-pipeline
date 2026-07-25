@@ -56,8 +56,8 @@ def test_apply_runtime_overrides_applies_set_overrides() -> None:
             "analysis.min_subjects_for_group=7",
             "analysis.alpha=0.01",
             "analysis.enabled=true",
-            "analysis.metadata={\"mode\":\"strict\"}",
-            "analysis.labels=[\"a\",\"b\"]",
+            'analysis.metadata={"mode":"strict"}',
+            'analysis.labels=["a","b"]',
             "analysis.optional=null",
         ],
     )

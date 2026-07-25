@@ -8,6 +8,15 @@ import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.preprocessing.report.style import (
+    AFTER_COLOR,
+    BEFORE_COLOR,
+    FLAG_COLOR,
+    REFERENCE_COLOR,
+    RUN_COLORS,
+    report_image_format,
+    apply_report_style,
+)
 from eeg_pipeline.preprocessing.ica_cardiac_review import (
     CardiacReviewSettings,
     ComponentCardiacReview,
@@ -17,6 +26,9 @@ from eeg_pipeline.preprocessing.ica_cardiac_review import (
     component_cardiac_evidence_table,
     component_run_cardiac_evidence_table,
 )
+
+#: Runs below this count give a quantile band no more meaning than a min-max envelope.
+MINIMUM_RUNS_FOR_QUANTILE_BAND = 5
 
 CARDIAC_REPORT_TITLES = (
     "How to review ECG artifacts",
@@ -41,10 +53,10 @@ def _plot_run_cardiac_review(
     axes["ecg"].plot(
         review.representative_times,
         review.representative_ecg_mv,
-        color="#343A40",
+        color="#000000",
     )
     for peak_time in review.representative_peak_times:
-        axes["ecg"].axvline(peak_time, color="#C23B22", alpha=0.65, linewidth=1.0)
+        axes["ecg"].axvline(peak_time, color=FLAG_COLOR, alpha=0.65, linewidth=1.0)
     axes["ecg"].set(
         title="Representative ECG with signal-detected R peaks",
         xlabel="Recording time (s)",
@@ -55,11 +67,11 @@ def _plot_run_cardiac_review(
     heart_rate_axis.plot(
         review.rr_times,
         review.heart_rate_bpm,
-        color="#6B4C9A",
+        color=REFERENCE_COLOR,
         linewidth=0.8,
         alpha=0.75,
     )
-    heart_rate_axis.scatter(review.rr_times, review.heart_rate_bpm, color="#6B4C9A", s=9)
+    heart_rate_axis.scatter(review.rr_times, review.heart_rate_bpm, color=REFERENCE_COLOR, s=9)
     heart_rate_axis.axhline(
         np.median(review.heart_rate_bpm),
         color="0.35",
@@ -75,13 +87,13 @@ def _plot_run_cardiac_review(
     axes["gfp"].plot(
         review.locked_times,
         review.before_gfp_uv,
-        color="#B24C3B",
+        color=BEFORE_COLOR,
         label="Before ICA",
     )
     axes["gfp"].plot(
         review.locked_times,
         review.after_gfp_uv,
-        color="#276B8A",
+        color=AFTER_COLOR,
         label="After ICA",
     )
     axes["gfp"].axvline(0.0, color="0.35", linestyle="--", linewidth=1.0)
@@ -131,6 +143,7 @@ def _plot_component_cardiac_review(
     component: int,
     status: str,
     status_description: str,
+    minimum_runs_for_band: int = MINIMUM_RUNS_FOR_QUANTILE_BAND,
 ):
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
@@ -147,14 +160,32 @@ def _plot_component_cardiac_review(
 
     run_means = review.run_mean_z[:, component]
     median = np.median(run_means, axis=0)
-    lower, upper = np.quantile(run_means, [0.16, 0.84], axis=0)
-    for run_mean in run_means:
-        axes[1].plot(review.times, run_mean, color="#7FA8B8", alpha=0.35, linewidth=0.8)
-    axes[1].plot(review.times, median, color="#276B8A", linewidth=1.8, label="ICA median")
-    axes[1].fill_between(review.times, lower, upper, color="#276B8A", alpha=0.18)
+    run_count = len(review.run_ids)
+    run_colors = [RUN_COLORS[index % len(RUN_COLORS)] for index in range(run_count)]
+
+    # Runs are drawn in their own colours so this panel can be read together with the
+    # scores panel: a cardiac deflection present in one run only is a different finding
+    # from one present in all of them, and a single shared colour hides which is which.
+    for run_index, (run_mean, recording_id) in enumerate(
+        zip(run_means, review.run_ids, strict=True)
+    ):
+        axes[1].plot(
+            review.times,
+            run_mean,
+            color=run_colors[run_index],
+            alpha=0.85,
+            linewidth=0.9,
+            label=recording_id.rsplit("_", maxsplit=1)[-1],
+        )
+    axes[1].plot(review.times, median, color="black", linewidth=2.0, label="Median")
+    # A quantile band drawn from a handful of runs is just the min-max envelope wearing
+    # the clothes of a distribution, so it is only shown once there are enough runs.
+    if run_count >= minimum_runs_for_band:
+        lower, upper = np.quantile(run_means, [0.16, 0.84], axis=0)
+        axes[1].fill_between(review.times, lower, upper, color="0.6", alpha=0.20)
     axes[1].axvline(0.0, color="0.35", linestyle="--", linewidth=1.0)
     axes[1].set(
-        title=f"R-locked ICA waveform and ECG timing ({len(review.run_ids)} runs)",
+        title=f"R-locked ICA waveform and ECG timing ({run_count} runs)",
         xlabel="Time from R peak (s)",
         ylabel="Baseline-standardized amplitude (z)",
     )
@@ -167,20 +198,24 @@ def _plot_component_cardiac_review(
         linewidth=1.2,
         label="ECG median",
     )
-    ecg_axis.set_ylabel("Normalized ECG", color="0.35")
+    # The ECG trace is shown for timing only and its normalized amplitude carries no
+    # interpretable scale, so it gets no numeric ticks to compete with the z axis.
+    ecg_axis.set_ylabel("Normalized ECG (timing only)", color="0.35", fontsize=8)
+    ecg_axis.set_yticks([])
     source_handles, source_labels = axes[1].get_legend_handles_labels()
     ecg_handles, ecg_labels = ecg_axis.get_legend_handles_labels()
     axes[1].legend(
         source_handles + ecg_handles,
         source_labels + ecg_labels,
         frameon=False,
-        fontsize=8,
+        fontsize=7,
+        ncol=2,
+        loc="upper left",
     )
 
     correlation = review.correlation_scores[:, component]
     ctps = review.ctps_scores[:, component]
-    run_positions = np.linspace(-0.16, 0.16, len(review.run_ids))
-    run_colors = plt.get_cmap("tab10")(np.linspace(0.0, 0.7, len(review.run_ids)))
+    run_positions = np.linspace(-0.16, 0.16, run_count)
     for run_index, (recording_id, offset) in enumerate(
         zip(review.run_ids, run_positions, strict=True)
     ):
@@ -202,16 +237,22 @@ def _plot_component_cardiac_review(
             linewidth=0.8,
             s=32,
         )
-        if review.correlation_flags[run_index, component]:
-            axes[2].scatter(offset, correlation[run_index], color="#C23B22", marker="x", s=52)
-        if review.ctps_flags[run_index, component]:
-            axes[2].scatter(
-                1.0 + offset,
-                ctps[run_index],
-                color="#C23B22",
-                marker="x",
-                s=52,
-            )
+        # Ring a flagged score rather than stamping over it: an opaque marker would hide
+        # the run colour, which is what connects this panel to the waveform panel.
+        for position, score, flagged in (
+            (offset, correlation[run_index], review.correlation_flags[run_index, component]),
+            (1.0 + offset, ctps[run_index], review.ctps_flags[run_index, component]),
+        ):
+            if flagged:
+                axes[2].scatter(
+                    position,
+                    score,
+                    s=150,
+                    facecolor="none",
+                    edgecolor=FLAG_COLOR,
+                    linewidth=1.5,
+                    zorder=1,
+                )
     lower_limit = min(-0.3, 1.15 * float(correlation.min()))
     upper_limit = max(0.3, 1.15 * float(max(correlation.max(), ctps.max())))
     axes[2].set(
@@ -224,7 +265,16 @@ def _plot_component_cardiac_review(
     )
     score_handles, score_labels = axes[2].get_legend_handles_labels()
     score_handles.append(
-        Line2D([], [], color="#C23B22", marker="x", linestyle="none", label="MNE flag")
+        Line2D(
+            [],
+            [],
+            color=FLAG_COLOR,
+            marker="o",
+            markerfacecolor="none",
+            markersize=9,
+            linestyle="none",
+            label="MNE flag",
+        )
     )
     score_labels.append("MNE flag")
     axes[2].legend(score_handles, score_labels, frameon=False, fontsize=7, ncol=2)
@@ -333,6 +383,7 @@ def generate_ica_cardiac_review(
         raise ValueError("generate_ica_cardiac_review requires cardiac_review.enabled=true.")
     if not filtered_raw_paths:
         raise ValueError("No filtered raw recordings were provided for ECG review.")
+    apply_report_style()
     ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
     raws = [mne.io.read_raw_fif(path, preload=True, verbose="ERROR") for path in filtered_raw_paths]
     run_reviews = [
@@ -400,6 +451,7 @@ def generate_ica_cardiac_review(
         caption=[review.recording_id for review in run_reviews],
         section=section,
         tags=("ica", "ecg", "ica-cardiac-review", "ecg-run-review"),
+        image_format=report_image_format(is_figure_list=True),
         replace=True,
     )
     component_figures = [
@@ -418,6 +470,7 @@ def generate_ica_cardiac_review(
         caption=[f"ICA{component:03d}" for component in range(int(ica.n_components_))],
         section=section,
         tags=("ica", "ecg", "ica-cardiac-review", "ecg-component-review"),
+        image_format=report_image_format(is_figure_list=True),
         replace=True,
     )
     _organize_cardiac_review(report)

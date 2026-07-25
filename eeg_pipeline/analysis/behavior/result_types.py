@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+
 @dataclass
 class GroupLevelResult:
     """Output contract for group-level analysis."""

@@ -40,7 +40,6 @@ from eeg_pipeline.utils.analysis.stats.effect_size import (
     resolve_binary_condition_values,
 )
 
-
 ###################################################################
 # Cluster Test Configuration and Utilities
 ###################################################################
@@ -268,7 +267,11 @@ def build_full_mask_from_eeg(
 
 def extract_cluster_indices(cluster: Any, expected_length: int) -> np.ndarray:
     """Extract cluster indices from cluster object."""
-    if isinstance(cluster, np.ndarray) and cluster.dtype == bool and cluster.shape[0] == expected_length:
+    if (
+        isinstance(cluster, np.ndarray)
+        and cluster.dtype == bool
+        and cluster.shape[0] == expected_length
+    ):
         return np.where(cluster)[0]
     return np.asarray(cluster)
 
@@ -295,7 +298,11 @@ def cluster_mask_from_clusters(
         if float(pval) > float(alpha):
             continue
         idx = extract_cluster_indices(cluster, n_features)
-        if isinstance(cluster, np.ndarray) and cluster.dtype == bool and cluster.shape[0] == n_features:
+        if (
+            isinstance(cluster, np.ndarray)
+            and cluster.dtype == bool
+            and cluster.shape[0] == n_features
+        ):
             mask |= cluster
         else:
             mask[idx] = True
@@ -326,7 +333,7 @@ def cluster_test_two_sample(
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
     """
     Two-sample cluster permutation test on channel data.
-    
+
     Returns (sig_mask, p_value, cluster_size, cluster_mass).
     """
     from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
@@ -374,7 +381,9 @@ def cluster_test_two_sample(
             n_jobs=n_jobs,
         )
 
-    sig_eeg = cluster_mask_from_clusters(clusters, pvals, n_features=group_a_eeg.shape[1], alpha=alpha)
+    sig_eeg = cluster_mask_from_clusters(
+        clusters, pvals, n_features=group_a_eeg.shape[1], alpha=alpha
+    )
 
     sig_full = build_full_mask_from_eeg(sig_eeg, len(info["ch_names"]), eeg_picks)
 
@@ -412,7 +421,7 @@ def cluster_test_epochs(
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
     """Cluster test on EpochsTFR data.
-    
+
     Args:
         tfr_epochs: MNE EpochsTFR object
         group_a_mask: Boolean mask for first group
@@ -428,45 +437,51 @@ def cluster_test_epochs(
         n_jobs: Number of parallel jobs
         config: Configuration object
         logger: Optional logger
-    
+
     Returns:
         Tuple of (significance_mask, cluster_p_min, cluster_k, cluster_mass)
     """
     import mne
-    
+
     info = tfr_epochs.info
     eeg_picks = mne.pick_types(info, eeg=True, exclude=[])
     if len(eeg_picks) == 0:
         if logger:
             logger.warning("No EEG channels found")
         return None, None, None, None
-    
+
     freqs = np.asarray(tfr_epochs.freqs)
     times = np.asarray(tfr_epochs.times)
     f_mask = (freqs >= fmin) & (freqs <= fmax)
     t_mask = (times >= tmin) & (times < tmax)
-    
+
     if f_mask.sum() == 0 or t_mask.sum() == 0:
         return None, None, None, None
-    
+
     data = np.asarray(tfr_epochs.data)[:, :, f_mask, :][:, :, :, t_mask]
     ch_power = data.mean(axis=(2, 3))
-    
+
     if ch_power.shape[1] != len(info["ch_names"]):
         if logger:
             logger.error("Channel dimension mismatch")
         return None, None, None, None
-    
+
     group_a = ch_power[np.asarray(group_a_mask, dtype=bool), :]
     group_b = ch_power[np.asarray(group_b_mask, dtype=bool), :]
-    
+
     if group_a.shape[0] < 2 or group_b.shape[0] < 2:
         return None, None, None, None
-    
+
     return cluster_test_two_sample(
-        group_a, group_b, info, alpha=alpha, paired=paired,
-        n_permutations=n_permutations, restrict_picks=restrict_picks,
-        n_jobs=n_jobs, config=config
+        group_a,
+        group_b,
+        info,
+        alpha=alpha,
+        paired=paired,
+        n_permutations=n_permutations,
+        restrict_picks=restrict_picks,
+        n_jobs=n_jobs,
+        config=config,
     )
 
 
@@ -502,19 +517,13 @@ def _create_band_summary_record(
         "condition_column": str(condition_column) if condition_column else "",
         "condition_a_label": str(condition_labels[0]),
         "condition_b_label": str(condition_labels[1]),
-        "condition_a_value": (
-            str(condition_values[0]) if condition_values is not None else ""
-        ),
-        "condition_b_value": (
-            str(condition_values[1]) if condition_values is not None else ""
-        ),
+        "condition_a_value": (str(condition_values[0]) if condition_values is not None else ""),
+        "condition_b_value": (str(condition_values[1]) if condition_values is not None else ""),
         "fmin": float(fmin),
         "fmax": float(fmax),
         "n_clusters_found": n_clusters_found,
         "n_significant": n_significant,
-        "min_p_value": (
-            float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan
-        ),
+        "min_p_value": (float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan),
         "n_condition_a_trials": n_condition_a_trials,
         "n_condition_b_trials": n_condition_b_trials,
         "n_permutations": n_permutations,
@@ -547,7 +556,7 @@ def compute_two_condition_time_cluster_test(
     condition_labels: Optional[Tuple[str, str]] = None,
 ) -> dict:
     """Time-domain cluster permutation test for two trial groups.
-    
+
     Generic two-condition comparison that can work with any condition column.
     Condition is specified via condition_column
     and condition_values parameters.
@@ -581,6 +590,7 @@ def compute_two_condition_time_cluster_test(
 
     # Local import to avoid circular dependency
     from eeg_pipeline.utils.analysis.tfr import get_tfr_config, get_bands_for_tfr
+
     freq_min, freq_max, _n_freqs, n_cycles_factor, decim, picks = get_tfr_config(config)
     if bands is None:
         bands = get_bands_for_tfr(max_freq_available=freq_max, config=config)
@@ -618,6 +628,7 @@ def compute_two_condition_time_cluster_test(
 
         # Local import to avoid circular dependency
         from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet, apply_baseline_to_tfr
+
         tfr_group_a = compute_tfr_morlet(
             group_a_epochs,
             config,
@@ -679,18 +690,14 @@ def compute_two_condition_time_cluster_test(
                 out_type="mask",
                 seed=rng_seed,
             )
-            t_stat_observed, clusters, cluster_p_values, null_distribution = (
-                cluster_test_result
-            )
+            t_stat_observed, clusters, cluster_p_values, null_distribution = cluster_test_result
 
             if save_null_distributions and null_distribution is not None:
                 null_dist_path = output_dir / f"null_distribution_{band_name}.json"
                 observed_masses = []
                 for cluster_idx, cluster_mask in enumerate(clusters):
                     if cluster_mask.sum() > 0:
-                        observed_masses.append(
-                            float(np.abs(t_stat_observed[cluster_mask]).sum())
-                        )
+                        observed_masses.append(float(np.abs(t_stat_observed[cluster_mask]).sum()))
                 save_null_distribution_data(
                     np.abs(null_distribution),
                     np.array(observed_masses),
@@ -706,11 +713,15 @@ def compute_two_condition_time_cluster_test(
                 min_p = float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan
                 logger.info(
                     "%s band: found %d clusters, %d significant (p < %.3f), min p-value=%.4f",
-                    band_name, n_clusters_found, n_significant, alpha, min_p,
+                    band_name,
+                    n_clusters_found,
+                    n_significant,
+                    alpha,
+                    min_p,
                 )
             else:
                 logger.info("%s band: no clusters found", band_name)
-            
+
             significant_mask = np.zeros((n_channels, n_times), dtype=bool)
             t_stat_grid = t_stat_observed.reshape(n_channels, n_times)
 
@@ -752,12 +763,12 @@ def compute_two_condition_time_cluster_test(
                 time_start = float(time_vec[time_indices[0]])
                 time_end = float(time_vec[time_indices[-1]])
 
-                cluster_group_a = (
-                    band_power_group_a[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
-                )
-                cluster_group_b = (
-                    band_power_group_b[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
-                )
+                cluster_group_a = band_power_group_a[:, channel_indices, :][
+                    :, :, time_indices
+                ].mean(axis=(1, 2))
+                cluster_group_b = band_power_group_b[:, channel_indices, :][
+                    :, :, time_indices
+                ].mean(axis=(1, 2))
 
                 cohens_d, d_ci_low, d_ci_high = compute_cohens_d_with_bootstrap_ci(
                     cluster_group_a,
@@ -849,8 +860,12 @@ def compute_two_condition_time_cluster_test(
                     "condition_column": str(condition_column) if condition_column else "",
                     "condition_a_label": str(condition_labels[0]),
                     "condition_b_label": str(condition_labels[1]),
-                    "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
-                    "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
+                    "condition_a_value": (
+                        str(condition_values[0]) if condition_values is not None else ""
+                    ),
+                    "condition_b_value": (
+                        str(condition_values[1]) if condition_values is not None else ""
+                    ),
                     "n_condition_a_trials": int(band_power_group_a.shape[0]),
                     "n_condition_b_trials": int(band_power_group_b.shape[0]),
                 },
@@ -888,13 +903,11 @@ def compute_two_condition_time_cluster_test(
                     cluster_group_a_ch = band_power_group_a_ch[:, time_indices_ch].mean(axis=1)
                     cluster_group_b_ch = band_power_group_b_ch[:, time_indices_ch].mean(axis=1)
 
-                    cohens_d_ch, d_ci_low_ch, d_ci_high_ch = (
-                        compute_cohens_d_with_bootstrap_ci(
-                            cluster_group_a_ch,
-                            cluster_group_b_ch,
-                            random_seed=rng_seed + channel_idx,
-                            n_bootstrap=500,
-                        )
+                    cohens_d_ch, d_ci_low_ch, d_ci_high_ch = compute_cohens_d_with_bootstrap_ci(
+                        cluster_group_a_ch,
+                        cluster_group_b_ch,
+                        random_seed=rng_seed + channel_idx,
+                        n_bootstrap=500,
                     )
 
                     channel_record = {
@@ -926,14 +939,12 @@ def compute_two_condition_time_cluster_test(
                     channel_record["p_value"] = (
                         p_fdr_local if np.isfinite(p_fdr_local) else channel_record["p_raw"]
                     )
-                    channel_record["fdr_reject_local"] = (
-                        bool(np.isfinite(q_value) and q_value < alpha)
+                    channel_record["fdr_reject_local"] = bool(
+                        np.isfinite(q_value) and q_value < alpha
                     )
 
                 n_significant_channels = sum(
-                    1
-                    for record in channel_cluster_records
-                    if record.get("fdr_reject_local", False)
+                    1 for record in channel_cluster_records if record.get("fdr_reject_local", False)
                 )
                 results[band_name] = {
                     "significant": n_significant_channels > 0,
@@ -999,21 +1010,17 @@ def compute_two_condition_time_cluster_test(
 
     if band_cluster_refs:
         p_values_global = [
-            record["p_value"]
-            for record in band_cluster_refs
-            if np.isfinite(record["p_value"])
+            record["p_value"] for record in band_cluster_refs if np.isfinite(record["p_value"])
         ]
         q_values_global = (
-            fdr_bh(p_values_global, alpha=fdr_alpha, config=config)
-            if p_values_global
-            else []
+            fdr_bh(p_values_global, alpha=fdr_alpha, config=config) if p_values_global else []
         )
         for record, q_value_global in zip(band_cluster_refs, q_values_global):
             record["p_fdr_global"] = (
                 float(q_value_global) if np.isfinite(q_value_global) else np.nan
             )
-            record["fdr_reject_global"] = (
-                bool(np.isfinite(q_value_global) and q_value_global < fdr_alpha)
+            record["fdr_reject_global"] = bool(
+                np.isfinite(q_value_global) and q_value_global < fdr_alpha
             )
 
     for band_name, result in results.items():
@@ -1090,10 +1097,9 @@ def _run_cluster_test_core(
             )
         condition_column = condition_column_config
     else:
-        condition_column = (
-            get_condition_column_from_config(config, aligned_events)
-            or get_binary_outcome_column_from_config(config, aligned_events)
-        )
+        condition_column = get_condition_column_from_config(
+            config, aligned_events
+        ) or get_binary_outcome_column_from_config(config, aligned_events)
     if condition_column is None or condition_column not in aligned_events.columns:
         logger.warning("Cluster condition column not found; skipping cluster test.")
         return None
@@ -1130,9 +1136,7 @@ def _run_cluster_test_core(
             series_normalized = series.astype(str).str.strip().str.lower()
             val_a_normalized = str(val_a).strip().lower()
             val_b_normalized = str(val_b).strip().lower()
-            return (series_normalized == val_a_normalized), (
-                series_normalized == val_b_normalized
-            )
+            return (series_normalized == val_a_normalized), (series_normalized == val_b_normalized)
 
         series_numeric = pd.to_numeric(series, errors="coerce")
         try:
@@ -1143,9 +1147,7 @@ def _run_cluster_test_core(
             series_str = series.astype(str).str.strip()
             return (series_str == str(val_a).strip()), (series_str == str(val_b).strip())
 
-    mask_group_a, mask_group_b = _match_condition_values(
-        condition_series, value_a, value_b
-    )
+    mask_group_a, mask_group_b = _match_condition_values(condition_series, value_a, value_b)
     keep_mask = mask_group_a | mask_group_b
     n_kept = int(keep_mask.sum())
     if n_kept == 0:
@@ -1176,11 +1178,10 @@ def _run_cluster_test_core(
     n_permutations_used = (
         n_perm if n_perm > 0 else int(statistics_config.get("n_permutations", 100))
     )
-    alpha_used = float(
-        statistics_config.get("sig_alpha", config.get("statistics.sig_alpha", 0.05))
-    )
+    alpha_used = float(statistics_config.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
     # Local import to avoid circular dependency
     from eeg_pipeline.utils.analysis.tfr import get_tfr_config, get_bands_for_tfr
+
     _, max_freq_available, _, _, _, _ = get_tfr_config(config)
     bands = get_bands_for_tfr(max_freq_available=max_freq_available, config=config)
 
@@ -1234,29 +1235,27 @@ def compute_cluster_masses_2d(
 ) -> Tuple[np.ndarray, Dict[int, float]]:
     """Compute cluster masses from 2D correlation matrix."""
     from scipy.ndimage import label
-    
+
     if cluster_structure is None:
         cluster_structure = _get_default_cluster_structure(config)
-    
+
     finite_mask = np.isfinite(correlation_matrix)
     if cluster_forming_threshold is not None:
         significant_mask = finite_mask & (np.abs(correlation_matrix) >= cluster_forming_threshold)
     else:
         significant_mask = (
-            finite_mask
-            & np.isfinite(pvalue_matrix)
-            & (pvalue_matrix < cluster_alpha)
+            finite_mask & np.isfinite(pvalue_matrix) & (pvalue_matrix < cluster_alpha)
         )
-    
+
     labels, n_clusters = label(significant_mask, structure=cluster_structure)
-    
+
     masses = {}
     for cluster_id in range(1, n_clusters + 1):
-        cluster_region = (labels == cluster_id)
+        cluster_region = labels == cluster_id
         if cluster_region.any():
             cluster_mass = np.nansum(np.abs(correlation_matrix[cluster_region]))
             masses[cluster_id] = float(cluster_mass)
-    
+
     return labels, masses
 
 
@@ -1300,7 +1299,7 @@ def _single_permutation_threshold(
     covariate_count: int,
 ) -> float:
     """Single permutation for threshold derivation.
-    
+
     Returns maximum absolute t-statistic across all bins for this permutation.
     """
     permuted_indices = _permute_indices_2d(
@@ -1310,7 +1309,7 @@ def _single_permutation_threshold(
         scheme=scheme,
     )
     max_absolute_value = 0.0
-    
+
     for frequency_idx, time_idx in informative_bins:
         t_statistic, _ = _compute_single_bin_corr(
             frequency_idx,
@@ -1328,7 +1327,7 @@ def _single_permutation_threshold(
                 max_absolute_value,
                 abs(float(t_statistic)),
             )
-    
+
     return max_absolute_value
 
 
@@ -1358,7 +1357,7 @@ def _single_permutation_mass(
     )
     permuted_correlations = np.full(correlations_shape, np.nan)
     permuted_pvalues = np.full(correlations_shape, np.nan)
-    
+
     for frequency_idx, time_idx in informative_bins:
         t_statistic, p_value = _compute_single_bin_corr(
             frequency_idx,
@@ -1373,7 +1372,7 @@ def _single_permutation_mass(
         )
         permuted_correlations[frequency_idx, time_idx] = t_statistic
         permuted_pvalues[frequency_idx, time_idx] = p_value
-    
+
     _, cluster_masses = compute_cluster_masses_2d(
         permuted_correlations,
         permuted_pvalues,
@@ -1381,7 +1380,7 @@ def _single_permutation_mass(
         cluster_forming_threshold,
         cluster_structure,
     )
-    
+
     return max(cluster_masses.values()) if cluster_masses else 0.0
 
 
@@ -1391,14 +1390,14 @@ def _correlation_to_t_statistic(
 ) -> Tuple[float, float]:
     """Convert correlation coefficient to t-statistic and p-value."""
     from scipy import stats as scipy_stats
-    
+
     if degrees_of_freedom <= 0 or not np.isfinite(correlation) or abs(correlation) >= 1:
         return np.nan, np.nan
-    
+
     denominator = max(_NUMERICAL_STABILITY_EPSILON, 1 - correlation**2)
     t_statistic = correlation * np.sqrt(degrees_of_freedom / denominator)
     p_value = float(2 * scipy_stats.t.sf(np.abs(t_statistic), degrees_of_freedom))
-    
+
     return t_statistic, p_value
 
 
@@ -1415,19 +1414,19 @@ def _compute_bin_correlation_with_residuals(
     bin_key = (frequency_idx, time_idx)
     if bin_key not in residual_cache:
         return np.nan, np.nan
-    
+
     x_residuals, y_residuals, index_map = residual_cache[bin_key]
     if x_residuals.size < min_valid_points:
         return np.nan, np.nan
-    
+
     permuted_order = [index_map[i] for i in permuted_indices if i in index_map]
     if len(permuted_order) != y_residuals.size:
         return np.nan, np.nan
-    
+
     y_permuted = y_residuals[permuted_order]
     correlation_method = "spearman" if use_spearman else "pearson"
     correlation, _ = compute_correlation(x_residuals, y_permuted, correlation_method)
-    
+
     degrees_of_freedom = x_residuals.size - covariate_count - 2
     return _correlation_to_t_statistic(correlation, degrees_of_freedom)
 
@@ -1444,20 +1443,20 @@ def _compute_bin_correlation_direct(
     """Compute correlation for a bin directly from raw data."""
     bin_values = bin_data[frequency_idx, time_idx, :]
     y_permuted = y_array[permuted_indices]
-    
+
     valid_mask = np.isfinite(bin_values) & np.isfinite(y_permuted)
     n_valid = int(valid_mask.sum())
-    
+
     if n_valid < min_valid_points:
         return np.nan, np.nan
-    
+
     correlation_method = "spearman" if use_spearman else "pearson"
     correlation, _ = compute_correlation(
         bin_values[valid_mask],
         y_permuted[valid_mask],
         correlation_method,
     )
-    
+
     degrees_of_freedom = n_valid - 2
     return _correlation_to_t_statistic(correlation, degrees_of_freedom)
 
@@ -1474,7 +1473,7 @@ def _compute_single_bin_corr(
     covariate_count: int,
 ) -> Tuple[float, float]:
     """Compute correlation for a single bin with permuted y.
-    
+
     Returns t-statistic and p-value (not raw correlation).
     """
     if residual_cache:
@@ -1487,7 +1486,7 @@ def _compute_single_bin_corr(
             use_spearman,
             covariate_count,
         )
-    
+
     return _compute_bin_correlation_direct(
         frequency_idx,
         time_idx,
@@ -1521,8 +1520,7 @@ def _run_parallel_or_sequential(
     """Run function in parallel or sequentially based on configuration."""
     if _should_use_parallel(n_jobs, n_iterations):
         return Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(func)(base_seed + i, **func_kwargs)
-            for i in range(n_iterations)
+            delayed(func)(base_seed + i, **func_kwargs) for i in range(n_iterations)
         )
     return [func(base_seed + i, **func_kwargs) for i in range(n_iterations)]
 
@@ -1538,37 +1536,37 @@ def _build_residual_cache(
     residual_cache: Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray, Dict[int, int]]] = {}
     covariate_count = covariates_matrix.shape[1]
     covariates = np.asarray(covariates_matrix, dtype=float)
-    
+
     for frequency_idx, time_idx in informative_bins:
         bin_values = bin_data[frequency_idx, time_idx, :]
         valid_mask = (
-            np.isfinite(bin_values)
-            & np.isfinite(y_array)
-            & np.all(np.isfinite(covariates), axis=1)
+            np.isfinite(bin_values) & np.isfinite(y_array) & np.all(np.isfinite(covariates), axis=1)
         )
-        
+
         min_required = max(min_valid_points, covariate_count + 1)
         if valid_mask.sum() < min_required:
             continue
-        
-        design_matrix = np.column_stack([
-            np.ones(valid_mask.sum()),
-            covariates[valid_mask],
-        ])
-        
+
+        design_matrix = np.column_stack(
+            [
+                np.ones(valid_mask.sum()),
+                covariates[valid_mask],
+            ]
+        )
+
         try:
             beta_x = np.linalg.lstsq(design_matrix, bin_values[valid_mask], rcond=None)[0]
             beta_y = np.linalg.lstsq(design_matrix, y_array[valid_mask], rcond=None)[0]
         except np.linalg.LinAlgError:
             continue
-        
+
         x_residuals = bin_values[valid_mask] - design_matrix @ beta_x
         y_residuals = y_array[valid_mask] - design_matrix @ beta_y
-        
+
         valid_indices = np.where(valid_mask)[0]
         index_map = {int(idx): pos for pos, idx in enumerate(valid_indices)}
         residual_cache[(frequency_idx, time_idx)] = (x_residuals, y_residuals, index_map)
-    
+
     return residual_cache
 
 
@@ -1605,10 +1603,10 @@ def _derive_cluster_forming_threshold(
         use_spearman=use_spearman,
         covariate_count=covariate_count,
     )
-    
+
     if not max_absolute_values:
         return 0.0
-    
+
     percentile = 100 * (1 - cluster_alpha)
     return float(np.nanpercentile(max_absolute_values, percentile))
 
@@ -1632,12 +1630,12 @@ def compute_permutation_max_masses(
     scheme: str = "shuffle",
 ) -> Tuple[List[float], float]:
     """Compute permutation distribution of max cluster masses.
-    
+
     Uses parallel processing with loky backend for speed.
     """
     if n_cluster_perm <= 0:
         return [], cluster_forming_threshold or 0.0
-    
+
     n_jobs_actual = _determine_parallel_jobs(n_jobs)
     groups_array = np.asarray(groups) if groups is not None else None
     n_samples = len(y_array)
@@ -1648,7 +1646,7 @@ def compute_permutation_max_masses(
             "Invalid cluster permutation scheme "
             f"{scheme!r}; expected 'shuffle' or 'circular_shift'."
         )
-    
+
     residual_cache: Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray, Dict[int, int]]] = {}
     covariate_count = 0
     if covariates_matrix is not None:
@@ -1660,9 +1658,9 @@ def compute_permutation_max_masses(
             covariates_matrix,
             min_valid_points,
         )
-    
+
     base_seed = int(cluster_rng.integers(0, _MAX_RNG_SEED))
-    
+
     if cluster_forming_threshold is None:
         cluster_forming_threshold = _derive_cluster_forming_threshold(
             n_samples,
@@ -1680,7 +1678,7 @@ def compute_permutation_max_masses(
             base_seed,
             n_jobs_actual,
         )
-    
+
     offset_seed = base_seed + n_cluster_perm
     permutation_max_masses = _run_parallel_or_sequential(
         _single_permutation_mass,
@@ -1702,7 +1700,7 @@ def compute_permutation_max_masses(
         cluster_forming_threshold=cluster_forming_threshold,
         cluster_structure=cluster_structure,
     )
-    
+
     return permutation_max_masses, cluster_forming_threshold
 
 
@@ -1716,39 +1714,43 @@ def compute_cluster_pvalues_2d(
     pvalues = np.full_like(cluster_labels, np.nan, dtype=float)
     significant_mask = np.zeros_like(cluster_labels, dtype=bool)
     records = []
-    
+
     if not perm_max_masses:
         for cluster_id, mass in cluster_masses.items():
-            cluster_region = (cluster_labels == cluster_id)
-            records.append({
-                "cluster_id": int(cluster_id),
-                "mass": mass,
-                "size": int(cluster_region.sum()),
-                "p_value": np.nan,
-            })
+            cluster_region = cluster_labels == cluster_id
+            records.append(
+                {
+                    "cluster_id": int(cluster_id),
+                    "mass": mass,
+                    "size": int(cluster_region.sum()),
+                    "p_value": np.nan,
+                }
+            )
         return pvalues, significant_mask, records
-    
+
     denominator = len(perm_max_masses) + 1
     permutation_array = np.asarray(perm_max_masses)
-    
+
     for cluster_id, cluster_mass in cluster_masses.items():
-        cluster_region = (cluster_labels == cluster_id)
+        cluster_region = cluster_labels == cluster_id
         cluster_size = int(cluster_region.sum())
-        
+
         n_exceeding = np.sum(permutation_array >= cluster_mass)
         p_value = (n_exceeding + 1) / denominator
-        
+
         pvalues[cluster_region] = p_value
         if p_value <= alpha:
             significant_mask[cluster_region] = True
-        
-        records.append({
-            "cluster_id": int(cluster_id),
-            "mass": float(cluster_mass),
-            "size": cluster_size,
-            "p_value": float(p_value),
-        })
-    
+
+        records.append(
+            {
+                "cluster_id": int(cluster_id),
+                "mass": float(cluster_mass),
+                "size": cluster_size,
+                "p_value": float(p_value),
+            }
+        )
+
     return pvalues, significant_mask, records
 
 
@@ -1780,9 +1782,13 @@ def compute_cluster_correction_2d(
         empty_mask = np.zeros_like(correlations, dtype=bool)
         default_threshold = float(cluster_forming_threshold or 0.0)
         return empty_labels, empty_pvalues, empty_mask, [], [], default_threshold
-    
+
     if scheme is None:
-        scheme = str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+        scheme = (
+            str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle"))
+            .strip()
+            .lower()
+        )
 
     permutation_max_masses, derived_threshold = compute_permutation_max_masses(
         bin_data,
@@ -1801,13 +1807,11 @@ def compute_cluster_correction_2d(
         n_jobs,
         scheme=scheme,
     )
-    
+
     final_threshold = (
-        cluster_forming_threshold
-        if cluster_forming_threshold is not None
-        else derived_threshold
+        cluster_forming_threshold if cluster_forming_threshold is not None else derived_threshold
     )
-    
+
     observed_labels, cluster_masses = compute_cluster_masses_2d(
         correlations,
         p_values,
@@ -1815,7 +1819,7 @@ def compute_cluster_correction_2d(
         final_threshold,
         cluster_structure,
     )
-    
+
     if not cluster_masses:
         empty_pvalues = np.full_like(correlations, np.nan)
         for row_idx, col_idx in informative_bins:
@@ -1829,7 +1833,7 @@ def compute_cluster_correction_2d(
             permutation_max_masses,
             final_threshold,
         )
-    
+
     pvalues, significant_mask, records = compute_cluster_pvalues_2d(
         observed_labels,
         cluster_masses,
@@ -1839,7 +1843,7 @@ def compute_cluster_correction_2d(
     for row_idx, col_idx in informative_bins:
         if not np.isfinite(pvalues[row_idx, col_idx]):
             pvalues[row_idx, col_idx] = 1.0
-    
+
     return (
         observed_labels,
         pvalues,

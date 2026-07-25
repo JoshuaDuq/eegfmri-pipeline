@@ -14,7 +14,6 @@ import pandas as pd
 
 from ..config.loader import load_config
 
-
 ###################################################################
 # Constants
 ###################################################################
@@ -71,15 +70,15 @@ def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None)
     """Resolve covariate name to canonical form (predictor, trial, etc.)."""
     if name is None:
         return None
-    
+
     normalized_name = str(name).lower()
-    
+
     if config is None:
         config = _load_config_safely()
-    
+
     predictor_aliases = PREDICTOR_ALIASES.copy()
     trial_aliases = TRIAL_ALIASES.copy()
-    
+
     if config is not None and hasattr(config, "get"):
         config_pred_cols = config.get("event_columns.predictor", [])
         predictor_aliases.update(str(col).lower() for col in config_pred_cols)
@@ -88,12 +87,12 @@ def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None)
             explicit_predictor_norm = str(explicit_predictor).strip().lower()
             if explicit_predictor_norm:
                 predictor_aliases.add(explicit_predictor_norm)
-    
+
     if normalized_name in predictor_aliases:
         return "predictor"
     if normalized_name in trial_aliases:
         return "trial"
-    
+
     return normalized_name
 
 
@@ -116,9 +115,7 @@ def extract_predictor_data(
     if predictor_column is None or predictor_column not in aligned_events.columns:
         return None, None
 
-    predictor_series = pd.to_numeric(
-        aligned_events[predictor_column], errors="coerce"
-    )
+    predictor_series = pd.to_numeric(aligned_events[predictor_column], errors="coerce")
     return predictor_series, predictor_column
 
 
@@ -137,13 +134,11 @@ def _resolve_requested_covariate(
 ) -> None:
     """Resolve a single requested covariate name to a column."""
     if covariate_name in events_df.columns:
-        canonical_name = (
-            _canonical_covariate_name(covariate_name, config=config) or covariate_name
-        )
+        canonical_name = _canonical_covariate_name(covariate_name, config=config) or covariate_name
         covariate_columns.append(covariate_name)
         column_name_map[covariate_name] = canonical_name
         return
-    
+
     canonical_name = _canonical_covariate_name(covariate_name, config=config)
     if canonical_name == "predictor":
         predictor_column = _pick_first_column(events_df, predictor_candidates)
@@ -164,12 +159,10 @@ def _resolve_default_covariates(
     if predictor_column:
         covariate_columns.append(predictor_column)
         column_name_map[predictor_column] = "predictor"
-    
+
     trial_column = _pick_first_column(events_df, TRIAL_COLUMN_CANDIDATES)
     if trial_column:
-        canonical_name = (
-            _canonical_covariate_name(trial_column, config=config) or trial_column
-        )
+        canonical_name = _canonical_covariate_name(trial_column, config=config) or trial_column
         covariate_columns.append(trial_column)
         column_name_map[trial_column] = canonical_name
     else:
@@ -193,7 +186,7 @@ def _resolve_covariate_columns(
     """Resolve which columns to use as covariates."""
     if config is None:
         raise ValueError("config is required")
-    
+
     covariate_columns: List[str] = []
     column_name_map: Dict[str, str] = {}
     predictor_candidates = config.get("event_columns.predictor")
@@ -230,10 +223,8 @@ def _build_covariate_dataframe(
     for column_name in covariate_columns:
         if column_name in events_df.columns:
             canonical_name = column_name_map.get(column_name, column_name)
-            covariates_df[canonical_name] = pd.to_numeric(
-                events_df[column_name], errors="coerce"
-            )
-    
+            covariates_df[canonical_name] = pd.to_numeric(events_df[column_name], errors="coerce")
+
     return None if covariates_df.empty else covariates_df
 
 
@@ -245,16 +236,16 @@ def _remove_predictor_column(
     """Remove predictor column from covariates DataFrame."""
     if predictor_column is None:
         return covariates_df.copy()
-    
+
     columns_to_drop = {predictor_column}
     predictor_canonical = _canonical_covariate_name(predictor_column, config=config)
     if predictor_canonical and predictor_canonical != predictor_column:
         columns_to_drop.add(predictor_canonical)
-    
+
     columns_to_drop = [col for col in columns_to_drop if col in covariates_df.columns]
     if not columns_to_drop:
         return covariates_df.copy()
-    
+
     result = covariates_df.drop(columns=columns_to_drop, errors="ignore")
     return None if result.empty else result
 
@@ -277,20 +268,16 @@ def _build_covariate_matrices(
     covariate_columns, column_name_map = _resolve_covariate_columns(
         events_df, requested_covariates, config
     )
-    
+
     if not covariate_columns:
         return None, None
 
-    covariates_df = _build_covariate_dataframe(
-        events_df, covariate_columns, column_name_map
-    )
-    
+    covariates_df = _build_covariate_dataframe(events_df, covariate_columns, column_name_map)
+
     if covariates_df is None:
         return None, None
 
-    covariates_without_predictor = _remove_predictor_column(
-        covariates_df, predictor_column, config
-    )
+    covariates_without_predictor = _remove_predictor_column(covariates_df, predictor_column, config)
 
     return covariates_df, covariates_without_predictor
 
@@ -301,7 +288,7 @@ def build_covariate_matrix(
     config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
     """Build covariate matrix from aligned events.
-    
+
     Parameters
     ----------
     aligned_events : DataFrame or None
@@ -310,7 +297,7 @@ def build_covariate_matrix(
         Covariate names to include. If None, uses defaults (predictor, trial).
     config : Any, optional
         Configuration object. If None, attempts to load from file.
-        
+
     Returns
     -------
     DataFrame or None
@@ -318,7 +305,7 @@ def build_covariate_matrix(
     """
     if aligned_events is None:
         return None
-    
+
     _, predictor_column = extract_predictor_data(aligned_events, config)
     covariates_df, _ = _build_covariate_matrices(
         aligned_events, requested_covariates, predictor_column, config
@@ -332,7 +319,7 @@ def build_covariates_without_predictor(
     config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
     """Build covariate matrix excluding predictor column.
-    
+
     Parameters
     ----------
     covariates_df : DataFrame or None
@@ -341,7 +328,7 @@ def build_covariates_without_predictor(
         Name of predictor column to exclude
     config : Any, optional
         Configuration object for canonical name resolution
-        
+
     Returns
     -------
     DataFrame or None
@@ -349,7 +336,7 @@ def build_covariates_without_predictor(
     """
     if covariates_df is None or covariates_df.empty:
         return None
-    
+
     return _remove_predictor_column(covariates_df, predictor_column, config)
 
 

@@ -27,7 +27,6 @@ import mne
 
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
-
 ###################################################################
 # Constants
 ###################################################################
@@ -133,9 +132,7 @@ def _validate_channel_count(n_channels: int, min_channels: int) -> Optional[str]
     return None
 
 
-def _validate_epochs_data_quality(
-    epochs: mne.Epochs, config: Any
-) -> tuple[list[str], list[str]]:
+def _validate_epochs_data_quality(epochs: mne.Epochs, config: Any) -> tuple[list[str], list[str]]:
     """Validate data quality for epochs (NaN, extremes, flat channels)."""
     issues = []
     warnings = []
@@ -145,18 +142,12 @@ def _validate_epochs_data_quality(
 
         nan_count, nan_fraction = _check_nan_inf_in_data(data)
         if nan_count > 0:
-            issues.append(
-                f"Data contains {nan_count} NaN/Inf values ({nan_fraction:.2%})"
-            )
+            issues.append(f"Data contains {nan_count} NaN/Inf values ({nan_fraction:.2%})")
 
-        max_uv = get_config_value(
-            config, "validation.max_amplitude_uv", DEFAULT_MAX_AMPLITUDE_UV
-        )
+        max_uv = get_config_value(config, "validation.max_amplitude_uv", DEFAULT_MAX_AMPLITUDE_UV)
         extreme_fraction = _check_extreme_amplitudes(data, max_uv)
         if extreme_fraction > WARNING_EXTREME_FRACTION:
-            warnings.append(
-                f"{extreme_fraction:.1%} of data exceeds {max_uv} µV"
-            )
+            warnings.append(f"{extreme_fraction:.1%} of data exceeds {max_uv} µV")
 
         flat_count = _check_flat_channels(data)
         if flat_count > 0:
@@ -218,16 +209,12 @@ def validate_epochs(
     if epoch_issue:
         issues.append(epoch_issue)
 
-    expected_sfreq = get_config_value(
-        config, "preprocessing.resample_freq", DEFAULT_SAMPLING_FREQ
-    )
+    expected_sfreq = get_config_value(config, "preprocessing.resample_freq", DEFAULT_SAMPLING_FREQ)
     sfreq_warning = _validate_sampling_rate(sfreq, expected_sfreq)
     if sfreq_warning:
         warnings.append(sfreq_warning)
 
-    min_channels = get_config_value(
-        config, "validation.min_channels", DEFAULT_MIN_CHANNELS
-    )
+    min_channels = get_config_value(config, "validation.min_channels", DEFAULT_MIN_CHANNELS)
     channel_issue = _validate_channel_count(n_channels, min_channels)
     if channel_issue:
         issues.append(channel_issue)
@@ -263,9 +250,7 @@ def validate_epochs(
 ###################################################################
 
 
-def _get_percent_threshold(
-    percent_threshold: Optional[float], config: Optional[Any]
-) -> float:
+def _get_percent_threshold(percent_threshold: Optional[float], config: Optional[Any]) -> float:
     """Extract percent threshold from config or use default."""
     if percent_threshold is not None:
         return percent_threshold
@@ -315,9 +300,7 @@ def detect_data_format(
 ###################################################################
 
 
-def _handle_alignment_error(
-    msg: str, strict: bool, logger: Optional[logging.Logger]
-) -> None:
+def _handle_alignment_error(msg: str, strict: bool, logger: Optional[logging.Logger]) -> None:
     """Handle alignment error by raising or logging."""
     if strict:
         raise ValueError(msg)
@@ -376,9 +359,7 @@ def ensure_aligned_lengths(
 ###################################################################
 
 
-def require_epochs_tfr(
-    tfr: Any, context_msg: str, logger: Optional[logging.Logger] = None
-) -> bool:
+def require_epochs_tfr(tfr: Any, context_msg: str, logger: Optional[logging.Logger] = None) -> bool:
     """Check if object is EpochsTFR."""
     if not isinstance(tfr, mne.time_frequency.EpochsTFR):
         if logger:

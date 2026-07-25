@@ -75,7 +75,6 @@ from eeg_pipeline.utils.data.feature_alignment import (
     filter_feature_payload_columns,
 )
 
-
 _ACCUMULATOR_EXTRAS = ["baseline", "pac_trials", "pac_time", "sourcecontrast"]
 _FEATURE_ACCUMULATOR_KEYS = list(FEATURE_CATEGORIES) + _ACCUMULATOR_EXTRAS
 
@@ -93,7 +92,9 @@ _ACTIVE_ONLY_BASELINE_REFERENCED_CATEGORIES = {"erds"}
 _BASELINE_RANGE_NAMES = {"baseline"}
 
 
-def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin: Optional[float], tmax: Optional[float]) -> List[Dict[str, Any]]:
+def _resolve_time_ranges(
+    explicit_windows: Optional[List[Dict[str, Any]]], tmin: Optional[float], tmax: Optional[float]
+) -> List[Dict[str, Any]]:
     """Resolve time ranges from explicit windows or single range parameters."""
     if explicit_windows:
         return list(explicit_windows)
@@ -298,7 +299,7 @@ def _precompute_tfr_if_needed(
     needs_tfr = len(time_ranges) > 1 and any(cat in feature_categories for cat in _TFR_CATEGORIES)
     if not needs_tfr:
         return None
-    
+
     logger.info("Pre-computing TFR on full epochs for multi-range extraction...")
     return compute_tfr_morlet(epochs, config, logger=logger)
 
@@ -334,14 +335,10 @@ def _precompute_complex_tfr_if_needed(
     )
 
     itpc_transform = (
-        _get_spatial_transform_type(config, feature_family="itpc")
-        if needs_itpc
-        else "none"
+        _get_spatial_transform_type(config, feature_family="itpc") if needs_itpc else "none"
     )
     pac_transform = (
-        _get_spatial_transform_type(config, feature_family="pac")
-        if needs_pac_complex
-        else "none"
+        _get_spatial_transform_type(config, feature_family="pac") if needs_pac_complex else "none"
     )
     if needs_itpc and needs_pac_complex and itpc_transform != pac_transform:
         logger.warning(
@@ -387,7 +384,7 @@ def _precompute_intermediates_if_needed(
     )
     if not needs_precompute:
         return None
-    
+
     logger.info("Pre-computing shared intermediates on full epochs for multi-range extraction...")
     resolved_bands = bands or get_frequency_band_names(config)
     windows_spec = TimeWindowSpec(
@@ -458,15 +455,19 @@ def _unpack_feature_results(features: FeatureExtractionResult) -> Dict[str, Any]
     }
 
 
-def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionResult) -> Dict[str, pd.DataFrame]:
+def _build_extra_blocks(
+    unpacked: Dict[str, Any], features: FeatureExtractionResult
+) -> Dict[str, pd.DataFrame]:
     """Build extra blocks dictionary for alignment, filtering out None/empty DataFrames."""
     extra_blocks = {
         "itpc": unpacked.get("itpc_df"),
         "itpc_trial": unpacked.get("itpc_trial_df"),
         # Align PAC at the per-trial level when available.
-        "pac_trials": unpacked.get("pac_trials_df")
-        if unpacked.get("pac_trials_df") is not None
-        else unpacked.get("pac_df"),
+        "pac_trials": (
+            unpacked.get("pac_trials_df")
+            if unpacked.get("pac_trials_df") is not None
+            else unpacked.get("pac_df")
+        ),
         "pac_time": unpacked.get("pac_time_df"),
         "complexity": unpacked.get("comp_df"),
         "spectral": unpacked.get("spectral_df"),
@@ -481,9 +482,7 @@ def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionRes
         "quality": getattr(features, "quality_df", None),
     }
     return {
-        k: v
-        for k, v in extra_blocks.items()
-        if v is not None and not getattr(v, "empty", False)
+        k: v for k, v in extra_blocks.items() if v is not None and not getattr(v, "empty", False)
     }
 
 
@@ -519,7 +518,11 @@ def _build_feature_qc(features: FeatureExtractionResult, ctx: FeatureContext) ->
     qc: Dict[str, Any] = {}
     if features.aper_qc is not None:
         qc["aperiodic"] = features.aper_qc
-    if ctx.precomputed is not None and hasattr(ctx.precomputed, "qc") and ctx.precomputed.qc is not None:
+    if (
+        ctx.precomputed is not None
+        and hasattr(ctx.precomputed, "qc")
+        and ctx.precomputed.qc is not None
+    ):
         qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
     return qc
 
@@ -561,9 +564,7 @@ def _accumulate_features(
             aligned.get("pow_df_aligned"),
             range_name,
         ),
-        "baseline": (
-            None if isinstance(range_name, str) else aligned.get("baseline_df_aligned")
-        ),
+        "baseline": (None if isinstance(range_name, str) else aligned.get("baseline_df_aligned")),
         "connectivity": aligned.get("conn_df_aligned"),
         "directedconnectivity": unpacked.get("dconn_df"),
         "sourcelocalization": unpacked.get("source_df"),
@@ -583,14 +584,12 @@ def _accumulate_features(
         "microstates": unpacked.get("microstates_df"),
         "quality": getattr(features, "quality_df", None),
     }
-    
+
     for key, df in feature_mapping.items():
         if key not in accumulated:
             accumulated[key] = []
         if df is not None and not df.empty:
-            accumulated[key].append(
-                attach_feature_alignment_columns(df, aligned_events)
-            )
+            accumulated[key].append(attach_feature_alignment_columns(df, aligned_events))
 
 
 def _get_df_cols(df: Optional[pd.DataFrame]) -> int:
@@ -643,18 +642,14 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
 
     trial_id_presence = [TRIAL_ID_COLUMN in df.columns for df in valid_dfs]
     if any(trial_id_presence) and not all(trial_id_presence):
-        raise ValueError(
-            "Feature tables must either all or none contain trial_id before merging."
-        )
+        raise ValueError("Feature tables must either all or none contain trial_id before merging.")
 
     seen_payload_columns: set[str] = set()
     for df in valid_dfs:
         if df.columns.duplicated().any():
             duplicates = df.columns[df.columns.duplicated()].tolist()
             raise ValueError(f"Feature table contains duplicate feature columns: {duplicates}.")
-        payload_columns = {
-            str(column) for column in df.columns if column != TRIAL_ID_COLUMN
-        }
+        payload_columns = {str(column) for column in df.columns if column != TRIAL_ID_COLUMN}
         duplicates = seen_payload_columns.intersection(payload_columns)
         if duplicates:
             raise ValueError(
@@ -693,13 +688,9 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
         reference = valid_dfs[0]
         for df in valid_dfs[1:]:
             if len(df) != len(reference):
-                raise ValueError(
-                    "Feature tables without trial_id must have identical row counts."
-                )
+                raise ValueError("Feature tables without trial_id must have identical row counts.")
             if not df.index.equals(reference.index):
-                raise ValueError(
-                    "Feature tables without trial_id must have identical row indexes."
-                )
+                raise ValueError("Feature tables without trial_id must have identical row indexes.")
         merged = pd.concat(valid_dfs, axis=1)
 
     if common_attrs:
@@ -782,7 +773,11 @@ def _save_merged_features(
                 feature_columns=filter_feature_payload_columns(merged_df.columns),
                 config=config,
                 subject=subject_str,
-                task=task if task is not None else config.get("project.task") if config is not None else None,
+                task=(
+                    task
+                    if task is not None
+                    else config.get("project.task") if config is not None else None
+                ),
                 qc=qc,
                 df_attrs=dict(df_attrs),
             )
@@ -805,10 +800,10 @@ def _save_extraction_config(
 ) -> None:
     """Save extraction configuration to JSON file in each feature category's metadata folder."""
     from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
-    
+
     config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
     categories = feature_categories or config.get("feature_categories", [])
-    
+
     saved_to = []
     for category in categories:
         folder = _get_folder_for_feature(f"features_{category}", pipeline_config)
@@ -818,7 +813,7 @@ def _save_extraction_config(
             save_path = category_metadata_dir / config_name
             save_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
             saved_to.append(str(save_path))
-    
+
     if saved_to:
         logger.info("Saved extraction config to %d feature category folders", len(saved_to))
 
@@ -897,7 +892,7 @@ def _filter_trialwise_columns_for_canonical_export(
         config=config,
         df_attrs=dict(getattr(df, "attrs", {}) or {}),
     )
-    column_props = (provenance.get("columns") or {})
+    column_props = provenance.get("columns") or {}
     keep_columns = [
         str(column)
         for column in df.columns
@@ -1007,7 +1002,9 @@ def _save_canonical_trial_table_artifact(
 
     save_trial_table(_TableWrapper(df_trials, metadata), out_path, format="parquet")
 
-    also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
+    also_save_csv = bool(
+        get_config_value(config, "feature_engineering.output.also_save_csv", False)
+    )
     if also_save_csv:
         from eeg_pipeline.infra.tsv import write_csv
 
@@ -1137,7 +1134,11 @@ class FeaturePipeline(PipelineBase):
             t_end = float(times[-1]) if times.size else np.nan
             self.logger.info(
                 "Epochs loaded: %d trials, %d channels, %.0f Hz, %.3f\u2013%.3fs",
-                int(n_trials), int(n_channels), sfreq, t_start, t_end,
+                int(n_trials),
+                int(n_channels),
+                sfreq,
+                t_start,
+                t_end,
             )
 
             original_events = _load_events_df(
@@ -1575,7 +1576,9 @@ class FeaturePipeline(PipelineBase):
                         ).strip(),
                         "aggregation_method": kwargs.get("aggregation_method", "mean"),
                         "feature_categories": feature_categories,
-                        "n_trials": int(len(accumulated_y)) if accumulated_y is not None else int(n_trials),
+                        "n_trials": (
+                            int(len(accumulated_y)) if accumulated_y is not None else int(n_trials)
+                        ),
                         "subject": subject,
                         "task": task,
                     }

@@ -38,7 +38,9 @@ def feature_folder_from_context(ctx: BehaviorContext) -> str:
 
 
 def normalize_trial_table_feature_selection(feature_files: Optional[List[str]]) -> List[str]:
-    from eeg_pipeline.utils.data.trial_table import normalize_trial_table_feature_selection as _normalize
+    from eeg_pipeline.utils.data.trial_table import (
+        normalize_trial_table_feature_selection as _normalize,
+    )
 
     return _normalize(feature_files)
 
@@ -50,7 +52,9 @@ def trial_table_suffix_from_features(feature_files: Optional[List[str]]) -> str:
 
 
 def trial_table_feature_folder_from_features(feature_files: Optional[List[str]]) -> str:
-    from eeg_pipeline.utils.data.trial_table import trial_table_feature_folder_from_features as _folder
+    from eeg_pipeline.utils.data.trial_table import (
+        trial_table_feature_folder_from_features as _folder,
+    )
 
     return _folder(feature_files)
 
@@ -140,7 +144,9 @@ def compute_trial_table_input_hash(ctx: BehaviorContext) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] = None) -> Optional[Path]:
+def find_trial_table_path(
+    stats_dir: Path, feature_files: Optional[List[str]] = None
+) -> Optional[Path]:
     """Find trial table path using shared trial-table resolution helpers."""
     from eeg_pipeline.utils.data.trial_table import find_trial_table_path as _find
 

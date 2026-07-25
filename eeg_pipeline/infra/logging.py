@@ -48,13 +48,15 @@ def _configure_logger_handlers(logger: logging.Logger) -> None:
 def get_logger(name: str) -> logging.Logger:
     if not name or not isinstance(name, str):
         raise ValueError("Logger name must be a non-empty string")
-    
+
     logger = logging.getLogger(name)
     _configure_logger_handlers(logger)
     return logger
 
 
-def get_module_logger(logger: Optional[logging.Logger] = None, module_name: Optional[str] = None) -> logging.Logger:
+def get_module_logger(
+    logger: Optional[logging.Logger] = None, module_name: Optional[str] = None
+) -> logging.Logger:
     if logger is not None:
         return logger
     return get_logger(module_name or __name__)
@@ -68,7 +70,7 @@ def get_subject_logger(
         raise ValueError("Module name must be a non-empty string")
     if not subject or not isinstance(subject, str):
         raise ValueError("Subject must be a non-empty string")
-    
+
     logger_name = f"{module_name}.sub-{subject}"
     return get_logger(logger_name)
 

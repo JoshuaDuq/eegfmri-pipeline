@@ -48,7 +48,7 @@ from eeg_pipeline.preprocessing.eeg_fmri.qc import (
 from eeg_pipeline.preprocessing.eeg_fmri.sequence import load_multiband_slice_schedule
 
 DEFAULT_INPUT_ROOT = Path(
-    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1"
+    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v2"
 )
 DEFAULT_BOLD_ROOT = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri")
 DEFAULT_OUTPUT_ROOT = Path(
@@ -107,6 +107,7 @@ def _require_manifest_fields(row: dict[str, str], line_number: int) -> None:
     required = {
         "subject",
         "run",
+        "source_layout",
         "staged_vhdr",
         "source_vhdr_sha256",
         "source_vmrk_sha256",
@@ -133,6 +134,8 @@ def read_input_recordings(
             _require_manifest_fields(row, line_number)
             if row["verified"] != "True":
                 raise ValueError(f"Marker manifest line {line_number} is not verified")
+            if row["source_layout"] != "original_5khz":
+                continue
             vhdr_path = Path(row["staged_vhdr"]).resolve()
             if not vhdr_path.is_relative_to(input_root.resolve()):
                 raise ValueError(f"Staged header escapes the input root: {vhdr_path}")

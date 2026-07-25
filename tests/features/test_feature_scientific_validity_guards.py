@@ -233,7 +233,9 @@ class TestScientificValidityGuards(unittest.TestCase):
                 roi_names=["roi"],
             )
 
-    def test_feature_context_rejects_cross_trial_features_without_train_mask_in_trial_safe_mode(self):
+    def test_feature_context_rejects_cross_trial_features_without_train_mask_in_trial_safe_mode(
+        self,
+    ):
         with self.assertRaisesRegex(ValueError, "train_mask"):
             FeatureContext(
                 subject="0001",
@@ -314,7 +316,9 @@ class TestScientificValidityGuards(unittest.TestCase):
             extract_itpc_from_precomputed(SimpleNamespace(config=ctx.config))
 
     def test_erds_extractor_rejects_rest_mode(self):
-        precomputed = SimpleNamespace(config=DotConfig({"feature_engineering": {"task_is_rest": True}}))
+        precomputed = SimpleNamespace(
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}})
+        )
         with self.assertRaisesRegex(ValueError, "ERDS is not scientifically valid"):
             extract_erds_from_precomputed(precomputed, ["alpha"])
 
@@ -344,7 +348,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                         "feature_engineering": {
                             "task_is_rest": True,
                             "analysis_mode": "trial_ml_safe",
-                        }
+                        },
                     }
                 ),
                 logger=logging.getLogger("precomputed-rest-analysis-mode"),
@@ -391,7 +395,9 @@ class TestScientificValidityGuards(unittest.TestCase):
             "active": np.zeros(10, dtype=bool),
         }
 
-        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+        with self.assertRaisesRegex(
+            ValueError, "target window 'active' does not contain valid samples"
+        ):
             select_single_rest_analysis_segment(
                 masks,
                 feature_name="Spectral",
@@ -405,12 +411,15 @@ class TestScientificValidityGuards(unittest.TestCase):
             condition_labels=None,
         )
 
-        with patch(
-            "eeg_pipeline.analysis.features.api.extract_power_from_precomputed",
-            return_value=(pd.DataFrame({"power": [1.0, 2.0]}), ["power"]),
-        ) as mock_spectral, patch(
-            "eeg_pipeline.analysis.features.api.extract_erds_from_precomputed",
-        ) as mock_erds:
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.api.extract_power_from_precomputed",
+                return_value=(pd.DataFrame({"power": [1.0, 2.0]}), ["power"]),
+            ) as mock_spectral,
+            patch(
+                "eeg_pipeline.analysis.features.api.extract_erds_from_precomputed",
+            ) as mock_erds,
+        ):
             result = extract_precomputed_features(
                 epochs=SimpleNamespace(),
                 bands=["alpha"],
@@ -513,14 +522,19 @@ class TestScientificValidityGuards(unittest.TestCase):
             logger=logging.getLogger("quality-rest"),
         )
 
-        with patch(
-            "eeg_pipeline.analysis.features.quality.pick_eeg_channels",
-            return_value=(np.array([0, 1]), ["C3", "C4"]),
-        ), patch(
-            "eeg_pipeline.analysis.features.quality._compute_signal_metrics",
-            return_value={"variance": np.array([1.0, 2.0], dtype=float)},
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.quality.pick_eeg_channels",
+                return_value=(np.array([0, 1]), ["C3", "C4"]),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.quality._compute_signal_metrics",
+                return_value={"variance": np.array([1.0, 2.0], dtype=float)},
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_quality_features(ctx)
 
     def test_quality_resting_state_rejects_empty_target_before_substitution(self):
@@ -556,7 +570,9 @@ class TestScientificValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.quality.pick_eeg_channels",
             return_value=(np.array([0, 1]), ["C3", "C4"]),
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_quality_features(ctx)
 
     def test_power_without_baseline_emits_log10raw_for_resting_state(self):
@@ -610,7 +626,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                         "min_segment_sec": 1.0,
                         "min_cycles_at_fmin": 0.0,
                         "exclude_line_noise": False,
-                    }
+                    },
                 },
                 "frequency_bands": {"alpha": [8.0, 12.0]},
                 "rois": {},
@@ -690,9 +706,10 @@ class TestScientificValidityGuards(unittest.TestCase):
             logger=logging.getLogger("pac-api-rest"),
         )
 
-        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+        with self.assertRaisesRegex(
+            ValueError, "target window 'active' does not contain valid samples"
+        ):
             _resolve_pac_segment_window(ctx, epochs.times)
-
 
     def test_ratios_resting_state_rejects_empty_target_window(self):
         sfreq = 100.0
@@ -746,7 +763,9 @@ class TestScientificValidityGuards(unittest.TestCase):
                 "beta": np.full((2, 1), 2.0, dtype=float),
             },
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_band_ratios_from_precomputed(precomputed, config)
 
     def test_asymmetry_resting_state_rejects_empty_target_window(self):
@@ -769,7 +788,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                         "min_segment_sec": 0.0,
                         "min_cycles_at_fmin": 0.0,
                         "skip_invalid_segments": True,
-                    }
+                    },
                 },
                 "frequency_bands": {"alpha": [8.0, 12.0]},
             }
@@ -788,7 +807,9 @@ class TestScientificValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.precomputed.extras._compute_psd_band_power_for_segment",
             return_value={"alpha": np.array([[2.0, 4.0], [2.0, 4.0]], dtype=float)},
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_asymmetry_from_precomputed(precomputed)
 
     def test_iaf_trial_ml_safe_requires_train_mask(self):
@@ -1003,7 +1024,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                             "threshold_percentile": 50.0,
                             "min_duration_ms": 1.0,
                             "min_cycles": 1.0,
-                        }
+                        },
                     },
                 }
             ),
@@ -1013,7 +1034,9 @@ class TestScientificValidityGuards(unittest.TestCase):
             spatial_modes=["global"],
         )
 
-        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+        with self.assertRaisesRegex(
+            ValueError, "target window 'active' does not contain valid samples"
+        ):
             extract_burst_features(ctx, ["alpha"])
 
     def test_condition_burst_thresholds_require_condition_support(self):
@@ -1098,9 +1121,7 @@ class TestScientificValidityGuards(unittest.TestCase):
             band_data={"alpha": band},
             windows=windows,
             logger=logging.getLogger("itpc-precomputed-fold-global"),
-            config=DotConfig(
-                {"feature_engineering": {"itpc": {"method": "fold_global"}}}
-            ),
+            config=DotConfig({"feature_engineering": {"itpc": {"method": "fold_global"}}}),
             train_mask=None,
         )
 
@@ -1140,7 +1161,9 @@ class TestScientificValidityGuards(unittest.TestCase):
         with patch(
             "eeg_pipeline.analysis.features.source_localization._load_fmri_constraint_config"
         ) as mock_load_fmri_cfg:
-            with self.assertRaisesRegex(ValueError, "requires feature_engineering.sourcelocalization.trans"):
+            with self.assertRaisesRegex(
+                ValueError, "requires feature_engineering.sourcelocalization.trans"
+            ):
                 _load_source_localization_config(ctx, config, method="lcmv")
 
         mock_load_fmri_cfg.assert_not_called()
@@ -1190,21 +1213,27 @@ class TestScientificValidityGuards(unittest.TestCase):
             name="active",
         )
 
-        with patch(
-            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
-            return_value=src_cfg,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
-            return_value=("fwd", "src", None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
-            return_value=(["stc"] * n_epochs, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
-            return_value=roi_data,
-        ), patch(
-            "mne.read_labels_from_annot",
-            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=("fwd", "src", None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(["stc"] * n_epochs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=roi_data,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+            ),
         ):
             df, cols = extract_source_localization_features(
                 ctx,
@@ -1278,29 +1307,40 @@ class TestScientificValidityGuards(unittest.TestCase):
         def _fake_compute_roi_envelope(data, *_args, **_kwargs):
             captured["n_times_env"] = int(np.asarray(data).shape[-1])
             return np.ones((n_epochs, 2, int(np.asarray(data).shape[-1])), dtype=float)
-        with patch(
-            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
-            return_value=src_cfg,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
-            return_value=("fwd", "src", None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
-            return_value=(["stc"] * n_epochs, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
-            return_value=roi_data,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
-            side_effect=_fake_compute_roi_power,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
-            side_effect=_fake_compute_roi_envelope,
-        ), patch(
-            "mne.read_labels_from_annot",
-            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=("fwd", "src", None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(["stc"] * n_epochs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=roi_data,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+                side_effect=_fake_compute_roi_power,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+                side_effect=_fake_compute_roi_envelope,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_source_localization_features(
                     ctx,
                     bands=["alpha"],
@@ -1319,7 +1359,9 @@ class TestScientificValidityGuards(unittest.TestCase):
         roi_data = np.random.default_rng(707).standard_normal((n_epochs, 2, n_times))
         stcs = [_StcStub(np.ones((3, n_times), dtype=float)) for _ in range(n_epochs)]
 
-        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        fmri_cfg = SimpleNamespace(
+            enabled=False, provenance="independent", require_provenance=False
+        )
         src_cfg = SimpleNamespace(
             method="lcmv",
             fmri_cfg=fmri_cfg,
@@ -1373,35 +1415,47 @@ class TestScientificValidityGuards(unittest.TestCase):
                 return np.ones((np.asarray(data).shape[0], 3), dtype=float)
             return np.ones((n_epochs, 2), dtype=float)
 
-        with patch(
-            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
-            return_value=src_cfg,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._load_source_contrast_config",
-            return_value=SimpleNamespace(condition_column="condition"),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
-            return_value=("fwd", "src", None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
-            return_value=(stcs, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
-            return_value=roi_data,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
-            side_effect=_fake_compute_roi_power,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
-            return_value=np.ones((n_epochs, 2, 40), dtype=float),
-        ), patch(
-            "mne.write_source_spaces",
-            return_value=None,
-        ), patch(
-            "mne.read_labels_from_annot",
-            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_contrast_config",
+                return_value=SimpleNamespace(condition_column="condition"),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=("fwd", "src", None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(stcs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=roi_data,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+                side_effect=_fake_compute_roi_power,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+                return_value=np.ones((n_epochs, 2, 40), dtype=float),
+            ),
+            patch(
+                "mne.write_source_spaces",
+                return_value=None,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_source_localization_features(ctx, bands=["alpha"], method="lcmv")
 
         self.assertFalse(captured_lengths)
@@ -1448,29 +1502,39 @@ class TestScientificValidityGuards(unittest.TestCase):
             name="active",
         )
 
-        with patch(
-            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
-            return_value=src_cfg,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
-            return_value=("fwd", "src", None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
-            return_value=(["stc"] * n_epochs, None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
-            return_value=roi_data,
-        ), patch(
-            "mne.read_labels_from_annot",
-            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
-            return_value=np.full((n_epochs, 2), np.nan, dtype=float),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
-            return_value=np.ones((n_epochs, 2, 100), dtype=float),
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=("fwd", "src", None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(["stc"] * n_epochs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=roi_data,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+                return_value=np.full((n_epochs, 2), np.nan, dtype=float),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+                return_value=np.ones((n_epochs, 2, 100), dtype=float),
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "non-finite source-localization power features"):
+            with self.assertRaisesRegex(
+                ValueError, "non-finite source-localization power features"
+            ):
                 extract_source_localization_features(
                     ctx,
                     bands=["alpha"],
@@ -1482,14 +1546,19 @@ class TestScientificValidityGuards(unittest.TestCase):
         feature_cols: list[str] = []
         roi_data = np.ones((2, 2, 50), dtype=float)
 
-        with patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
-            return_value=np.full((2, 2), np.nan, dtype=float),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
-            return_value=np.ones((2, 2, 50), dtype=float),
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+                return_value=np.full((2, 2), np.nan, dtype=float),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+                return_value=np.ones((2, 2, 50), dtype=float),
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "non-finite source-localization power features"):
+            with self.assertRaisesRegex(
+                ValueError, "non-finite source-localization power features"
+            ):
                 _append_source_band_family_features(
                     records=records,
                     feature_cols=feature_cols,
@@ -1599,7 +1668,11 @@ class TestScientificValidityGuards(unittest.TestCase):
                 ),
                 patch(
                     "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
-                    return_value=(Path("/tmp/trans.fif"), Path("/tmp/bem.fif"), Path("/tmp/bem-sol.fif")),
+                    return_value=(
+                        Path("/tmp/trans.fif"),
+                        Path("/tmp/bem.fif"),
+                        Path("/tmp/bem-sol.fif"),
+                    ),
                 ),
                 patch(
                     "eeg_pipeline.analysis.features.source_localization._select_fmri_constrained_voxels",
@@ -1722,7 +1795,11 @@ class TestScientificValidityGuards(unittest.TestCase):
                 ),
                 patch(
                     "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
-                    return_value=(Path("/tmp/trans.fif"), Path("/tmp/bem.fif"), Path("/tmp/bem-sol.fif")),
+                    return_value=(
+                        Path("/tmp/trans.fif"),
+                        Path("/tmp/bem.fif"),
+                        Path("/tmp/bem-sol.fif"),
+                    ),
                 ),
                 patch(
                     "eeg_pipeline.analysis.features.source_localization._select_fmri_constrained_voxels",
@@ -1847,7 +1924,11 @@ class TestScientificValidityGuards(unittest.TestCase):
             ),
             patch(
                 "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
-                return_value=(Path("/tmp/trans.fif"), Path("/tmp/bem.fif"), Path("/tmp/bem-sol.fif")),
+                return_value=(
+                    Path("/tmp/trans.fif"),
+                    Path("/tmp/bem.fif"),
+                    Path("/tmp/bem-sol.fif"),
+                ),
             ),
             patch(
                 "eeg_pipeline.analysis.features.source_localization._select_fmri_constrained_voxels",
@@ -2014,24 +2095,39 @@ class TestScientificValidityGuards(unittest.TestCase):
             envelope_correlation=lambda *_args, **_kwargs: _Connectivity(),
         )
 
-        with patch.dict(sys.modules, {"mne_connectivity": fake_connectivity}), patch(
-            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
-            return_value=src_cfg,
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
-            return_value=(object(), object(), None),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._compute_eloreta_source_estimates",
-            return_value=([_StcStub(np.ones((2, 120), dtype=float)) for _ in range(4)], object()),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
-            return_value=np.ones((4, 3, 120), dtype=float),
-        ), patch(
-            "eeg_pipeline.analysis.features.source_localization._validate_source_connectivity_duration",
-            return_value=True,
-        ), patch(
-            "mne.read_labels_from_annot",
-            return_value=[SimpleNamespace(name="roi_a"), SimpleNamespace(name="roi_b"), SimpleNamespace(name="roi_c")],
+        with (
+            patch.dict(sys.modules, {"mne_connectivity": fake_connectivity}),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=(object(), object(), None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_eloreta_source_estimates",
+                return_value=(
+                    [_StcStub(np.ones((2, 120), dtype=float)) for _ in range(4)],
+                    object(),
+                ),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=np.ones((4, 3, 120), dtype=float),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._validate_source_connectivity_duration",
+                return_value=True,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[
+                    SimpleNamespace(name="roi_a"),
+                    SimpleNamespace(name="roi_b"),
+                    SimpleNamespace(name="roi_c"),
+                ],
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "non-finite source connectivity"):
                 extract_source_connectivity_features(
@@ -2097,7 +2193,9 @@ class TestScientificValidityGuards(unittest.TestCase):
                 }
             }
         )
-        with self.assertRaisesRegex(ValueError, "not scientifically valid when feature_engineering.task_is_rest=true"):
+        with self.assertRaisesRegex(
+            ValueError, "not scientifically valid when feature_engineering.task_is_rest=true"
+        ):
             _load_source_contrast_config(cfg)
 
     def test_source_contrast_extracts_subject_level_row_without_welch(self):
@@ -2280,12 +2378,15 @@ class TestScientificValidityGuards(unittest.TestCase):
                 raise ValueError("invalid baseline window")
             return (float(baseline_window[0]), float(baseline_window[1]))
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr.validate_baseline_window_pre_stimulus",
-            side_effect=_fake_validate,
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
-            side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.validate_baseline_window_pre_stimulus",
+                side_effect=_fake_validate,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
+                side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "invalid baseline window"):
                 compute_tfr_for_subject(
@@ -2319,15 +2420,19 @@ class TestScientificValidityGuards(unittest.TestCase):
             strict_seen["value"] = bool(strict)
             return (float(baseline_window[0]), float(baseline_window[1]))
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr.validate_baseline_window_pre_stimulus",
-            side_effect=_fake_validate,
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
-            side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr._extract_baseline_power_features",
-            return_value=(pd.DataFrame(), []),
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.validate_baseline_window_pre_stimulus",
+                side_effect=_fake_validate,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
+                side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr._extract_baseline_power_features",
+                return_value=(pd.DataFrame(), []),
+            ),
         ):
             tfr_out, baseline_df, baseline_cols, _b_start, _b_end = compute_tfr_for_subject(
                 epochs=object(),
@@ -2367,12 +2472,15 @@ class TestScientificValidityGuards(unittest.TestCase):
             seen["bands"] = dict(bands)
             return pd.DataFrame(index=np.arange(2)), []
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr._extract_baseline_power_features",
-            side_effect=_fake_extract,
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
-            side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr._extract_baseline_power_features",
+                side_effect=_fake_extract,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
+                side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+            ),
         ):
             _tfr_out, _baseline_df, _baseline_cols, _b_start, _b_end = compute_tfr_for_subject(
                 epochs=object(),
@@ -2645,7 +2753,10 @@ class TestScientificValidityGuards(unittest.TestCase):
         empty_mask = np.zeros((n_times,), dtype=bool)
         windows = TimeWindows(
             masks={"analysis": analysis_mask, "active": empty_mask},
-            ranges={"analysis": (float(times[0]), float(times[-1])), "active": (float(times[0]), float(times[-1]))},
+            ranges={
+                "analysis": (float(times[0]), float(times[-1])),
+                "active": (float(times[0]), float(times[-1])),
+            },
             times=times,
             name="active",
         )
@@ -2708,7 +2819,9 @@ class TestScientificValidityGuards(unittest.TestCase):
             frequency_bands={"theta": [4.0, 8.0], "gamma": [30.0, 80.0]},
         )
 
-        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+        with self.assertRaisesRegex(
+            ValueError, "target window 'active' does not contain valid samples"
+        ):
             extract_pac_from_precomputed(precomputed, cfg)
 
     def test_pac_precomputed_without_normalization_is_not_divided_by_segment_length(self):

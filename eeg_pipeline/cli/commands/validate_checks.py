@@ -240,7 +240,10 @@ def _validate_behavior(
         ),
         (
             "condition_effects",
-            ["condition_effects*/*/condition_effects*.tsv", "condition_effects*/*/condition_effects*.parquet"],
+            [
+                "condition_effects*/*/condition_effects*.tsv",
+                "condition_effects*/*/condition_effects*.parquet",
+            ],
             ["feature", "p_primary"],
             None,
         ),
@@ -407,8 +410,12 @@ def _output_text_report(
     print("  SUMMARY")
     print("  " + "-" * 30)
     status = _determine_status(issues, warnings)
-    status_text = "✗ FAILED" if status == "error" else ("⚠ WARNINGS" if status == "warning" else "✓ PASSED")
-    status_color_code = "\033[91m" if status == "error" else ("\033[93m" if status == "warning" else "\033[92m")
+    status_text = (
+        "✗ FAILED" if status == "error" else ("⚠ WARNINGS" if status == "warning" else "✓ PASSED")
+    )
+    status_color_code = (
+        "\033[91m" if status == "error" else ("\033[93m" if status == "warning" else "\033[92m")
+    )
     print(f"  Status: {status_color_code}{status_text}\033[0m")
     print(f"  Passed: {len(passed)}")
     print(f"  Issues: {len(issues)}")

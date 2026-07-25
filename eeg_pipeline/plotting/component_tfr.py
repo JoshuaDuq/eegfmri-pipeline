@@ -12,6 +12,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from eeg_pipeline.analysis.component_tfr import ConditionTFR
 
+#: Decibels per unit log10 power ratio. Power in dB is 10 * log10(power / reference).
+_DECIBELS_PER_LOG10 = 10.0
+
 
 def save_ica_topography_overview(
     ica: mne.preprocessing.ICA,
@@ -114,7 +117,10 @@ def _plot_tfr_page(
         constrained_layout=True,
     )
 
-    data = condition.baseline_power.get_data()
+    # MNE's "logratio" baseline is log10(power/baseline). The rest of the report states
+    # baseline-relative power in decibels, so convert here rather than presenting the
+    # same quantity in two units a factor of ten apart across adjacent sections.
+    data = _DECIBELS_PER_LOG10 * condition.baseline_power.get_data()
     frequencies = condition.baseline_power.freqs
     times = condition.baseline_power.times
     image = None
@@ -143,7 +149,7 @@ def _plot_tfr_page(
     figure.colorbar(
         image,
         ax=[axis for axis in axes.flat if axis in figure.axes],
-        label="log10(power / baseline)",
+        label="Baseline-relative power (dB)",
         shrink=0.82,
     )
     figure.suptitle(
@@ -175,7 +181,7 @@ def _validate_component_axes(
 def _shared_color_limit(condition_tfrs: list[ConditionTFR]) -> float:
     finite_values = []
     for condition in condition_tfrs:
-        data = condition.baseline_power.get_data()
+        data = _DECIBELS_PER_LOG10 * condition.baseline_power.get_data()
         finite_values.append(np.abs(data[np.isfinite(data)]))
     combined = np.concatenate(finite_values)
     if combined.size == 0:

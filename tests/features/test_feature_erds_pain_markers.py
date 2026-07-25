@@ -25,10 +25,12 @@ class TestERDSPainMarkers(unittest.TestCase):
         baseline_power = 10.0
         power = np.full((n_epochs, n_channels, n_times), baseline_power, dtype=float)
 
-        left_hemi = [0, 2, 4]   # C3, CP3, FC3
+        left_hemi = [0, 2, 4]  # C3, CP3, FC3
         right_hemi = [1, 3, 5]  # C4, CP4, FC4
 
-        def apply_pattern(channel_indices: list[int], erd_pct: float, rebound_pct: float | None) -> None:
+        def apply_pattern(
+            channel_indices: list[int], erd_pct: float, rebound_pct: float | None
+        ) -> None:
             active = times >= 0.0
             erd_mask = (times >= 0.20) & (times < 0.45)
             rebound_mask = times >= 0.60
@@ -145,10 +147,20 @@ class TestERDSPainMarkers(unittest.TestCase):
             "erds", "active", "alpha", "roi", "erd_magnitude", channel="Somatosensory_Contralateral"
         )
         rebound_mag_col = NamingSchema.build(
-            "erds", "active", "alpha", "roi", "rebound_magnitude", channel="Somatosensory_Contralateral"
+            "erds",
+            "active",
+            "alpha",
+            "roi",
+            "rebound_magnitude",
+            channel="Somatosensory_Contralateral",
         )
         rebound_lat_col = NamingSchema.build(
-            "erds", "active", "alpha", "roi", "rebound_latency", channel="Somatosensory_Contralateral"
+            "erds",
+            "active",
+            "alpha",
+            "roi",
+            "rebound_latency",
+            channel="Somatosensory_Contralateral",
         )
 
         for col in (onset_col, erd_peak_col, erd_mag_col, rebound_mag_col, rebound_lat_col):

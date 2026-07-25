@@ -25,7 +25,9 @@ def stage_regression_impl(
     write_stats_table_fn: Callable[[Any, pd.DataFrame, Path], Path],
 ) -> pd.DataFrame:
     """Trialwise regression stage with optional run-level aggregation."""
-    from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
+    from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+        run_trialwise_feature_regressions,
+    )
 
     ctx.config = ensure_behavior_config(ctx.config)
 
@@ -38,9 +40,11 @@ def stage_regression_impl(
         ctx.logger.warning("Regression: trial table missing; skipping.")
         return pd.DataFrame()
 
-    primary_unit = str(
-        require_config_value(ctx.config, "behavior_analysis.regression.primary_unit")
-    ).strip().lower()
+    primary_unit = (
+        str(require_config_value(ctx.config, "behavior_analysis.regression.primary_unit"))
+        .strip()
+        .lower()
+    )
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     run_col = str(
         require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
@@ -48,9 +52,7 @@ def stage_regression_impl(
     allow_iid_trials = bool(
         require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
     )
-    n_perm = int(
-        require_config_value(ctx.config, "behavior_analysis.regression.n_permutations")
-    )
+    n_perm = int(require_config_value(ctx.config, "behavior_analysis.regression.n_permutations"))
     include_run_block = bool(
         require_config_value(ctx.config, "behavior_analysis.regression.include_run_block")
     )

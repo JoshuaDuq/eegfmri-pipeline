@@ -23,7 +23,6 @@ import pandas as pd
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import generate_manifest, save_features_organized
 
-
 CONDITION_COLUMN_NAME = "condition"
 
 
@@ -31,7 +30,7 @@ CONDITION_COLUMN_NAME = "condition"
 class FeatureSet:
     """
     Container for a single feature group's extraction results.
-    
+
     Attributes
     ----------
     df : pd.DataFrame
@@ -41,6 +40,7 @@ class FeatureSet:
     name : str
         Name of this feature group (e.g., "erds", "spectral")
     """
+
     df: pd.DataFrame
     columns: List[str]
     name: str
@@ -82,57 +82,58 @@ class ExtractionResult:
     condition : Optional[np.ndarray]
         Array of condition labels per epoch (values depend on the paradigm)
     """
+
     features: Dict[str, FeatureSet] = field(default_factory=dict)
     precomputed: Optional[PrecomputedData] = None
     condition: Optional[np.ndarray] = None
     qc: Dict[str, Any] = field(default_factory=dict)
-    
+
     def get_combined_df(self, include_condition: bool = True) -> pd.DataFrame:
         """
         Combine all feature sets into a single DataFrame.
-        
+
         Parameters
         ----------
         include_condition : bool
             If True and condition labels exist, adds condition column.
-        
+
         Returns
         -------
         pd.DataFrame
             Combined features with one row per epoch.
         """
         non_empty_dfs = self._validated_feature_frames()
-        
+
         if not non_empty_dfs:
             return pd.DataFrame()
-        
+
         combined = pd.concat(non_empty_dfs, axis=1)
-        
+
         if include_condition and self.condition is not None:
             self._validate_condition_length(len(combined))
             combined.insert(0, CONDITION_COLUMN_NAME, self.condition)
-        
+
         return self._reorder_columns(combined)
-    
+
     def _reorder_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Reorder columns: condition first (if present), then sorted feature columns."""
         if CONDITION_COLUMN_NAME not in df.columns:
             return df[sorted(df.columns)]
-        
+
         feature_columns = sorted([col for col in df.columns if col != CONDITION_COLUMN_NAME])
         return df[[CONDITION_COLUMN_NAME] + feature_columns]
-    
+
     def get_feature_group_df(self, group: str, include_condition: bool = True) -> pd.DataFrame:
         """
         Get DataFrame for a specific feature group.
-        
+
         Parameters
         ----------
         group : str
             Name of the feature group to retrieve.
         include_condition : bool
             If True and condition labels exist, adds condition column.
-        
+
         Returns
         -------
         pd.DataFrame
@@ -140,22 +141,20 @@ class ExtractionResult:
         """
         if group not in self.features:
             return pd.DataFrame()
-        
+
         feature_set = self.features[group]
         df = feature_set.df.copy()
-        
+
         if include_condition and self.condition is not None:
             self._validate_condition_length(len(df))
             df.insert(0, CONDITION_COLUMN_NAME, self.condition)
-        
+
         return df
 
     def _validated_feature_frames(self) -> List[pd.DataFrame]:
         """Return nonempty feature frames after validating their shared row contract."""
         frames = [
-            feature_set.df
-            for feature_set in self.features.values()
-            if not feature_set.df.empty
+            feature_set.df for feature_set in self.features.values() if not feature_set.df.empty
         ]
         if not frames:
             return []
@@ -185,11 +184,11 @@ class ExtractionResult:
                 f"ExtractionResult condition length ({len(self.condition)}) does not "
                 f"match feature rows ({n_rows})."
             )
-    
+
     def get_all_columns(self) -> List[str]:
         """
         Get all column names across all feature groups.
-        
+
         Returns
         -------
         List[str]
@@ -199,16 +198,16 @@ class ExtractionResult:
         for feature_set in self.features.values():
             all_columns.extend(feature_set.columns)
         return all_columns
-    
+
     @property
     def n_epochs(self) -> int:
         """Number of epochs across all feature groups."""
         if not self.features:
             return 0
-        
+
         first_feature_set = next(iter(self.features.values()))
         return len(first_feature_set.df)
-    
+
     def condition_counts(self) -> Dict[str, int]:
         """Return a mapping from each condition label to its trial count."""
         if self.condition is None:
@@ -217,10 +216,7 @@ class ExtractionResult:
         return {str(label): int(count) for label, count in zip(unique, counts)}
 
     def __repr__(self) -> str:
-        total_features = sum(
-            len(feature_set.columns)
-            for feature_set in self.features.values()
-        )
+        total_features = sum(len(feature_set.columns) for feature_set in self.features.values())
         group_names = list(self.features.keys())
 
         condition_info = ""
@@ -236,7 +232,7 @@ class ExtractionResult:
     def get_qc_summary(self) -> Dict[str, Any]:
         """
         Return aggregated QC metrics across all feature groups.
-        
+
         Returns
         -------
         Dict[str, Any]
@@ -246,11 +242,8 @@ class ExtractionResult:
             - groups_with_issues: list of groups that had QC issues or were skipped
             - per_group_status: dict mapping group name to success/skip status
         """
-        total_features = sum(
-            len(feature_set.columns) 
-            for feature_set in self.features.values()
-        )
-        
+        total_features = sum(len(feature_set.columns) for feature_set in self.features.values())
+
         summary: Dict[str, Any] = {
             "n_feature_groups": len(self.features),
             "total_features": total_features,
@@ -259,44 +252,41 @@ class ExtractionResult:
             "groups_with_issues": [],
             "per_group_status": {},
         }
-        
+
         self._add_qc_status_to_summary(summary)
         self._add_condition_summary_to_summary(summary)
-        
+
         return summary
-    
+
     def _add_qc_status_to_summary(self, summary: Dict[str, Any]) -> None:
         """Add QC status information for each feature group."""
         for group_name, qc_data in self.qc.items():
             if group_name == "precomputed" or not isinstance(qc_data, dict):
                 continue
-            
+
             if "skipped_reason" in qc_data:
                 status = f"skipped: {qc_data['skipped_reason']}"
             elif "error" in qc_data:
                 status = f"error: {qc_data['error']}"
             else:
                 status = "ok"
-            
+
             summary["per_group_status"][group_name] = status
-            
+
             if status.startswith("skipped:") or status.startswith("error:"):
                 summary["groups_with_issues"].append(group_name)
-    
+
     def _add_condition_summary_to_summary(self, summary: Dict[str, Any]) -> None:
         """Add condition label summary if available."""
         if self.condition is not None:
             summary["condition_counts"] = self.condition_counts()
 
     def build_manifest(
-        self, 
-        config: Any = None, 
-        subject: Optional[str] = None, 
-        task: Optional[str] = None
+        self, config: Any = None, subject: Optional[str] = None, task: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate manifest for current feature columns.
-        
+
         Parameters
         ----------
         config : Any, optional
@@ -305,7 +295,7 @@ class ExtractionResult:
             Subject identifier.
         task : str, optional
             Task identifier.
-        
+
         Returns
         -------
         Dict[str, Any]
@@ -313,7 +303,7 @@ class ExtractionResult:
         """
         feature_dataframe = self.get_combined_df(include_condition=False)
         feature_columns = list(feature_dataframe.columns)
-        
+
         return generate_manifest(
             feature_columns,
             config=config,
@@ -333,7 +323,7 @@ class ExtractionResult:
     ) -> Dict[str, Path]:
         """
         Save combined features and manifest in a reproducible, organized structure.
-        
+
         Parameters
         ----------
         output_dir : Union[str, Path]
@@ -346,7 +336,7 @@ class ExtractionResult:
             Configuration object for manifest generation.
         include_condition : bool
             If True, includes condition column in saved DataFrame.
-        
+
         Returns
         -------
         Dict[str, Path]
@@ -354,7 +344,7 @@ class ExtractionResult:
         """
         feature_dataframe = self.get_combined_df(include_condition=include_condition)
         output_path = Path(output_dir)
-        
+
         return save_features_organized(
             feature_dataframe,
             output_path,
@@ -368,10 +358,11 @@ class ExtractionResult:
 @dataclass
 class FeatureExtractionResult:
     """Typed container for TFR-based feature extraction outputs.
-    
+
     This flat container is used by the TFR-on-the-fly pipeline in pipelines/features.py.
     Each field corresponds to a specific feature group's DataFrame and column names.
     """
+
     tfr: Any = None
     baseline_df: Optional[pd.DataFrame] = None
     baseline_cols: List[str] = field(default_factory=list)

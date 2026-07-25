@@ -24,19 +24,40 @@ class CardiacAttenuationMetrics:
     before_rms_uv: float
     after_rms_uv: float
     attenuation_percent: float
+    #: Same quantity in decibels, matching how attenuation is reported elsewhere in the
+    #: pipeline (eeg_fmri.qc uses 20*log10 for amplitude ratios). Kept alongside the
+    #: percentage so existing QC tables stay readable.
+    attenuation_db: float
+    is_fallback: bool = False
 
 
-def pulse_marker_events(raw: mne.io.BaseRaw) -> np.ndarray:
-    """Create MNE events from preserved BrainVision Analyzer R annotations."""
-    events, _ = mne.events_from_annotations(
-        raw,
-        event_id={PULSE_MARKER_DESCRIPTION: PULSE_EVENT_ID},
-        use_rounding=True,
-        verbose="ERROR",
+def pulse_marker_events(raw: mne.io.BaseRaw) -> tuple[np.ndarray, bool]:
+    """Create MNE events from preserved BrainVision Analyzer R annotations (or fallback)."""
+    try:
+        events, _ = mne.events_from_annotations(
+            raw,
+            event_id={PULSE_MARKER_DESCRIPTION: PULSE_EVENT_ID},
+            use_rounding=True,
+            verbose="ERROR",
+        )
+    except ValueError as exc:
+        if "Could not find any of the events" in str(exc):
+            events = []
+        else:
+            raise
+    if len(events) > 0:
+        return events, False
+
+    # BrainVision analyzer often uses a 0.21s static delay when R-peaks aren't found,
+    # and doesn't export them. We use MNE's ecg detector to approximate them for QC.
+    events, _, _, _ = mne.preprocessing.find_ecg_events(
+        raw, ch_name="ECG", event_id=PULSE_EVENT_ID, return_ecg=True, verbose="ERROR"
     )
     if len(events) == 0:
-        raise ValueError(f"Raw recording contains no {PULSE_MARKER_DESCRIPTION!r} markers.")
-    return events
+        raise ValueError(
+            f"Raw recording contains no {PULSE_MARKER_DESCRIPTION!r} markers and fallback failed."
+        )
+    return events, True
 
 
 def _marker_locked_rms(
@@ -53,7 +74,6 @@ def _marker_locked_rms(
         tmin=baseline[0],
         tmax=measurement_window[1],
         baseline=baseline,
-        picks="eeg",
         preload=True,
         reject_by_annotation=True,
         verbose="ERROR",
@@ -95,7 +115,7 @@ def compute_cardiac_attenuation(
         projection=False,
         verbose=False,
     )
-    events = pulse_marker_events(before_referenced)
+    events, is_fallback = pulse_marker_events(before_referenced)
     before_rms = _marker_locked_rms(
         before_referenced,
         events,
@@ -111,12 +131,16 @@ def compute_cardiac_attenuation(
     if before_rms == 0:
         raise ValueError(f"{recording_id}: pre-ICA marker-locked EEG RMS is zero.")
     attenuation_percent = 100.0 * (1.0 - after_rms / before_rms)
+    if after_rms <= 0:
+        raise ValueError(f"{recording_id}: post-ICA marker-locked EEG RMS is zero.")
     return CardiacAttenuationMetrics(
         recording_id=recording_id,
         marker_count=len(events),
         before_rms_uv=before_rms * 1e6,
         after_rms_uv=after_rms * 1e6,
         attenuation_percent=attenuation_percent,
+        attenuation_db=float(20.0 * np.log10(before_rms / after_rms)),
+        is_fallback=is_fallback,
     )
 
 
@@ -125,6 +149,7 @@ def add_marker_ctps_columns(
     scores: np.ndarray,
     *,
     threshold: float,
+    is_fallback: bool = False,
 ) -> pd.DataFrame:
     """Add marker-based CTPS evidence without changing exclusion statuses."""
     expected_components = np.arange(len(scores))
@@ -138,6 +163,7 @@ def add_marker_ctps_columns(
     result = components.copy()
     result["analyzer_marker_ctps_score"] = np.asarray(scores, dtype=float)
     result["analyzer_marker_ctps_flag"] = np.asarray(scores) >= threshold
+    result["analyzer_marker_ctps_fallback"] = is_fallback
     return result
 
 
@@ -147,19 +173,22 @@ def compute_marker_ctps_scores(
     *,
     threshold: float,
     epoch_window: tuple[float, float],
-) -> np.ndarray:
+) -> tuple[np.ndarray, bool]:
     """Score ICA components using CTPS epochs anchored to Analyzer markers."""
     marker_epochs = []
+    any_fallback = False
     for raw in raws:
+        events, is_fallback = pulse_marker_events(raw)
+        if is_fallback:
+            any_fallback = True
         marker_epochs.append(
             mne.Epochs(
                 raw,
-                pulse_marker_events(raw),
+                events,
                 event_id=PULSE_EVENT_ID,
                 tmin=epoch_window[0],
                 tmax=epoch_window[1],
                 baseline=None,
-                picks="eeg",
                 preload=True,
                 reject_by_annotation=True,
                 verbose="ERROR",
@@ -172,11 +201,12 @@ def compute_marker_ctps_scores(
         raise ValueError("No valid marker-locked epochs remain for CTPS QC.")
     _, scores = ica.find_bads_ecg(
         epochs,
+        ch_name="ECG",
         method="ctps",
         threshold=threshold,
         verbose="ERROR",
     )
-    return np.asarray(scores, dtype=float)
+    return np.asarray(scores, dtype=float), any_fallback
 
 
 def write_cardiac_attenuation_qc(
@@ -203,6 +233,8 @@ def write_cardiac_attenuation_qc(
                 "before_rms_uv": metrics.before_rms_uv,
                 "after_rms_uv": metrics.after_rms_uv,
                 "attenuation_percent": metrics.attenuation_percent,
+                "attenuation_db": metrics.attenuation_db,
+                "is_fallback": metrics.is_fallback,
             }
         )
     if not rows:
@@ -231,6 +263,16 @@ def _write_cardiac_attenuation_figure(table: pd.DataFrame, output_path: Path) ->
     axis.scatter(table["after_rms_uv"], positions, label="After ICA", color="#276B8A")
     axis.set_yticks(positions, table["recording_id"])
     axis.set_xlabel("R-marker-locked EEG RMS (µV)")
+    median_db = float(table["attenuation_db"].median())
+    axis.text(
+        0.98,
+        0.02,
+        f"median attenuation {median_db:.1f} dB",
+        transform=axis.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+    )
     axis.set_title("Cardiac artifact attenuation after ICA")
     axis.grid(axis="x", alpha=0.25)
     axis.legend(frameon=False)
@@ -298,7 +340,7 @@ def run_marker_ctps_qc(
 
         ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
         raws = [mne.io.read_raw_fif(path, preload=True, verbose="ERROR") for path in filtered_paths]
-        scores = compute_marker_ctps_scores(
+        scores, any_fallback = compute_marker_ctps_scores(
             raws,
             ica,
             threshold=threshold,
@@ -309,6 +351,7 @@ def run_marker_ctps_qc(
             components,
             scores,
             threshold=threshold,
+            is_fallback=any_fallback,
         )
         updated.to_csv(components_path, sep="\t", index=False)
 
@@ -319,6 +362,7 @@ def run_marker_ctps_qc(
                 "status_description",
                 "analyzer_marker_ctps_score",
                 "analyzer_marker_ctps_flag",
+                "analyzer_marker_ctps_fallback",
             ]
         ].copy()
         summary.insert(0, "participant_id", f"sub-{subject}")

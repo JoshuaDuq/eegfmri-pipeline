@@ -397,6 +397,14 @@ class PreprocessingPipeline(PipelineBase):
             else:
                 raise ValueError(f"Unknown preprocessing step: {step}")
 
+        # The review sections describe what preprocessing produced, not what any scanner
+        # correction did, so they belong to every run that fitted an ICA — an EEG-only
+        # dataset gets the same evidence minus the panels whose inputs it lacks. They run
+        # after the step loop because the Analyzer panel reads QC tables that a later
+        # step writes, and each section already omits itself when its inputs are absent.
+        if {STEP_ICA_FIT, STEP_EPOCHS} & set(steps):
+            self._append_report_review_sections(subjects=subjects, task=task)
+
         return outputs
 
     def _run_pulse_marker_qc(
@@ -465,10 +473,15 @@ class PreprocessingPipeline(PipelineBase):
             / "qc"
             / f"{task_entity}desc-pulsemarkers_qc.tsv"
         )
+        strict_validation = self.config.get(
+            "preprocessing.brainvision_analyzer.strict_pulse_qc", False
+        )
+
         return validate_pulse_marker_recordings(
             recordings,
             criteria,
             output_path=output_path,
+            strict=strict_validation,
         )
 
     def _get_analyzer_cardiac_qc_config(self) -> Any:
@@ -637,7 +650,17 @@ class PreprocessingPipeline(PipelineBase):
         if bool(self.config.get("ica.cardiac_review.enabled", False)):
             self._run_ica_cardiac_review(subjects=subjects, task=task)
 
+        if bool(self.config.get("ica.ocular_review.enabled", False)):
+            self._run_ica_ocular_review(subjects=subjects, task=task)
+
         if bool(self.config.get("ica.band_specific_report.enabled", False)):
+            if task_is_rest and bool(self.config.get("ica.band_specific_report.tfr.enabled", True)):
+                raise ValueError(
+                    "Resting-state epochs are fixed-length segments with no event and no "
+                    "pre-stimulus interval, so the baseline-relative component TFR has no "
+                    "baseline. Set ica.band_specific_report.tfr.enabled=false to review "
+                    "resting-state components by topography and spectrum."
+                )
             self._run_band_specific_ica_report(subjects=subjects, task=task)
             if self.config.get("ica.band_specific_report.comparisons"):
                 if task_is_rest:
@@ -694,6 +717,42 @@ class PreprocessingPipeline(PipelineBase):
                     settings=settings,
                 )
 
+    def _run_ica_ocular_review(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        from eeg_pipeline.preprocessing.ica_ocular_report import (
+            generate_ica_ocular_review,
+            OcularReviewSettings,
+        )
+
+        settings = OcularReviewSettings.from_mapping(self.config.get("ica.ocular_review", {}))
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            filtered_paths = self._find_filtered_raw_run_files(subject, task)
+            for epochs_path, report_path, output_prefix in self._find_band_ica_report_inputs(
+                subject
+            ):
+                session_filtered_paths = [
+                    path
+                    for path in filtered_paths
+                    if path.name.startswith(f"{output_prefix}_task-")
+                ]
+                if not session_filtered_paths:
+                    raise FileNotFoundError(
+                        f"No filtered raw runs match EOG review prefix {output_prefix!r}."
+                    )
+                generate_ica_ocular_review(
+                    filtered_raw_paths=session_filtered_paths,
+                    ica_path=epochs_path.with_name(f"{output_prefix}_proc-ica_ica.fif"),
+                    report_path=report_path,
+                    output_path=epochs_path.with_name(
+                        f"{output_prefix}_desc-icaeog_components.tsv"
+                    ),
+                    settings=settings,
+                )
+
     def _run_band_specific_ica_report(
         self,
         *,
@@ -711,6 +770,7 @@ class PreprocessingPipeline(PipelineBase):
         )
         random_state = int(self.config.get("project.random_state", 42))
         for subject in self._resolve_bad_harmonization_subjects(subjects):
+            filtered_paths = self._find_filtered_raw_run_files(subject, task)
             for epochs_path, report_path, output_prefix in self._find_band_ica_report_inputs(
                 subject
             ):
@@ -721,6 +781,11 @@ class PreprocessingPipeline(PipelineBase):
                     output_prefix=output_prefix,
                     random_state=random_state,
                     settings=settings,
+                    filtered_raw_paths=[
+                        path
+                        for path in filtered_paths
+                        if path.name.startswith(f"{output_prefix}_task-")
+                    ],
                 )
             self.logger.info(
                 "Added exploratory band-specific ICA diagnostics for sub-%s, task=%s",
@@ -1056,11 +1121,224 @@ class PreprocessingPipeline(PipelineBase):
         elif bool(self.config.get("preprocessing.write_clean_events", True)):
             self._write_clean_events_tsv(subjects=subjects, task=task)
 
+        self._append_epoch_rejection_review(subjects=subjects, task=task)
+
         band_report_config = self.config.get("ica.band_specific_report", {})
         if bool(band_report_config.get("enabled", False)) and band_report_config.get("comparisons"):
             self._append_band_ica_condition_tfrs(subjects=subjects, task=task)
 
         self.logger.info("Epoch creation complete")
+
+    def _append_epoch_rejection_review(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        """Append trial-retention evidence to each subject report."""
+        import mne
+        import pandas as pd
+
+        from eeg_pipeline.infra.paths import find_clean_epochs_path
+        from eeg_pipeline.preprocessing.report.rejection import add_rejection_review
+
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            epochs_path = find_clean_epochs_path(
+                subject,
+                task,
+                deriv_root=self.deriv_root,
+                config=self.config,
+            )
+            if epochs_path is None or not epochs_path.exists():
+                self.logger.warning(
+                    "Clean epochs not found; skipping epoch-rejection review for sub-%s",
+                    subject,
+                )
+                continue
+
+            report_path = self._find_subject_report_path(epochs_path)
+            if report_path is None:
+                self.logger.warning(
+                    "Subject report not found; skipping epoch-rejection review for sub-%s",
+                    subject,
+                )
+                continue
+
+            events_path = epochs_path.with_name(epochs_path.name.replace("_epo.fif", "_events.tsv"))
+            clean_events = pd.read_csv(events_path, sep="\t") if events_path.is_file() else None
+            report = mne.open_report(report_path)
+            summary = add_rejection_review(
+                report=report,
+                clean_epochs=mne.read_epochs(epochs_path, preload=False, verbose="ERROR"),
+                clean_events=clean_events,
+                config=self.config,
+            )
+            self._append_signal_preservation(
+                report=report,
+                epochs_path=epochs_path,
+                subject=subject,
+            )
+            report.save(report_path, overwrite=True, open_browser=False)
+            report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+            self.logger.info(
+                "sub-%s retained %d of %d epochs (%.1f%% dropped)",
+                subject,
+                summary.kept,
+                summary.total,
+                100.0 * summary.dropped_fraction,
+            )
+
+    def _append_signal_preservation(
+        self,
+        *,
+        report,
+        epochs_path: Path,
+        subject: str,
+    ) -> None:
+        """Add evidence that brain signal survived, beside the evidence of removal."""
+        import mne
+
+        from eeg_pipeline.preprocessing.report.preservation import (
+            add_rest_preservation_review,
+            add_task_preservation_review,
+        )
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
+
+        if not ReportSettings.from_config(self.config).enabled:
+            return
+        epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
+        if bool(self.config.get("preprocessing.task_is_rest", False)):
+            reliability = None
+            alpha = add_rest_preservation_review(report=report, epochs=epochs)
+        else:
+            reliability, alpha = add_task_preservation_review(report=report, epochs=epochs)
+        self.logger.info(
+            "sub-%s preservation: split-half r=%s posterior alpha=%s",
+            subject,
+            "n/a" if reliability is None else f"{reliability.corrected_correlation:.3f}",
+            "n/a" if alpha is None else f"{alpha.prominence_db:.1f} dB",
+        )
+
+    def _append_report_review_sections(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        """Append the configurable review sections to each subject report.
+
+        Every section is optional and absent when its inputs are: a dataset recorded
+        outside a scanner simply has no Analyzer section, rather than an empty one.
+        """
+        import mne
+
+        from eeg_pipeline.preprocessing.report.analyzer_qc import (
+            add_analyzer_correction_review,
+        )
+        from eeg_pipeline.preprocessing.report.coverage import add_coverage_review
+        from eeg_pipeline.preprocessing.report.provenance import add_provenance_review
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
+
+        report_settings = ReportSettings.from_config(self.config)
+        if not report_settings.enabled:
+            self.logger.info("Skipping report review sections (report.enabled=false)")
+            return
+        if task is None:
+            self.logger.info("Skipping report review sections without a task label")
+            return
+
+        deriv_eeg_root = self.deriv_root / "preprocessed" / "eeg"
+
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            reports = sorted(
+                path
+                for path in (deriv_eeg_root / f"sub-{subject}").rglob("*_report.h5")
+                if not path.name.startswith("._")
+            )
+            if not reports:
+                self.logger.warning("No report found; skipping review sections for sub-%s", subject)
+                continue
+            filtered_paths = self._find_filtered_raw_run_files(subject, task)
+            for report_path in reports:
+                report = mne.open_report(report_path)
+                add_provenance_review(report=report, config=self.config)
+                analyzer = add_analyzer_correction_review(
+                    report=report,
+                    qc_dir=deriv_eeg_root / "qc",
+                    task=task,
+                    subject=subject,
+                )
+                coverage = add_coverage_review(
+                    report=report,
+                    deriv_eeg_root=deriv_eeg_root,
+                    task=task,
+                    subject=subject,
+                    settings=report_settings,
+                )
+                evidence = self._append_run_evidence(
+                    report=report,
+                    report_path=report_path,
+                    filtered_paths=filtered_paths,
+                    settings=report_settings,
+                )
+                report.save(report_path, overwrite=True, open_browser=False)
+                report.save(
+                    report_path.with_suffix(".html"),
+                    overwrite=True,
+                    open_browser=False,
+                )
+                self.logger.info(
+                    "sub-%s report sections: analyzer=%s coverage=%s gradient=%s runs=%d",
+                    subject,
+                    "present" if analyzer is not None else "absent",
+                    "present" if coverage is not None else "absent",
+                    (
+                        "present"
+                        if evidence is not None and evidence.has_scanner_evidence
+                        else "absent"
+                    ),
+                    0 if evidence is None else len(evidence.spectra),
+                )
+
+    def _append_run_evidence(
+        self,
+        *,
+        report,
+        report_path: Path,
+        filtered_paths: List[Path],
+        settings,
+    ):
+        """Add every per-run section for the runs belonging to one report.
+
+        The sensor spectra, gradient residual, time-resolved quality, and beat detection
+        all need each run before and after the ICA exclusions, so they are measured in a
+        single pass rather than one read and one ``ICA.apply`` per section.
+        """
+        import mne
+
+        from eeg_pipeline.preprocessing.report.run_evidence import add_run_evidence_review
+
+        prefix = report_path.name.removesuffix("_report.h5")
+        run_paths = [path for path in filtered_paths if path.name.startswith(f"{prefix}_task-")]
+        ica_path = report_path.with_name(f"{prefix}_proc-ica_ica.fif")
+        if not run_paths or not ica_path.is_file():
+            self.logger.info("Skipping per-run report evidence for %s (missing inputs)", prefix)
+            return None
+        return add_run_evidence_review(
+            report=report,
+            filtered_raw_paths=run_paths,
+            ica=mne.preprocessing.read_ica(ica_path, verbose="ERROR"),
+            settings=settings,
+        )
+
+    def _find_subject_report_path(self, epochs_path: Path) -> Optional[Path]:
+        """Find the MNE report that sits beside a subject's epochs."""
+        candidates = sorted(
+            path
+            for path in epochs_path.parent.glob("*_report.h5")
+            if not path.name.startswith("._")
+        )
+        return candidates[0] if candidates else None
 
     def _append_band_ica_condition_tfrs(
         self,

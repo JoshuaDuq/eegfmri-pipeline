@@ -150,18 +150,12 @@ def _apply_config_overrides(config: Dict[str, Any], config_path: Path) -> Dict[s
         with open(overrides_path, "r", encoding="utf-8") as handle:
             overrides = json.load(handle) or {}
     except OSError as exc:
-        raise ConfigError(
-            f"Failed to read TUI overrides at {overrides_path}: {exc}"
-        ) from exc
+        raise ConfigError(f"Failed to read TUI overrides at {overrides_path}: {exc}") from exc
     except json.JSONDecodeError as exc:
-        raise ConfigError(
-            f"Failed to parse TUI overrides at {overrides_path}: {exc}"
-        ) from exc
+        raise ConfigError(f"Failed to parse TUI overrides at {overrides_path}: {exc}") from exc
 
     if not isinstance(overrides, dict):
-        raise ConfigError(
-            f"TUI overrides at {overrides_path} must contain a JSON object."
-        )
+        raise ConfigError(f"TUI overrides at {overrides_path} must contain a JSON object.")
 
     _merge_overrides(config, overrides)
     return resolve_config_paths(config, config_path)
@@ -174,11 +168,13 @@ def _apply_config_overrides(config: Dict[str, Any], config_path: Path) -> Dict[s
 
 class ConfigError(Exception):
     """Exception raised for configuration-related errors."""
+
     pass
 
 
 class ConfigValidationError(ConfigError):
     """Exception raised when config validation fails."""
+
     pass
 
 
@@ -203,7 +199,7 @@ class ConfigDict(dict):
             super().__setitem__(key, value)
             return
 
-        keys = key.split('.')
+        keys = key.split(".")
         current = self
         for k in keys[:-1]:
             if k not in current or not isinstance(current[k], dict):
@@ -220,7 +216,7 @@ class ConfigDict(dict):
         2. Nested under ``paths.<key>`` (returned as ``Path`` when string)
         3. Nested under ``project.<key>`` (for metadata like subjects/task)
         """
-        if key.startswith('_'):
+        if key.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
 
         if key in self:
@@ -246,10 +242,10 @@ class ConfigDict(dict):
 def _should_reload_config(config_path: Path) -> bool:
     global _CONFIG, _CONFIG_PATH, _CONFIG_MTIME
     global _CONFIG_OVERRIDES_PATH, _CONFIG_OVERRIDES_MTIME
-    
+
     if _CONFIG is None:
         return True
-    
+
     if _CONFIG_PATH != config_path:
         return True
 
@@ -258,11 +254,11 @@ def _should_reload_config(config_path: Path) -> bool:
         return True
     if _CONFIG_OVERRIDES_MTIME != overrides_mtime:
         return True
-    
+
     current_mtime = config_path.stat().st_mtime
     if _CONFIG_MTIME is not None and current_mtime != _CONFIG_MTIME:
         return True
-    
+
     return False
 
 
@@ -275,13 +271,13 @@ def _get_overrides_cache_state(config_path: Path) -> tuple[Path, Optional[float]
 
 def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
     """Load and parse YAML config file.
-    
+
     Args:
         config_path: Path to config YAML file
-        
+
     Returns:
         Parsed config dictionary with resolved paths
-        
+
     Raises:
         ConfigError: If file cannot be read or parsed
     """
@@ -298,13 +294,13 @@ def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
             f"Failed to load config file at {config_path}: {e}\n"
             "Please ensure the file exists and is readable."
         ) from e
-    
+
     if not isinstance(config, dict):
         raise ConfigError(
             f"Config file {config_path} must contain a YAML dictionary/mapping, "
             f"got {type(config).__name__}"
         )
-    
+
     config = resolve_config_paths(config, config_path)
     return _apply_config_overrides(config, config_path)
 
@@ -316,36 +312,35 @@ def _apply_thread_limits(config: Dict[str, Any]) -> None:
 
 
 def load_config(
-    config_path: Optional[Union[str, Path]] = None,
-    apply_thread_limits: bool = True
+    config_path: Optional[Union[str, Path]] = None, apply_thread_limits: bool = True
 ) -> ConfigDict:
     """Load configuration from YAML file.
-    
+
     This is the main entry point for accessing configuration. The config is
     cached and automatically reloaded if the file changes.
     Thread-safe: concurrent calls are serialized via _CONFIG_LOCK.
-    
+
     Args:
         config_path: Optional path to config file. If None, uses default
                     eeg_config.yaml in config directory.
         apply_thread_limits: Whether to apply thread limits from config
-        
+
     Returns:
         ConfigDict instance providing dot-notation and dict access
-        
+
     Raises:
         ConfigError: If config file cannot be loaded or parsed
-        
+
     Example:
         >>> config = load_config()
         >>> task = config.get("project.task", "default_task")
         >>> alpha = config.get("statistics.sig_alpha", 0.05)
     """
     global _CONFIG, _CONFIG_PATH, _CONFIG_MTIME
-    
+
     resolved_path = _resolve_config_path(config_path)
     _validate_config_path(resolved_path)
-    
+
     with _CONFIG_LOCK:
         if _should_reload_config(resolved_path):
             config = _load_and_cache_config(resolved_path, apply_thread_limits)
@@ -371,17 +366,17 @@ def _validate_config_path(config_path: Path) -> None:
 def _load_and_cache_config(config_path: Path, apply_thread_limits: bool) -> Dict[str, Any]:
     global _CONFIG, _CONFIG_PATH, _CONFIG_MTIME
     global _CONFIG_OVERRIDES_PATH, _CONFIG_OVERRIDES_MTIME
-    
+
     config = _load_config_from_file(config_path)
-    
+
     if apply_thread_limits:
         _apply_thread_limits(config)
-    
+
     _CONFIG = config
     _CONFIG_PATH = config_path
     _CONFIG_MTIME = config_path.stat().st_mtime
     _CONFIG_OVERRIDES_PATH, _CONFIG_OVERRIDES_MTIME = _get_overrides_cache_state(config_path)
-    
+
     return config
 
 
@@ -392,15 +387,15 @@ def _load_and_cache_config(config_path: Path, apply_thread_limits: bool) -> Dict
 
 def get_nested_value(config: Dict[str, Any], key: str, default: Any = None) -> Any:
     """Get nested config value using dot notation.
-    
+
     Args:
         config: Configuration dictionary
         key: Dot-separated key path (e.g., "section.subsection.key")
         default: Default value to return if key not found
-        
+
     Returns:
         Config value or default if not found
-        
+
     Example:
         >>> config = {"section": {"subsection": {"key": "value"}}}
         >>> get_nested_value(config, "section.subsection.key", "default")
@@ -410,8 +405,8 @@ def get_nested_value(config: Dict[str, Any], key: str, default: Any = None) -> A
     """
     if not isinstance(config, dict):
         return default
-        
-    keys = key.split('.')
+
+    keys = key.split(".")
     value = config
 
     for k in keys:
@@ -425,18 +420,18 @@ def get_nested_value(config: Dict[str, Any], key: str, default: Any = None) -> A
 
 def get_config_value(config: Any, key: str, default: Any) -> Any:
     """Get config value with fallback to default.
-    
+
     Works with ConfigDict, regular dicts, or None. This is the preferred
     method for accessing config values when you need a default.
-    
+
     Args:
         config: Configuration object (ConfigDict, dict, or None)
         key: Dot-separated key path (e.g., "section.subsection.key")
         default: Default value to return if key not found or config is None
-        
+
     Returns:
         Config value or default
-        
+
     Example:
         >>> config = load_config()
         >>> alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
@@ -449,7 +444,7 @@ def get_config_value(config: Any, key: str, default: Any) -> Any:
 
     if hasattr(config, "get"):
         return config.get(key, default)
-    
+
     return default
 
 
@@ -577,6 +572,7 @@ def get_frequency_band_names(config: Any) -> List[str]:
 # Default Configuration Values
 ###################################################################
 
+
 def get_default_frequency_bands() -> Dict[str, List[float]]:
     return {
         "delta": [1.0, 3.9],
@@ -591,6 +587,7 @@ def get_default_frequency_bands() -> Dict[str, List[float]]:
         "gamma_high_clean": [67.0, 77.0],
     }
 
+
 def get_frequency_bands_for_aperiodic(config: Any) -> Dict[str, List[float]]:
     """Get frequency bands for aperiodic analysis with fallback to defaults."""
     return get_frequency_bands(config) or get_default_frequency_bands()
@@ -604,11 +601,11 @@ def get_frequency_bands_for_aperiodic(config: Any) -> Dict[str, List[float]]:
 def get_constants(section: str, config: Optional[Any] = None) -> Dict[str, Any]:
     if config is None:
         config = load_config()
-    
+
     constants = get_nested_value(config, f"{section}.constants", {})
     if not constants:
         raise ValueError(f"{section}.constants not found in config.")
-    
+
     return dict(constants)
 
 
@@ -622,8 +619,11 @@ def get_min_samples(config: Any, sample_type: str = "default") -> int:
     defaults = {"channel": 10, "roi": 20, "default": 5, "edge": 30}
     if config is None:
         return defaults.get(sample_type, 5)
-    return int(get_config_value(config, f"behavior_analysis.min_samples.{sample_type}",
-                                 defaults.get(sample_type, 5)))
+    return int(
+        get_config_value(
+            config, f"behavior_analysis.min_samples.{sample_type}", defaults.get(sample_type, 5)
+        )
+    )
 
 
 ###################################################################
@@ -633,10 +633,10 @@ def get_min_samples(config: Any, sample_type: str = "default") -> int:
 
 def get_fisher_z_clip_values(config: Any) -> Tuple[float, float]:
     """Get Fisher z-transform clipping bounds from config.
-    
+
     Args:
         config: Configuration object (ConfigDict, dict, or None)
-        
+
     Returns:
         Tuple of (clip_min, clip_max) for Fisher z-transform clipping
     """
@@ -652,7 +652,7 @@ def get_fisher_z_clip_values(config: Any) -> Tuple[float, float]:
 
 def get_feature_constant(config: Any, constant_name: str, default: Any = None) -> Any:
     """Get a feature extraction constant from config.
-    
+
     Automatically converts string representations of numbers to the appropriate
     numeric type based on the default value's type.
     """
@@ -676,9 +676,9 @@ def get_feature_constant(config: Any, constant_name: str, default: Any = None) -
     config_path = constant_map.get(constant_name)
     if config_path is None:
         return default
-    
+
     value = get_config_value(config, config_path, default)
-    
+
     # Auto-convert string representations of numbers to numeric types
     if isinstance(value, str) and default is not None:
         try:
@@ -688,5 +688,5 @@ def get_feature_constant(config: Any, constant_name: str, default: Any = None) -
                 return int(float(value))  # Handle "1e-12" -> 0 for ints
         except (ValueError, TypeError):
             return default
-    
+
     return value

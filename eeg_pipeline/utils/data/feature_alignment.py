@@ -4,7 +4,6 @@ from typing import Iterable, List, Tuple
 
 import pandas as pd
 
-
 TRIAL_ID_COLUMN = "trial_id"
 
 FEATURE_ALIGNMENT_COLUMNS: Tuple[str, ...] = (TRIAL_ID_COLUMN,)
@@ -63,9 +62,7 @@ def attach_feature_alignment_columns(
 
 def require_trial_id_column(frame: pd.DataFrame, *, context: str) -> pd.Series:
     if TRIAL_ID_COLUMN not in frame.columns:
-        raise ValueError(
-            f"{context} is missing required canonical alignment column 'trial_id'."
-        )
+        raise ValueError(f"{context} is missing required canonical alignment column 'trial_id'.")
     return frame[TRIAL_ID_COLUMN]
 
 

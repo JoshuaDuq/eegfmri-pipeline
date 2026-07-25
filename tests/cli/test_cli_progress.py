@@ -24,11 +24,16 @@ class TestCliProgress(unittest.TestCase):
         module = importlib.import_module("eeg_pipeline.cli.progress")
         reporter = module.ProgressReporter(enabled=True)
 
-        with patch.object(module, "resource", None), patch.object(module.sys, "platform", "win32"), patch.object(
-            reporter,
-            "_get_windows_memory_usage_gb",
-            return_value=1.5,
-        ), patch.object(module.time, "process_time", return_value=0.0):
+        with (
+            patch.object(module, "resource", None),
+            patch.object(module.sys, "platform", "win32"),
+            patch.object(
+                reporter,
+                "_get_windows_memory_usage_gb",
+                return_value=1.5,
+            ),
+            patch.object(module.time, "process_time", return_value=0.0),
+        ):
             usage = reporter._get_resource_usage()
 
         self.assertEqual(usage["memory"], 1.5)

@@ -103,12 +103,10 @@ def _extract_confidence_interval(
     return ci[0], ci[1]
 
 
-def _format_correlation_main_text(
-    r: float, p: float, n: int, include_r_squared: bool
-) -> str:
+def _format_correlation_main_text(r: float, p: float, n: int, include_r_squared: bool) -> str:
     """Format main correlation statistics text."""
     if include_r_squared and np.isfinite(r):
-        r_squared = r ** 2
+        r_squared = r**2
         return f"r={r:.3f}, R²={r_squared:.3f}, {format_p_value(p)}, n={n}"
     return f"r={r:.3f}, {format_p_value(p)}, n={n}"
 
@@ -125,6 +123,7 @@ def _format_confidence_interval_text(
         if not (np.isfinite(r) and n > 3):
             return ""
         from .correlation import fisher_ci
+
         ci_level = get_ci_level(config)
         ci_low, ci_high = fisher_ci(r, n, config=config, ci_level=ci_level)
 
@@ -194,7 +193,7 @@ def _compute_bf10_correlation(r: float, n: int) -> float:
         return np.nan
 
     r_clipped = np.clip(r, -0.9999, 0.9999)
-    r_squared = r_clipped ** 2
+    r_squared = r_clipped**2
 
     degrees_of_freedom = n - 2
     denominator = 1 - r_squared + 1e-10

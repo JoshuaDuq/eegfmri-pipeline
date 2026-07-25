@@ -46,9 +46,7 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
         get_condition_column_from_config,
     )
 
-    compare_col_value = get_config_value(
-        config, "behavior_analysis.condition.compare_column", None
-    )
+    compare_col_value = get_config_value(config, "behavior_analysis.condition.compare_column", None)
     compare_col = str(compare_col_value or "").strip()
     if compare_col:
         if compare_col in df_trials.columns:
@@ -90,9 +88,7 @@ def _filter_sparse_run_condition_cells(
     if min_trials <= 0:
         return df_trials
     if "n_trials_cell" not in df_trials.columns:
-        raise ValueError(
-            f"{context} requires 'n_trials_cell' after run-level aggregation."
-        )
+        raise ValueError(f"{context} requires 'n_trials_cell' after run-level aggregation.")
 
     keep_mask = pd.to_numeric(df_trials["n_trials_cell"], errors="coerce") >= min_trials
     dropped = int((~keep_mask).sum())
@@ -102,7 +98,7 @@ def _filter_sparse_run_condition_cells(
             context,
             dropped,
             min_trials,
-    )
+        )
     return df_trials.loc[keep_mask].reset_index(drop=True)
 
 
@@ -156,33 +152,35 @@ def stage_condition_column_impl(
 
     ctx.config = ensure_behavior_config(ctx.config)
 
-    compare_values = require_config_value(
-        ctx.config, "behavior_analysis.condition.compare_values"
-    )
+    compare_values = require_config_value(ctx.config, "behavior_analysis.condition.compare_values")
     use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
     if use_multigroup:
         ctx.logger.info(
             "Condition column: %d values specified, delegating to multigroup comparison",
             len(compare_values),
         )
-        return stage_condition_multigroup_fn(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
+        return stage_condition_multigroup_fn(
+            ctx, config, df_trials=df_trials, feature_cols=feature_cols
+        )
 
-    fail_fast = bool(
-        require_config_value(ctx.config, "behavior_analysis.condition.fail_fast")
+    fail_fast = bool(require_config_value(ctx.config, "behavior_analysis.condition.fail_fast"))
+    primary_unit = (
+        str(require_config_value(ctx.config, "behavior_analysis.condition.primary_unit"))
+        .strip()
+        .lower()
     )
-    primary_unit = str(
-        require_config_value(ctx.config, "behavior_analysis.condition.primary_unit")
-    ).strip().lower()
     allow_iid_trials = bool(
         require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
     )
     perm_enabled = bool(
-        require_config_value(
-            ctx.config, "behavior_analysis.condition.permutation.enabled"
-        )
+        require_config_value(ctx.config, "behavior_analysis.condition.permutation.enabled")
     )
     n_perm = _resolve_condition_permutation_count(ctx.config, perm_enabled=perm_enabled)
-    if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
+    if (
+        primary_unit in {"trial", "trialwise"}
+        and (not perm_enabled or n_perm <= 0)
+        and not allow_iid_trials
+    ):
         raise ValueError(
             "Trial-level condition comparisons require a valid non-i.i.d inference method. "
             "Enable permutation testing with a positive permutation count "
@@ -207,9 +205,7 @@ def stage_condition_column_impl(
         feature_cols = get_feature_columns_fn(df_trials, ctx, "condition")
 
     compare_col = resolve_condition_compare_column_fn(df_trials, ctx.config)
-    _ = bool(
-        require_config_value(ctx.config, "behavior_analysis.condition.overwrite")
-    )
+    _ = bool(require_config_value(ctx.config, "behavior_analysis.condition.overwrite"))
     if use_run_unit:
         _require_complete_run_level_condition_keys(
             df_trials,
@@ -217,7 +213,9 @@ def stage_condition_column_impl(
             compare_col=compare_col,
             context="Condition column comparison",
         )
-        ctx.logger.info("Condition: aggregating to run×condition level (primary_unit=%s)", primary_unit)
+        ctx.logger.info(
+            "Condition: aggregating to run×condition level (primary_unit=%s)", primary_unit
+        )
         group_keys = [run_col, compare_col]
         df_agg = (
             df_trials.groupby(group_keys, dropna=False)[feature_cols]
@@ -225,10 +223,7 @@ def stage_condition_column_impl(
             .reset_index()
         )
         cell_counts = (
-            df_trials.groupby(group_keys, dropna=False)
-            .size()
-            .rename("n_trials_cell")
-            .reset_index()
+            df_trials.groupby(group_keys, dropna=False).size().rename("n_trials_cell").reset_index()
         )
         df_trials = df_agg.merge(cell_counts, on=group_keys, how="left")
         df_trials = _filter_sparse_run_condition_cells(
@@ -258,7 +253,9 @@ def stage_condition_column_impl(
     out_dir = get_stats_subfolder_fn(ctx, "condition_effects")
 
     try:
-        cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(df_trials, ctx.config, ctx.logger)
+        cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(
+            df_trials, ctx.config, ctx.logger
+        )
 
         if n_condition_a == 0 and n_condition_b == 0:
             msg = (
@@ -297,7 +294,12 @@ def stage_condition_column_impl(
                 groups = df_trials[run_col].to_numpy()
 
         groups = sanitize_permutation_groups_fn(groups, ctx.logger, "Condition column")
-        if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and perm_enabled and groups is None:
+        if (
+            primary_unit in {"trial", "trialwise"}
+            and not allow_iid_trials
+            and perm_enabled
+            and groups is None
+        ):
             raise ValueError(
                 "Trial-level condition comparison requires grouped permutation labels for non-i.i.d trials. "
                 "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
@@ -348,7 +350,9 @@ def stage_condition_column_impl(
 
             col_path = out_dir / f"condition_effects_column{suffix}_{compare_col}.parquet"
             write_parquet_with_optional_csv_fn(column_df, col_path, also_save_csv=ctx.also_save_csv)
-            ctx.logger.info("Condition column comparison: %d features saved to %s", len(column_df), col_path)
+            ctx.logger.info(
+                "Condition column comparison: %d features saved to %s", len(column_df), col_path
+            )
             return column_df
 
     except Exception as exc:
@@ -383,17 +387,19 @@ def stage_condition_impl(
 
     result_dfs: List[pd.DataFrame] = []
 
-    compare_values = require_config_value(
-        ctx.config, "behavior_analysis.condition.compare_values"
-    )
+    compare_values = require_config_value(ctx.config, "behavior_analysis.condition.compare_values")
     use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
 
     if use_multigroup:
-        multigroup_df = stage_condition_multigroup_fn(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
+        multigroup_df = stage_condition_multigroup_fn(
+            ctx, config, df_trials=df_trials, feature_cols=feature_cols
+        )
         if multigroup_df is not None and not multigroup_df.empty:
             result_dfs.append(multigroup_df)
     else:
-        col_df = stage_condition_column_fn(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
+        col_df = stage_condition_column_fn(
+            ctx, config, df_trials=df_trials, feature_cols=feature_cols
+        )
         if col_df is not None and not col_df.empty:
             result_dfs.append(col_df)
 
@@ -435,9 +441,11 @@ def stage_condition_multigroup_impl(
         ctx.logger.info("Condition multigroup: no feature columns found; skipping.")
         return pd.DataFrame()
 
-    primary_unit = str(
-        require_config_value(ctx.config, "behavior_analysis.condition.primary_unit")
-    ).strip().lower()
+    primary_unit = (
+        str(require_config_value(ctx.config, "behavior_analysis.condition.primary_unit"))
+        .strip()
+        .lower()
+    )
     allow_iid_trials = bool(
         require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
     )
@@ -449,12 +457,8 @@ def stage_condition_multigroup_impl(
         )
 
     compare_column = resolve_condition_compare_column_fn(df_trials, ctx.config)
-    compare_values = require_config_value(
-        ctx.config, "behavior_analysis.condition.compare_values"
-    )
-    _ = bool(
-        require_config_value(ctx.config, "behavior_analysis.condition.overwrite")
-    )
+    compare_values = require_config_value(ctx.config, "behavior_analysis.condition.compare_values")
+    _ = bool(require_config_value(ctx.config, "behavior_analysis.condition.overwrite"))
     compare_labels = get_config_value(
         ctx.config, "behavior_analysis.condition.compare_labels", None
     )
@@ -489,10 +493,7 @@ def stage_condition_multigroup_impl(
             .reset_index()
         )
         cell_counts = (
-            df_trials.groupby(group_keys, dropna=False)
-            .size()
-            .rename("n_trials_cell")
-            .reset_index()
+            df_trials.groupby(group_keys, dropna=False).size().rename("n_trials_cell").reset_index()
         )
         df_trials = df_agg.merge(cell_counts, on=group_keys, how="left")
         df_trials = _filter_sparse_run_condition_cells(
@@ -541,14 +542,20 @@ def stage_condition_multigroup_impl(
         logger=ctx.logger,
         config=ctx.config,
         paired=bool(use_run_unit),
-        pair_ids=df_trials[run_col].to_numpy() if bool(use_run_unit and run_col in df_trials.columns) else None,
+        pair_ids=(
+            df_trials[run_col].to_numpy()
+            if bool(use_run_unit and run_col in df_trials.columns)
+            else None
+        ),
     )
 
     if multigroup_df is not None and not multigroup_df.empty:
         if "p_raw" not in multigroup_df.columns and "p_value" in multigroup_df.columns:
             multigroup_df["p_raw"] = pd.to_numeric(multigroup_df["p_value"], errors="coerce")
         if "p_primary" not in multigroup_df.columns:
-            multigroup_df["p_primary"] = pd.to_numeric(multigroup_df.get("p_raw", np.nan), errors="coerce")
+            multigroup_df["p_primary"] = pd.to_numeric(
+                multigroup_df.get("p_raw", np.nan), errors="coerce"
+            )
 
         multigroup_df = compute_unified_fdr_fn(
             ctx,

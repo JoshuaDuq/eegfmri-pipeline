@@ -221,7 +221,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--min-alignment-samples", fmt.Sprintf("%d", m.alignMinAlignmentSamples))
 	}
 	if m.alignTrimToFirstVolume {
-		args = append(args, "--trim-to-first-volume")
+		args = append(args, "--trim-to-volume-bounds")
 	}
 	refs := []string{"as_is", "first_volume", "scanner_trigger"}
 	if m.alignFmriOnsetReference != 0 {

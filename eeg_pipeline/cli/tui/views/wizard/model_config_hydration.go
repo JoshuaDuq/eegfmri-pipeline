@@ -2703,7 +2703,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.alignMinAlignmentSamples = n
 			}
 		}},
-		{key: "alignment.trim_to_first_volume", apply: func(v interface{}) {
+		{key: "alignment.trim_to_volume_bounds", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.alignTrimToFirstVolume = b
 			}

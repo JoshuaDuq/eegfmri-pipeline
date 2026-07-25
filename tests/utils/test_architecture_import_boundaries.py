@@ -87,9 +87,6 @@ def test_architecture_import_boundaries() -> None:
             for imported in imports:
                 if imported.startswith(rule.forbidden_prefix):
                     rel = path.relative_to(REPO_ROOT)
-                    violations.append(
-                        f"{rel}: {rule.description} "
-                        f"(imports {imported})"
-                    )
+                    violations.append(f"{rel}: {rule.description} " f"(imports {imported})")
 
     assert not violations, "Architecture boundary violations:\n" + "\n".join(violations)

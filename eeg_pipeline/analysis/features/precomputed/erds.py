@@ -17,7 +17,6 @@ from eeg_pipeline.utils.config.loader import get_feature_constant
 
 from .extras import validate_window_masks
 
-
 _DEFAULT_LATERALITY_MARKER = "Somatosensory_Contralateral"
 _DEFAULT_LEFT_SOMATOSENSORY_CHANNELS = (
     "C1",
@@ -256,7 +255,9 @@ def _compute_laterality_metrics(
         metrics["erd_magnitude"] = float(abs(min(peak_value, 0.0)))
 
     noise_pct = float(baseline_noise_pct) if np.isfinite(baseline_noise_pct) else 0.0
-    onset_threshold = max(float(onset_min_threshold_percent), float(onset_threshold_sigma) * noise_pct)
+    onset_threshold = max(
+        float(onset_min_threshold_percent), float(onset_threshold_sigma) * noise_pct
+    )
 
     onset_mask = np.isfinite(trace) & (trace <= -onset_threshold)
     onset_idx = _first_sustained_crossing(onset_mask, onset_min_samples)
@@ -356,7 +357,9 @@ def extract_erds_from_precomputed(
         erds_cfg.get("enable_laterality_markers"),
         False,
     )
-    laterality_marker_identifier = str(erds_cfg.get("laterality_marker_identifier", _DEFAULT_LATERALITY_MARKER))
+    laterality_marker_identifier = str(
+        erds_cfg.get("laterality_marker_identifier", _DEFAULT_LATERALITY_MARKER)
+    )
     laterality_marker_bands = {
         str(token).strip().lower()
         for token in _coerce_str_list(erds_cfg.get("laterality_marker_bands"), ["alpha"])
@@ -371,13 +374,19 @@ def extract_erds_from_precomputed(
     )
 
     onset_threshold_sigma = _float_or_default(erds_cfg.get("onset_threshold_sigma"), 1.0)
-    onset_min_threshold_percent = _float_or_default(erds_cfg.get("onset_min_threshold_percent"), 5.0)
+    onset_min_threshold_percent = _float_or_default(
+        erds_cfg.get("onset_min_threshold_percent"), 5.0
+    )
     onset_min_duration_ms = _float_or_default(erds_cfg.get("onset_min_duration_ms"), 30.0)
     rebound_threshold_sigma = _float_or_default(erds_cfg.get("rebound_threshold_sigma"), 1.0)
-    rebound_min_threshold_percent = _float_or_default(erds_cfg.get("rebound_min_threshold_percent"), 5.0)
+    rebound_min_threshold_percent = _float_or_default(
+        erds_cfg.get("rebound_min_threshold_percent"), 5.0
+    )
     rebound_min_latency_ms = _float_or_default(erds_cfg.get("rebound_min_latency_ms"), 100.0)
 
-    onset_min_samples = max(1, _int_or_default(round(onset_min_duration_ms * precomputed.sfreq / 1000.0), 1))
+    onset_min_samples = max(
+        1, _int_or_default(round(onset_min_duration_ms * precomputed.sfreq / 1000.0), 1)
+    )
 
     clamped_baselines = 0
     windows = precomputed.windows
@@ -400,7 +409,9 @@ def extract_erds_from_precomputed(
         segment_masks = get_segment_masks(precomputed.times, windows, precomputed.config)
 
     # Filter out baseline - ERDS uses baseline only as reference
-    active_segments = {k: v for k, v in segment_masks.items() if k != "baseline" and v is not None and np.any(v)}
+    active_segments = {
+        k: v for k, v in segment_masks.items() if k != "baseline" and v is not None and np.any(v)
+    }
 
     spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
     roi_map = {}
@@ -417,7 +428,9 @@ def extract_erds_from_precomputed(
 
     if not active_segments:
         if precomputed.logger:
-            precomputed.logger.warning("ERDS: No non-baseline segments defined; skipping extraction.")
+            precomputed.logger.warning(
+                "ERDS: No non-baseline segments defined; skipping extraction."
+            )
         return pd.DataFrame(), [], {}
 
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
@@ -503,28 +516,44 @@ def extract_erds_from_precomputed(
 
                     if "channels" in spatial_modes:
                         record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "percent", channel=ch_name)
+                            NamingSchema.build(
+                                "erds", segment_label, band, "ch", "percent", channel=ch_name
+                            )
                         ] = float(erds_full)
                         if use_log_ratio:
                             record[
-                                NamingSchema.build("erds", segment_label, band, "ch", "db", channel=ch_name)
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "ch", "db", channel=ch_name
+                                )
                             ] = float(erds_full_db)
 
                     all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
                     if use_log_ratio:
-                        all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
+                        all_log_full.append(
+                            float(erds_full_db) if np.isfinite(erds_full_db) else np.nan
+                        )
 
-                    if "channels" in spatial_modes and np.any(np.isfinite(erds_trace)) and len(active_times) > 1:
+                    if (
+                        "channels" in spatial_modes
+                        and np.any(np.isfinite(erds_trace))
+                        and len(active_times) > 1
+                    ):
                         valid_mask_trace = np.isfinite(erds_trace)
                         if np.sum(valid_mask_trace) > 2:
-                            slope, _ = np.polyfit(active_times[valid_mask_trace], erds_trace[valid_mask_trace], 1)
+                            slope, _ = np.polyfit(
+                                active_times[valid_mask_trace], erds_trace[valid_mask_trace], 1
+                            )
                             record[
-                                NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "ch", "slope", channel=ch_name
+                                )
                             ] = float(slope)
 
                         peak_idx = int(np.nanargmax(np.abs(erds_trace)))
                         record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)
+                            NamingSchema.build(
+                                "erds", segment_label, band, "ch", "peak_latency", channel=ch_name
+                            )
                         ] = float(active_times[peak_idx])
 
                         threshold = (
@@ -554,10 +583,24 @@ def extract_erds_from_precomputed(
                                 erd_magnitude = 0.0
                                 erd_duration = 0.0
                             record[
-                                NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)
+                                NamingSchema.build(
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "ch",
+                                    "erd_magnitude",
+                                    channel=ch_name,
+                                )
                             ] = erd_magnitude
                             record[
-                                NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)
+                                NamingSchema.build(
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "ch",
+                                    "erd_duration",
+                                    channel=ch_name,
+                                )
                             ] = erd_duration
 
                             if len(ers_vals) > 0:
@@ -567,10 +610,24 @@ def extract_erds_from_precomputed(
                                 ers_magnitude = 0.0
                                 ers_duration = 0.0
                             record[
-                                NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)
+                                NamingSchema.build(
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "ch",
+                                    "ers_magnitude",
+                                    channel=ch_name,
+                                )
                             ] = ers_magnitude
                             record[
-                                NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)
+                                NamingSchema.build(
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "ch",
+                                    "ers_duration",
+                                    channel=ch_name,
+                                )
                             ] = ers_duration
 
                 if (
@@ -585,8 +642,12 @@ def extract_erds_from_precomputed(
                         laterality_columns,
                     )
 
-                    left_trace, left_n = _aggregate_trace(channel_erds_trace, left_somato_idx, len(active_times))
-                    right_trace, right_n = _aggregate_trace(channel_erds_trace, right_somato_idx, len(active_times))
+                    left_trace, left_n = _aggregate_trace(
+                        channel_erds_trace, left_somato_idx, len(active_times)
+                    )
+                    right_trace, right_n = _aggregate_trace(
+                        channel_erds_trace, right_somato_idx, len(active_times)
+                    )
 
                     selected_indices: np.ndarray
                     selected_trace: np.ndarray
@@ -597,8 +658,16 @@ def extract_erds_from_precomputed(
                         selected_indices = left_somato_idx
                         selected_trace = left_trace
                     elif infer_contralateral and left_n > 0 and right_n > 0:
-                        left_peak = float(np.nanmin(left_trace)) if np.any(np.isfinite(left_trace)) else np.nan
-                        right_peak = float(np.nanmin(right_trace)) if np.any(np.isfinite(right_trace)) else np.nan
+                        left_peak = (
+                            float(np.nanmin(left_trace))
+                            if np.any(np.isfinite(left_trace))
+                            else np.nan
+                        )
+                        right_peak = (
+                            float(np.nanmin(right_trace))
+                            if np.any(np.isfinite(right_trace))
+                            else np.nan
+                        )
                         if np.isfinite(left_peak) and np.isfinite(right_peak):
                             if left_peak <= right_peak:
                                 selected_indices = left_somato_idx
@@ -627,7 +696,11 @@ def extract_erds_from_precomputed(
 
                     if selected_indices.size > 0 and np.any(np.isfinite(selected_trace)):
                         noise_vals = baseline_noise_pct_by_channel[selected_indices]
-                        baseline_noise_pct = float(np.nanmedian(noise_vals)) if np.any(np.isfinite(noise_vals)) else np.nan
+                        baseline_noise_pct = (
+                            float(np.nanmedian(noise_vals))
+                            if np.any(np.isfinite(noise_vals))
+                            else np.nan
+                        )
                         laterality_metrics = _compute_laterality_metrics(
                             selected_trace,
                             active_times,
@@ -670,7 +743,9 @@ def extract_erds_from_precomputed(
                 if "global" in spatial_modes:
                     if baseline_valid_fraction < min_valid_fraction:
                         record[
-                            NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                            NamingSchema.build(
+                                "erds", segment_label, band, "global", "percent_mean"
+                            )
                         ] = np.nan
                         record[
                             NamingSchema.build("erds", segment_label, band, "global", "percent_std")
@@ -678,52 +753,99 @@ def extract_erds_from_precomputed(
                     else:
                         # Scientific validity: compute ERDS on spatially-aggregated power
                         # (mean across channels) rather than averaging per-channel ERDS (ratio).
-                        valid_mask_ch = np.isfinite(baseline_ref_by_channel) & np.isfinite(active_mean_by_channel)
+                        valid_mask_ch = np.isfinite(baseline_ref_by_channel) & np.isfinite(
+                            active_mean_by_channel
+                        )
                         if not np.any(valid_mask_ch):
                             record[
-                                NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "global", "percent_mean"
+                                )
                             ] = np.nan
                             record[
-                                NamingSchema.build("erds", segment_label, band, "global", "percent_std")
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "global", "percent_std"
+                                )
                             ] = np.nan
                         else:
-                            baseline_mean = float(np.nanmean(baseline_ref_by_channel[valid_mask_ch]))
+                            baseline_mean = float(
+                                np.nanmean(baseline_ref_by_channel[valid_mask_ch])
+                            )
                             active_mean = float(np.nanmean(active_mean_by_channel[valid_mask_ch]))
-                            if baseline_mean > epsilon and np.isfinite(baseline_mean) and np.isfinite(active_mean):
-                                global_percent_mean = float(((active_mean - baseline_mean) / baseline_mean) * 100)
+                            if (
+                                baseline_mean > epsilon
+                                and np.isfinite(baseline_mean)
+                                and np.isfinite(active_mean)
+                            ):
+                                global_percent_mean = float(
+                                    ((active_mean - baseline_mean) / baseline_mean) * 100
+                                )
                             else:
                                 global_percent_mean = np.nan
                             record[
-                                NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "global", "percent_mean"
+                                )
                             ] = global_percent_mean
                             record[
-                                NamingSchema.build("erds", segment_label, band, "global", "percent_std")
-                            ] = float(np.std(valid_erds)) if valid_erds else np.nan
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "global", "percent_std"
+                                )
+                            ] = (float(np.std(valid_erds)) if valid_erds else np.nan)
 
                     if use_log_ratio:
                         if baseline_valid_fraction < min_valid_fraction:
-                            record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = np.nan
-                            record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = np.nan
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "global", "db_mean")
+                            ] = np.nan
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "global", "db_std")
+                            ] = np.nan
                         else:
-                            valid_mask_ch = np.isfinite(baseline_ref_by_channel) & np.isfinite(active_mean_by_channel)
+                            valid_mask_ch = np.isfinite(baseline_ref_by_channel) & np.isfinite(
+                                active_mean_by_channel
+                            )
                             if not np.any(valid_mask_ch):
-                                record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = np.nan
-                                record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = np.nan
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "global", "db_mean"
+                                    )
+                                ] = np.nan
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "global", "db_std"
+                                    )
+                                ] = np.nan
                             else:
-                                baseline_mean = float(np.nanmean(baseline_ref_by_channel[valid_mask_ch]))
-                                active_mean = float(np.nanmean(active_mean_by_channel[valid_mask_ch]))
+                                baseline_mean = float(
+                                    np.nanmean(baseline_ref_by_channel[valid_mask_ch])
+                                )
+                                active_mean = float(
+                                    np.nanmean(active_mean_by_channel[valid_mask_ch])
+                                )
                                 if (
                                     baseline_mean > epsilon
                                     and np.isfinite(baseline_mean)
                                     and np.isfinite(active_mean)
                                 ):
-                                    db_mean = float(10 * np.log10(max(active_mean, min_active_power) / baseline_mean))
+                                    db_mean = float(
+                                        10
+                                        * np.log10(
+                                            max(active_mean, min_active_power) / baseline_mean
+                                        )
+                                    )
                                 else:
                                     db_mean = np.nan
-                                record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = db_mean
-                                record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = (
-                                    float(np.std(valid_log)) if valid_log else np.nan
-                                )
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "global", "db_mean"
+                                    )
+                                ] = db_mean
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "global", "db_std"
+                                    )
+                                ] = (float(np.std(valid_log)) if valid_log else np.nan)
 
                 if "roi" in spatial_modes and roi_map:
                     for roi_name, roi_indices in roi_map.items():
@@ -731,13 +853,23 @@ def extract_erds_from_precomputed(
                         if roi_idx.size == 0:
                             record[
                                 NamingSchema.build(
-                                    "erds", segment_label, band, "roi", "percent_mean", channel=roi_name
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "roi",
+                                    "percent_mean",
+                                    channel=roi_name,
                                 )
                             ] = np.nan
                             if use_log_ratio:
                                 record[
                                     NamingSchema.build(
-                                        "erds", segment_label, band, "roi", "db_mean", channel=roi_name
+                                        "erds",
+                                        segment_label,
+                                        band,
+                                        "roi",
+                                        "db_mean",
+                                        channel=roi_name,
                                     )
                                 ] = np.nan
                             continue
@@ -748,7 +880,12 @@ def extract_erds_from_precomputed(
                         if not np.any(valid_roi):
                             record[
                                 NamingSchema.build(
-                                    "erds", segment_label, band, "roi", "percent_mean", channel=roi_name
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "roi",
+                                    "percent_mean",
+                                    channel=roi_name,
                                 )
                             ] = np.nan
                         else:
@@ -760,7 +897,12 @@ def extract_erds_from_precomputed(
                                 roi_percent_mean = np.nan
                             record[
                                 NamingSchema.build(
-                                    "erds", segment_label, band, "roi", "percent_mean", channel=roi_name
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "roi",
+                                    "percent_mean",
+                                    channel=roi_name,
                                 )
                             ] = roi_percent_mean
 
@@ -768,17 +910,29 @@ def extract_erds_from_precomputed(
                             if not np.any(valid_roi):
                                 record[
                                     NamingSchema.build(
-                                        "erds", segment_label, band, "roi", "db_mean", channel=roi_name
+                                        "erds",
+                                        segment_label,
+                                        band,
+                                        "roi",
+                                        "db_mean",
+                                        channel=roi_name,
                                     )
                                 ] = np.nan
                             else:
                                 if b_roi > epsilon and np.isfinite(b_roi) and np.isfinite(a_roi):
-                                    roi_db_mean = float(10 * np.log10(max(a_roi, min_active_power) / b_roi))
+                                    roi_db_mean = float(
+                                        10 * np.log10(max(a_roi, min_active_power) / b_roi)
+                                    )
                                 else:
                                     roi_db_mean = np.nan
                                 record[
                                     NamingSchema.build(
-                                        "erds", segment_label, band, "roi", "db_mean", channel=roi_name
+                                        "erds",
+                                        segment_label,
+                                        band,
+                                        "roi",
+                                        "db_mean",
+                                        channel=roi_name,
                                     )
                                 ] = roi_db_mean
 
@@ -798,8 +952,12 @@ def extract_erds_from_precomputed(
             "median_clamped_channels": float(np.median(clamp_list)) if clamp_list else 0.0,
             "max_clamped_channels": int(np.max(clamp_list)) if clamp_list else 0,
             "min_baseline_power": float(stats.get("baseline_min_power", min_baseline_power)),
-            "median_baseline_valid_fraction": float(np.median(valid_frac_list)) if valid_frac_list else 0.0,
-            "min_baseline_valid_fraction": float(np.min(valid_frac_list)) if valid_frac_list else 0.0,
+            "median_baseline_valid_fraction": (
+                float(np.median(valid_frac_list)) if valid_frac_list else 0.0
+            ),
+            "min_baseline_valid_fraction": (
+                float(np.min(valid_frac_list)) if valid_frac_list else 0.0
+            ),
             "n_epochs_low_validity": int(sum(1 for f in valid_frac_list if f < min_valid_fraction)),
         }
 

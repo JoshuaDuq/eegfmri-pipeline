@@ -15,19 +15,91 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
 from eeg_pipeline.utils.config.loader import get_config_value, load_config, require_config_value
 
-
 _CHANNEL_NAMES = {
-    "FP1", "FP2", "FPZ",
-    "F7", "F3", "FZ", "F4", "F8", "F5", "F1", "F2", "F6", "F9", "F10",
-    "FT7", "FC3", "FCZ", "FC4", "FT8", "FC5", "FC1", "FC2", "FC6", "FT9", "FT10",
-    "T7", "C3", "CZ", "C4", "T8", "C5", "C1", "C2", "C6", "T9", "T10",
-    "TP7", "CP3", "CPZ", "CP4", "TP8", "CP5", "CP1", "CP2", "CP6", "TP9", "TP10",
-    "P7", "P3", "PZ", "P4", "P8", "P5", "P1", "P2", "P6", "P9", "P10",
-    "PO7", "PO3", "POZ", "PO4", "PO8", "PO5", "PO6", "PO9", "PO10", "PO1", "PO2",
-    "O1", "OZ", "O2", "O9", "O10",
-    "AF3", "AF4", "AF7", "AF8", "AFZ",
-    "CB1", "CB2",
-    "I1", "I2", "IZ",
+    "FP1",
+    "FP2",
+    "FPZ",
+    "F7",
+    "F3",
+    "FZ",
+    "F4",
+    "F8",
+    "F5",
+    "F1",
+    "F2",
+    "F6",
+    "F9",
+    "F10",
+    "FT7",
+    "FC3",
+    "FCZ",
+    "FC4",
+    "FT8",
+    "FC5",
+    "FC1",
+    "FC2",
+    "FC6",
+    "FT9",
+    "FT10",
+    "T7",
+    "C3",
+    "CZ",
+    "C4",
+    "T8",
+    "C5",
+    "C1",
+    "C2",
+    "C6",
+    "T9",
+    "T10",
+    "TP7",
+    "CP3",
+    "CPZ",
+    "CP4",
+    "TP8",
+    "CP5",
+    "CP1",
+    "CP2",
+    "CP6",
+    "TP9",
+    "TP10",
+    "P7",
+    "P3",
+    "PZ",
+    "P4",
+    "P8",
+    "P5",
+    "P1",
+    "P2",
+    "P6",
+    "P9",
+    "P10",
+    "PO7",
+    "PO3",
+    "POZ",
+    "PO4",
+    "PO8",
+    "PO5",
+    "PO6",
+    "PO9",
+    "PO10",
+    "PO1",
+    "PO2",
+    "O1",
+    "OZ",
+    "O2",
+    "O9",
+    "O10",
+    "AF3",
+    "AF4",
+    "AF7",
+    "AF8",
+    "AFZ",
+    "CB1",
+    "CB2",
+    "I1",
+    "I2",
+    "IZ",
 }
 
 
@@ -118,16 +190,14 @@ def load_feature_registry(config: Any) -> FeatureRegistry:
 
     files = require_config_value(registry_cfg, "files")
     if not files:
-        raise ValueError("behavior_analysis.feature_registry.files is required and cannot be empty.")
+        raise ValueError(
+            "behavior_analysis.feature_registry.files is required and cannot be empty."
+        )
 
     source_to_type = require_config_value(registry_cfg, "source_to_feature_type")
     type_hierarchy = require_config_value(registry_cfg, "feature_type_hierarchy")
-    patterns = _load_feature_patterns(
-        require_config_value(registry_cfg, "feature_patterns")
-    )
-    classifiers = _load_feature_rules(
-        require_config_value(registry_cfg, "feature_classifiers")
-    )
+    patterns = _load_feature_patterns(require_config_value(registry_cfg, "feature_patterns"))
+    classifiers = _load_feature_rules(require_config_value(registry_cfg, "feature_classifiers"))
 
     return FeatureRegistry(
         files=files,
@@ -169,9 +239,13 @@ def _is_channel_pair(name: str) -> bool:
 
 def _matches_exclusion_criteria(column_lower: str, rule: FeatureRule) -> bool:
     """Check if column matches any exclusion criteria."""
-    if rule.exclude_startswith and any(column_lower.startswith(pattern.lower()) for pattern in rule.exclude_startswith):
+    if rule.exclude_startswith and any(
+        column_lower.startswith(pattern.lower()) for pattern in rule.exclude_startswith
+    ):
         return True
-    if rule.exclude_contains and any(pattern.lower() in column_lower for pattern in rule.exclude_contains):
+    if rule.exclude_contains and any(
+        pattern.lower() in column_lower for pattern in rule.exclude_contains
+    ):
         return True
     return False
 
@@ -182,7 +256,9 @@ def _matches_inclusion_criteria(column: str, column_lower: str, rule: FeatureRul
         return False
     if rule.channel_name and column.upper() not in _CHANNEL_NAMES:
         return False
-    if rule.startswith and not any(column_lower.startswith(pattern.lower()) for pattern in rule.startswith):
+    if rule.startswith and not any(
+        column_lower.startswith(pattern.lower()) for pattern in rule.startswith
+    ):
         return False
     if rule.contains and not any(pattern.lower() in column_lower for pattern in rule.contains):
         return False
@@ -201,7 +277,9 @@ def _rule_matches(column: str, rule: FeatureRule) -> bool:
     if _matches_exclusion_criteria(column_lower, rule):
         return False
 
-    if not (rule.startswith or rule.contains or rule.regex or rule.channel_pair or rule.channel_name):
+    if not (
+        rule.startswith or rule.contains or rule.regex or rule.channel_pair or rule.channel_name
+    ):
         return False
 
     return _matches_inclusion_criteria(column, column_lower, rule)
@@ -509,9 +587,7 @@ def _parse_feature_metadata(column: str, feature_type: str) -> Dict[str, Any]:
     if band_candidates:
         meta["band"] = band_candidates[0]
 
-    band_extractors = {
-        "power", "connectivity", "graph", "itpc", "pac", "spectral", "roi"
-    }
+    band_extractors = {"power", "connectivity", "graph", "itpc", "pac", "spectral", "roi"}
     if feature_type in band_extractors:
         band, identifier = _extract_band_and_identifier(parts, _FREQUENCY_BANDS)
         meta["band"] = band

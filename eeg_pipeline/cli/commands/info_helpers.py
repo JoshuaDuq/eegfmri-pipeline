@@ -93,6 +93,7 @@ def _get_unavailable_channels(deriv_root: Path, task: str) -> List[str]:
     """
     import ast
     import pandas as pd
+
     logger = logging.getLogger(__name__)
 
     log_path = deriv_root / "preprocessed" / "eeg" / f"pyprep_task_{task}_log.csv"
@@ -111,7 +112,9 @@ def _get_unavailable_channels(deriv_root: Path, task: str) -> List[str]:
                 if isinstance(ch_list, list):
                     bad_set.update(ch_list)
             except (ValueError, SyntaxError) as exc:
-                logger.debug("Failed to parse bad_channels entry %r from %s: %s", val, log_path, exc)
+                logger.debug(
+                    "Failed to parse bad_channels entry %r from %s: %s", val, log_path, exc
+                )
         return sorted(bad_set)
     except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
         return []
@@ -135,7 +138,11 @@ def _handle_ml_feature_space_mode(args: argparse.Namespace, config: Any, task: s
             return [val.strip()]
         return None
 
-    families = _as_list(args.feature_families) or _as_list(config.get("machine_learning.data.feature_families")) or None
+    families = (
+        _as_list(args.feature_families)
+        or _as_list(config.get("machine_learning.data.feature_families"))
+        or None
+    )
     if not families:
         # Broad default consistent with ML loader fallback.
         families = ["power"]
@@ -165,11 +172,17 @@ def _handle_ml_feature_space_mode(args: argparse.Namespace, config: Any, task: s
 
         for fam in families:
             fname_override = config.get(f"machine_learning.data.feature_files.{fam}")
-            filename = str(fname_override).strip() if isinstance(fname_override, str) and str(fname_override).strip() else f"features_{fam}.parquet"
+            filename = (
+                str(fname_override).strip()
+                if isinstance(fname_override, str) and str(fname_override).strip()
+                else f"features_{fam}.parquet"
+            )
 
             if str(fam).startswith("pac"):
                 path = features_dir / "pac" / filename
-            elif str(fam) in {"sourcelocalization", "source_localization"} or str(fam).startswith("sourcelocalization"):
+            elif str(fam) in {"sourcelocalization", "source_localization"} or str(fam).startswith(
+                "sourcelocalization"
+            ):
                 candidates = source_localization_candidate_paths(
                     features_dir=features_dir,
                     filename=filename,
@@ -358,6 +371,7 @@ def _get_logger(output_json: bool) -> logging.Logger:
     if output_json:
         return _configure_logging_for_json_output()
     from eeg_pipeline.infra.logging import get_logger
+
     return get_logger(__name__)
 
 
@@ -426,8 +440,8 @@ def _collect_available_time_windows(
         category = feature_path.parent.name
         prefix = f"features_{category}_"
         stem = feature_path.stem
-        if stem.startswith(prefix) and stem[len(prefix):]:
-            window = stem[len(prefix):]
+        if stem.startswith(prefix) and stem[len(prefix) :]:
+            window = stem[len(prefix) :]
             windows.add(window)
             if not allowed_groups or category in allowed_groups:
                 windows_by_group.setdefault(category, set()).add(window)
@@ -478,7 +492,7 @@ def _process_single_subject(
     """Process a single subject to build status information."""
     from eeg_pipeline.utils.data.subjects import get_epoch_metadata
     from eeg_pipeline.infra.paths import deriv_features_path, deriv_stats_path
-    
+
     available_bands = []
     has_stats = False
     # Detect source data
@@ -501,15 +515,16 @@ def _process_single_subject(
     if deriv_root.exists():
         # Check for epochs
         from eeg_pipeline.infra.paths import find_clean_epochs_path
+
         epoch_path = find_clean_epochs_path(subj_id, task, deriv_root=deriv_root, config=config)
         if epoch_path and epoch_path.exists():
             has_derivatives = True
-        
+
         # Check for features
         features_dir = deriv_features_path(deriv_root, subj_id)
         if features_dir.exists() and any(features_dir.rglob("features_*")):
             has_derivatives = True
-        
+
         # Check for EEG preprocessing
         eeg_prep_dir = deriv_root / "preprocessed" / "eeg" / f"sub-{subj_id}"
         if eeg_prep_dir.exists():
@@ -517,14 +532,14 @@ def _process_single_subject(
                 if any(eeg_prep_dir.glob(pattern)):
                     has_derivatives = True
                     break
-        
+
         # Check for fMRI preprocessing
         fmriprep_dir = deriv_root / "fmriprep" / f"sub-{subj_id}"
         if fmriprep_dir.exists():
             func_dir = fmriprep_dir / "func"
             if func_dir.exists() and any(func_dir.glob("*preproc_bold*")):
                 has_derivatives = True
-        
+
         # Check for stats
         stats_dir = deriv_stats_path(deriv_root, subj_id)
         if stats_dir.exists():
@@ -604,16 +619,30 @@ def _build_subject_status_json(
     # Get available windows from first subject with features
     available_windows = []
     available_windows_by_feature = {}
-    feature_groups = ["itpc", "power", "connectivity", "aperiodic", "pac", "complexity", 
-                      "ratios", "asymmetry", "erds", "spectral", "bursts", "erp"]
-    
+    feature_groups = [
+        "itpc",
+        "power",
+        "connectivity",
+        "aperiodic",
+        "pac",
+        "complexity",
+        "ratios",
+        "asymmetry",
+        "erds",
+        "spectral",
+        "bursts",
+        "erp",
+    ]
+
     for result in results:
         subj_id = _extract_subject_id(result["subject"])
         features_dir = deriv_features_path(deriv_root, subj_id)
         if not features_dir.exists():
             continue
-            
-        available_windows, available_windows_by_feature = _collect_available_time_windows(features_dir, config, feature_groups)
+
+        available_windows, available_windows_by_feature = _collect_available_time_windows(
+            features_dir, config, feature_groups
+        )
         if available_windows:
             break
 
@@ -656,14 +685,14 @@ def _build_subject_status_json(
                 source_root,
             )
             futures.append(future)
-        
+
         for future in as_completed(futures):
             try:
                 json_results.append(future.result())
             except Exception:
                 # If processing fails for a subject, skip it
                 pass
-    
+
     # Sort results to maintain consistent order
     json_results.sort(key=lambda x: x["id"])
 
@@ -713,8 +742,17 @@ def _handle_subjects_mode(
         bids_root_override = _resolve_optional_eeg_bids_root(config)
 
     # Fast path: serve cached TUI payload without scanning epochs/features trees.
-    if args.status and args.output_json and bool(getattr(args, "subjects_cache", False)) and not bool(getattr(args, "subjects_refresh", False)):
-        bids_root_for_stamp = bids_root_override if bids_root_override is not None else getattr(config, "bids_root", None)
+    if (
+        args.status
+        and args.output_json
+        and bool(getattr(args, "subjects_cache", False))
+        and not bool(getattr(args, "subjects_refresh", False))
+    ):
+        bids_root_for_stamp = (
+            bids_root_override
+            if bids_root_override is not None
+            else getattr(config, "bids_root", None)
+        )
         cache_path = _subjects_cache_path(deriv_root, task=task, source=args.source)
         stamp = _build_subjects_cache_stamp(deriv_root=deriv_root, bids_root=bids_root_for_stamp)
         cached = _read_subjects_cache(cache_path=cache_path, stamp=stamp)
@@ -734,16 +772,24 @@ def _handle_subjects_mode(
 
     if args.status:
         if args.output_json:
-            epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
+            epochs_subjects = set(
+                _collect_subjects_from_derivatives_epochs(deriv_root, task, config)
+            )
             features_subjects = set(_collect_subjects_from_features(deriv_root))
 
-            bids_root_for_stamp = bids_root_override if bids_root_override is not None else getattr(config, "bids_root", None)
+            bids_root_for_stamp = (
+                bids_root_override
+                if bids_root_override is not None
+                else getattr(config, "bids_root", None)
+            )
             cache_enabled = bool(getattr(args, "subjects_cache", False))
             refresh = bool(getattr(args, "subjects_refresh", False))
             cache_path = _subjects_cache_path(deriv_root, task=task, source=args.source)
 
             if cache_enabled and not refresh:
-                stamp = _build_subjects_cache_stamp(deriv_root=deriv_root, bids_root=bids_root_for_stamp)
+                stamp = _build_subjects_cache_stamp(
+                    deriv_root=deriv_root, bids_root=bids_root_for_stamp
+                )
                 cached = _read_subjects_cache(cache_path=cache_path, stamp=stamp)
                 if cached is not None:
                     _print_json_output(cached)
@@ -759,11 +805,15 @@ def _handle_subjects_mode(
                 bids_root_override,
             )
             if cache_enabled:
-                stamp = _build_subjects_cache_stamp(deriv_root=deriv_root, bids_root=bids_root_for_stamp)
+                stamp = _build_subjects_cache_stamp(
+                    deriv_root=deriv_root, bids_root=bids_root_for_stamp
+                )
                 _write_subjects_cache_atomic(cache_path=cache_path, stamp=stamp, payload=output)
             _print_json_output(output)
         else:
-            epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
+            epochs_subjects = set(
+                _collect_subjects_from_derivatives_epochs(deriv_root, task, config)
+            )
             features_subjects = set(_collect_subjects_from_features(deriv_root))
             for subj in discovered:
                 epoch_mark = "x" if subj in epochs_subjects else " "
@@ -843,7 +893,9 @@ def _handle_config_mode(args: argparse.Namespace, config: Any, deriv_root: Path,
             "source_root": config.get("paths.source_data"),
             "task": task,
             "preprocessing_n_jobs": config.get("preprocessing.n_jobs", 1),
-            "n_subjects": len(config.subjects) if hasattr(config, "subjects") and config.subjects else 0,
+            "n_subjects": (
+                len(config.subjects) if hasattr(config, "subjects") and config.subjects else 0
+            ),
         }
         if args.output_json:
             _print_json_output(summary)
@@ -886,9 +938,7 @@ def _print_discovery_report(result: dict) -> None:
     print("  " + "-" * 30)
     for col in result["columns"]:
         has_values = col in result["values"]
-        val_indicator = (
-            f" ({len(result['values'][col])} values)" if has_values else ""
-        )
+        val_indicator = f" ({len(result['values'][col])} values)" if has_values else ""
         print(f"    • {col}{val_indicator}")
     print()
 
@@ -899,10 +949,7 @@ def _print_discovery_report(result: dict) -> None:
             if len(vals) <= 10:
                 vals_str = ", ".join(str(v) for v in vals)
             else:
-                vals_str = (
-                    ", ".join(str(v) for v in vals[:8])
-                    + f", ... (+{len(vals) - 8} more)"
-                )
+                vals_str = ", ".join(str(v) for v in vals[:8]) + f", ... (+{len(vals) - 8} more)"
             print(f"    {col}: {vals_str}")
     print()
 
@@ -961,14 +1008,17 @@ def _discover_fmri_events_columns_and_values(
 
     fmri_root = _resolve_fmri_root(config)
     task_label = str(task or "").strip()
-    chosen_subject = subject.replace("sub-", "") if isinstance(subject, str) and subject.strip() else None
+    chosen_subject = (
+        subject.replace("sub-", "") if isinstance(subject, str) and subject.strip() else None
+    )
 
     def glob_events(func_dir: Path, sub: str, task_name: str) -> List[Path]:
         if task_name:
             out = sorted(func_dir.glob(f"{sub}_task-{task_name}_run-*_bold_events.tsv"))
             if not out:
                 out = [
-                    p for p in sorted(func_dir.glob(f"{sub}_task-{task_name}_run-*_events.tsv"))
+                    p
+                    for p in sorted(func_dir.glob(f"{sub}_task-{task_name}_run-*_events.tsv"))
                     if not p.name.endswith("_bold_events.tsv")
                 ]
             if not out:
@@ -978,7 +1028,8 @@ def _discover_fmri_events_columns_and_values(
         out = sorted(func_dir.glob(f"{sub}_task-*_run-*_bold_events.tsv"))
         if not out:
             out = [
-                p for p in sorted(func_dir.glob(f"{sub}_task-*_run-*_events.tsv"))
+                p
+                for p in sorted(func_dir.glob(f"{sub}_task-*_run-*_events.tsv"))
                 if not p.name.endswith("_bold_events.tsv")
             ]
         if not out:
@@ -1109,7 +1160,9 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
     else:
         if conditions:
             col_label = selected_column or "condition"
-            print(f"Available fMRI condition values for sub-{subject}, task-{task_out} ({col_label}):")
+            print(
+                f"Available fMRI condition values for sub-{subject}, task-{task_out} ({col_label}):"
+            )
             for cond in conditions:
                 print(f"  - {cond}")
             print(f"\nTotal: {len(conditions)} conditions")
@@ -1126,6 +1179,7 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
         discover_trial_table_columns,
         discover_condition_effects_columns,
     )
+
     task = resolve_task(args.task, config)
     bids_root = None
     if args.discover_source in ["events", "all"]:
@@ -1145,7 +1199,9 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
         subject = subjects[0]
 
     if args.discover_source in ["events", "all"] and bids_root:
-        events_data = discover_event_columns(bids_root, task=task, subject=subject, deriv_root=deriv_root)
+        events_data = discover_event_columns(
+            bids_root, task=task, subject=subject, deriv_root=deriv_root
+        )
         if events_data["columns"]:
             result["sources_checked"].append("events")
             if not result["columns"]:
@@ -1265,7 +1321,9 @@ def _handle_rois_mode(args: argparse.Namespace, subjects: List[str], config: Any
                 for col in roi_cols:
                     # Pattern: ..._roi_ROIName_metric_...
                     # ROI names are like: Frontal, Sensorimotor_Left, ParOccipital_Midline, Midline_FrontalCentral
-                    match = re.search(r"_roi_([A-Za-z]+(?:_(?:Left|Right|Midline|FrontalCentral))?)_", col)
+                    match = re.search(
+                        r"_roi_([A-Za-z]+(?:_(?:Left|Right|Midline|FrontalCentral))?)_", col
+                    )
                     if match:
                         rois.add(match.group(1))
             except Exception:
@@ -1307,16 +1365,18 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
         _print_discovery_report(result)
 
 
-def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+def _handle_multigroup_stats_mode(
+    args: argparse.Namespace, subjects: List[str], config: Any
+) -> None:
     """Handle multigroup-stats mode: discover available multigroup comparisons from precomputed stats."""
     from eeg_pipeline.infra.tsv import read_tsv
-    
+
     deriv_root = get_deriv_root(config, command="info")
-    
+
     subject = args.subject
     if not subject and subjects:
         subject = subjects[0]
-    
+
     result = {
         "available": False,
         "groups": [],
@@ -1325,14 +1385,14 @@ def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str],
         "file": None,
         "subject": subject,
     }
-    
+
     if not subject:
         for sub_dir in sorted(deriv_root.glob("sub-*")):
             if sub_dir.is_dir():
                 subject = sub_dir.name.replace("sub-", "")
                 result["subject"] = subject
                 break
-    
+
     if not subject:
         result["error"] = "No subject found"
         if args.output_json:
@@ -1340,25 +1400,29 @@ def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str],
         else:
             print("Error: No subject found for multigroup stats discovery")
         return
-    
+
     stats_dir = deriv_root / f"sub-{subject}" / "stats" / "condition_effects"
     if not stats_dir.exists():
         stats_dir = deriv_root / f"sub-{subject}" / "stats"
-    
-    multigroup_files = list(stats_dir.glob("condition_effects_multigroup*.tsv")) if stats_dir.exists() else []
-    
+
+    multigroup_files = (
+        list(stats_dir.glob("condition_effects_multigroup*.tsv")) if stats_dir.exists() else []
+    )
+
     if not multigroup_files:
-        result["error"] = "No multigroup stats found. Run behavior pipeline with 3+ comparison values first."
+        result["error"] = (
+            "No multigroup stats found. Run behavior pipeline with 3+ comparison values first."
+        )
         if args.output_json:
             _print_json_output(result)
         else:
             print("No multigroup stats found.")
             print("Run behavior pipeline with 3+ comparison values to generate multigroup stats.")
         return
-    
+
     stats_file = multigroup_files[0]
     df = read_tsv(stats_file)
-    
+
     if df is None or df.empty:
         result["error"] = f"Could not read stats file: {stats_file}"
         if args.output_json:
@@ -1366,19 +1430,21 @@ def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str],
         else:
             print(f"Error reading stats file: {stats_file}")
         return
-    
+
     groups = set()
     if "group1" in df.columns:
         groups.update(df["group1"].dropna().unique())
     if "group2" in df.columns:
         groups.update(df["group2"].dropna().unique())
-    
+
     result["available"] = True
     result["groups"] = sorted(list(groups))
     result["n_features"] = df["feature"].nunique() if "feature" in df.columns else len(df)
-    result["n_significant"] = int(df["significant_fdr"].sum()) if "significant_fdr" in df.columns else 0
+    result["n_significant"] = (
+        int(df["significant_fdr"].sum()) if "significant_fdr" in df.columns else 0
+    )
     result["file"] = str(stats_file)
-    
+
     if args.output_json:
         _print_json_output(result)
     else:

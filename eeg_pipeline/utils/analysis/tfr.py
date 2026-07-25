@@ -24,13 +24,13 @@ from eeg_pipeline.utils.analysis.stats import (
     validate_baseline_window_pre_stimulus,
 )
 
-
 ###################################################################
 # Constants Loading
 ###################################################################
 
 # Numerical constants
 _PERCENT_TO_RATIO_DIVISOR = 100.0
+
 
 def _get_tfr_constants(config=None):
     if config is None:
@@ -39,8 +39,7 @@ def _get_tfr_constants(config=None):
 
 
 def _get_min_baseline_samples(config) -> int:
-    """Get minimum baseline samples from config.
-    """
+    """Get minimum baseline samples from config."""
     raw = require_config_value(
         config, "time_frequency_analysis.constants.min_samples_for_baseline_validation"
     )
@@ -60,6 +59,7 @@ def _get_min_baseline_samples(config) -> int:
 ###################################################################
 # Configuration Helpers
 ###################################################################
+
 
 def _finite_float(value: Any, key: str) -> float:
     try:
@@ -91,7 +91,7 @@ def _positive_int(value: Any, key: str) -> int:
 def get_tfr_config(config) -> Tuple[float, float, int, float, int, Union[str, list]]:
     """
     Parses TFR configuration from settings with fallback defaults.
-    
+
     Returns:
         tuple: (freq_min, freq_max, n_freqs, n_cycles_factor, decim, picks)
     """
@@ -125,28 +125,28 @@ def get_tfr_config(config) -> Tuple[float, float, int, float, int, Union[str, li
         "time_frequency_analysis.tfr.decim",
     )
     picks = tfr_config.get("picks", "eeg")
-    
+
     return freq_min, freq_max, n_freqs, n_cycles_factor, decim, picks
 
 
 def get_tfr_decim(config, mode: str = "power") -> int:
     """
     Get decimation factor for TFR based on mode.
-    
+
     Parameters
     ----------
     config : Any
         Configuration object
     mode : str
         "power" for power TFR (can be aggressive) or "phase" for complex TFR (preserve time structure)
-        
+
     Returns
     -------
     int
         Decimation factor
     """
     tfr_config = config.get("time_frequency_analysis.tfr", {})
-    
+
     mode = str(mode).strip().lower()
     if mode == "phase":
         return _positive_int(
@@ -174,10 +174,10 @@ def filter_freqs_for_signal_length(
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Filter frequencies whose wavelets would be longer than the signal.
-    
+
     Morlet wavelet length is approximately: n_cycles / freq * sfreq * 2
     (the factor of 2 accounts for the full wavelet extent).
-    
+
     Parameters
     ----------
     freqs : np.ndarray
@@ -190,7 +190,7 @@ def filter_freqs_for_signal_length(
         Number of samples in the signal
     logger : Optional[logging.Logger]
         Logger for warnings
-        
+
     Returns
     -------
     Tuple[np.ndarray, np.ndarray]
@@ -198,7 +198,7 @@ def filter_freqs_for_signal_length(
     """
     wavelet_lengths = (n_cycles / freqs) * sfreq * 2
     valid_mask = wavelet_lengths < n_samples
-    
+
     if not np.all(valid_mask):
         n_excluded = np.sum(~valid_mask)
         excluded_freqs = freqs[~valid_mask]
@@ -208,14 +208,14 @@ def filter_freqs_for_signal_length(
                 f"whose wavelets exceed signal length ({n_samples} samples). "
                 f"Consider using longer time windows for low-frequency analysis."
             )
-        
+
         if not np.any(valid_mask):
             raise ValueError(
                 f"All frequencies excluded: signal too short ({n_samples} samples) "
                 f"for wavelet analysis. Minimum frequency {freqs.min():.2f} Hz requires "
                 f"~{int(wavelet_lengths.min())} samples."
             )
-    
+
     return freqs[valid_mask], n_cycles[valid_mask]
 
 
@@ -229,7 +229,7 @@ def compute_tfr_morlet(
 ) -> mne.time_frequency.EpochsTFR:
     """
     Compute TFR using Morlet wavelets with consistent pipeline parameters.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -244,7 +244,7 @@ def compute_tfr_morlet(
         Channel picks. If None, uses config defaults.
     decim : Optional[int]
         Decimation factor. If None, uses config decim_power for power TFR.
-        
+
     Returns
     -------
     mne.time_frequency.EpochsTFR
@@ -252,25 +252,25 @@ def compute_tfr_morlet(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     freq_min, freq_max, n_freqs, n_cycles_factor, _, tfr_picks = get_tfr_config(config)
-    
+
     if freqs is None:
         freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     if picks is None:
         picks = tfr_picks
     if decim is None:
         decim = get_tfr_decim(config, mode="power")
-    
+
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
-    
+
     n_samples = len(epochs.times)
     sfreq = epochs.info["sfreq"]
-    freqs, n_cycles = filter_freqs_for_signal_length(
-        freqs, n_cycles, sfreq, n_samples, logger
+    freqs, n_cycles = filter_freqs_for_signal_length(freqs, n_cycles, sfreq, n_samples, logger)
+
+    workers = resolve_tfr_workers(
+        workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1))
     )
-    
-    workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
 
     resolved_picks = _resolve_picks(epochs, picks) if isinstance(picks, str) else picks
 
@@ -296,7 +296,7 @@ def compute_tfr_morlet(
             power = epochs.compute_tfr(**compute_kwargs, n_jobs=1)
         else:
             raise
-    
+
     return power
 
 
@@ -312,17 +312,17 @@ def compute_tfr_for_visualization(
 def _resolve_picks(epochs: mne.Epochs, config_picks: str) -> str:
     """
     Resolve channel picks based on what's available in epochs.
-    
+
     After CSD transform, channels become type 'csd' instead of 'eeg'.
     This function detects the actual channel types and returns appropriate picks.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
         Epochs object to check
     config_picks : str
         Configured picks (e.g., 'eeg')
-        
+
     Returns
     -------
     str
@@ -330,19 +330,19 @@ def _resolve_picks(epochs: mne.Epochs, config_picks: str) -> str:
     """
     if config_picks == "data":
         return "data"
-    
+
     ch_types = set(epochs.get_channel_types())
-    
+
     if config_picks == "eeg":
         if "eeg" in ch_types:
             return "eeg"
         if "csd" in ch_types:
             return "csd"
         return "data"
-    
+
     if config_picks in ch_types:
         return config_picks
-    
+
     return "data"
 
 
@@ -354,9 +354,9 @@ def compute_complex_tfr(
 ) -> mne.time_frequency.EpochsTFR:
     """
     Compute complex-valued TFR for phase-based metrics (ITPC, PAC).
-    
+
     Uses decim_phase (default=1) to preserve time structure for phase metrics.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -367,7 +367,7 @@ def compute_complex_tfr(
         Logger instance
     freqs : Optional[np.ndarray]
         Frequency array. If None, uses config defaults.
-        
+
     Returns
     -------
     mne.time_frequency.EpochsTFR
@@ -375,26 +375,30 @@ def compute_complex_tfr(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     freq_min, freq_max, n_freqs, n_cycles_factor, _, tfr_picks = get_tfr_config(config)
-    
+
     if freqs is None:
         freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
-    
+
     decim_phase = get_tfr_decim(config, mode="phase")
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
-    
+
     n_samples = len(epochs.times)
     sfreq = epochs.info["sfreq"]
-    freqs, n_cycles = filter_freqs_for_signal_length(
-        freqs, n_cycles, sfreq, n_samples, logger
+    freqs, n_cycles = filter_freqs_for_signal_length(freqs, n_cycles, sfreq, n_samples, logger)
+
+    workers = resolve_tfr_workers(
+        workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1))
     )
-    
-    workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
-    
+
     resolved_picks = _resolve_picks(epochs, tfr_picks)
-    
-    logger.info("Computing complex TFR for phase-based metrics (decim=%d, %d freqs)...", decim_phase, len(freqs))
+
+    logger.info(
+        "Computing complex TFR for phase-based metrics (decim=%d, %d freqs)...",
+        decim_phase,
+        len(freqs),
+    )
     compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
@@ -428,22 +432,22 @@ def _extract_baseline_power_features(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract baseline power features from TFR data."""
     b_start, b_end = baseline_indices
-    data_baseline = tfr.data[..., int(b_start):int(b_end)]
+    data_baseline = tfr.data[..., int(b_start) : int(b_end)]
     data_mean_time = np.nanmean(data_baseline, axis=-1)
-    
+
     results = {}
     ch_names = tfr.info["ch_names"]
     len(tfr)
-    
+
     freqs = tfr.freqs
-    
+
     for band, (fmin, fmax) in bands.items():
         if fmax is None:
             fmax = freqs[-1]
         freq_mask = (freqs >= fmin) & (freqs <= fmax)
         if not np.any(freq_mask):
             continue
-        
+
         band_freqs = np.asarray(freqs[freq_mask], dtype=float)
         if band_freqs.size >= 2 and np.all(np.isfinite(band_freqs)):
             w = np.gradient(band_freqs).astype(float)
@@ -457,11 +461,11 @@ def _extract_baseline_power_features(
         num = np.nansum(np.where(finite, p * w3, 0.0), axis=-1)
         den = np.nansum(np.where(finite, w3, 0.0), axis=-1)
         band_power = np.where(den > 0, num / den, np.nan)
-        
+
         for i, ch in enumerate(ch_names):
             col = NamingSchema.build("power", "baseline", band, "ch", "mean", channel=ch)
             results[col] = band_power[:, i]
-            
+
     df = pd.DataFrame(results)
     return df, list(df.columns)
 
@@ -493,7 +497,7 @@ def extract_roi_tfrs(
             continue
 
         roi_data = np.nanmean(power.data[:, picks, :, :], axis=1, keepdims=True)
-        roi_info = mne.create_info([f"ROI:{roi}"], sfreq=power.info['sfreq'], ch_types='eeg')
+        roi_info = mne.create_info([f"ROI:{roi}"], sfreq=power.info["sfreq"], ch_types="eeg")
 
         roi_tfr = power.copy()
         roi_tfr.data = roi_data
@@ -546,20 +550,18 @@ def compute_tfr_for_subject(
         tfr_baseline_raw = tuple(baseline_window)
     else:
         tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
-    strict_baseline_validation = bool(
-        tfr_analysis.get("strict_baseline_validation", True)
-    )
+    strict_baseline_validation = bool(tfr_analysis.get("strict_baseline_validation", True))
     tfr_baseline = validate_baseline_window_pre_stimulus(
         tfr_baseline_raw,
         logger=logger,
         strict=strict_baseline_validation,
     )
     min_baseline_samples = _get_min_baseline_samples(config)
-    
+
     b_start, b_end = tfr_baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
     b_end = 0.0 if b_end is None else float(b_end)
-    
+
     baseline_mask = (times >= b_start) & (times < b_end)
     b_idxs = np.where(baseline_mask)[0]
 
@@ -588,7 +590,7 @@ def compute_tfr_for_subject(
                     )
         except (ValueError, TypeError, IndexError):
             pass
-    
+
     if len(b_idxs) < min_baseline_samples:
         logger.info(
             f"Baseline window [{b_start:.3f}, {b_end:.3f}] outside current time range "
@@ -605,7 +607,7 @@ def compute_tfr_for_subject(
 
     logger.info("Extracting baseline power features (raw power)...")
     logger.info("Cropping TFR to range [%.3f, %.3f]", times.min(), times.max())
-    
+
     baseline_df, baseline_cols = _extract_baseline_power_features(
         tfr, power_bands, (b_idxs[0], b_idxs[-1] + 1), logger
     )
@@ -613,42 +615,35 @@ def compute_tfr_for_subject(
     return tfr, baseline_df, baseline_cols, b_start, b_end
 
 
-
-
 ###################################################################
 # Channel Extraction & Finding
 ###################################################################
 
+
 def extract_eeg_channels(epochs: mne.Epochs) -> List[str]:
     return [
-        ch for ch in epochs.info["ch_names"]
-        if epochs.get_channel_types(picks=[ch])[0] == "eeg"
+        ch for ch in epochs.info["ch_names"] if epochs.get_channel_types(picks=[ch])[0] == "eeg"
     ]
 
 
 def find_common_channels_train_test(
-    train_subjects: List[str],
-    test_subject: str,
-    subj_to_epochs: Dict[str, mne.Epochs]
+    train_subjects: List[str], test_subject: str, subj_to_epochs: Dict[str, mne.Epochs]
 ) -> List[str]:
-    train_channel_sets = [
-        set(extract_eeg_channels(subj_to_epochs[s]))
-        for s in train_subjects
-    ]
-    
+    train_channel_sets = [set(extract_eeg_channels(subj_to_epochs[s])) for s in train_subjects]
+
     if len(train_channel_sets) == 1:
         common_train = sorted(list(train_channel_sets[0]))
     else:
         common_train = sorted(list(set.intersection(*train_channel_sets)))
-    
+
     test_channels = set(extract_eeg_channels(subj_to_epochs[test_subject]))
     return sorted([ch for ch in common_train if ch in test_channels])
-
 
 
 ###################################################################
 # ROI Channel Operations
 ###################################################################
+
 
 def canonicalize_ch_name(ch: str) -> str:
     cleaned = ch.strip()
@@ -677,21 +672,21 @@ def find_roi_channels(info: mne.Info, patterns: List[str]) -> List[str]:
     channel_names = info["ch_names"]
     canon_map = {ch: canonicalize_ch_name(ch) for ch in channel_names}
     matched_channels = set()
-    
+
     for pattern in patterns:
         regex = re.compile(pattern, flags=re.IGNORECASE)
         for ch_name in channel_names:
             canon_name = canon_map.get(ch_name, ch_name)
             if regex.match(ch_name) or regex.match(canon_name):
                 matched_channels.add(ch_name)
-    
+
     ordered_channels = []
     seen = set()
     for ch_name in channel_names:
         if ch_name in matched_channels and ch_name not in seen:
             ordered_channels.append(ch_name)
             seen.add(ch_name)
-    
+
     return ordered_channels
 
 
@@ -705,40 +700,41 @@ def build_rois_from_info(info: mne.Info, config=None) -> Dict[str, List[str]]:
     return rois
 
 
-
-
 ###################################################################
 # TFR Parameter Computation
 ###################################################################
+
 
 def compute_adaptive_n_cycles(
     freqs: Union[np.ndarray, list],
     cycles_factor: Optional[float] = None,
     min_cycles: Optional[float] = None,
     max_cycles: Optional[float] = None,
-    config: Optional[Any] = None
+    config: Optional[Any] = None,
 ) -> np.ndarray:
     """
     Compute adaptive n_cycles for Morlet wavelets.
-    
+
     Formula: n_cycles = freq / cycles_factor, clamped to [min_cycles, max_cycles].
-    
+
     With n_cycles_factor=2.0 (default), this gives:
     - 4 Hz -> 2 cycles (clamped to min_cycles=3)
     - 10 Hz -> 5 cycles
     - 40 Hz -> 20 cycles (clamped to max_cycles=15 if set)
     - 80 Hz -> 40 cycles (clamped to max_cycles=15 if set)
-    
+
     The max_cycles cap prevents extreme temporal smoothing at high frequencies
     (gamma band), which can degrade PAC/ITPC time structure.
     """
     if cycles_factor is None:
-        cycles_factor = _get_config_float(config, "time_frequency_analysis.tfr.n_cycles_factor", 2.0)
+        cycles_factor = _get_config_float(
+            config, "time_frequency_analysis.tfr.n_cycles_factor", 2.0
+        )
     if min_cycles is None:
         min_cycles = _get_config_float(config, "time_frequency_analysis.tfr.min_cycles", 3.0)
     if max_cycles is None:
         max_cycles = _get_config_float(config, "time_frequency_analysis.tfr.max_cycles", None)
-    
+
     freqs = np.asarray(freqs, dtype=float)
     if freqs.size == 0 or not np.all(np.isfinite(freqs)) or np.any(freqs <= 0):
         raise ValueError("time_frequency_analysis.tfr frequencies must be finite and > 0.")
@@ -762,10 +758,10 @@ def compute_adaptive_n_cycles(
             )
     base_cycles = freqs / cycles_factor
     n_cycles = np.maximum(base_cycles, min_cycles)
-    
+
     if max_cycles is not None and np.isfinite(max_cycles) and max_cycles > 0:
         n_cycles = np.minimum(n_cycles, max_cycles)
-    
+
     return n_cycles
 
 
@@ -774,8 +770,6 @@ def _get_config_float(config: Optional[Any], key: str, default: float) -> float:
     if config is None:
         return default
     return float(config.get(key, default))
-
-
 
 
 def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:
@@ -808,14 +802,15 @@ def get_bands_for_tfr(
     if band_bounds is None:
         config = ensure_config(config)
         from ..config.loader import get_frequency_bands
-        
+
         config_bands = get_frequency_bands(config)
         if not config_bands:
-            raise ValueError("No frequency bands found in config. Check time_frequency_analysis.bands")
-        
+            raise ValueError(
+                "No frequency bands found in config. Check time_frequency_analysis.bands"
+            )
+
         band_bounds = {
-            k: (v[0], v[1] if v[1] is not None else None)
-            for k, v in dict(config_bands).items()
+            k: (v[0], v[1] if v[1] is not None else None) for k, v in dict(config_bands).items()
         }
 
     max_freq = max_freq_available
@@ -825,7 +820,7 @@ def get_bands_for_tfr(
         else:
             config = ensure_config(config)
             max_freq = float(config.get("time_frequency_analysis.tfr.freq_max"))
-    
+
     standard_bands = ["delta", "theta", "alpha", "beta"]
     bands = {k: v for k, v in band_bounds.items() if k in standard_bands}
 
@@ -833,13 +828,14 @@ def get_bands_for_tfr(
     if gamma_lower is None or gamma_upper is None:
         config = ensure_config(config)
         from ..config.loader import get_frequency_bands
+
         config_bands = get_frequency_bands(config)
         if "gamma" not in config_bands:
             raise ValueError("Gamma band not found in config frequency bands")
         default_gamma = config_bands["gamma"]
         gamma_lower = gamma_lower if gamma_lower is not None else default_gamma[0]
         gamma_upper = gamma_upper if gamma_upper is not None else default_gamma[1]
-    
+
     bands["gamma"] = (gamma_lower, min(gamma_upper or max_freq, max_freq))
     return bands
 
@@ -847,6 +843,7 @@ def get_bands_for_tfr(
 ###################################################################
 # TFR I/O with Unit Standardization
 ###################################################################
+
 
 def save_tfr_with_sidecar(
     tfr: Union["mne.time_frequency.EpochsTFR", "mne.time_frequency.AverageTFR"],
@@ -857,7 +854,7 @@ def save_tfr_with_sidecar(
     config=None,
 ) -> None:
     logger = _get_logger(logger)
-    
+
     if mode is None:
         config = ensure_config(config)
         mode = str(config.get("time_frequency_analysis.baseline_mode"))
@@ -865,7 +862,7 @@ def save_tfr_with_sidecar(
     path = Path(out_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tfr.save(str(path), overwrite=True)
-    
+
     sidecar = {
         "baseline_applied": True,
         "baseline_mode": str(mode),
@@ -876,7 +873,7 @@ def save_tfr_with_sidecar(
     }
     with open(path.with_suffix(".json"), "w", encoding="utf-8") as f:
         json.dump(sidecar, f, indent=2)
-    
+
     logger.info(f"Saved TFR and sidecar: {path} (+ .json)")
 
 
@@ -884,32 +881,73 @@ def save_tfr_with_sidecar(
 # TFR Baseline Operations
 ###################################################################
 
+
+def morlet_taper_half_width(
+    freqs: np.ndarray,
+    sfreq: float,
+    n_cycles: np.ndarray,
+) -> float:
+    """Return the widest Morlet half-width in seconds across the requested frequencies.
+
+    A Morlet wavelet is centred on its sample, so a baseline window must stay at least
+    this far from both the event and the epoch boundary. Otherwise the estimate at the
+    window edge is built partly from data outside the window.
+    """
+    from mne.time_frequency import morlet
+
+    cycles = np.broadcast_to(np.asarray(n_cycles, dtype=float), np.shape(freqs))
+    return max(
+        (len(morlet(float(sfreq), [float(freq)], n_cycles=float(cycle))[0]) // 2) / float(sfreq)
+        for freq, cycle in zip(np.asarray(freqs, dtype=float), cycles, strict=True)
+    )
+
+
 def validate_baseline_window(
     times: np.ndarray,
     baseline: Tuple[float, float],
     min_samples: Optional[int] = None,
     config=None,
+    taper_half_width: Optional[float] = None,
 ) -> Tuple[float, float, np.ndarray]:
     if min_samples is None:
         config = ensure_config(config)
         min_samples = _get_min_baseline_samples(config)
-    
+
     b_start, b_end = baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
     b_end = 0.0 if b_end is None else float(b_end)
-    
+
     if b_end > 0:
         raise ValueError(f"Baseline window must end at or before 0 s, got [{b_start}, {b_end}]")
-    
+
+    if taper_half_width is not None:
+        margin = float(taper_half_width)
+        if b_end > -margin:
+            raise ValueError(
+                f"Baseline window ends at {b_end:.3f} s but the widest taper is "
+                f"{2 * margin:.3f} s across, so the estimate there draws on data up to "
+                f"{b_end + margin:.3f} s after the event. End the baseline at or before "
+                f"{-margin:.2f} s. The leak scales with each condition's response, so it "
+                "biases condition differences rather than cancelling in them."
+            )
+        earliest = float(times.min()) + margin
+        if b_start < earliest - 1e-9:
+            raise ValueError(
+                f"Baseline window starts at {b_start:.3f} s but the epoch starts at "
+                f"{float(times.min()):.3f} s, so with a {2 * margin:.3f} s taper the "
+                f"estimate there draws on padding. Start the baseline at or after "
+                f"{earliest:.2f} s."
+            )
+
     if b_start >= b_end:
         raise ValueError(
             f"Baseline window start ({b_start}) must be < end ({b_end}). "
             f"Invalid baseline window configuration."
         )
-    
+
     mask = (times >= b_start) & (times < b_end)
     n_samples = int(mask.sum())
-    
+
     if n_samples < min_samples:
         msg = (
             f"Baseline window [{b_start:.3f}, {b_end:.3f}] s has {n_samples} samples; "
@@ -918,7 +956,7 @@ def validate_baseline_window(
         logger = _get_logger(None)
         logger.error(msg)
         raise ValueError(msg)
-    
+
     return b_start, b_end, mask
 
 
@@ -930,7 +968,7 @@ def restrict_epochs_to_roi(
 ) -> mne.Epochs:
     """
     Restrict epochs to channels within a specified ROI.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -941,7 +979,7 @@ def restrict_epochs_to_roi(
         Configuration object
     logger : logging.Logger
         Logger instance
-        
+
     Returns
     -------
     mne.Epochs
@@ -949,26 +987,24 @@ def restrict_epochs_to_roi(
     """
     if roi_selection is None:
         return epochs
-    
+
     roi_map = build_rois_from_info(epochs.info, config=config)
     if roi_selection not in roi_map:
         raise ValueError(
             f"ROI '{roi_selection}' was requested for TFR extraction but is not "
             "defined or has no matching channels."
         )
-    
+
     channels = roi_map[roi_selection]
     epochs_restricted = epochs.pick_channels(channels)
     logger.info(f"Restricted TF computation to ROI '{roi_selection}' ({len(channels)} channels)")
     return epochs_restricted
 
 
-def apply_baseline_to_tfr(
-    tfr, config, logger
-) -> Tuple[bool, Optional[Tuple[float, float]]]:
+def apply_baseline_to_tfr(tfr, config, logger) -> Tuple[bool, Optional[Tuple[float, float]]]:
     """
     Apply baseline correction to a TFR object using logratio mode.
-    
+
     Parameters
     ----------
     tfr : mne.time_frequency.EpochsTFR or mne.time_frequency.AverageTFR
@@ -977,7 +1013,7 @@ def apply_baseline_to_tfr(
         Configuration object
     logger : logging.Logger
         Logger instance
-        
+
     Returns
     -------
     Tuple[bool, Optional[Tuple[float, float]]]
@@ -985,16 +1021,20 @@ def apply_baseline_to_tfr(
     """
     baseline_applied = False
     baseline_window_used = None
-    baseline_window = config.get(
-        "time_frequency_analysis.baseline_window", [-5.0, -0.01]
-    )
+    baseline_window = config.get("time_frequency_analysis.baseline_window", [-4.6, -2.4])
     min_baseline_samples = _get_min_baseline_samples(config)
-    
+
     try:
+        half_width = morlet_taper_half_width(
+            tfr.freqs,
+            float(tfr.info["sfreq"]),
+            compute_adaptive_n_cycles(tfr.freqs, config=config),
+        )
         b_start, b_end, _ = validate_baseline_window(
             tfr.times,
             tuple(baseline_window),
             min_samples=min_baseline_samples,
+            taper_half_width=half_width,
         )
         baseline_applied = apply_baseline_safe(
             tfr,
@@ -1006,11 +1046,9 @@ def apply_baseline_to_tfr(
         )
         baseline_window_used = _extract_baseline_from_comment(tfr, (b_start, b_end))
     except (ValueError, RuntimeError) as err:
-        logger.error(
-            f"Baseline validation failed ({err}); raising error"
-        )
+        logger.error(f"Baseline validation failed ({err}); raising error")
         raise
-    
+
     return baseline_applied, baseline_window_used
 
 
@@ -1030,7 +1068,7 @@ def validate_baseline_indices(
 
     if b_end > 0:
         raise ValueError("Baseline window must end at or before 0 s (stimulus onset)")
-    
+
     if b_start >= b_end:
         raise ValueError(
             f"Baseline window start ({b_start}) must be < end ({b_end}). "
@@ -1042,8 +1080,7 @@ def validate_baseline_indices(
 
     if len(idx) < min_samples:
         raise ValueError(
-            f"Baseline window contains only {len(idx)} samples "
-            f"(minimum {min_samples} required)"
+            f"Baseline window contains only {len(idx)} samples " f"(minimum {min_samples} required)"
         )
 
     if logger is not None:
@@ -1065,13 +1102,13 @@ def _check_baseline_already_applied(
 ) -> bool:
     if force:
         return False
-    
+
     constants = _get_tfr_constants(config)
     comment = getattr(tfr_obj, "comment", None)
     baseline_sentinel = constants["baseline_sentinel"]
     if not isinstance(comment, str) or baseline_sentinel not in comment:
         return False
-    
+
     logger.warning(
         f"Detected baseline-corrected TFR by sentinel '{baseline_sentinel}' in comment; "
         f"skipping re-application to prevent double-baselining. "
@@ -1117,13 +1154,13 @@ def apply_baseline_safe(
         return True
 
     times = np.asarray(tfr_obj.times)
-    
+
     if min_samples is None:
         min_samples = _get_min_baseline_samples(config)
-    
+
     baseline_start = float(times.min()) if baseline[0] is None else float(baseline[0])
     baseline_end = 0.0 if baseline[1] is None else float(baseline[1])
-    
+
     if baseline_end > 0:
         error_msg = (
             f"Baseline window must end at or before 0 s (pre-stimulus), "
@@ -1132,21 +1169,23 @@ def apply_baseline_safe(
         )
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
+
     baseline_start_clipped, baseline_end_clipped = _clip_baseline_window(
         baseline_start, baseline_end, times, logger
     )
-    
+
     _validate_baseline_samples(
         baseline_start_clipped, baseline_end_clipped, times, min_samples, logger
     )
-    
+
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         tfr_obj.apply_baseline(
             baseline=(baseline_start_clipped, baseline_end_clipped),
             mode=mode,
         )
-    _add_baseline_comment(tfr_obj, mode, baseline_start_clipped, baseline_end_clipped, config=config)
+    _add_baseline_comment(
+        tfr_obj, mode, baseline_start_clipped, baseline_end_clipped, config=config
+    )
     logger.debug(
         "Applied baseline %s with mode='%s'.",
         (baseline_start_clipped, baseline_end_clipped),
@@ -1160,16 +1199,16 @@ def _validate_baseline_samples(
     baseline_end_clipped: float,
     times: np.ndarray,
     min_samples: int,
-    logger: logging.Logger
+    logger: logging.Logger,
 ) -> None:
     times_array = np.asarray(times)
     baseline_mask = (times_array >= baseline_start_clipped) & (times_array < baseline_end_clipped)
     n_samples = int(baseline_mask.sum())
     min_required_samples = max(1, min_samples)
-    
+
     is_invalid_window = baseline_start_clipped >= baseline_end_clipped
     has_insufficient_samples = n_samples < min_required_samples
-    
+
     if is_invalid_window or has_insufficient_samples:
         time_min_available = float(times[0])
         time_max_available = float(times[-1])
@@ -1188,11 +1227,11 @@ def _add_baseline_comment(
     mode: str,
     baseline_start_clipped: float,
     baseline_end_clipped: float,
-    config: Optional[Any] = None
+    config: Optional[Any] = None,
 ) -> None:
     constants = _get_tfr_constants(config)
     previous_comment = getattr(tfr_obj, "comment", "")
-    baseline_sentinel = constants['baseline_sentinel']
+    baseline_sentinel = constants["baseline_sentinel"]
     baseline_tag = (
         f"{baseline_sentinel}mode={mode};"
         f"win=({baseline_start_clipped:.3f},{baseline_end_clipped:.3f})"
@@ -1225,45 +1264,42 @@ def apply_baseline_and_crop(
         config=config,
     )
 
-    baseline_used = _extract_baseline_from_comment(tfr_obj, baseline) if baseline_applied else baseline
+    baseline_used = (
+        _extract_baseline_from_comment(tfr_obj, baseline) if baseline_applied else baseline
+    )
 
     if crop_window is not None:
         _apply_crop_window(tfr_obj, crop_window, logger)
-    
+
     return baseline_used
 
 
 def _extract_baseline_from_comment(
-    tfr_obj: Any,
-    default_baseline: Tuple[Optional[float], Optional[float]]
+    tfr_obj: Any, default_baseline: Tuple[Optional[float], Optional[float]]
 ) -> Tuple[float, float]:
     if not hasattr(tfr_obj, "comment"):
         return default_baseline
-    
+
     comment = str(tfr_obj.comment)
     match = re.search(r"BASELINED:.*?win=\(([^,]+),([^)]+)\)", comment)
     if match:
         return (float(match.group(1)), float(match.group(2)))
-    
+
     return default_baseline
 
 
 def _apply_crop_window(
-    tfr_obj: Any,
-    crop_window: Tuple[Optional[float], Optional[float]],
-    logger: logging.Logger
+    tfr_obj: Any, crop_window: Tuple[Optional[float], Optional[float]], logger: logging.Logger
 ) -> None:
     times = np.asarray(tfr_obj.times)
     tmin_req, tmax_req = crop_window
     tmin_avail, tmax_avail = float(times[0]), float(times[-1])
-    
+
     tmin_req = float(times.min()) if tmin_req is None else float(tmin_req)
     tmax_req = float(times.max()) if tmax_req is None else float(tmax_req)
-    
+
     if tmin_req > tmax_req:
-        raise ValueError(
-            f"Requested crop window start ({tmin_req}) must be <= end ({tmax_req})."
-        )
+        raise ValueError(f"Requested crop window start ({tmin_req}) must be <= end ({tmax_req}).")
 
     if tmin_req < tmin_avail or tmax_req > tmax_avail:
         raise ValueError(
@@ -1278,6 +1314,7 @@ def _apply_crop_window(
 # TFR Data Extraction and Masking
 ###################################################################
 
+
 def average_tfr_band(tfr_avg, fmin: float, fmax: float, tmin: float, tmax: float):
     freqs = np.asarray(tfr_avg.freqs)
     times = np.asarray(tfr_avg.times)
@@ -1289,34 +1326,29 @@ def average_tfr_band(tfr_avg, fmin: float, fmax: float, tmin: float, tmax: float
     return sel.mean(axis=(1, 2))
 
 
-
-
-
-
 ###################################################################
 # Time Window Utilities
 ###################################################################
 
 
-def clip_time_range(times: np.ndarray, tmin_req: float, tmax_req: float) -> Optional[Tuple[float, float]]:
+def clip_time_range(
+    times: np.ndarray, tmin_req: float, tmax_req: float
+) -> Optional[Tuple[float, float]]:
     tmin_clip = float(max(times.min(), tmin_req))
     tmax_clip = float(min(times.max(), tmax_req))
-    
+
     is_finite = np.isfinite(tmin_clip) and np.isfinite(tmax_clip)
     is_valid_range = tmax_clip > tmin_clip
     if not is_finite or not is_valid_range:
         return None
-    
+
     return tmin_clip, tmax_clip
-
-
-
-
 
 
 ###################################################################
 # TFR Object Extraction Utilities
 ###################################################################
+
 
 def extract_trial_spectral_profiles(
     tfr_epochs,
@@ -1336,13 +1368,13 @@ def extract_trial_spectral_profiles(
 
     times = np.asarray(tfr_epochs.times, dtype=float)
     freqs = np.asarray(tfr_epochs.freqs, dtype=float)
-    
+
     clipped_window = clip_time_range(times, float(active_window[0]), float(active_window[1]))
     if clipped_window is None:
         return None
     tmin, tmax = clipped_window
     a_mask = (times >= tmin) & (times < tmax)
-    
+
     if not np.any(a_mask):
         return None
 
@@ -1359,45 +1391,47 @@ def extract_trial_spectral_profiles(
     b_start = float(times.min()) if baseline[0] is None else float(baseline[0])
     b_end = 0.0 if baseline[1] is None else float(baseline[1])
     b_mask = (times >= b_start) & (times < b_end)
-    
+
     if not np.any(b_mask):
         if logger:
             logger.warning("No timepoints found for baseline window.")
         return None
-        
+
     # Extract baseline power
     baseline_data = np.asarray(tfr_epochs.data, dtype=float)[:, :, :, b_mask]
     baseline_power = np.nanmean(baseline_data, axis=3)  # Average time
-    baseline_power = np.nanmean(baseline_power, axis=1) # Average channels
-    
+    baseline_power = np.nanmean(baseline_power, axis=1)  # Average channels
+
     # Extract active power
     active_data = np.asarray(tfr_epochs.data, dtype=float)[:, :, :, a_mask]
-    active_power = np.nanmean(active_data, axis=3) # Average time
-    active_power = np.nanmean(active_power, axis=1) # Average channels
-    
+    active_power = np.nanmean(active_data, axis=3)  # Average time
+    active_power = np.nanmean(active_power, axis=1)  # Average channels
+
     # Compute log-ratio
     epsilon = 1e-12
     base_floor = np.maximum(baseline_power, epsilon)
     active_floor = np.maximum(active_power, epsilon)
-    
+
     with np.errstate(divide="ignore", invalid="ignore"):
         profiles = np.log10(active_floor / base_floor)
-        
+
     return freqs, profiles
 
 
-def extract_trial_band_power(tfr_epochs, fmin: float, fmax: float, tmin: float, tmax: float) -> Optional[np.ndarray]:
+def extract_trial_band_power(
+    tfr_epochs, fmin: float, fmax: float, tmin: float, tmax: float
+) -> Optional[np.ndarray]:
     if not isinstance(tfr_epochs, mne.time_frequency.EpochsTFR):
         return None
-    
+
     freqs = np.asarray(tfr_epochs.freqs)
     times = np.asarray(tfr_epochs.times)
     f_mask = (freqs >= float(fmin)) & (freqs <= float(fmax))
     t_mask = (times >= float(tmin)) & (times < float(tmax))
-    
+
     if f_mask.sum() == 0 or t_mask.sum() == 0:
         return None
-    
+
     sel = np.asarray(tfr_epochs.data)[:, :, f_mask, :][:, :, :, t_mask]  # (trials, ch, f, t)
     if sel.size == 0:
         return None
@@ -1425,35 +1459,47 @@ def build_roi_channel_mask(ch_names: List[str], roi_channels: List[str]) -> np.n
     return np.array([ch in roi_channels for ch in ch_names], dtype=bool)
 
 
-def extract_significant_roi_channels(ch_names: List[str], mask_vec: np.ndarray, sig_mask: np.ndarray) -> Tuple[List[int], List[str]]:
+def extract_significant_roi_channels(
+    ch_names: List[str], mask_vec: np.ndarray, sig_mask: np.ndarray
+) -> Tuple[List[int], List[str]]:
     roi_sig_indices = [i for i in range(len(ch_names)) if mask_vec[i] and sig_mask[i]]
     roi_sig_chs = [ch_names[i] for i in roi_sig_indices]
     return roi_sig_indices, roi_sig_chs
 
 
-def extract_roi_from_tfr(avg_tfr, roi: str, roi_map: Optional[Dict[str, List[str]]], config) -> Optional[Any]:
+def extract_roi_from_tfr(
+    avg_tfr, roi: str, roi_map: Optional[Dict[str, List[str]]], config
+) -> Optional[Any]:
     if roi_map is not None:
         chs_all = roi_map.get(roi)
         if chs_all is not None:
-            subj_chs = avg_tfr.info['ch_names']
+            subj_chs = avg_tfr.info["ch_names"]
             canon_subj = {canonicalize_ch_name(ch).upper(): ch for ch in subj_chs}
             want = {canonicalize_ch_name(ch).upper() for ch in chs_all}
-            chs = [canon_subj[canonicalize_ch_name(ch).upper()] for ch in subj_chs if canonicalize_ch_name(ch).upper() in want]
+            chs = [
+                canon_subj[canonicalize_ch_name(ch).upper()]
+                for ch in subj_chs
+                if canonicalize_ch_name(ch).upper() in want
+            ]
             if len(chs) > 0:
                 picks = mne.pick_channels(subj_chs, include=chs, exclude=[])
                 roi_tfr = avg_tfr.copy()
-                roi_tfr.data = np.nanmean(np.asarray(avg_tfr.data)[picks, :, :], axis=0, keepdims=True)
-                roi_tfr.info = mne.create_info([f"ROI:{roi}"], sfreq=avg_tfr.info['sfreq'], ch_types='eeg')
+                roi_tfr.data = np.nanmean(
+                    np.asarray(avg_tfr.data)[picks, :, :], axis=0, keepdims=True
+                )
+                roi_tfr.info = mne.create_info(
+                    [f"ROI:{roi}"], sfreq=avg_tfr.info["sfreq"], ch_types="eeg"
+                )
                 return roi_tfr
-    
+
     roi_defs = get_rois(config)
     pats = roi_defs.get(roi, [])
     chs = find_roi_channels(avg_tfr.info, pats)
     if len(chs) > 0:
-        picks = mne.pick_channels(avg_tfr.info['ch_names'], include=chs, exclude=[])
+        picks = mne.pick_channels(avg_tfr.info["ch_names"], include=chs, exclude=[])
         roi_tfr = avg_tfr.copy()
         roi_tfr.data = np.nanmean(np.asarray(avg_tfr.data)[picks, :, :], axis=0, keepdims=True)
-        roi_tfr.info = mne.create_info([f"ROI:{roi}"], sfreq=avg_tfr.info['sfreq'], ch_types='eeg')
+        roi_tfr.info = mne.create_info([f"ROI:{roi}"], sfreq=avg_tfr.info["sfreq"], ch_types="eeg")
         return roi_tfr
     return None
 
@@ -1464,18 +1510,12 @@ def extract_tfr_object(tfr: Any):
     return tfr[0] if isinstance(tfr, list) else tfr
 
 
-
-
-
-
 def create_tfr_subset(tfr, n: int):
     return tfr.copy()[:n]
 
 
 def apply_baseline_and_average(
-    tfr,
-    baseline: Tuple[Optional[float], Optional[float]],
-    logger: Optional[logging.Logger] = None
+    tfr, baseline: Tuple[Optional[float], Optional[float]], logger: Optional[logging.Logger] = None
 ):
     tfr_copy = tfr.copy()
     if isinstance(tfr_copy, mne.time_frequency.EpochsTFR):

@@ -31,6 +31,7 @@ from eeg_pipeline.cli.commands.info_helpers import (
     _handle_version_mode,
 )
 
+
 def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the info command."""
     logger = _get_logger(args.output_json)

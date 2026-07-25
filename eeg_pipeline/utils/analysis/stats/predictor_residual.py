@@ -310,7 +310,9 @@ def crossfit_predictor_outcome_curve(
     n_valid = int(valid_mask.sum())
     metadata["n_valid"] = n_valid
 
-    min_samples = int(_get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10))
+    min_samples = int(
+        _get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10)
+    )
     if n_valid < min_samples:
         metadata["status"] = "skipped_insufficient_samples"
         return predicted, residual, metadata
@@ -357,7 +359,9 @@ def crossfit_predictor_outcome_curve(
         fold_metadata.append(model_metadata)
 
     if not np.isfinite(cv_predictions).all():
-        raise ValueError("Predictor residual crossfit failed to produce finite predictions for all held-out groups.")
+        raise ValueError(
+            "Predictor residual crossfit failed to produce finite predictions for all held-out groups."
+        )
 
     predicted.loc[predictor_valid.index] = cv_predictions
     residual.loc[outcome_valid.index] = outcome_valid.to_numpy(dtype=float) - cv_predictions
@@ -387,7 +391,9 @@ def fit_predictor_outcome_curve(
     n_valid = int(valid_mask.sum())
     metadata["n_valid"] = n_valid
 
-    min_samples = int(_get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10))
+    min_samples = int(
+        _get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10)
+    )
     if n_valid < min_samples:
         metadata["status"] = "skipped_insufficient_samples"
         predicted = pd.Series(np.nan, index=common_index, dtype=float)

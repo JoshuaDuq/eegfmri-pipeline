@@ -18,7 +18,6 @@ from scipy.signal import hilbert
 
 from eeg_pipeline.types import BandData, PSDData
 
-
 # Filter design constants
 FILTER_LENGTH_MULTIPLIER = 6.6
 MIN_FILTER_LENGTH = 3
@@ -62,14 +61,14 @@ def _safe_filter_length(n_times: int, sfreq: float, l_freq: float) -> str:
     """Compute filter length that fits within signal, or 'auto' if safe."""
     effective_l_freq = l_freq if l_freq > 0 else DEFAULT_LOW_FREQ_HZ
     default_length = int(FILTER_LENGTH_MULTIPLIER * sfreq / effective_l_freq)
-    
+
     if default_length >= n_times:
         safe_length = n_times - 1
         if safe_length % 2 == 0:
             safe_length -= 1
         return str(max(safe_length, MIN_FILTER_LENGTH))
-    
-    return 'auto'
+
+    return "auto"
 
 
 def _parse_padding_config(
@@ -80,7 +79,7 @@ def _parse_padding_config(
     """Extract padding parameters from config or function arguments."""
     pad_seconds = DEFAULT_PAD_SECONDS
     pad_cycles_value = DEFAULT_PAD_CYCLES
-    
+
     if config is not None and hasattr(config, "get"):
         config_pad_sec = config.get("feature_engineering.band_envelope.pad_sec")
         if config_pad_sec is not None:
@@ -88,26 +87,26 @@ def _parse_padding_config(
                 pad_seconds = float(config_pad_sec)
             except (ValueError, TypeError):
                 pass
-        
+
         config_pad_cycles = config.get("feature_engineering.band_envelope.pad_cycles")
         if config_pad_cycles is not None:
             try:
                 pad_cycles_value = float(config_pad_cycles)
             except (ValueError, TypeError):
                 pass
-    
+
     if pad_sec is not None:
         try:
             pad_seconds = float(pad_sec)
         except (ValueError, TypeError):
             pass
-    
+
     if pad_cycles is not None:
         try:
             pad_cycles_value = float(pad_cycles)
         except (ValueError, TypeError):
             pass
-    
+
     return pad_seconds, pad_cycles_value
 
 
@@ -123,17 +122,17 @@ def _compute_padding_samples(
         cycle_pad_seconds = 0.0
     else:
         cycle_pad_seconds = pad_cycles / fmin
-    
+
     effective_pad_seconds = max(pad_seconds, cycle_pad_seconds)
-    
+
     if not (np.isfinite(effective_pad_seconds) and effective_pad_seconds > 0):
         return 0
-    
+
     pad_samples = int(round(effective_pad_seconds * sfreq))
-    
+
     if n_times <= 1:
         return 0
-    
+
     return max(0, min(pad_samples, n_times - 1))
 
 
@@ -141,7 +140,7 @@ def _apply_padding(data: np.ndarray, pad_samples: int) -> Tuple[np.ndarray, int]
     """Apply symmetric padding to data and return padded data and new length."""
     if pad_samples <= 0:
         return data, data.shape[-1]
-    
+
     padded = np.pad(
         data,
         pad_width=((0, 0), (pad_samples, pad_samples)),
@@ -159,7 +158,7 @@ def _remove_padding(
     """Remove padding from filtered and analytic signals."""
     if pad_samples <= 0 or n_times_padded <= (2 * pad_samples):
         return filtered, analytic
-    
+
     filtered_unpadded = filtered[:, pad_samples:-pad_samples]
     analytic_unpadded = analytic[:, pad_samples:-pad_samples]
     return filtered_unpadded, analytic_unpadded
@@ -180,7 +179,7 @@ def compute_band_data(
 ) -> BandData:
     """
     Compute all band-related quantities once.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -203,7 +202,7 @@ def compute_band_data(
         Padding in cycles (overrides config)
     config : Any
         Configuration object with padding parameters
-    
+
     Returns
     -------
     BandData
@@ -211,36 +210,32 @@ def compute_band_data(
     """
     if data.ndim != 3:
         raise ValueError(f"Expected 3D data, got {data.ndim}D")
-    
+
     if sfreq <= 0:
         raise ValueError(f"Invalid sampling frequency: {sfreq}")
-    
+
     if fmin >= fmax or fmin < 0:
         raise ValueError(f"Invalid frequency range: [{fmin}, {fmax}]")
-    
+
     if fmax > sfreq / 2:
         raise ValueError(f"fmax {fmax} exceeds Nyquist frequency {sfreq / 2}")
-    
+
     n_epochs, n_channels, n_times = data.shape
-    
+
     if n_times < 1:
         raise ValueError("Data has no time samples")
-    
+
     try:
         flat_data = data.reshape(-1, n_times)
-        
-        pad_seconds, pad_cycles = _parse_padding_config(
-            config, pad_sec, pad_cycles
-        )
-        
-        pad_samples = _compute_padding_samples(
-            pad_seconds, pad_cycles, fmin, sfreq, n_times
-        )
-        
+
+        pad_seconds, pad_cycles = _parse_padding_config(config, pad_sec, pad_cycles)
+
+        pad_samples = _compute_padding_samples(pad_seconds, pad_cycles, fmin, sfreq, n_times)
+
         flat_data_padded, n_times_padded = _apply_padding(flat_data, pad_samples)
-        
+
         filter_length = _safe_filter_length(n_times_padded, sfreq, fmin)
-        
+
         filtered = mne.filter.filter_data(
             flat_data_padded,
             sfreq,
@@ -250,20 +245,18 @@ def compute_band_data(
             n_jobs=n_jobs,
             verbose=False,
         )
-        
+
         analytic = hilbert(filtered, axis=-1)
-        
-        filtered, analytic = _remove_padding(
-            filtered, analytic, pad_samples, n_times_padded
-        )
-        
+
+        filtered, analytic = _remove_padding(filtered, analytic, pad_samples, n_times_padded)
+
         filtered = filtered.reshape(n_epochs, n_channels, n_times)
         analytic = analytic.reshape(n_epochs, n_channels, n_times)
-        
+
         envelope = np.abs(analytic)
         phase = np.angle(analytic)
-        power = envelope ** 2
-        
+        power = envelope**2
+
         return BandData(
             band=band,
             fmin=fmin,
@@ -274,7 +267,7 @@ def compute_band_data(
             phase=phase,
             power=power,
         )
-        
+
     except (ValueError, IndexError, RuntimeError) as exc:
         if logger:
             logger.error(f"Failed to compute band data for {band}: {exc}")
@@ -288,16 +281,16 @@ def _parse_psd_config(config: Any, n_times: int, sfreq: float) -> dict[str, Any]
         psd_cfg = config.get("feature_engineering.psd", {}) or {}
         if not psd_cfg:
             psd_cfg = config.get("feature_engineering.spectral", {}) or {}
-    
+
     nyquist_freq = sfreq / 2.0
     default_fmax = min(DEFAULT_PSD_FMAX_HZ, nyquist_freq - DEFAULT_PSD_FMAX_OFFSET_HZ)
     default_n_fft = min(n_times, int(DEFAULT_PSD_FFT_MULTIPLIER * sfreq))
     default_n_overlap = max(0, default_n_fft // 2)
-    
+
     n_fft_raw = psd_cfg.get("n_fft", None)
     n_fft = default_n_fft if n_fft_raw is None else int(n_fft_raw)
     n_fft = max(2, min(n_fft, n_times))
-    
+
     n_overlap_raw = psd_cfg.get("n_overlap", None)
     if n_overlap_raw is None:
         n_overlap = default_n_overlap if n_fft == default_n_fft else max(0, n_fft // 2)
@@ -325,7 +318,7 @@ def compute_psd(
 ) -> PSDData:
     """
     Compute power spectral density using Welch's method.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -338,7 +331,7 @@ def compute_psd(
         Logger instance for warnings and errors
     min_samples : int
         Minimum number of time samples required
-    
+
     Returns
     -------
     PSDData
@@ -346,29 +339,23 @@ def compute_psd(
     """
     if data.ndim != 3:
         raise ValueError(f"Expected 3D data, got {data.ndim}D")
-    
+
     if sfreq <= 0:
         raise ValueError(f"Invalid sampling frequency: {sfreq}")
-    
+
     n_epochs, n_channels, n_times = data.shape
-    
+
     if n_times < min_samples:
-        raise ValueError(
-            f"PSD requires at least {int(min_samples)} samples, got {int(n_times)}."
-        )
-    
+        raise ValueError(f"PSD requires at least {int(min_samples)} samples, got {int(n_times)}.")
+
     psd_params = _parse_psd_config(config, n_times, sfreq)
-    
+
     if psd_params["fmin"] >= psd_params["fmax"]:
-        raise ValueError(
-            f"Invalid frequency range: [{psd_params['fmin']}, {psd_params['fmax']}]"
-        )
-    
+        raise ValueError(f"Invalid frequency range: [{psd_params['fmin']}, {psd_params['fmax']}]")
+
     if psd_params["fmax"] > sfreq / 2.0:
-        raise ValueError(
-            f"fmax {psd_params['fmax']} exceeds Nyquist frequency {sfreq / 2.0}"
-        )
-    
+        raise ValueError(f"fmax {psd_params['fmax']} exceeds Nyquist frequency {sfreq / 2.0}")
+
     try:
         psd_all, freqs = psd_array_welch(
             data,
@@ -385,7 +372,7 @@ def compute_psd(
         if logger:
             logger.error("PSD computation failed: %s", exc)
         raise RuntimeError(f"PSD computation failed: {exc}") from exc
-    
+
     return PSDData(freqs=freqs, psd=psd_all)
 
 
@@ -408,14 +395,14 @@ def compute_psd_bandpower(
 ) -> dict[str, np.ndarray]:
     """
     Compute PSD-integrated band power (scientifically valid for ratios/asymmetry).
-    
+
     This is the correct approach for band power ratios and asymmetry metrics.
     Unlike Hilbert envelope², PSD integration:
     - Properly accounts for 1/f spectral slope
     - Is bandwidth-normalized (power per Hz)
     - Has well-defined statistical properties
     - Is comparable across bands of different widths
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -446,7 +433,7 @@ def compute_psd_bandpower(
         Number of harmonics to exclude. Default 3.
     logger : Optional[logging.Logger]
         Logger for warnings
-    
+
     Returns
     -------
     dict[str, np.ndarray]
@@ -454,20 +441,18 @@ def compute_psd_bandpower(
     """
     if data.ndim != 3:
         raise ValueError(f"Expected 3D data, got {data.ndim}D")
-    
+
     if sfreq <= 0:
         raise ValueError(f"Invalid sampling frequency: {sfreq}")
-    
+
     n_epochs, n_channels, n_times = data.shape
-    
+
     if n_times < 64:
-        raise ValueError(
-            f"PSD bandpower requires at least 64 samples, got {int(n_times)}."
-        )
-    
+        raise ValueError(f"PSD bandpower requires at least 64 samples, got {int(n_times)}.")
+
     nyquist = sfreq / 2.0
     fmax = min(fmax, nyquist - 0.5)
-    
+
     try:
         if psd_method == "multitaper":
             psds, freqs = psd_array_multitaper(
@@ -497,16 +482,16 @@ def compute_psd_bandpower(
         if logger:
             logger.error("PSD computation failed: %s", exc)
         raise RuntimeError(f"PSD computation failed: {exc}") from exc
-    
+
     freqs = np.asarray(freqs, dtype=float)
     psds = np.asarray(psds, dtype=float)
-    
+
     # Compute frequency bin widths for integration
     if len(freqs) > 1:
         df = np.gradient(freqs)
     else:
         df = np.ones_like(freqs)
-    
+
     # Build line-noise exclusion mask if requested
     line_noise_mask = np.zeros(len(freqs), dtype=bool)
     if exclude_line_noise and line_freqs:
@@ -519,41 +504,45 @@ def compute_psd_bandpower(
         if logger and np.any(line_noise_mask):
             n_excluded = np.sum(line_noise_mask)
             logger.debug("Excluding %d frequency bins for line noise", n_excluded)
-    
+
     band_power: dict[str, np.ndarray] = {}
-    
+
     for band_name, (band_fmin, band_fmax) in band_ranges.items():
         band_mask = (freqs >= band_fmin) & (freqs <= band_fmax)
-        
+
         # Exclude line noise bins from band integration
         if exclude_line_noise:
             band_mask = band_mask & ~line_noise_mask
-        
+
         if not np.any(band_mask):
             if logger:
                 logger.warning(
                     "Band '%s' [%.1f-%.1f Hz] outside PSD range [%.1f-%.1f Hz]; skipping.",
-                    band_name, band_fmin, band_fmax, freqs.min(), freqs.max()
+                    band_name,
+                    band_fmin,
+                    band_fmax,
+                    freqs.min(),
+                    freqs.max(),
                 )
             band_power[band_name] = np.full((n_epochs, n_channels), np.nan)
             continue
-        
+
         # Integrate PSD over band: sum(PSD * df)
         psd_band = psds[..., band_mask]
         df_band = df[band_mask]
-        
+
         # Weighted integration (handles non-uniform frequency spacing)
         integrated_power = np.sum(psd_band * df_band, axis=-1)
-        
+
         if normalize_by_bandwidth:
             # Power per Hz (comparable across bands of different widths)
             # Use actual integrated bandwidth (excluding line noise gaps)
             actual_bandwidth = np.sum(df_band)
             if actual_bandwidth > 0:
                 integrated_power = integrated_power / actual_bandwidth
-        
+
         band_power[band_name] = integrated_power
-    
+
     return band_power
 
 
@@ -566,12 +555,12 @@ def subtract_evoked(
 ) -> np.ndarray:
     """
     Subtract evoked (phase-locked) response to isolate induced activity.
-    
+
     For spectral analysis of event-related data, the
     evoked response (ERP) can contaminate power/spectral estimates, especially
     at low frequencies. Subtracting the evoked response isolates "induced"
     oscillatory activity that is time-locked but not phase-locked to the stimulus.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -580,21 +569,21 @@ def subtract_evoked(
         If provided, subtract condition-specific evoked responses. Array of
         length n_epochs with condition labels. If None, subtract grand average
         across all epochs.
-    
+
     Returns
     -------
     np.ndarray
         Induced data with same shape as input (data - evoked)
-    
+
     Notes
     -----
     This is the standard approach for computing "induced" power in EEG/MEG:
     - Total power = Evoked power + Induced power
     - Induced = Total - Evoked
-    
+
     In event-related paradigms, induced power often better reflects ongoing
     oscillatory changes, while evoked power reflects transient responses.
-    
+
     References
     ----------
     Tallon-Baudry & Bertrand (1999). Oscillatory gamma activity in humans
@@ -602,10 +591,10 @@ def subtract_evoked(
     """
     if data.ndim != 3:
         raise ValueError(f"Expected 3D data (epochs, channels, times), got {data.ndim}D")
-    
+
     n_epochs, n_channels, n_times = data.shape
     induced = data.copy()
-    
+
     if train_mask is not None:
         train_mask = np.asarray(train_mask, dtype=bool).ravel()
         if train_mask.size != n_epochs:
@@ -668,7 +657,7 @@ def subtract_evoked(
             condition_evoked = np.nanmean(data[cond_mask_ref], axis=0, keepdims=True)
 
             induced[cond_mask_all] = data[cond_mask_all] - condition_evoked
-    
+
     return induced
 
 
@@ -681,7 +670,7 @@ def bandpass_filter_epochs(
 ) -> np.ndarray:
     """
     Bandpass filter data (2D or 3D).
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -694,7 +683,7 @@ def bandpass_filter_epochs(
         Upper frequency bound in Hz
     n_jobs : int
         Number of parallel jobs for filtering
-    
+
     Returns
     -------
     np.ndarray
@@ -702,28 +691,28 @@ def bandpass_filter_epochs(
     """
     if data.ndim not in (2, 3):
         raise ValueError(f"Expected 2D or 3D data, got {data.ndim}D")
-    
+
     if sfreq <= 0:
         raise ValueError(f"Invalid sampling frequency: {sfreq}")
-    
+
     if fmin >= fmax or fmin < 0:
         raise ValueError(f"Invalid frequency range: [{fmin}, {fmax}]")
-    
+
     if fmax > sfreq / 2:
         raise ValueError(f"fmax {fmax} exceeds Nyquist frequency {sfreq / 2}")
-    
+
     try:
         original_shape = data.shape
-        
+
         if data.ndim == 2:
             flat_data = data
         else:
             n_epochs, n_channels, n_times = data.shape
             flat_data = data.reshape(-1, n_times)
-        
+
         n_times = flat_data.shape[-1]
         filter_length = _safe_filter_length(n_times, sfreq, fmin)
-        
+
         filtered = mne.filter.filter_data(
             flat_data,
             sfreq,
@@ -733,8 +722,8 @@ def bandpass_filter_epochs(
             n_jobs=n_jobs,
             verbose=False,
         )
-        
+
         return filtered.reshape(original_shape)
-        
+
     except (ValueError, IndexError, RuntimeError) as exc:
         raise RuntimeError(f"Bandpass filtering failed: {exc}") from exc

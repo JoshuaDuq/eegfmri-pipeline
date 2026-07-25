@@ -18,6 +18,7 @@ _COMPONENT_RANGE_RE = re.compile(
     r"^\s*([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*-\s*([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*$"
 )
 
+
 def _split_list_tokens(tokens: List[str]) -> List[str]:
     parts: List[str] = []
     for token in tokens:
@@ -55,9 +56,7 @@ def _parse_erp_components(tokens: List[str]) -> List[dict]:
         elif ":" in token:
             name, rest = token.split(":", 1)
         else:
-            raise ValueError(
-                f"Invalid ERP component token {token!r}; expected e.g. n2=0.20-0.35"
-            )
+            raise ValueError(f"Invalid ERP component token {token!r}; expected e.g. n2=0.20-0.35")
         name = name.strip().lower()
         rest = rest.strip()
         if not name:
@@ -90,8 +89,10 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
     if getattr(args, "aec_output", None) is not None:
         config["feature_engineering.connectivity.aec_output"] = args.aec_output
     if getattr(args, "conn_force_within_epoch_for_ml", None) is not None:
-        config["feature_engineering.connectivity.force_within_epoch_for_ml"] = args.conn_force_within_epoch_for_ml
-    
+        config["feature_engineering.connectivity.force_within_epoch_for_ml"] = (
+            args.conn_force_within_epoch_for_ml
+        )
+
     conn_cfg = config.setdefault("feature_engineering", {}).setdefault("connectivity", {})
     if getattr(args, "conn_window_len", None) is not None:
         conn_cfg["sliding_window_len"] = args.conn_window_len
@@ -152,7 +153,7 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
 def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply directed connectivity-related config overrides (PSI, DTF, PDC)."""
     dconn_cfg = config.setdefault("feature_engineering", {}).setdefault("directedconnectivity", {})
-    
+
     if getattr(args, "directed_connectivity_measures", None) is not None:
         measures = args.directed_connectivity_measures
         dconn_cfg["enable_psi"] = "psi" in measures
@@ -173,7 +174,7 @@ def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any)
 def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply source localization-related config overrides (LCMV, eLORETA)."""
     src_cfg = config.setdefault("feature_engineering", {}).setdefault("sourcelocalization", {})
-    
+
     if getattr(args, "source_method", None) is not None:
         src_cfg["method"] = args.source_method
     if getattr(args, "source_spacing", None) is not None:
@@ -276,25 +277,27 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["enabled"] = args.source_fmri_contrast_enabled
     if getattr(args, "source_fmri_contrast_type", None) is not None:
         contrast_cfg["type"] = args.source_fmri_contrast_type
-    
+
     cond_a_cfg = contrast_cfg.setdefault("condition_a", {})
     if getattr(args, "source_fmri_cond_a_column", None) is not None:
         cond_a_cfg["column"] = args.source_fmri_cond_a_column
     if getattr(args, "source_fmri_cond_a_value", None) is not None:
         cond_a_cfg["value"] = args.source_fmri_cond_a_value
-    
+
     cond_b_cfg = contrast_cfg.setdefault("condition_b", {})
     if getattr(args, "source_fmri_cond_b_column", None) is not None:
         cond_b_cfg["column"] = args.source_fmri_cond_b_column
     if getattr(args, "source_fmri_cond_b_value", None) is not None:
         cond_b_cfg["value"] = args.source_fmri_cond_b_value
-    
+
     if getattr(args, "source_fmri_contrast_formula", None) is not None:
         contrast_cfg["formula"] = args.source_fmri_contrast_formula
     if getattr(args, "source_fmri_contrast_name", None) is not None:
         contrast_cfg["name"] = args.source_fmri_contrast_name
     if getattr(args, "source_fmri_runs", None) is not None:
-        contrast_cfg["runs"] = [int(r.strip()) for r in args.source_fmri_runs.split(",") if r.strip()]
+        contrast_cfg["runs"] = [
+            int(r.strip()) for r in args.source_fmri_runs.split(",") if r.strip()
+        ]
     if getattr(args, "source_fmri_hrf_model", None) is not None:
         contrast_cfg["hrf_model"] = args.source_fmri_hrf_model
     if getattr(args, "source_fmri_drift_model", None) is not None:
@@ -341,7 +344,7 @@ def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.pac.min_epochs"] = args.pac_min_epochs
     if getattr(args, "pac_pairs", None) is not None:
         config["feature_engineering.pac.pairs"] = _parse_pair_tokens(args.pac_pairs, label="PAC")
-    
+
     pac_cfg = config.setdefault("feature_engineering", {}).setdefault("pac", {})
     if getattr(args, "pac_source", None) is not None:
         pac_cfg["source"] = args.pac_source
@@ -386,11 +389,11 @@ def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.aperiodic.psd_bandwidth"] = args.aperiodic_psd_bandwidth
     if getattr(args, "aperiodic_max_rms", None) is not None:
         config["feature_engineering.aperiodic.max_rms"] = args.aperiodic_max_rms
-    
+
     # Scientific validity: induced spectra option
     if getattr(args, "aperiodic_subtract_evoked", None) is not None:
         config["feature_engineering.aperiodic.subtract_evoked"] = args.aperiodic_subtract_evoked
-    
+
     aperiodic_cfg = config.setdefault("feature_engineering", {}).setdefault("aperiodic", {})
     if getattr(args, "aperiodic_model", None) is not None:
         aperiodic_cfg["model"] = args.aperiodic_model
@@ -473,7 +476,9 @@ def _apply_burst_overrides(args: argparse.Namespace, config: Any) -> None:
     if getattr(args, "burst_min_segment_sec", None) is not None:
         config["feature_engineering.bursts.min_segment_sec"] = args.burst_min_segment_sec
     if getattr(args, "burst_skip_invalid_segments", None) is not None:
-        config["feature_engineering.bursts.skip_invalid_segments"] = args.burst_skip_invalid_segments
+        config["feature_engineering.bursts.skip_invalid_segments"] = (
+            args.burst_skip_invalid_segments
+        )
     if getattr(args, "burst_bands", None) is not None:
         config["feature_engineering.bursts.bands"] = list(_split_list_tokens(args.burst_bands))
     if getattr(args, "burst_min_duration", None) is not None:
@@ -491,7 +496,9 @@ def _apply_power_overrides(args: argparse.Namespace, config: Any) -> None:
     if getattr(args, "power_subtract_evoked", None) is not None:
         config["feature_engineering.power.subtract_evoked"] = args.power_subtract_evoked
     if getattr(args, "power_min_trials_per_condition", None) is not None:
-        config["feature_engineering.power.min_trials_per_condition"] = args.power_min_trials_per_condition
+        config["feature_engineering.power.min_trials_per_condition"] = (
+            args.power_min_trials_per_condition
+        )
     if getattr(args, "power_exclude_line_noise", None) is not None:
         config["feature_engineering.power.exclude_line_noise"] = args.power_exclude_line_noise
     if getattr(args, "power_line_noise_freq", None) is not None:
@@ -507,8 +514,10 @@ def _apply_power_overrides(args: argparse.Namespace, config: Any) -> None:
 def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply spectral-related config overrides."""
     if getattr(args, "ratio_pairs", None) is not None:
-        config["feature_engineering.spectral.ratio_pairs"] = _parse_pair_tokens(args.ratio_pairs, label="ratio")
-    
+        config["feature_engineering.spectral.ratio_pairs"] = _parse_pair_tokens(
+            args.ratio_pairs, label="ratio"
+        )
+
     spectral_cfg = config.setdefault("feature_engineering", {}).setdefault("spectral", {})
     if getattr(args, "spectral_include_log_ratios", None) is not None:
         spectral_cfg["include_log_ratios"] = args.spectral_include_log_ratios
@@ -539,12 +548,18 @@ def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
 def _apply_asymmetry_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply asymmetry-related config overrides."""
     if getattr(args, "asymmetry_channel_pairs", None) is not None:
-        config["feature_engineering.asymmetry.channel_pairs"] = _parse_pair_tokens(args.asymmetry_channel_pairs, label="asymmetry")
+        config["feature_engineering.asymmetry.channel_pairs"] = _parse_pair_tokens(
+            args.asymmetry_channel_pairs, label="asymmetry"
+        )
     if getattr(args, "asymmetry_activation_bands", None) is not None:
-        config["feature_engineering.asymmetry.activation_bands"] = list(_split_list_tokens(args.asymmetry_activation_bands))
+        config["feature_engineering.asymmetry.activation_bands"] = list(
+            _split_list_tokens(args.asymmetry_activation_bands)
+        )
     if getattr(args, "asymmetry_emit_activation_convention", None) is not None:
-        config["feature_engineering.asymmetry.emit_activation_convention"] = args.asymmetry_emit_activation_convention
-    
+        config["feature_engineering.asymmetry.emit_activation_convention"] = (
+            args.asymmetry_emit_activation_convention
+        )
+
     asym_cfg = config.setdefault("feature_engineering", {}).setdefault("asymmetry", {})
     if getattr(args, "asymmetry_min_segment_sec", None) is not None:
         asym_cfg["min_segment_sec"] = args.asymmetry_min_segment_sec
@@ -601,7 +616,9 @@ def _apply_itpc_overrides(args: argparse.Namespace, config: Any) -> None:
     if getattr(args, "itpc_condition_values", None) is not None:
         config["feature_engineering.itpc.condition_values"] = args.itpc_condition_values
     if getattr(args, "itpc_min_trials_per_condition", None) is not None:
-        config["feature_engineering.itpc.min_trials_per_condition"] = args.itpc_min_trials_per_condition
+        config["feature_engineering.itpc.min_trials_per_condition"] = (
+            args.itpc_min_trials_per_condition
+        )
     if getattr(args, "itpc_n_jobs", None) is not None:
         parallel_cfg = config.setdefault("feature_engineering", {}).setdefault("parallel", {})
         parallel_cfg["n_jobs_itpc"] = args.itpc_n_jobs
@@ -761,14 +778,10 @@ def _apply_rest_mode_overrides(args: argparse.Namespace, config: Any) -> None:
         return
 
     if getattr(args, "analysis_mode", None) == "trial_ml_safe":
-        raise ValueError(
-            "--analysis-mode trial_ml_safe is incompatible with --task-is-rest."
-        )
+        raise ValueError("--analysis-mode trial_ml_safe is incompatible with --task-is-rest.")
 
     if getattr(args, "source_contrast_enabled", None):
-        raise ValueError(
-            "--source-contrast is incompatible with --task-is-rest."
-        )
+        raise ValueError("--source-contrast is incompatible with --task-is-rest.")
 
     power_cfg = config.setdefault("feature_engineering", {}).setdefault("power", {})
     if getattr(args, "power_require_baseline", None) is None:
@@ -782,9 +795,7 @@ def _apply_rest_mode_overrides(args: argparse.Namespace, config: Any) -> None:
 
     aperiodic_subtract_evoked = getattr(args, "aperiodic_subtract_evoked", None)
     if aperiodic_subtract_evoked:
-        raise ValueError(
-            "--aperiodic-subtract-evoked is incompatible with --task-is-rest."
-        )
+        raise ValueError("--aperiodic-subtract-evoked is incompatible with --task-is-rest.")
     if aperiodic_subtract_evoked is None:
         config.setdefault("feature_engineering", {}).setdefault("aperiodic", {})[
             "subtract_evoked"
@@ -796,10 +807,16 @@ def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) ->
     if getattr(args, "spatial_transform", None) is not None:
         config["feature_engineering.spatial_transform"] = args.spatial_transform
     if getattr(args, "spatial_transform_lambda2", None) is not None:
-        config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["lambda2"] = args.spatial_transform_lambda2
+        config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})[
+            "lambda2"
+        ] = args.spatial_transform_lambda2
     if getattr(args, "spatial_transform_stiffness", None) is not None:
-        config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["stiffness"] = args.spatial_transform_stiffness
-    per_family_cfg = config.setdefault("feature_engineering", {}).setdefault("spatial_transform_per_family", {})
+        config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})[
+            "stiffness"
+        ] = args.spatial_transform_stiffness
+    per_family_cfg = config.setdefault("feature_engineering", {}).setdefault(
+        "spatial_transform_per_family", {}
+    )
     for family in (
         "connectivity",
         "itpc",
@@ -836,7 +853,7 @@ def _apply_frequency_bands_override(args: argparse.Namespace, config: Any) -> No
 
 def _apply_rois_override(args: argparse.Namespace, config: Any) -> None:
     """Apply custom ROI definitions to config.
-    
+
     Sets ROIs in both locations used by different subsystems:
     - Top-level 'rois': Used by get_roi_definitions() in feature extraction
     - 'time_frequency_analysis.rois': Used by get_rois() in TFR analysis

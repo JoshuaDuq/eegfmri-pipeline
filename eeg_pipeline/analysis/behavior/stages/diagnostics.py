@@ -69,13 +69,9 @@ def _resolve_configured_icc_unit_columns(
     )
     compare_column = str(compare_column_value or "").strip()
     if not compare_column:
-        compare_column = str(
-            get_condition_column_from_config(config, df_trials) or ""
-        ).strip()
+        compare_column = str(get_condition_column_from_config(config, df_trials) or "").strip()
     if not compare_column:
-        compare_column = str(
-            get_binary_outcome_column_from_config(config, df_trials) or ""
-        ).strip()
+        compare_column = str(get_binary_outcome_column_from_config(config, df_trials) or "").strip()
 
     predictor_column = str(resolve_predictor_column(df_trials, config) or "").strip()
     configured_specs = require_config_value(
@@ -153,7 +149,9 @@ def _validate_icc_alignment_design(
         within_cell_unique = observed.groupby(
             [run_col, trial_col],
             dropna=True,
-        )[column].nunique(dropna=True)
+        )[
+            column
+        ].nunique(dropna=True)
         ambiguous_cells = within_cell_unique[within_cell_unique > 1]
         if not ambiguous_cells.empty:
             raise ValueError(
@@ -161,9 +159,13 @@ def _validate_icc_alignment_design(
                 f"({run_col}, {trial_col}) for {int(len(ambiguous_cells))} cells."
             )
 
-        normalized = observed.groupby([trial_col, run_col], dropna=True)[column].first().reset_index()
+        normalized = (
+            observed.groupby([trial_col, run_col], dropna=True)[column].first().reset_index()
+        )
         normalized["__value__"] = _normalize_alignment_values(normalized[column])
-        across_run_unique = normalized.groupby(trial_col, dropna=True)["__value__"].nunique(dropna=True)
+        across_run_unique = normalized.groupby(trial_col, dropna=True)["__value__"].nunique(
+            dropna=True
+        )
         inconsistent_trials = across_run_unique[across_run_unique > 1]
         if inconsistent_trials.empty:
             continue
@@ -261,12 +263,12 @@ def stage_icc_impl(
         )
 
     records = []
-    
+
     unique_runs = df_trials[run_col].dropna().unique()
     if len(unique_runs) < 2:
         ctx.logger.info("ICC: only one run available; skipping.")
         return pd.DataFrame()
-        
+
     for feat in feature_cols:
         if feat not in df_trials.columns:
             continue
@@ -289,14 +291,16 @@ def stage_icc_impl(
         data = valid_pivoted.to_numpy()
         icc_val, ci_low, ci_high = compute_icc(data, icc_type="ICC(3,1)")
 
-        records.append({
-            "feature": feat,
-            "icc": float(icc_val),
-            "ci_lower_95": float(ci_low) if not pd.isna(ci_low) else float("nan"),
-            "ci_upper_95": float(ci_high) if not pd.isna(ci_high) else float("nan"),
-            "n_trials_aligned": int(len(valid_pivoted)),
-            "n_runs": int(data.shape[1]),
-        })
+        records.append(
+            {
+                "feature": feat,
+                "icc": float(icc_val),
+                "ci_lower_95": float(ci_low) if not pd.isna(ci_low) else float("nan"),
+                "ci_upper_95": float(ci_high) if not pd.isna(ci_high) else float("nan"),
+                "n_trials_aligned": int(len(valid_pivoted)),
+                "n_runs": int(data.shape[1]),
+            }
+        )
 
     out_df = pd.DataFrame(records)
     meta = {

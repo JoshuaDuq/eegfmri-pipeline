@@ -7,7 +7,6 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
-
 CastFn = Callable[[Any], Any]
 
 
@@ -113,7 +112,9 @@ def _has_any_arg(args: argparse.Namespace, arg_names: Sequence[str]) -> bool:
 
 
 _GENERAL_OVERRIDE_RULES = (
-    ConfigOverrideRule("correlation_method", "behavior_analysis.statistics.correlation_method", str),
+    ConfigOverrideRule(
+        "correlation_method", "behavior_analysis.statistics.correlation_method", str
+    ),
     ConfigOverrideRule("bootstrap", "behavior_analysis.bootstrap", _to_int),
     ConfigOverrideRule("perm_scheme", "behavior_analysis.permutation.scheme", _to_lower_stripped),
     ConfigOverrideRule("n_jobs", "behavior_analysis.n_jobs", _to_int),
@@ -121,22 +122,38 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("predictor_column", "behavior_analysis.predictor_column", _to_stripped),
     ConfigOverrideRule("outcome_column", "behavior_analysis.outcome_column", _to_stripped),
     ConfigOverrideRule("predictor_type", "behavior_analysis.predictor_type", _to_lower_stripped),
-    ConfigOverrideRule("predictor_control", "behavior_analysis.predictor_control_enabled", _to_bool),
+    ConfigOverrideRule(
+        "predictor_control", "behavior_analysis.predictor_control_enabled", _to_bool
+    ),
     ConfigOverrideRule("control_trial_order", "behavior_analysis.control_trial_order", _to_bool),
     ConfigOverrideRule("run_adjustment", "behavior_analysis.run_adjustment.enabled", _to_bool),
-    ConfigOverrideRule("run_adjustment_column", "behavior_analysis.run_adjustment.column", _to_stripped),
+    ConfigOverrideRule(
+        "run_adjustment_column", "behavior_analysis.run_adjustment.column", _to_stripped
+    ),
     ConfigOverrideRule(
         "run_adjustment_include_in_correlations",
         "behavior_analysis.run_adjustment.include_in_correlations",
         _to_bool,
     ),
-    ConfigOverrideRule("run_adjustment_max_dummies", "behavior_analysis.run_adjustment.max_dummies", _to_int),
+    ConfigOverrideRule(
+        "run_adjustment_max_dummies", "behavior_analysis.run_adjustment.max_dummies", _to_int
+    ),
     ConfigOverrideRule("fdr_alpha", "behavior_analysis.statistics.fdr_alpha", _to_float),
     ConfigOverrideRule("statistics_alpha", "statistics.alpha", _to_float),
-    ConfigOverrideRule("stats_predictor_control", "behavior_analysis.statistics.predictor_control", _to_lower_stripped),
-    ConfigOverrideRule("stats_allow_iid_trials", "behavior_analysis.statistics.allow_iid_trials", _to_bool),
-    ConfigOverrideRule("stats_hierarchical_fdr", "behavior_analysis.statistics.hierarchical_fdr", _to_bool),
-    ConfigOverrideRule("stats_compute_reliability", "behavior_analysis.statistics.compute_reliability", _to_bool),
+    ConfigOverrideRule(
+        "stats_predictor_control",
+        "behavior_analysis.statistics.predictor_control",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule(
+        "stats_allow_iid_trials", "behavior_analysis.statistics.allow_iid_trials", _to_bool
+    ),
+    ConfigOverrideRule(
+        "stats_hierarchical_fdr", "behavior_analysis.statistics.hierarchical_fdr", _to_bool
+    ),
+    ConfigOverrideRule(
+        "stats_compute_reliability", "behavior_analysis.statistics.compute_reliability", _to_bool
+    ),
     ConfigOverrideRule(
         "exclude_non_trialwise_features",
         "behavior_analysis.features.exclude_non_trialwise_features",
@@ -167,14 +184,20 @@ _GENERAL_OVERRIDE_RULES = (
         "behavior_analysis.feature_registry.feature_classifiers",
         _to_json_list,
     ),
-    ConfigOverrideRule("compute_change_scores", "behavior_analysis.correlations.compute_change_scores", _to_bool),
+    ConfigOverrideRule(
+        "compute_change_scores", "behavior_analysis.correlations.compute_change_scores", _to_bool
+    ),
     ConfigOverrideRule("loso_stability", "behavior_analysis.correlations.loso_stability", _to_bool),
-    ConfigOverrideRule("compute_bayes_factors", "behavior_analysis.correlations.compute_bayes_factors", _to_bool),
+    ConfigOverrideRule(
+        "compute_bayes_factors", "behavior_analysis.correlations.compute_bayes_factors", _to_bool
+    ),
     ConfigOverrideRule("icc_unit_columns", "behavior_analysis.icc.unit_columns", _to_stripped_list),
 )
 
 _TRIAL_TABLE_OVERRIDE_RULES = (
-    ConfigOverrideRule("trial_table_format", "behavior_analysis.trial_table.format", _to_lower_stripped),
+    ConfigOverrideRule(
+        "trial_table_format", "behavior_analysis.trial_table.format", _to_lower_stripped
+    ),
     ConfigOverrideRule(
         "trial_table_disallow_positional_alignment",
         "behavior_analysis.trial_table.disallow_positional_alignment",
@@ -188,19 +211,37 @@ _TRIAL_TABLE_OVERRIDE_RULES = (
 )
 
 _PREDICTOR_RESIDUAL_OVERRIDE_RULES = (
-    ConfigOverrideRule("predictor_residual_enabled", "behavior_analysis.predictor_residual.enabled", _to_bool),
-    ConfigOverrideRule("predictor_residual_method", "behavior_analysis.predictor_residual.method", _to_lower_stripped),
-    ConfigOverrideRule("predictor_residual_min_samples", "behavior_analysis.predictor_residual.min_samples", _to_int),
+    ConfigOverrideRule(
+        "predictor_residual_enabled", "behavior_analysis.predictor_residual.enabled", _to_bool
+    ),
+    ConfigOverrideRule(
+        "predictor_residual_method",
+        "behavior_analysis.predictor_residual.method",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule(
+        "predictor_residual_min_samples",
+        "behavior_analysis.predictor_residual.min_samples",
+        _to_int,
+    ),
     ConfigOverrideRule(
         "predictor_residual_spline_df_candidates",
         "behavior_analysis.predictor_residual.spline_df_candidates",
         _to_list,
     ),
-    ConfigOverrideRule("predictor_residual_poly_degree", "behavior_analysis.predictor_residual.poly_degree", _to_int),
+    ConfigOverrideRule(
+        "predictor_residual_poly_degree",
+        "behavior_analysis.predictor_residual.poly_degree",
+        _to_int,
+    ),
 )
 
 _PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
-    ConfigOverrideRule("predictor_residual_crossfit_enabled", "behavior_analysis.predictor_residual.crossfit.enabled", _to_bool),
+    ConfigOverrideRule(
+        "predictor_residual_crossfit_enabled",
+        "behavior_analysis.predictor_residual.crossfit.enabled",
+        _to_bool,
+    ),
     ConfigOverrideRule(
         "predictor_residual_crossfit_group_column",
         "behavior_analysis.predictor_residual.crossfit.group_column",
@@ -224,22 +265,48 @@ _PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
 )
 
 _REGRESSION_OVERRIDE_RULES = (
-    ConfigOverrideRule("regression_outcome", "behavior_analysis.regression.outcome", _to_lower_stripped),
-    ConfigOverrideRule("regression_include_predictor", "behavior_analysis.regression.include_predictor", _to_bool),
+    ConfigOverrideRule(
+        "regression_outcome", "behavior_analysis.regression.outcome", _to_lower_stripped
+    ),
+    ConfigOverrideRule(
+        "regression_include_predictor", "behavior_analysis.regression.include_predictor", _to_bool
+    ),
     ConfigOverrideRule(
         "regression_predictor_control",
         "behavior_analysis.regression.predictor_control",
         _to_lower_stripped,
     ),
-    ConfigOverrideRule("regression_include_trial_order", "behavior_analysis.regression.include_trial_order", _to_bool),
-    ConfigOverrideRule("regression_include_prev_terms", "behavior_analysis.regression.include_prev_terms", _to_bool),
-    ConfigOverrideRule("regression_include_run_block", "behavior_analysis.regression.include_run_block", _to_bool),
-    ConfigOverrideRule("regression_include_interaction", "behavior_analysis.regression.include_interaction", _to_bool),
-    ConfigOverrideRule("regression_standardize", "behavior_analysis.regression.standardize", _to_bool),
-    ConfigOverrideRule("regression_min_samples", "behavior_analysis.regression.min_samples", _to_int),
-    ConfigOverrideRule("regression_primary_unit", "behavior_analysis.regression.primary_unit", _to_lower_stripped),
-    ConfigOverrideRule("regression_permutations", "behavior_analysis.regression.n_permutations", _to_int),
-    ConfigOverrideRule("regression_max_features", "behavior_analysis.regression.max_features", _to_optional_int_max),
+    ConfigOverrideRule(
+        "regression_include_trial_order",
+        "behavior_analysis.regression.include_trial_order",
+        _to_bool,
+    ),
+    ConfigOverrideRule(
+        "regression_include_prev_terms", "behavior_analysis.regression.include_prev_terms", _to_bool
+    ),
+    ConfigOverrideRule(
+        "regression_include_run_block", "behavior_analysis.regression.include_run_block", _to_bool
+    ),
+    ConfigOverrideRule(
+        "regression_include_interaction",
+        "behavior_analysis.regression.include_interaction",
+        _to_bool,
+    ),
+    ConfigOverrideRule(
+        "regression_standardize", "behavior_analysis.regression.standardize", _to_bool
+    ),
+    ConfigOverrideRule(
+        "regression_min_samples", "behavior_analysis.regression.min_samples", _to_int
+    ),
+    ConfigOverrideRule(
+        "regression_primary_unit", "behavior_analysis.regression.primary_unit", _to_lower_stripped
+    ),
+    ConfigOverrideRule(
+        "regression_permutations", "behavior_analysis.regression.n_permutations", _to_int
+    ),
+    ConfigOverrideRule(
+        "regression_max_features", "behavior_analysis.regression.max_features", _to_optional_int_max
+    ),
 )
 
 _REGRESSION_PREDICTOR_SPLINE_OVERRIDE_RULES = (
@@ -267,7 +334,11 @@ _REGRESSION_PREDICTOR_SPLINE_OVERRIDE_RULES = (
 
 _CORRELATIONS_OVERRIDE_RULES = (
     ConfigOverrideRule("correlations_types", "behavior_analysis.correlations.types", _to_list),
-    ConfigOverrideRule("correlations_primary_unit", "behavior_analysis.correlations.primary_unit", _to_lower_stripped),
+    ConfigOverrideRule(
+        "correlations_primary_unit",
+        "behavior_analysis.correlations.primary_unit",
+        _to_lower_stripped,
+    ),
     ConfigOverrideRule("correlations_min_runs", "behavior_analysis.correlations.min_runs", _to_int),
     ConfigOverrideRule(
         "correlations_prefer_predictor_residual",
@@ -284,7 +355,9 @@ _CORRELATIONS_OVERRIDE_RULES = (
         "behavior_analysis.correlations.use_crossfit_predictor_residual",
         _to_bool,
     ),
-    ConfigOverrideRule("correlations_target_column", "behavior_analysis.correlations.target_column", _to_stripped),
+    ConfigOverrideRule(
+        "correlations_target_column", "behavior_analysis.correlations.target_column", _to_stripped
+    ),
     ConfigOverrideRule(
         "correlations_power_segment",
         "behavior_analysis.correlations.power_segment_preference",
@@ -322,34 +395,62 @@ _GROUP_LEVEL_OVERRIDE_RULES = (
 
 _CONDITION_OVERRIDE_RULES = (
     ConfigOverrideRule("condition_fail_fast", "behavior_analysis.condition.fail_fast", _to_bool),
-    ConfigOverrideRule("condition_effect_threshold", "behavior_analysis.condition.effect_size_threshold", _to_float),
-    ConfigOverrideRule("condition_min_trials", "behavior_analysis.condition.min_trials_per_condition", _to_int),
-    ConfigOverrideRule("condition_compare_column", "behavior_analysis.condition.compare_column", _to_stripped),
-    ConfigOverrideRule("condition_compare_values", "behavior_analysis.condition.compare_values", _to_stripped_list),
-    ConfigOverrideRule("condition_compare_labels", "behavior_analysis.condition.compare_labels", _to_stripped_list),
+    ConfigOverrideRule(
+        "condition_effect_threshold", "behavior_analysis.condition.effect_size_threshold", _to_float
+    ),
+    ConfigOverrideRule(
+        "condition_min_trials", "behavior_analysis.condition.min_trials_per_condition", _to_int
+    ),
+    ConfigOverrideRule(
+        "condition_compare_column", "behavior_analysis.condition.compare_column", _to_stripped
+    ),
+    ConfigOverrideRule(
+        "condition_compare_values", "behavior_analysis.condition.compare_values", _to_stripped_list
+    ),
+    ConfigOverrideRule(
+        "condition_compare_labels", "behavior_analysis.condition.compare_labels", _to_stripped_list
+    ),
     ConfigOverrideRule("condition_overwrite", "behavior_analysis.condition.overwrite", _to_bool),
-    ConfigOverrideRule("condition_primary_unit", "behavior_analysis.condition.primary_unit", _to_lower_stripped),
+    ConfigOverrideRule(
+        "condition_primary_unit", "behavior_analysis.condition.primary_unit", _to_lower_stripped
+    ),
 )
 
 _TEMPORAL_OVERRIDE_RULES = (
-    ConfigOverrideRule("temporal_target_column", "behavior_analysis.temporal.target_column", _to_stripped),
+    ConfigOverrideRule(
+        "temporal_target_column", "behavior_analysis.temporal.target_column", _to_stripped
+    ),
     ConfigOverrideRule(
         "temporal_correction_method",
         "behavior_analysis.temporal.correction_method",
         _to_lower_stripped,
     ),
-    ConfigOverrideRule("temporal_split_by_condition", "behavior_analysis.temporal.split_by_condition", _to_bool),
-    ConfigOverrideRule("temporal_condition_column", "behavior_analysis.temporal.condition_column", _to_stripped),
-    ConfigOverrideRule("temporal_condition_values", "behavior_analysis.temporal.condition_values", _to_stripped_list),
+    ConfigOverrideRule(
+        "temporal_split_by_condition", "behavior_analysis.temporal.split_by_condition", _to_bool
+    ),
+    ConfigOverrideRule(
+        "temporal_condition_column", "behavior_analysis.temporal.condition_column", _to_stripped
+    ),
+    ConfigOverrideRule(
+        "temporal_condition_values",
+        "behavior_analysis.temporal.condition_values",
+        _to_stripped_list,
+    ),
     ConfigOverrideRule(
         "temporal_include_roi_averages",
         "behavior_analysis.temporal.include_roi_averages",
         _to_bool,
     ),
-    ConfigOverrideRule("temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool),
-    ConfigOverrideRule("temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int),
+    ConfigOverrideRule(
+        "temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool
+    ),
+    ConfigOverrideRule(
+        "temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int
+    ),
     ConfigOverrideRule("temporal_freqs_hz", "behavior_analysis.temporal.freqs_hz", _to_float_list),
-    ConfigOverrideRule("temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int),
+    ConfigOverrideRule(
+        "temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int
+    ),
     ConfigOverrideRule(
         "temporal_topomap_window_ms",
         "behavior_analysis.temporal_correlation_topomaps.window_size_ms",
@@ -366,13 +467,21 @@ _TEMPORAL_ITPC_OVERRIDE_RULES = (
 )
 
 _TEMPORAL_ERDS_OVERRIDE_RULES = (
-    ConfigOverrideRule("temporal_erds_method", "behavior_analysis.temporal.erds.method", _to_lower_stripped),
+    ConfigOverrideRule(
+        "temporal_erds_method", "behavior_analysis.temporal.erds.method", _to_lower_stripped
+    ),
 )
 
 _TEMPORAL_FEATURES_OVERRIDE_RULES = (
-    ConfigOverrideRule("temporal_feature_power", "behavior_analysis.temporal.features.power", _to_bool),
-    ConfigOverrideRule("temporal_feature_itpc", "behavior_analysis.temporal.features.itpc", _to_bool),
-    ConfigOverrideRule("temporal_feature_erds", "behavior_analysis.temporal.features.erds", _to_bool),
+    ConfigOverrideRule(
+        "temporal_feature_power", "behavior_analysis.temporal.features.power", _to_bool
+    ),
+    ConfigOverrideRule(
+        "temporal_feature_itpc", "behavior_analysis.temporal.features.itpc", _to_bool
+    ),
+    ConfigOverrideRule(
+        "temporal_feature_erds", "behavior_analysis.temporal.features.erds", _to_bool
+    ),
 )
 
 _CLUSTER_CORRECTION_OVERRIDE_RULES = (
@@ -381,7 +490,9 @@ _CLUSTER_CORRECTION_OVERRIDE_RULES = (
         "behavior_analysis.cluster_correction.n_permutations",
         _to_int,
     ),
-    ConfigOverrideRule("cluster_correction_alpha", "behavior_analysis.cluster_correction.alpha", _to_float),
+    ConfigOverrideRule(
+        "cluster_correction_alpha", "behavior_analysis.cluster_correction.alpha", _to_float
+    ),
     ConfigOverrideRule(
         "cluster_correction_forming_threshold",
         "behavior_analysis.cluster_correction.cluster_forming_threshold",
@@ -392,21 +503,33 @@ _CLUSTER_CORRECTION_OVERRIDE_RULES = (
         "behavior_analysis.cluster_correction.min_timepoints",
         _to_int,
     ),
-    ConfigOverrideRule("cluster_correction_min_channels", "behavior_analysis.cluster_correction.min_channels", _to_int),
+    ConfigOverrideRule(
+        "cluster_correction_min_channels",
+        "behavior_analysis.cluster_correction.min_channels",
+        _to_int,
+    ),
     ConfigOverrideRule(
         "cluster_correction_min_cluster_size",
         "behavior_analysis.cluster_correction.min_cluster_size",
         _to_int,
     ),
-    ConfigOverrideRule("cluster_correction_tail", "behavior_analysis.cluster_correction.tail", _to_int),
+    ConfigOverrideRule(
+        "cluster_correction_tail", "behavior_analysis.cluster_correction.tail", _to_int
+    ),
 )
 
 _CLUSTER_OVERRIDE_RULES = (
-    ConfigOverrideRule("cluster_threshold", "behavior_analysis.cluster.forming_threshold", _to_float),
+    ConfigOverrideRule(
+        "cluster_threshold", "behavior_analysis.cluster.forming_threshold", _to_float
+    ),
     ConfigOverrideRule("cluster_min_size", "behavior_analysis.cluster.min_cluster_size", _to_int),
     ConfigOverrideRule("cluster_tail", "behavior_analysis.cluster.tail", _to_int),
-    ConfigOverrideRule("cluster_condition_column", "behavior_analysis.cluster.condition_column", _to_stripped),
-    ConfigOverrideRule("cluster_condition_values", "behavior_analysis.cluster.condition_values", _to_stripped_list),
+    ConfigOverrideRule(
+        "cluster_condition_column", "behavior_analysis.cluster.condition_column", _to_stripped
+    ),
+    ConfigOverrideRule(
+        "cluster_condition_values", "behavior_analysis.cluster.condition_values", _to_stripped_list
+    ),
 )
 
 _OUTPUT_OVERRIDE_RULES = (
@@ -450,7 +573,9 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         n_perm = int(args.n_perm)
         _set_nested_config_value(config, "behavior_analysis.statistics.n_permutations", n_perm)
         _set_nested_config_value(config, "behavior_analysis.cluster.n_permutations", n_perm)
-        _set_nested_config_value(config, "behavior_analysis.cluster_correction.n_permutations", n_perm)
+        _set_nested_config_value(
+            config, "behavior_analysis.cluster_correction.n_permutations", n_perm
+        )
 
     perm_group_column_preference = getattr(args, "perm_group_column_preference", None)
     if perm_group_column_preference:
@@ -489,7 +614,9 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
             "behavior_analysis.correlations.p_primary_mode",
             "perm_if_available" if enabled else "asymptotic",
         )
-        _set_nested_config_value(config, "behavior_analysis.correlations.permutation.enabled", enabled)
+        _set_nested_config_value(
+            config, "behavior_analysis.correlations.permutation.enabled", enabled
+        )
 
     _apply_override_rules(args, config, _GROUP_LEVEL_OVERRIDE_RULES)
     if getattr(args, "group_level_block_permutation", None) is not None:
@@ -522,21 +649,29 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         _set_nested_config_value(config, "behavior_analysis.temporal.time_range_ms", [lo, hi])
 
     if _has_any_arg(args, ("temporal_itpc_baseline_min", "temporal_itpc_baseline_max")):
-        baseline_window = list(config.get("behavior_analysis.temporal.itpc.baseline_window", [-0.5, -0.01]))
+        baseline_window = list(
+            config.get("behavior_analysis.temporal.itpc.baseline_window", [-0.5, -0.01])
+        )
         if getattr(args, "temporal_itpc_baseline_min", None) is not None:
             baseline_window[0] = float(args.temporal_itpc_baseline_min)
         if getattr(args, "temporal_itpc_baseline_max", None) is not None:
             baseline_window[1] = float(args.temporal_itpc_baseline_max)
-        _set_nested_config_value(config, "behavior_analysis.temporal.itpc.baseline_window", baseline_window)
+        _set_nested_config_value(
+            config, "behavior_analysis.temporal.itpc.baseline_window", baseline_window
+        )
     _apply_override_rules(args, config, _TEMPORAL_ITPC_OVERRIDE_RULES)
 
     if _has_any_arg(args, ("temporal_erds_baseline_min", "temporal_erds_baseline_max")):
-        baseline_window = list(config.get("behavior_analysis.temporal.erds.baseline_window", [-0.5, -0.1]))
+        baseline_window = list(
+            config.get("behavior_analysis.temporal.erds.baseline_window", [-0.5, -0.1])
+        )
         if getattr(args, "temporal_erds_baseline_min", None) is not None:
             baseline_window[0] = float(args.temporal_erds_baseline_min)
         if getattr(args, "temporal_erds_baseline_max", None) is not None:
             baseline_window[1] = float(args.temporal_erds_baseline_max)
-        _set_nested_config_value(config, "behavior_analysis.temporal.erds.baseline_window", baseline_window)
+        _set_nested_config_value(
+            config, "behavior_analysis.temporal.erds.baseline_window", baseline_window
+        )
     _apply_override_rules(args, config, _TEMPORAL_ERDS_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _TEMPORAL_FEATURES_OVERRIDE_RULES)

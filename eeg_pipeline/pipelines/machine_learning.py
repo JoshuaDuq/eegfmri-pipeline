@@ -33,10 +33,10 @@ Modes:
 
 Usage:
     pipeline = MLPipeline(config=config)
-    
+
     # Compute only (SRP)
     pipeline.run_batch(["0001", "0002"], mode="regression")
-    
+
 """
 
 from __future__ import annotations
@@ -57,11 +57,15 @@ from eeg_pipeline.analysis.machine_learning.orchestration import (
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 
-
 MLMode = Literal[
-    "regression", "timegen", "classify",
-    "model_comparison", "incremental_validity",
-    "uncertainty", "shap", "permutation",
+    "regression",
+    "timegen",
+    "classify",
+    "model_comparison",
+    "incremental_validity",
+    "uncertainty",
+    "shap",
+    "permutation",
 ]
 
 
@@ -76,10 +80,10 @@ VALID_CV_SCOPES = {"group", "subject"}
 
 class MLPipeline(PipelineBase):
     """Pipeline for ML-based EEG analysis.
-    
+
     Unlike other pipelines, ML requires multiple subjects for LOSO CV.
     The process_subject method is not used; instead use run_batch directly.
-    
+
     Modes:
         - regression: LOSO regression predicting a continuous target
         - timegen: Time-generalization analysis
@@ -90,15 +94,14 @@ class MLPipeline(PipelineBase):
         - shap: SHAP feature importance
         - permutation: Permutation feature importance
     """
-    
+
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="machine_learning", config=config)
         self.results_root = self.deriv_root / "machine_learning"
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
         raise NotImplementedError(
-            "MLPipeline requires multiple subjects for LOSO CV. "
-            "Use run_batch() instead."
+            "MLPipeline requires multiple subjects for LOSO CV. " "Use run_batch() instead."
         )
 
     def visualize(self, _results_dir: Path) -> None:
@@ -117,27 +120,25 @@ class MLPipeline(PipelineBase):
         """Validate inputs and return resolved task."""
         if not subjects:
             raise ValueError("No subjects specified")
-        
+
         resolved_task = task or self.config.get("project.task")
         if resolved_task is None:
             raise ValueError("Missing required config value: project.task")
-        
+
         if cv_scope not in VALID_CV_SCOPES:
             raise ValueError(
                 f"Invalid cv_scope: {cv_scope} "
                 f"(expected one of: {', '.join(sorted(VALID_CV_SCOPES))})"
             )
-        
+
         if cv_scope == "group":
-            min_subjects = int(
-                require_config_value(self.config, "analysis.min_subjects_for_group")
-            )
+            min_subjects = int(require_config_value(self.config, "analysis.min_subjects_for_group"))
             if len(subjects) < min_subjects:
                 raise ValueError(
                     f"ML pipeline requires at least {min_subjects} subjects "
                     f"for group scope, got {len(subjects)}"
                 )
-        
+
         return resolved_task
 
     def _extract_ml_parameters(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,12 +150,28 @@ class MLPipeline(PipelineBase):
             "cv_scope": kwargs.get("cv_scope", "group"),
             "progress": ensure_progress_reporter(kwargs.get("progress")),
             "n_perm": kwargs.get("n_perm", DEFAULT_N_PERM),
-            "inner_splits": kwargs.get("inner_splits", self.config.get("machine_learning.cv.inner_splits", 5)),
+            "inner_splits": kwargs.get(
+                "inner_splits", self.config.get("machine_learning.cv.inner_splits", 5)
+            ),
             "outer_jobs": kwargs.get("outer_jobs", DEFAULT_OUTER_JOBS),
             "rng_seed": rng_seed,
-            "model": kwargs.get("model", self.config.get("machine_learning.models.regression_default", DEFAULT_MODEL)),
-            "uncertainty_alpha": kwargs.get("uncertainty_alpha", self.config.get("machine_learning.analysis.uncertainty.alpha", DEFAULT_UNCERTAINTY_ALPHA)),
-            "perm_n_repeats": kwargs.get("perm_n_repeats", self.config.get("machine_learning.analysis.permutation_importance.n_repeats", DEFAULT_PERM_N_REPEATS)),
+            "model": kwargs.get(
+                "model",
+                self.config.get("machine_learning.models.regression_default", DEFAULT_MODEL),
+            ),
+            "uncertainty_alpha": kwargs.get(
+                "uncertainty_alpha",
+                self.config.get(
+                    "machine_learning.analysis.uncertainty.alpha", DEFAULT_UNCERTAINTY_ALPHA
+                ),
+            ),
+            "perm_n_repeats": kwargs.get(
+                "perm_n_repeats",
+                self.config.get(
+                    "machine_learning.analysis.permutation_importance.n_repeats",
+                    DEFAULT_PERM_N_REPEATS,
+                ),
+            ),
             "classification_model": kwargs.get("classification_model"),
             # Data/target controls (kept out of core config for CLI override friendliness)
             "feature_families": kwargs.get("feature_families"),
@@ -189,7 +206,7 @@ class MLPipeline(PipelineBase):
         """Run uncertainty quantification via conformal prediction."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_uncertainty_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
-        
+
         X, y, groups, _, _ = load_active_matrix(
             subjects,
             task,
@@ -206,14 +223,19 @@ class MLPipeline(PipelineBase):
             feature_scopes=feature_scopes,
             feature_stats=feature_stats,
         )
-        
+
         results_dir = self.results_root / "uncertainty"
         results_dir.mkdir(parents=True, exist_ok=True)
-        
+
         return _run_uncertainty_stage(
-            X=X, y=y, groups=groups,
-            config=self.config, seed=rng_seed, alpha=alpha,
-            results_dir=results_dir, logger=self.logger,
+            X=X,
+            y=y,
+            groups=groups,
+            config=self.config,
+            seed=rng_seed,
+            alpha=alpha,
+            results_dir=results_dir,
+            logger=self.logger,
             model_name=model or DEFAULT_MODEL,
         )
 
@@ -236,7 +258,7 @@ class MLPipeline(PipelineBase):
         """Run SHAP-based feature importance."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_shap_importance_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
-        
+
         X, y, groups, feature_names, _ = load_active_matrix(
             subjects,
             task,
@@ -253,14 +275,19 @@ class MLPipeline(PipelineBase):
             feature_scopes=feature_scopes,
             feature_stats=feature_stats,
         )
-        
+
         results_dir = self.results_root / "shap"
         results_dir.mkdir(parents=True, exist_ok=True)
-        
+
         return _run_shap_importance_stage(
-            X=X, y=y, groups=groups, feature_names=feature_names,
-            config=self.config, seed=rng_seed,
-            results_dir=results_dir, logger=self.logger,
+            X=X,
+            y=y,
+            groups=groups,
+            feature_names=feature_names,
+            config=self.config,
+            seed=rng_seed,
+            results_dir=results_dir,
+            logger=self.logger,
             model_name=model or DEFAULT_MODEL,
         )
 
@@ -282,9 +309,11 @@ class MLPipeline(PipelineBase):
         model: Optional[str] = None,
     ) -> Optional[Path]:
         """Run permutation-based feature importance."""
-        from eeg_pipeline.analysis.machine_learning.orchestration import _run_permutation_importance_stage
+        from eeg_pipeline.analysis.machine_learning.orchestration import (
+            _run_permutation_importance_stage,
+        )
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
-        
+
         X, y, groups, feature_names, _ = load_active_matrix(
             subjects,
             task,
@@ -301,14 +330,20 @@ class MLPipeline(PipelineBase):
             feature_scopes=feature_scopes,
             feature_stats=feature_stats,
         )
-        
+
         results_dir = self.results_root / "permutation_importance"
         results_dir.mkdir(parents=True, exist_ok=True)
-        
+
         return _run_permutation_importance_stage(
-            X=X, y=y, groups=groups, feature_names=feature_names,
-            config=self.config, seed=rng_seed, n_repeats=n_repeats,
-            results_dir=results_dir, logger=self.logger,
+            X=X,
+            y=y,
+            groups=groups,
+            feature_names=feature_names,
+            config=self.config,
+            seed=rng_seed,
+            n_repeats=n_repeats,
+            results_dir=results_dir,
+            logger=self.logger,
             model_name=model or DEFAULT_MODEL,
         )
 
@@ -322,7 +357,7 @@ class MLPipeline(PipelineBase):
     ) -> Path:
         """Execute regression ML analysis."""
         progress.step("Regression ML", current=1, total=1)
-        
+
         if cv_scope == "subject":
             return run_within_subject_regression_ml(
                 subjects=subjects,
@@ -612,15 +647,15 @@ class MLPipeline(PipelineBase):
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """Run ML pipeline (compute only, no visualization).
-        
+
         Single responsibility: Compute and write results contract.
-        
+
         Args:
             subjects: List of subject IDs
             task: Task name
             mode: ML analysis mode
             **kwargs: Additional options (n_perm, inner_splits, etc.)
-        
+
         Returns:
             List of result dicts with results_dir paths
         """
@@ -643,11 +678,16 @@ class MLPipeline(PipelineBase):
         try:
             self.logger.info(
                 "=== ML pipeline: mode=%s, cv_scope=%s, model=%s ===",
-                mode, params["cv_scope"], params["model"],
+                mode,
+                params["cv_scope"],
+                params["model"],
             )
             self.logger.info(
                 "Subjects: %d, task: %s, permutations: %d, inner_splits: %d",
-                len(subjects), resolved_task, params["n_perm"], params["inner_splits"],
+                len(subjects),
+                resolved_task,
+                params["n_perm"],
+                params["inner_splits"],
             )
 
             params["progress"].start("machine_learning", subjects)
@@ -679,7 +719,9 @@ class MLPipeline(PipelineBase):
 
             self.logger.info(
                 "ML pipeline (%s) complete: %s (%.1fs)",
-                mode, results_dir or "no output", elapsed,
+                mode,
+                results_dir or "no output",
+                elapsed,
             )
             params["progress"].complete(success=True)
             progress_completed = True
@@ -702,9 +744,7 @@ class MLPipeline(PipelineBase):
                     params["progress"].complete(success=False)
                     progress_completed = True
                 except Exception as progress_exc:
-                    caught_error.add_note(
-                        f"Progress completion also failed: {progress_exc}"
-                    )
+                    caught_error.add_note(f"Progress completion also failed: {progress_exc}")
 
         metadata_error: Optional[Exception] = None
         try:
@@ -726,16 +766,13 @@ class MLPipeline(PipelineBase):
 
         if caught_error is not None:
             if metadata_error is not None:
-                caught_error.add_note(
-                    f"Run metadata writing also failed: {metadata_error}"
-                )
+                caught_error.add_note(f"Run metadata writing also failed: {metadata_error}")
             raise caught_error
         if metadata_error is not None:
             raise metadata_error
         if result is None:
             raise RuntimeError("ML pipeline completed without producing a result.")
         return result
-
 
 
 __all__ = [

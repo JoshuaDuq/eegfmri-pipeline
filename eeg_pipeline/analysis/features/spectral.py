@@ -70,7 +70,6 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands, get_feature_co
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
 from eeg_pipeline.types import PrecomputedData
 
-
 ###################################################################
 # TFR-BASED POWER EXTRACTION
 ###################################################################
@@ -125,7 +124,9 @@ def _resolve_power_segment_name(ctx: Any) -> Optional[str]:
     if not isinstance(ranges, dict):
         return None
 
-    candidate_names = [str(name) for name in ranges.keys() if str(name).strip().lower() != "baseline"]
+    candidate_names = [
+        str(name) for name in ranges.keys() if str(name).strip().lower() != "baseline"
+    ]
     if not candidate_names:
         return None
     if len(candidate_names) == 1:
@@ -145,47 +146,51 @@ def _resolve_power_segment_name(ctx: Any) -> Optional[str]:
     return candidate_names[0]
 
 
-def _extract_tfr_components(tfr: Any) -> Tuple[Any, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[List[str]]]:
+def _extract_tfr_components(
+    tfr: Any,
+) -> Tuple[
+    Any, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[List[str]]
+]:
     """Extract TFR object and its core components.
-    
+
     Returns:
         Tuple of (tfr_obj, data, freqs, times, channel_names) or None values if extraction fails.
     """
     tfr_obj = extract_tfr_object(tfr)
     if tfr_obj is None:
         return None, None, None, None, None
-    
+
     data = tfr_obj.data
     freqs = tfr_obj.freqs
     times = tfr_obj.times
     channel_names = tfr_obj.info["ch_names"]
-    
+
     return tfr_obj, data, freqs, times, channel_names
 
 
 def _parse_baseline_column_name(column_name: str) -> Optional[Tuple[str, str]]:
     """Parse baseline column name to extract band and channel.
-    
+
     Returns:
         (band, channel) tuple if valid baseline power column, None otherwise.
     """
     parsed = NamingSchema.parse(str(column_name))
     if not parsed.get("valid"):
         return None
-    
+
     is_power_baseline = (
-        parsed.get("group") == "power" and
-        parsed.get("segment") == "baseline" and
-        parsed.get("scope") == "ch"
+        parsed.get("group") == "power"
+        and parsed.get("segment") == "baseline"
+        and parsed.get("scope") == "ch"
     )
     if not is_power_baseline:
         return None
-    
+
     band = parsed.get("band")
     channel = parsed.get("identifier")
     if not band or not channel:
         return None
-    
+
     return band, channel
 
 
@@ -194,11 +199,11 @@ def _build_baseline_arrays(
     channel_names: List[str],
 ) -> Dict[str, np.ndarray]:
     """Build baseline power arrays organized by frequency band.
-    
+
     Args:
         baseline_df: DataFrame with baseline power features (may be None/empty).
         channel_names: Ordered list of channel names to match against.
-    
+
     Returns:
         Dictionary mapping band names to (n_epochs, n_channels) arrays.
     """
@@ -210,14 +215,14 @@ def _build_baseline_arrays(
         parsed_result = _parse_baseline_column_name(column_name)
         if parsed_result is None:
             continue
-        
+
         band, channel = parsed_result
         values = baseline_df[column_name].to_numpy(dtype=float)
         baseline_map.setdefault(band, {})[channel] = values
 
     n_epochs = len(baseline_df)
     baseline_arrays: Dict[str, np.ndarray] = {}
-    
+
     for band, channel_map in baseline_map.items():
         band_matrix = np.full((n_epochs, len(channel_names)), np.nan)
         for channel_idx, channel_name in enumerate(channel_names):
@@ -225,7 +230,7 @@ def _build_baseline_arrays(
             if channel_values is not None and len(channel_values) == n_epochs:
                 band_matrix[:, channel_idx] = channel_values
         baseline_arrays[band] = band_matrix
-    
+
     return baseline_arrays
 
 
@@ -236,28 +241,28 @@ def _compute_frequency_weighted_power(
     frequencies: np.ndarray,
 ) -> np.ndarray:
     """Compute frequency-weighted mean power for a band and time window.
-    
+
     Args:
         tfr_data: TFR data array (n_epochs, n_channels, n_freqs, n_times).
         frequency_mask: Boolean mask for frequencies in the band.
         time_mask: Boolean mask for time points in the segment.
         frequencies: Full frequency array.
-    
+
     Returns:
         Array of shape (n_epochs, n_channels) with weighted mean power.
     """
     band_data = tfr_data[:, :, frequency_mask, :][:, :, :, time_mask]
     power_freq_time = np.nanmean(band_data, axis=3)
-    
+
     band_frequencies = np.asarray(frequencies[frequency_mask], dtype=float)
     frequency_weights = compute_frequency_weights(band_frequencies)
-    
+
     weights_3d = frequency_weights[None, None, :]
     finite_mask = np.isfinite(power_freq_time) & np.isfinite(weights_3d)
-    
+
     numerator = np.nansum(np.where(finite_mask, power_freq_time * weights_3d, 0.0), axis=2)
     denominator = np.nansum(np.where(finite_mask, weights_3d, 0.0), axis=2)
-    
+
     weighted_power = np.where(denominator > 0, numerator / denominator, np.nan)
     return weighted_power
 
@@ -271,7 +276,7 @@ def _normalize_power(
     epsilon_psd: float,
 ) -> Tuple[np.ndarray, str]:
     """Normalize raw power values.
-    
+
     Args:
         raw_power: Raw power array (n_epochs, n_channels).
         band: Frequency band name.
@@ -279,10 +284,10 @@ def _normalize_power(
         is_tfr_baselined: Whether TFR was already baseline-corrected.
         require_baseline: Whether baseline is required for normalization.
         epsilon_psd: Epsilon value for PSD floor.
-    
+
     Returns:
         Tuple of (normalized_values, statistic_name).
-        
+
     Notes:
         Uses symmetric epsilon strategy: both numerator and denominator are
         floored to epsilon_psd. This prevents:
@@ -292,11 +297,11 @@ def _normalize_power(
     """
     if is_tfr_baselined:
         return raw_power, "baselined"
-    
+
     # Apply symmetric epsilon floor to both numerator and denominator
     power_floor = np.maximum(raw_power, epsilon_psd)
     baseline_array = baseline_arrays.get(band)
-    
+
     if baseline_array is None or not np.isfinite(baseline_array).any():
         if require_baseline:
             raise ValueError(
@@ -305,14 +310,14 @@ def _normalize_power(
             )
         normalized = np.log10(power_floor)
         return normalized, "log10raw"
-    
+
     # Symmetric epsilon: floor baseline to same epsilon as numerator
     # This ensures log-ratio is bounded and numerically stable
     baseline_floor = np.maximum(baseline_array, epsilon_psd)
-    
+
     # Mark non-finite baseline values as NaN (propagates to output)
     baseline_floor = np.where(np.isfinite(baseline_array), baseline_floor, np.nan)
-    
+
     normalized = np.log10(power_floor / baseline_floor)
     return normalized, "logratio"
 
@@ -325,14 +330,14 @@ def _extract_channel_features(
     channel_names: List[str],
 ) -> Dict[str, np.ndarray]:
     """Extract per-channel power features.
-    
+
     Args:
         normalized_power: Normalized power array (n_epochs, n_channels).
         segment_name: Name of the time segment.
         band: Frequency band name.
         statistic_name: Name of the normalization statistic.
         channel_names: List of channel names.
-    
+
     Returns:
         Dictionary mapping column names to feature arrays.
     """
@@ -342,7 +347,7 @@ def _extract_channel_features(
             "power", segment_name, band, "ch", statistic_name, channel=channel_name
         )
         features[column_name] = normalized_power[:, channel_idx]
-    
+
     return features
 
 
@@ -353,13 +358,13 @@ def _extract_global_features(
     statistic_name: str,
 ) -> Dict[str, np.ndarray]:
     """Extract global (across-channel) mean power features.
-    
+
     Args:
         normalized_power: Normalized power array (n_epochs, n_channels).
         segment_name: Name of the time segment.
         band: Frequency band name.
         statistic_name: Name of the normalization statistic.
-    
+
     Returns:
         Dictionary mapping column name to feature array.
     """
@@ -378,14 +383,14 @@ def _extract_roi_features(
     roi_map: Dict[str, List[int]],
 ) -> Dict[str, np.ndarray]:
     """Extract ROI (region of interest) mean power features.
-    
+
     Args:
         normalized_power: Normalized power array (n_epochs, n_channels).
         segment_name: Name of the time segment.
         band: Frequency band name.
         statistic_name: Name of the normalization statistic.
         roi_map: Dictionary mapping ROI names to channel indices.
-    
+
     Returns:
         Dictionary mapping column names to feature arrays.
     """
@@ -393,13 +398,13 @@ def _extract_roi_features(
     for roi_name, channel_indices in roi_map.items():
         if len(channel_indices) == 0:
             continue
-        
+
         roi_mean = np.nanmean(normalized_power[:, channel_indices], axis=1)
         column_name = NamingSchema.build(
             "power", segment_name, band, "roi", f"{statistic_name}_mean", channel=roi_name
         )
         features[column_name] = roi_mean
-    
+
     return features
 
 
@@ -409,12 +414,12 @@ def _build_band_frequency_masks(
     frequencies: np.ndarray,
 ) -> Dict[str, np.ndarray]:
     """Build frequency masks for each band.
-    
+
     Args:
         bands: List of band names to process.
         frequency_bands: Dictionary mapping band names to (fmin, fmax) tuples.
         frequencies: Full frequency array.
-    
+
     Returns:
         Dictionary mapping band names to boolean frequency masks.
     """
@@ -422,12 +427,12 @@ def _build_band_frequency_masks(
     for band in bands:
         if band not in frequency_bands:
             continue
-        
+
         fmin, fmax = frequency_bands[band]
         frequency_mask = (frequencies >= fmin) & (frequencies <= fmax)
         if np.any(frequency_mask):
             band_masks[band] = frequency_mask
-    
+
     return band_masks
 
 
@@ -438,13 +443,13 @@ def _validate_baseline_requirements(
     require_baseline: bool,
 ) -> None:
     """Validate baseline requirements for power normalization.
-    
+
     Args:
         baseline_df: Baseline features DataFrame.
         n_epochs: Number of epochs in TFR data.
         is_tfr_baselined: Whether TFR was already baseline-corrected.
         require_baseline: Whether baseline is required.
-    
+
     Raises:
         ValueError: If baseline requirements are not met.
     """
@@ -460,10 +465,10 @@ def _validate_baseline_requirements(
 
 def _check_tfr_baselined(tfr_obj: Any) -> bool:
     """Check if TFR object has been baseline-corrected.
-    
+
     Args:
         tfr_obj: TFR object to check.
-    
+
     Returns:
         True if TFR comment indicates baseline correction.
     """
@@ -490,17 +495,17 @@ def extract_power_features(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract power features for defined time segments using TFR data.
-    
+
     Computes:
     - Raw power for baseline (if available) - internalized for normalization
     - Log-ratio power for active segments relative to baseline
     - Global mean power per band
     - ROI mean power per band (if spatial_modes includes 'roi')
-    
+
     Args:
         ctx: FeatureContext with TFR data, windows, and configuration.
         bands: List of frequency band names to extract.
-    
+
     Returns:
         Tuple of (features_dataframe, column_names_list).
     """
@@ -519,25 +524,39 @@ def extract_power_features(
     tfr_baseline_mode = _extract_tfr_baseline_mode(tfr_obj) if is_tfr_baselined else None
 
     frequency_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(ctx.config)
-    
-    spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
+
+    spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
     roi_map = build_roi_map_if_needed(spatial_modes, channel_names, ctx.config)
-    
+
     band_frequency_masks = _build_band_frequency_masks(bands, frequency_bands, freqs)
     if not band_frequency_masks:
         return pd.DataFrame(), []
 
-    power_cfg = ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
-    spectral_cfg = ctx.config.get("feature_engineering.spectral", {}) if hasattr(ctx.config, "get") else {}
+    power_cfg = (
+        ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
+    )
+    spectral_cfg = (
+        ctx.config.get("feature_engineering.spectral", {}) if hasattr(ctx.config, "get") else {}
+    )
     exclude_line_noise = bool(
         power_cfg.get("exclude_line_noise", spectral_cfg.get("exclude_line_noise", False))
     )
     line_freqs_raw = power_cfg.get("line_noise_freqs", spectral_cfg.get("line_noise_freqs", None))
     line_freqs = _resolve_line_noise_freqs({"line_noise_freqs": line_freqs_raw}, ctx.config)
-    line_width = float(power_cfg.get("line_noise_width_hz", spectral_cfg.get("line_noise_width_hz", 1.0)))
-    n_harmonics = int(power_cfg.get("line_noise_harmonics", spectral_cfg.get("line_noise_harmonics", 3)))
+    line_width = float(
+        power_cfg.get("line_noise_width_hz", spectral_cfg.get("line_noise_width_hz", 1.0))
+    )
+    n_harmonics = int(
+        power_cfg.get("line_noise_harmonics", spectral_cfg.get("line_noise_harmonics", 3))
+    )
 
-    if exclude_line_noise and line_freqs and np.isfinite(line_width) and line_width > 0 and n_harmonics > 0:
+    if (
+        exclude_line_noise
+        and line_freqs
+        and np.isfinite(line_width)
+        and line_width > 0
+        and n_harmonics > 0
+    ):
         line_noise_mask = np.zeros_like(freqs, dtype=bool)
         for base in line_freqs:
             if not np.isfinite(base) or base <= 0:
@@ -557,10 +576,10 @@ def extract_power_features(
         return pd.DataFrame(), []
 
     n_epochs = len(tfr_data)
-    
+
     segment_name = _resolve_power_segment_name(ctx)
     ctx.logger.info(f"Computing power features for segment: {segment_name or 'unnamed'}")
-    
+
     time_mask = make_mask_for_times(ctx.windows, segment_name, times)
     if not np.any(time_mask):
         ctx.logger.error(
@@ -569,7 +588,7 @@ def extract_power_features(
             "Skipping power feature extraction for this segment."
         )
         return pd.DataFrame(), []
-    
+
     epsilon_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))
     emit_db = bool(power_cfg.get("emit_db", True))
     output_features = {}
@@ -579,25 +598,31 @@ def extract_power_features(
     # - For other segments, emit baseline-normalized power (logratio) unless TFR is already baselined.
     if str(segment_name or "").strip().lower() == "baseline" and not is_tfr_baselined:
         for band, frequency_mask in band_frequency_masks.items():
-            raw_power = _compute_frequency_weighted_power(tfr_data, frequency_mask, time_mask, freqs)
+            raw_power = _compute_frequency_weighted_power(
+                tfr_data, frequency_mask, time_mask, freqs
+            )
 
             if "channels" in spatial_modes:
                 for channel_idx, channel_name in enumerate(channel_names):
                     output_features[
-                        NamingSchema.build("power", "baseline", band, "ch", "mean", channel=channel_name)
+                        NamingSchema.build(
+                            "power", "baseline", band, "ch", "mean", channel=channel_name
+                        )
                     ] = raw_power[:, channel_idx]
 
             if "global" in spatial_modes:
-                output_features[
-                    NamingSchema.build("power", "baseline", band, "global", "mean")
-                ] = np.nanmean(raw_power, axis=1)
+                output_features[NamingSchema.build("power", "baseline", band, "global", "mean")] = (
+                    np.nanmean(raw_power, axis=1)
+                )
 
             if "roi" in spatial_modes and roi_map:
                 for roi_name, channel_indices in roi_map.items():
                     if not channel_indices:
                         continue
                     output_features[
-                        NamingSchema.build("power", "baseline", band, "roi", "mean", channel=roi_name)
+                        NamingSchema.build(
+                            "power", "baseline", band, "roi", "mean", channel=roi_name
+                        )
                     ] = np.nanmean(raw_power[:, channel_indices], axis=1)
 
         if not output_features:
@@ -605,7 +630,9 @@ def extract_power_features(
 
         features_df = pd.DataFrame(output_features)
         features_df.attrs["baseline_mode"] = "raw_mean"
-        features_df.attrs["evoked_subtracted"] = bool(getattr(ctx, "power_evoked_subtracted", False))
+        features_df.attrs["evoked_subtracted"] = bool(
+            getattr(ctx, "power_evoked_subtracted", False)
+        )
         features_df.attrs["evoked_subtracted_conditionwise"] = bool(
             getattr(ctx, "power_evoked_subtracted_conditionwise", False)
         )
@@ -616,10 +643,10 @@ def extract_power_features(
 
     require_baseline = bool(ctx.config.get("feature_engineering.power.require_baseline", True))
     _validate_baseline_requirements(baseline_df, n_epochs, is_tfr_baselined, require_baseline)
-    
+
     for band, frequency_mask in band_frequency_masks.items():
         raw_power = _compute_frequency_weighted_power(tfr_data, frequency_mask, time_mask, freqs)
-        
+
         normalized_power, statistic_name = _normalize_power(
             raw_power,
             band,
@@ -633,8 +660,8 @@ def extract_power_features(
         # (most commonly "logratio") instead of the generic "baselined".
         if is_tfr_baselined and statistic_name == "baselined" and tfr_baseline_mode:
             statistic_name = tfr_baseline_mode
-        
-        if 'channels' in spatial_modes:
+
+        if "channels" in spatial_modes:
             channel_features = _extract_channel_features(
                 normalized_power, segment_name, band, statistic_name, channel_names
             )
@@ -643,10 +670,12 @@ def extract_power_features(
             if emit_db and statistic_name == "logratio":
                 for channel_idx, channel_name in enumerate(channel_names):
                     output_features[
-                        NamingSchema.build("power", segment_name, band, "ch", "db", channel=channel_name)
-                    ] = normalized_power[:, channel_idx] * 10.0
-        
-        if 'global' in spatial_modes:
+                        NamingSchema.build(
+                            "power", segment_name, band, "ch", "db", channel=channel_name
+                        )
+                    ] = (normalized_power[:, channel_idx] * 10.0)
+
+        if "global" in spatial_modes:
             if statistic_name == "logratio" and not is_tfr_baselined:
                 baseline_array = baseline_arrays.get(band)
                 if baseline_array is not None and np.isfinite(baseline_array).any():
@@ -663,7 +692,7 @@ def extract_power_features(
                     if emit_db:
                         output_features[
                             NamingSchema.build("power", segment_name, band, "global", "db_mean")
-                        ] = global_logratio * 10.0
+                        ] = (global_logratio * 10.0)
                 else:
                     global_features = _extract_global_features(
                         normalized_power, segment_name, band, statistic_name
@@ -677,9 +706,9 @@ def extract_power_features(
                 if emit_db and statistic_name == "logratio":
                     output_features[
                         NamingSchema.build("power", segment_name, band, "global", "db_mean")
-                    ] = np.nanmean(normalized_power, axis=1) * 10.0
-        
-        if 'roi' in spatial_modes and roi_map:
+                    ] = (np.nanmean(normalized_power, axis=1) * 10.0)
+
+        if "roi" in spatial_modes and roi_map:
             if statistic_name == "logratio" and not is_tfr_baselined:
                 baseline_array = baseline_arrays.get(band)
                 if baseline_array is not None and np.isfinite(baseline_array).any():
@@ -697,7 +726,12 @@ def extract_power_features(
                             roi_logratio = np.log10(num / den)
                         output_features[
                             NamingSchema.build(
-                                "power", segment_name, band, "roi", "logratio_mean", channel=roi_name
+                                "power",
+                                segment_name,
+                                band,
+                                "roi",
+                                "logratio_mean",
+                                channel=roi_name,
                             )
                         ] = roi_logratio
                         if emit_db:
@@ -705,7 +739,7 @@ def extract_power_features(
                                 NamingSchema.build(
                                     "power", segment_name, band, "roi", "db_mean", channel=roi_name
                                 )
-                            ] = roi_logratio * 10.0
+                            ] = (roi_logratio * 10.0)
                 else:
                     roi_features = _extract_roi_features(
                         normalized_power, segment_name, band, statistic_name, roi_map
@@ -725,11 +759,11 @@ def extract_power_features(
                             NamingSchema.build(
                                 "power", segment_name, band, "roi", "db_mean", channel=roi_name
                             )
-                        ] = roi_mean * 10.0
+                        ] = (roi_mean * 10.0)
 
     if not output_features:
         return pd.DataFrame(), []
-        
+
     features_df = pd.DataFrame(output_features)
     features_df.attrs["evoked_subtracted"] = bool(getattr(ctx, "power_evoked_subtracted", False))
     features_df.attrs["evoked_subtracted_conditionwise"] = bool(
@@ -748,18 +782,18 @@ def extract_power_from_precomputed(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """Extract power features from precomputed band data.
-    
+
     Computes log-ratio power relative to baseline, plus temporal slope features.
-    
+
     Args:
         precomputed: PrecomputedData with band power and window masks.
         bands: List of frequency band names to extract.
-    
+
     Returns:
         Tuple of (features_dataframe, column_names_list, qc_dict).
     """
     from eeg_pipeline.analysis.features.precomputed.extras import validate_window_masks
-    
+
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
     if not is_valid:
         logger = getattr(precomputed, "logger", None)
@@ -783,21 +817,25 @@ def extract_power_from_precomputed(
         return pd.DataFrame(), [], {}
 
     epsilon = float(get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12))
-    power_cfg = precomputed.config.get("feature_engineering.power", {}) if hasattr(precomputed.config, "get") else {}
+    power_cfg = (
+        precomputed.config.get("feature_engineering.power", {})
+        if hasattr(precomputed.config, "get")
+        else {}
+    )
     emit_db = bool(power_cfg.get("emit_db", True))
     # Separate thresholds for different validity checks:
     # - min_valid_fraction_samples: fraction of baseline timepoints that must be valid per channel
     # - min_valid_fraction_channels: fraction of channels that must be valid for global/ROI aggregation
-    min_valid_fraction_samples = float(get_feature_constant(
-        precomputed.config, "MIN_VALID_FRACTION_SAMPLES", 0.5
-    ))
-    min_valid_fraction_channels = float(get_feature_constant(
-        precomputed.config, "MIN_VALID_FRACTION_CHANNELS", 0.5
-    ))
+    min_valid_fraction_samples = float(
+        get_feature_constant(precomputed.config, "MIN_VALID_FRACTION_SAMPLES", 0.5)
+    )
+    min_valid_fraction_channels = float(
+        get_feature_constant(precomputed.config, "MIN_VALID_FRACTION_CHANNELS", 0.5)
+    )
     # Minimum absolute number of valid channels for global features
-    min_valid_channels_global = int(get_feature_constant(
-        precomputed.config, "MIN_VALID_CHANNELS_GLOBAL", 3
-    ))
+    min_valid_channels_global = int(
+        get_feature_constant(precomputed.config, "MIN_VALID_CHANNELS_GLOBAL", 3)
+    )
     windows = precomputed.windows
 
     # Determine which segments to process
@@ -807,10 +845,11 @@ def extract_power_from_precomputed(
     else:
         # Process all non-baseline segments
         segments_to_process = [
-            (name, mask) for name, mask in windows.masks.items() 
+            (name, mask)
+            for name, mask in windows.masks.items()
             if name.lower() != "baseline" and np.any(mask)
         ]
-    
+
     spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
     roi_map = {}
     if "roi" in spatial_modes:
@@ -873,19 +912,25 @@ def extract_power_from_precomputed(
                         active_power_by_channel[ch_idx] = float(active_power)
                     else:
                         logratio = np.nan
-                        baseline_power_by_channel[ch_idx] = float(baseline_power) if baseline_valid else np.nan
+                        baseline_power_by_channel[ch_idx] = (
+                            float(baseline_power) if baseline_valid else np.nan
+                        )
                         active_power_by_channel[ch_idx] = np.nan
 
                     logratio_by_channel[ch_idx] = logratio
 
                     if "channels" in spatial_modes:
                         record[
-                            NamingSchema.build("spectral", seg_label, band, "ch", "logratio", channel=ch_name)
+                            NamingSchema.build(
+                                "spectral", seg_label, band, "ch", "logratio", channel=ch_name
+                            )
                         ] = logratio
                         if emit_db:
                             record[
-                                NamingSchema.build("spectral", seg_label, band, "ch", "db", channel=ch_name)
-                            ] = float(logratio * 10.0) if np.isfinite(logratio) else np.nan
+                                NamingSchema.build(
+                                    "spectral", seg_label, band, "ch", "db", channel=ch_name
+                                )
+                            ] = (float(logratio * 10.0) if np.isfinite(logratio) else np.nan)
 
                         if len(active_times) > 2 and baseline_valid:
                             active_power_trace = power[ch_idx, active_mask]
@@ -920,7 +965,9 @@ def extract_power_from_precomputed(
                 )
 
                 # Store valid fraction in QC instead of columns
-                qc_payload["baseline_valid_fractions"][ep_idx].append(float(baseline_valid_fraction))
+                qc_payload["baseline_valid_fractions"][ep_idx].append(
+                    float(baseline_valid_fraction)
+                )
 
                 valid_mask_ch = np.isfinite(logratio_by_channel)
                 n_valid = int(np.sum(valid_mask_ch))
@@ -933,10 +980,14 @@ def extract_power_from_precomputed(
                     )
                     if not channels_valid:
                         record[
-                            NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
+                            NamingSchema.build(
+                                "spectral", seg_label, band, "global", "logratio_mean"
+                            )
                         ] = np.nan
                         record[
-                            NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
+                            NamingSchema.build(
+                                "spectral", seg_label, band, "global", "logratio_std"
+                            )
                         ] = np.nan
                     else:
                         # Scientific validity: compute logratio on the spatially-aggregated
@@ -955,15 +1006,23 @@ def extract_power_from_precomputed(
                             glob_logratio = np.nan
 
                         record[
-                            NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
+                            NamingSchema.build(
+                                "spectral", seg_label, band, "global", "logratio_mean"
+                            )
                         ] = glob_logratio
                         if emit_db:
                             record[
                                 NamingSchema.build("spectral", seg_label, band, "global", "db_mean")
-                            ] = float(glob_logratio * 10.0) if np.isfinite(glob_logratio) else np.nan
+                            ] = (
+                                float(glob_logratio * 10.0)
+                                if np.isfinite(glob_logratio)
+                                else np.nan
+                            )
                         # Keep std as across-channel variability of per-channel logratios.
                         record[
-                            NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
+                            NamingSchema.build(
+                                "spectral", seg_label, band, "global", "logratio_std"
+                            )
                         ] = (
                             float(np.nanstd(logratio_by_channel[valid_mask_ch], ddof=1))
                             if n_valid > 1
@@ -971,7 +1030,9 @@ def extract_power_from_precomputed(
                         )
                         if emit_db:
                             logratio_std_val = record.get(
-                                NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
+                                NamingSchema.build(
+                                    "spectral", seg_label, band, "global", "logratio_std"
+                                )
                             )
                             record[
                                 NamingSchema.build("spectral", seg_label, band, "global", "db_std")
@@ -990,19 +1051,34 @@ def extract_power_from_precomputed(
                         if not np.any(roi_valid):
                             record[
                                 NamingSchema.build(
-                                    "spectral", seg_label, band, "roi", "logratio_mean", channel=roi_name
+                                    "spectral",
+                                    seg_label,
+                                    band,
+                                    "roi",
+                                    "logratio_mean",
+                                    channel=roi_name,
                                 )
                             ] = np.nan
                             continue
                         b_roi = float(np.nanmean(baseline_power_by_channel[roi_idx][roi_valid]))
                         a_roi = float(np.nanmean(active_power_by_channel[roi_idx][roi_valid]))
-                        if b_roi > epsilon and a_roi > 0 and np.isfinite(b_roi) and np.isfinite(a_roi):
+                        if (
+                            b_roi > epsilon
+                            and a_roi > 0
+                            and np.isfinite(b_roi)
+                            and np.isfinite(a_roi)
+                        ):
                             roi_logratio = float(np.log10(a_roi / b_roi))
                         else:
                             roi_logratio = np.nan
                         record[
                             NamingSchema.build(
-                                "spectral", seg_label, band, "roi", "logratio_mean", channel=roi_name
+                                "spectral",
+                                seg_label,
+                                band,
+                                "roi",
+                                "logratio_mean",
+                                channel=roi_name,
                             )
                         ] = roi_logratio
                         if emit_db:
@@ -1010,7 +1086,9 @@ def extract_power_from_precomputed(
                                 NamingSchema.build(
                                     "spectral", seg_label, band, "roi", "db_mean", channel=roi_name
                                 )
-                            ] = float(roi_logratio * 10.0) if np.isfinite(roi_logratio) else np.nan
+                            ] = (
+                                float(roi_logratio * 10.0) if np.isfinite(roi_logratio) else np.nan
+                            )
 
     if not records or all(not r for r in records):
         return pd.DataFrame(), [], {}
@@ -1020,7 +1098,7 @@ def extract_power_from_precomputed(
     if all_fractions:
         qc_payload["mean_baseline_valid_fraction"] = float(np.mean(all_fractions))
         qc_payload["min_baseline_valid_fraction"] = float(np.min(all_fractions))
-    
+
     # Remove large per-trial list from final QC to keep it small
     qc_payload.pop("baseline_valid_fractions", None)
 
@@ -1041,58 +1119,58 @@ def _robust_aperiodic_fit(
     max_iterations: int = 3,
 ) -> Tuple[Optional[float], Optional[float]]:
     """Fit aperiodic model with iterative residual-based peak rejection.
-    
+
     This avoids bias from oscillatory peaks (e.g., alpha) that would otherwise
     pull the 1/f fit upward in specific frequency ranges.
-    
+
     Returns:
         Tuple of (slope, intercept) or (None, None) if fit fails
     """
     from scipy import stats
-    
+
     keep_mask = fit_mask.copy()
     min_fit_points = 5
     min_mad = 1e-12
-    
+
     if np.sum(keep_mask) < min_fit_points:
         return None, None
-    
+
     slope, intercept = None, None
-    
+
     for _ in range(max_iterations):
         kept_indices = np.flatnonzero(keep_mask)
         if len(kept_indices) < min_fit_points:
             break
-        
+
         slope, intercept = np.polyfit(log_f[kept_indices], log_p[kept_indices], 1)
-        
+
         # Compute residuals
         predicted = intercept + slope * log_f
         residuals = log_p - predicted
-        
+
         # Only reject positive residuals (peaks above 1/f)
         positive_residuals = np.where(residuals > 0, residuals, 0.0)
         kept_positive = positive_residuals[keep_mask]
-        
+
         if len(kept_positive) == 0 or np.all(kept_positive == 0):
             break
-        
+
         # MAD-based threshold for robust outlier detection using all kept residuals
         mad = stats.median_abs_deviation(residuals[keep_mask], scale="normal", nan_policy="omit")
         if not np.isfinite(mad) or mad < min_mad:
             break
-        
+
         threshold = peak_rejection_z * mad
         new_keep = keep_mask & (residuals <= threshold)
-        
+
         if np.sum(new_keep) < min_fit_points:
             break
-        
+
         if np.array_equal(new_keep, keep_mask):
             break
-        
+
         keep_mask = new_keep
-    
+
     return slope, intercept
 
 
@@ -1103,10 +1181,10 @@ def remove_aperiodic_component(
     robust: bool = True,
 ) -> np.ndarray:
     """Remove 1/f aperiodic component from PSD using robust linear fit in log-log space.
-    
+
     Uses iterative residual-based peak rejection to avoid bias from oscillatory
     peaks (e.g., alpha) that would otherwise distort the 1/f fit.
-    
+
     Parameters
     ----------
     psd : np.ndarray
@@ -1118,7 +1196,7 @@ def remove_aperiodic_component(
     robust : bool
         If True, use iterative peak rejection (recommended). If False, use
         simple polyfit (legacy behavior, may be biased by peaks).
-        
+
     Returns
     -------
     residual : np.ndarray
@@ -1126,24 +1204,26 @@ def remove_aperiodic_component(
     """
     if psd.size == 0 or freqs.size == 0:
         return psd.copy()
-    
+
     log_f = np.log10(np.maximum(freqs, 1e-6))
     log_p = np.log10(np.maximum(psd, 1e-20))
-    
+
     fit_mask = (freqs >= fit_range[0]) & (freqs <= fit_range[1]) & np.isfinite(log_p)
     if np.sum(fit_mask) < 5:
         raise ValueError("Insufficient frequency points for aperiodic fit in requested range.")
-    
+
     if robust:
         slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
         if slope is None or intercept is None:
-            raise ValueError("Robust aperiodic fit failed (insufficient points after peak rejection).")
+            raise ValueError(
+                "Robust aperiodic fit failed (insufficient points after peak rejection)."
+            )
     else:
         slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
-    
+
     aperiodic_fit = intercept + slope * log_f
     residual = log_p - aperiodic_fit
-    return 10 ** residual
+    return 10**residual
 
 
 def _rebuild_spectral_segment_masks(
@@ -1221,11 +1301,11 @@ def compute_peak_frequency(
     min_prominence: float = 0.1,
 ) -> Tuple[float, float, float, float]:
     """Compute peak frequency and peak power within a frequency range.
-    
+
     Uses smoothing and prominence criteria to stabilize peak detection,
     especially important for short segments / low SNR where argmax is
     dominated by estimation noise.
-    
+
     Parameters
     ----------
     psd : np.ndarray
@@ -1243,7 +1323,7 @@ def compute_peak_frequency(
     min_prominence : float
         Minimum prominence (in log10 units) for a valid peak. If no peak
         exceeds this threshold, returns center-of-gravity instead of argmax.
-    
+
     Returns
     -------
     peak_freq : float
@@ -1256,58 +1336,58 @@ def compute_peak_frequency(
         Log10(power) - log10(aperiodic_fit) at peak frequency
     """
     from scipy.ndimage import uniform_filter1d
-    
+
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
         return np.nan, np.nan, np.nan, np.nan
-    
+
     psd_band = psd[mask]
     freqs_band = freqs[mask]
-    
+
     if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
         return np.nan, np.nan, np.nan, np.nan
-    
+
     # Compute robust aperiodic fit for prominence metrics
     log_f = np.log10(np.maximum(freqs, 1e-6))
     log_p = np.log10(np.maximum(psd, 1e-20))
-    
+
     # Fit range covers both low frequencies (for 1/f anchor) and the analysis band
     fit_fmin = min(2.0, fmin)
     fit_fmax = max(40.0, fmax)
     fit_mask = (freqs >= fit_fmin) & (freqs <= fit_fmax) & np.isfinite(log_p)
-    
+
     aperiodic_fit = None
     if np.sum(fit_mask) >= 5:
         slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
         if slope is None or intercept is None:
             slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
         aperiodic_fit = 10 ** (intercept + slope * log_f)
-    
+
     if aperiodic_adjusted and aperiodic_fit is not None:
         residual = log_p - np.log10(aperiodic_fit)
-        psd_for_peak = (10 ** residual)[mask]
+        psd_for_peak = (10**residual)[mask]
         residual_band = residual[mask]
     else:
         psd_for_peak = psd_band
         residual_band = np.log10(np.maximum(psd_band, 1e-20))
-    
+
     if np.all(np.isnan(psd_for_peak)):
         psd_for_peak = psd_band
         residual_band = np.log10(np.maximum(psd_band, 1e-20))
-    
+
     # Apply smoothing to reduce noise sensitivity
     if smoothing_hz > 0 and len(freqs_band) > 3:
         df = np.median(np.diff(freqs_band))
         if df > 0:
             window_samples = max(1, int(smoothing_hz / df))
             if window_samples > 1:
-                psd_for_peak = uniform_filter1d(psd_for_peak, size=window_samples, mode='nearest')
-                residual_band = uniform_filter1d(residual_band, size=window_samples, mode='nearest')
-    
+                psd_for_peak = uniform_filter1d(psd_for_peak, size=window_samples, mode="nearest")
+                residual_band = uniform_filter1d(residual_band, size=window_samples, mode="nearest")
+
     # Find peaks with prominence criterion
     peak_idx = np.nanargmax(psd_for_peak)
     max_residual = residual_band[peak_idx]
-    
+
     # Check if peak is prominent enough above noise floor
     # If not, use center-of-gravity (more stable for weak/absent peaks)
     use_cog = False
@@ -1317,7 +1397,7 @@ def compute_peak_frequency(
         prominence = max_residual - baseline
         if prominence < min_prominence:
             use_cog = True
-    
+
     peak_bin_idx = int(peak_idx)
 
     if use_cog:
@@ -1335,21 +1415,21 @@ def compute_peak_frequency(
     else:
         peak_freq = float(freqs_band[peak_idx])
         peak_power = float(psd_band[peak_idx])
-    
+
     # Compute peak prominence metrics
     peak_ratio = np.nan
     peak_residual = np.nan
-    
+
     if aperiodic_fit is not None:
         # Find the global index for the peak frequency
         global_peak_idx = np.where(mask)[0][peak_bin_idx]
         aperiodic_at_peak = aperiodic_fit[global_peak_idx]
-        
+
         if np.isfinite(aperiodic_at_peak) and aperiodic_at_peak > 0:
             peak_ratio = float(peak_power / aperiodic_at_peak)
             if np.isfinite(peak_power) and peak_power > 0:
                 peak_residual = float(np.log10(peak_power) - np.log10(aperiodic_at_peak))
-    
+
     return peak_freq, peak_power, peak_ratio, peak_residual
 
 
@@ -1362,11 +1442,7 @@ def _spectral_descriptor_band(
     """Validate a spectrum and return finite samples in the requested band."""
     psd_array = np.asarray(psd, dtype=float)
     frequency_array = np.asarray(freqs, dtype=float)
-    if (
-        psd_array.ndim != 1
-        or frequency_array.ndim != 1
-        or psd_array.shape != frequency_array.shape
-    ):
+    if psd_array.ndim != 1 or frequency_array.ndim != 1 or psd_array.shape != frequency_array.shape:
         raise ValueError(
             "Spectral descriptor psd and freqs must have the same one-dimensional shape."
         )
@@ -1390,9 +1466,7 @@ def _spectral_descriptor_band(
         return empty, empty, empty
 
     bin_widths = (
-        np.gradient(frequency_array)
-        if len(frequency_array) > 1
-        else np.ones_like(frequency_array)
+        np.gradient(frequency_array) if len(frequency_array) > 1 else np.ones_like(frequency_array)
     )
     return (
         psd_array[finite_mask],
@@ -1409,21 +1483,19 @@ def compute_spectral_center(
 ) -> float:
     """
     Compute spectral center of gravity (centroid) within a frequency range.
-    
+
     Uses Δf weighting for non-uniform frequency grids (e.g., log-spaced).
     Formula: Σ(f * P * Δf) / Σ(P * Δf)
     """
-    psd_band, freqs_band, df = _spectral_descriptor_band(
-        psd, freqs, fmin, fmax
-    )
+    psd_band, freqs_band, df = _spectral_descriptor_band(psd, freqs, fmin, fmax)
     if psd_band.size == 0:
         return np.nan
     mass = psd_band * df
-    
+
     total_mass = np.nansum(mass)
     if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
-    
+
     center = float(np.nansum(freqs_band * mass) / total_mass)
     return center
 
@@ -1436,24 +1508,22 @@ def compute_spectral_bandwidth(
 ) -> float:
     """
     Compute spectral bandwidth (standard deviation of frequency distribution).
-    
+
     Uses Δf weighting for non-uniform frequency grids.
     """
-    psd_band, freqs_band, df = _spectral_descriptor_band(
-        psd, freqs, fmin, fmax
-    )
+    psd_band, freqs_band, df = _spectral_descriptor_band(psd, freqs, fmin, fmax)
     if psd_band.size == 0:
         return np.nan
     mass = psd_band * df
-    
+
     total_mass = np.nansum(mass)
     if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
-    
+
     center = np.nansum(freqs_band * mass) / total_mass
     variance = np.nansum(mass * (freqs_band - center) ** 2) / total_mass
     bandwidth = float(np.sqrt(variance))
-    
+
     return bandwidth
 
 
@@ -1466,9 +1536,9 @@ def compute_spectral_edge(
 ) -> float:
     """
     Compute spectral edge frequency (frequency below which X% of power lies).
-    
+
     Uses Δf weighting for non-uniform frequency grids.
-    
+
     Parameters
     ----------
     percentile : float
@@ -1477,21 +1547,19 @@ def compute_spectral_edge(
     if not np.isfinite(percentile) or percentile <= 0 or percentile > 1:
         raise ValueError("Spectral edge percentile must satisfy 0 < percentile <= 1.")
 
-    psd_band, freqs_band, df = _spectral_descriptor_band(
-        psd, freqs, fmin, fmax
-    )
+    psd_band, freqs_band, df = _spectral_descriptor_band(psd, freqs, fmin, fmax)
     if psd_band.size == 0:
         return np.nan
     mass = psd_band * df
-    
+
     total_mass = np.nansum(mass)
     if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
-    
+
     cumsum = np.nancumsum(mass) / total_mass
     edge_idx = np.searchsorted(cumsum, percentile)
     edge_idx = min(edge_idx, len(freqs_band) - 1)
-    
+
     return float(freqs_band[edge_idx])
 
 
@@ -1503,16 +1571,14 @@ def compute_spectral_entropy(
 ) -> float:
     """
     Compute normalized spectral entropy within a frequency range.
-    
+
     Uses Δf weighting for non-uniform frequency grids.
     """
-    psd_band, _freqs_band, df = _spectral_descriptor_band(
-        psd, freqs, fmin, fmax
-    )
+    psd_band, _freqs_band, df = _spectral_descriptor_band(psd, freqs, fmin, fmax)
     if psd_band.size == 0:
         return np.nan
     mass = psd_band * df
-    
+
     total_mass = np.nansum(mass)
     if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
@@ -1535,7 +1601,7 @@ def extract_spectral_features(
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """
     Extract spectral descriptor features including IAF (Individual Alpha Frequency).
-    
+
     Features extracted:
     - Peak frequency per band (IAF for alpha band)
     - Peak power per band
@@ -1543,12 +1609,12 @@ def extract_spectral_features(
     - Spectral bandwidth
     - Spectral entropy (normalized)
     - Spectral edge frequency (broadband, 95%)
-    
+
     Returns
     -------
     Tuple[pd.DataFrame, List[str], Dict[str, Any]]
         (features_df, column_names, qc_dict)
-        
+
     QC Outputs
     ----------
     The qc_dict contains:
@@ -1558,7 +1624,7 @@ def extract_spectral_features(
     - psd_method: PSD method used ('multitaper' or 'welch')
     - n_epochs: Number of epochs processed
     - n_channels: Number of channels
-    
+
     Scientific Notes
     ----------------
     Trial-level peak frequency features (including IAF) can be unstable for short
@@ -1569,7 +1635,7 @@ def extract_spectral_features(
     """
     if not bands:
         return pd.DataFrame(), [], {}
-    
+
     epochs = ctx.epochs
     config = ctx.config
     logger = ctx.logger
@@ -1585,13 +1651,15 @@ def extract_spectral_features(
 
     fmin_psd = float(spec_cfg.get("fmin", 1.0))
     fmax_psd = float(spec_cfg.get("fmax", min(80.0, float(sfreq) / 2.0 - 0.5)))
-    multitaper_adaptive = bool(spec_cfg.get("multitaper_adaptive", spec_cfg.get("psd_adaptive", False)))
+    multitaper_adaptive = bool(
+        spec_cfg.get("multitaper_adaptive", spec_cfg.get("psd_adaptive", False))
+    )
 
     exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
     line_freqs = _resolve_line_noise_freqs(spec_cfg, config)
     line_width = float(spec_cfg.get("line_noise_width_hz", 1.0))
     n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
-    
+
     # Determine which segments to process
     # CRITICAL: Use epochs.times (cropped) for mask building, not ctx.windows (original)
     windows = ctx.windows
@@ -1635,13 +1703,13 @@ def extract_spectral_features(
     data = epochs.get_data(picks=picks)
     n_epochs = data.shape[0]
     n_channels = data.shape[1]
-    
+
     # Segment duration validation parameters
     min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
     min_cycles_at_fmin = float(spec_cfg.get("min_cycles_at_fmin", 3.0))
 
     records = [dict() for _ in range(n_epochs)]
-    
+
     # QC tracking
     qc_payload: Dict[str, Any] = {
         "psd_method": psd_method,
@@ -1659,28 +1727,33 @@ def extract_spectral_features(
 
         seg_data = data[:, :, mask]
         seg_duration_sec = float(seg_data.shape[2]) / float(sfreq)
-        
+
         # Validate minimum segment duration
         if seg_duration_sec < min_segment_sec:
             logger.warning(
                 "Spectral: segment '%s' duration (%.2fs) is shorter than min_segment_sec (%.2fs); "
                 "skipping to ensure reliable spectral estimation.",
-                segment_name, seg_duration_sec, min_segment_sec
+                segment_name,
+                seg_duration_sec,
+                min_segment_sec,
             )
-            qc_payload["segments_skipped"].append({
-                "segment": segment_name,
-                "reason": "duration_too_short",
-                "duration_sec": seg_duration_sec,
-                "min_required_sec": min_segment_sec,
-            })
+            qc_payload["segments_skipped"].append(
+                {
+                    "segment": segment_name,
+                    "reason": "duration_too_short",
+                    "duration_sec": seg_duration_sec,
+                    "min_required_sec": min_segment_sec,
+                }
+            )
             continue
-        
+
         qc_payload["segment_durations"][segment_name] = seg_duration_sec
-        
+
         if seg_data.shape[2] < 2:
             continue
 
         import mne
+
         if psd_method == "multitaper":
             # Multitaper: preferred for short segments (lower variance)
             psds, freqs = mne.time_frequency.psd_array_multitaper(
@@ -1713,7 +1786,7 @@ def extract_spectral_features(
         psds = np.asarray(psds, dtype=float)
         if psds.ndim != 3:
             continue
-        
+
         # Compute effective frequency resolution
         if len(freqs) > 1:
             freq_resolution = float(np.median(np.diff(freqs)))
@@ -1726,9 +1799,7 @@ def extract_spectral_features(
                     continue
                 for h in range(1, n_harm + 1):
                     f0 = base * h
-                    freq_keep_mask &= ~(
-                        (freqs >= (f0 - line_width)) & (freqs <= (f0 + line_width))
-                    )
+                    freq_keep_mask &= ~((freqs >= (f0 - line_width)) & (freqs <= (f0 + line_width)))
 
         freqs_use = freqs[freq_keep_mask] if np.any(~freq_keep_mask) else freqs
         psds_use = psds[:, :, freq_keep_mask] if np.any(~freq_keep_mask) else psds
@@ -1763,55 +1834,158 @@ def extract_spectral_features(
                         bandwidth = compute_spectral_bandwidth(psd, freqs_use, fmin, fmax)
                         entropy = compute_spectral_entropy(psd, freqs_use, fmin, fmax)
 
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_freq", channel=ch_name)] = peak_freq
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_power", channel=ch_name)] = peak_power
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_ratio", channel=ch_name)] = peak_ratio
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_residual", channel=ch_name)] = peak_residual
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "center_freq", channel=ch_name)] = center_freq
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "bandwidth", channel=ch_name)] = bandwidth
-                        record[NamingSchema.build("spectral", segment_name, band, "ch", "entropy", channel=ch_name)] = entropy
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "ch", "peak_freq", channel=ch_name
+                            )
+                        ] = peak_freq
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "ch", "peak_power", channel=ch_name
+                            )
+                        ] = peak_power
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "ch", "peak_ratio", channel=ch_name
+                            )
+                        ] = peak_ratio
+                        record[
+                            NamingSchema.build(
+                                "spectral",
+                                segment_name,
+                                band,
+                                "ch",
+                                "peak_residual",
+                                channel=ch_name,
+                            )
+                        ] = peak_residual
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "ch", "center_freq", channel=ch_name
+                            )
+                        ] = center_freq
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "ch", "bandwidth", channel=ch_name
+                            )
+                        ] = bandwidth
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "ch", "entropy", channel=ch_name
+                            )
+                        ] = entropy
 
                 if "global" in spatial_modes:
                     global_psd = np.nanmean(channel_psd, axis=0)
-                    g_peak_freq, g_peak_power, g_peak_ratio, g_peak_residual = compute_peak_frequency(
-                        global_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                    g_peak_freq, g_peak_power, g_peak_ratio, g_peak_residual = (
+                        compute_peak_frequency(
+                            global_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                        )
                     )
                     g_center = compute_spectral_center(global_psd, freqs_use, fmin, fmax)
                     g_bandwidth = compute_spectral_bandwidth(global_psd, freqs_use, fmin, fmax)
                     g_entropy = compute_spectral_entropy(global_psd, freqs_use, fmin, fmax)
 
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_freq")] = g_peak_freq
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_power")] = g_peak_power
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_ratio")] = g_peak_ratio
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_residual")] = g_peak_residual
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "center_freq")] = g_center
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "bandwidth")] = g_bandwidth
-                    record[NamingSchema.build("spectral", segment_name, band, "global", "entropy")] = g_entropy
+                    record[
+                        NamingSchema.build("spectral", segment_name, band, "global", "peak_freq")
+                    ] = g_peak_freq
+                    record[
+                        NamingSchema.build("spectral", segment_name, band, "global", "peak_power")
+                    ] = g_peak_power
+                    record[
+                        NamingSchema.build("spectral", segment_name, band, "global", "peak_ratio")
+                    ] = g_peak_ratio
+                    record[
+                        NamingSchema.build(
+                            "spectral", segment_name, band, "global", "peak_residual"
+                        )
+                    ] = g_peak_residual
+                    record[
+                        NamingSchema.build("spectral", segment_name, band, "global", "center_freq")
+                    ] = g_center
+                    record[
+                        NamingSchema.build("spectral", segment_name, band, "global", "bandwidth")
+                    ] = g_bandwidth
+                    record[
+                        NamingSchema.build("spectral", segment_name, band, "global", "entropy")
+                    ] = g_entropy
 
                 if "roi" in spatial_modes and roi_map:
                     for roi_name, roi_indices in roi_map.items():
                         if not roi_indices:
                             continue
                         roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
-                        r_peak_freq, r_peak_power, r_peak_ratio, r_peak_residual = compute_peak_frequency(
-                            roi_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                        r_peak_freq, r_peak_power, r_peak_ratio, r_peak_residual = (
+                            compute_peak_frequency(
+                                roi_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                            )
                         )
                         r_center = compute_spectral_center(roi_psd, freqs_use, fmin, fmax)
                         r_bandwidth = compute_spectral_bandwidth(roi_psd, freqs_use, fmin, fmax)
                         r_entropy = compute_spectral_entropy(roi_psd, freqs_use, fmin, fmax)
 
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_freq", channel=roi_name)] = r_peak_freq
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_power", channel=roi_name)] = r_peak_power
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_ratio", channel=roi_name)] = r_peak_ratio
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_residual", channel=roi_name)] = r_peak_residual
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "center_freq", channel=roi_name)] = r_center
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "bandwidth", channel=roi_name)] = r_bandwidth
-                        record[NamingSchema.build("spectral", segment_name, band, "roi", "entropy", channel=roi_name)] = r_entropy
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "roi", "peak_freq", channel=roi_name
+                            )
+                        ] = r_peak_freq
+                        record[
+                            NamingSchema.build(
+                                "spectral",
+                                segment_name,
+                                band,
+                                "roi",
+                                "peak_power",
+                                channel=roi_name,
+                            )
+                        ] = r_peak_power
+                        record[
+                            NamingSchema.build(
+                                "spectral",
+                                segment_name,
+                                band,
+                                "roi",
+                                "peak_ratio",
+                                channel=roi_name,
+                            )
+                        ] = r_peak_ratio
+                        record[
+                            NamingSchema.build(
+                                "spectral",
+                                segment_name,
+                                band,
+                                "roi",
+                                "peak_residual",
+                                channel=roi_name,
+                            )
+                        ] = r_peak_residual
+                        record[
+                            NamingSchema.build(
+                                "spectral",
+                                segment_name,
+                                band,
+                                "roi",
+                                "center_freq",
+                                channel=roi_name,
+                            )
+                        ] = r_center
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "roi", "bandwidth", channel=roi_name
+                            )
+                        ] = r_bandwidth
+                        record[
+                            NamingSchema.build(
+                                "spectral", segment_name, band, "roi", "entropy", channel=roi_name
+                            )
+                        ] = r_entropy
 
             global_psd = np.nanmean(channel_psd, axis=0)
             edge_fmax = float(freqs_use[-1]) if freqs_use.size else (float(sfreq) / 2.0 - 0.5)
             edge_95 = compute_spectral_edge(global_psd, freqs_use, 1.0, edge_fmax, 0.95)
-            record[NamingSchema.build("spectral", segment_name, "broadband", "global", "edge_freq_95")] = edge_95
+            record[
+                NamingSchema.build("spectral", segment_name, "broadband", "global", "edge_freq_95")
+            ] = edge_95
 
             if "roi" in spatial_modes and roi_map:
                 for roi_name, roi_indices in roi_map.items():
@@ -1819,16 +1993,25 @@ def extract_spectral_features(
                         continue
                     roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
                     roi_edge = compute_spectral_edge(roi_psd, freqs_use, 1.0, edge_fmax, 0.95)
-                    record[NamingSchema.build("spectral", segment_name, "broadband", "roi", "edge_freq_95", channel=roi_name)] = roi_edge
-    
+                    record[
+                        NamingSchema.build(
+                            "spectral",
+                            segment_name,
+                            "broadband",
+                            "roi",
+                            "edge_freq_95",
+                            channel=roi_name,
+                        )
+                    ] = roi_edge
+
     if not records:
         return pd.DataFrame(), [], qc_payload
-    
+
     df = pd.DataFrame(records)
     cols = list(df.columns)
-    
+
     logger.info(f"Extracted {len(cols)} spectral features for {n_epochs} epochs")
-    
+
     return df, cols, qc_payload
 
 

@@ -107,11 +107,17 @@ def _write_minimal_fmriprep_output(remote_derivatives: Path, local_bids_root: Pa
     subject_func = remote_root / "sub-0001" / "func"
     subject_func.mkdir(parents=True)
     for space in ["MNI152NLin2009cAsym", "T1w"]:
-        (subject_func / f"sub-0001_task-thermalactive_run-01_space-{space}_desc-preproc_bold.nii.gz").write_text(
+        (
+            subject_func
+            / f"sub-0001_task-thermalactive_run-01_space-{space}_desc-preproc_bold.nii.gz"
+        ).write_text(
             "bold",
             encoding="utf-8",
         )
-        (subject_func / f"sub-0001_task-thermalactive_run-01_space-{space}_desc-brain_mask.nii.gz").write_text(
+        (
+            subject_func
+            / f"sub-0001_task-thermalactive_run-01_space-{space}_desc-brain_mask.nii.gz"
+        ).write_text(
             "mask",
             encoding="utf-8",
         )
@@ -124,7 +130,9 @@ def _write_minimal_fmriprep_output(remote_derivatives: Path, local_bids_root: Pa
     (remote_root / "._sub-0001.html").write_text("metadata", encoding="utf-8")
 
 
-def test_fetch_fmriprep_outputs_uses_tar_archive_and_verifies_before_cleanup(tmp_path: Path) -> None:
+def test_fetch_fmriprep_outputs_uses_tar_archive_and_verifies_before_cleanup(
+    tmp_path: Path,
+) -> None:
     workflow_dir = tmp_path / "workflow"
     shutil.copytree(REPO_ROOT / "local_workflows" / "alliance_canada", workflow_dir)
     remote_derivatives, local_derivatives, local_bids_root = _write_workflow_config(

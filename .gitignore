@@ -62,18 +62,15 @@ eeg_pipeline/cli/tui/.gopath/
 bin/
 
 ### AI / Agent tooling (local, not shared) ###
-AGENTS.md
 .AGENTS.md
-agents.md
 .cursor/
-.agents/skills/
+.agents/
 skills-lock.json
 .codex/
 .worktrees/
 .aider*
 .continue/
 .copilot/
-docs/superpowers/
 
 # Track all Sphinx documentation source files; ignore build output only
 docs/_build/
@@ -92,6 +89,9 @@ Thumbs.db
 *.log
 output.json
 columns_sample.txt
+outputs/
+tmp/
+scratch/
 
 ### Local workflow state ###
 .superpowers/

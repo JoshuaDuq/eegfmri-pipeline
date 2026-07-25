@@ -165,8 +165,7 @@ fmri_preprocessing:
   engine: "apptainer"
   fmriprep:
     fs_license_file: "{_yaml_path(fs_license)}"
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(fmri_cfg))
@@ -181,7 +180,9 @@ fmri_preprocessing:
     config = ConfigDict({"project": {"task": "task"}})
     run_fmri(args, [], config)
 
-    assert _CapturePreprocessingPipeline.last_config.get("paths.bids_fmri_root") == _yaml_path(bids_root)
+    assert _CapturePreprocessingPipeline.last_config.get("paths.bids_fmri_root") == _yaml_path(
+        bids_root
+    )
     assert _CapturePreprocessingPipeline.last_config.get("fmri_preprocessing.engine") == "apptainer"
     assert _CapturePreprocessingPipeline.last_kwargs["subjects"] == ["0001"]
 
@@ -201,8 +202,7 @@ fmri_preprocessing:
   engine: "docker"
   fmriprep:
     fs_license_file: "{_yaml_path(fs_license)}"
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(fmri_cfg))
@@ -276,8 +276,7 @@ fmri_contrast:
   name: "from_yaml"
   condition_a:
     column: "trial_type"
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(fmri_cfg))
@@ -294,7 +293,9 @@ fmri_contrast:
     monkeypatch.setitem(
         sys.modules,
         "fmri_pipeline.analysis.plotting_config",
-        types.SimpleNamespace(build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)),
+        types.SimpleNamespace(
+            build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)
+        ),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -354,8 +355,7 @@ fmri_contrast:
   smoothing_fwhm: 6.0
   output_type: "t-stat"
   resample_to_freesurfer: true
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(fmri_cfg))
@@ -372,7 +372,9 @@ fmri_contrast:
     monkeypatch.setitem(
         sys.modules,
         "fmri_pipeline.analysis.plotting_config",
-        types.SimpleNamespace(build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)),
+        types.SimpleNamespace(
+            build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)
+        ),
     )
     monkeypatch.setitem(
         sys.modules,

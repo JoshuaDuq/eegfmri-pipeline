@@ -13,11 +13,11 @@ import pandas as pd
 
 def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     """Find first matching column from a list of candidates.
-    
+
     Args:
         df: DataFrame to search
         candidates: List of column names to try in order
-    
+
     Returns:
         First matching column name, or None if no match
     """
@@ -25,4 +25,3 @@ def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         if col in df.columns:
             return col
     return None
-

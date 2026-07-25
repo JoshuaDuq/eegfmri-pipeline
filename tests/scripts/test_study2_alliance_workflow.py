@@ -8,7 +8,6 @@ import yaml
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
 from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALLIANCE_ROOT = REPO_ROOT / "studies" / "pain_study" / "study2" / "alliance"
 
@@ -30,11 +29,7 @@ def test_study2_runtime_overrides_emit_parseable_path_templates():
     )
 
     lines = result.stdout.splitlines()
-    overrides = [
-        lines[index + 1]
-        for index, value in enumerate(lines)
-        if value == "--set"
-    ]
+    overrides = [lines[index + 1] for index, value in enumerate(lines) if value == "--set"]
 
     config: dict[str, object] = {}
     apply_set_overrides(config, overrides)
@@ -79,9 +74,7 @@ def test_study2_alliance_defaults_match_bem_valid_oct6_source_space():
 
 def test_study2_submission_uses_profile_memory():
     submit_script = ALLIANCE_ROOT / "run_full_study2_alliance.sh"
-    rorqual_profile = (
-        REPO_ROOT / "local_workflows" / "alliance_canada" / "clusters" / "rorqual.sh"
-    )
+    rorqual_profile = REPO_ROOT / "local_workflows" / "alliance_canada" / "clusters" / "rorqual.sh"
     trillium_profile = (
         REPO_ROOT / "local_workflows" / "alliance_canada" / "clusters" / "trillium.sh"
     )
@@ -146,7 +139,9 @@ def test_study2_adjacency_writes_to_runtime_output_root():
 
 
 def test_study2_smoketest_has_required_source_modeling_fields():
-    config_path = REPO_ROOT / "studies" / "pain_study" / "study2" / "config" / "study2_smoketest.yaml"
+    config_path = (
+        REPO_ROOT / "studies" / "pain_study" / "study2" / "config" / "study2_smoketest.yaml"
+    )
     config = yaml.safe_load(config_path.read_text())
     source_modeling = config["study2"]["source_modeling"]
     scanner_clean_gamma_ranges = [

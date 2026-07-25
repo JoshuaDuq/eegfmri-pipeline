@@ -15,7 +15,6 @@ from eeg_pipeline.cli.progress import create_progress_reporter, ProgressReporter
 from eeg_pipeline.infra.paths import resolve_deriv_root
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 
-
 DEFAULT_TASK_KEY = "project.task"
 MIN_SUBJECTS_KEY = "analysis.min_subjects_for_group"
 MIN_SUBJECTS_FOR_ML = 2
@@ -41,24 +40,20 @@ def add_common_subject_args(parser: argparse.ArgumentParser) -> None:
     """Add mutually exclusive subject selection arguments to parser."""
     subject_group = parser.add_mutually_exclusive_group()
     subject_group.add_argument(
-        "--group", type=str,
-        help="Group of subjects: 'all' or comma-separated list"
+        "--group", type=str, help="Group of subjects: 'all' or comma-separated list"
     )
     subject_group.add_argument(
-        "--subject", "-s", type=str, action="append",
-        help="Subject label(s) without 'sub-' prefix"
+        "--subject", "-s", type=str, action="append", help="Subject label(s) without 'sub-' prefix"
     )
     subject_group.add_argument(
-        "--all-subjects", action="store_true",
-        help="Process all available subjects"
+        "--all-subjects", action="store_true", help="Process all available subjects"
     )
 
 
 def add_task_arg(parser: argparse.ArgumentParser) -> None:
     """Add task label argument to parser."""
     parser.add_argument(
-        "--task", "-t", type=str, default=None,
-        help="Task label (default from config)"
+        "--task", "-t", type=str, default=None, help="Task label (default from config)"
     )
 
 
@@ -103,18 +98,16 @@ def add_output_format_args(parser: argparse.ArgumentParser) -> None:
         "--json",
         action="store_true",
         dest="output_json",
-        help="Output in JSON format (for TUI/scripting)"
+        help="Output in JSON format (for TUI/scripting)",
     )
     parser.add_argument(
         "--progress-json",
         action="store_true",
         dest="progress_json",
-        help="Emit progress events as JSON lines"
+        help="Emit progress events as JSON lines",
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be done without executing"
+        "--dry-run", action="store_true", help="Show what would be done without executing"
     )
     parser.add_argument(
         "--set",
@@ -122,10 +115,7 @@ def add_output_format_args(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=None,
         metavar="KEY=VALUE",
-        help=(
-            "Override config key at runtime (repeatable). "
-            "Example: --set project.task=mytask"
-        ),
+        help=("Override config key at runtime (repeatable). " "Example: --set project.task=mytask"),
     )
 
 
@@ -143,16 +133,11 @@ def validate_subjects_not_empty(subjects: List[str], operation: str) -> None:
         raise ValueError(f"No subjects specified for {operation}")
 
 
-def validate_min_subjects(
-    subjects: List[str],
-    min_count: int,
-    operation: str
-) -> None:
+def validate_min_subjects(subjects: List[str], min_count: int, operation: str) -> None:
     """Validate that subjects list meets minimum count requirement."""
     if len(subjects) < min_count:
         raise ValueError(
-            f"{operation} requires at least {min_count} subjects, "
-            f"got {len(subjects)}"
+            f"{operation} requires at least {min_count} subjects, " f"got {len(subjects)}"
         )
 
 

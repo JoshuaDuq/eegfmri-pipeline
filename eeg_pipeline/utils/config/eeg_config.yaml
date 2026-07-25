@@ -165,7 +165,21 @@ frequency_bands: &frequency_bands
 # 2.2 Time Windows
 time_windows:
   active: &active_window [3.0, 10.5]  # Active/task period [s]
-  baseline_tfr: &baseline_window_tfr [-5.0, -0.01]  # TFR baseline window [s]
+  # A time-frequency baseline window must clear the taper half-width at BOTH ends.
+  # The tapers are centred, so a window reaching nearer to the event than one half-width
+  # estimates "pre-stimulus" power partly from post-stimulus data. That leak scales with
+  # each condition's own response, so it biases condition differences instead of
+  # cancelling in them (measured: a true 6.02 dB difference reported as 3.93 dB).
+  # The same applies at the epoch boundary, where the window would draw on padding.
+  #
+  # One value cannot serve estimators with different taper widths, so the windows are
+  # split by the estimator that consumes them.
+  #
+  # Morlet, n_cycles = clip(f/2, 3, 15) from 1 Hz: worst half-width 2.39 s at 1 Hz.
+  # With epochs.tmin = -7.0 the widest valid window is [-4.6, -2.4].
+  baseline_tfr_morlet: &baseline_window_tfr_morlet [-4.6, -2.4]
+  # Multitaper with a constant 1.0 s window: half-width 0.5 s.
+  baseline_tfr_multitaper: &baseline_window_tfr_multitaper [-5.0, -0.5]
   baseline_erp: [-0.2, 0.0]  # ERP baseline window [s]
 
 # 2.3 Numeric Guards
@@ -209,7 +223,7 @@ alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
   # EEG↔fMRI: recommended for simultaneous acquisition
-  trim_to_first_volume: true         # EEG raw_to_bids: trim to first volume marker
+  trim_to_volume_bounds: true         # EEG raw_to_bids: trim to first volume marker
   fmri_onset_reference: "first_iti_start"  # fMRI raw_to_bids: event onsets relative to first ITI
 
 eeg:
@@ -253,9 +267,15 @@ preprocessing:
   brainvision_analyzer:
     # Enable only when BrainVision Analyzer scanner/pulse correction precedes MNE.
     enabled: true
+    strict_pulse_qc: false
     pulse_artifact_qc:
-      minimum_bpm: 45.0
-      maximum_bpm: 80.0
+      # Physiological plausibility bounds on the median marker-derived heart rate.
+      # These reject implausible marker sets, not unusual participants, so they must
+      # span the normal human range: sinus rhythm is 60-100 bpm, trained athletes
+      # reach ~40 bpm at rest, and noxious stimulation raises rate well above 80.
+      # A narrower bound rejects valid recordings with a hard error.
+      minimum_bpm: 40.0
+      maximum_bpm: 100.0
       minimum_marker_fraction: 0.8
       minimum_recording_coverage: 0.8
     cardiac_artifact_qc:
@@ -302,23 +322,43 @@ ica:
   # Optional manual-review evidence for residual cardiac artifact. R peaks are
   # detected from the ECG signal and do not require Analyzer R annotations.
   cardiac_review:
-    enabled: false
+    enabled: true
     ecg_channel: "ECG"
     epoch_window: [-0.4, 0.6]
     baseline: [-0.4, -0.1]
     measurement_window: [0.0, 0.4]
     ctps_threshold: "auto"
     representative_window_seconds: 10.0
+  # Optional manual-review evidence for residual ocular artifact. Blinks are detected
+  # from the configured ocular channels; no component is excluded by this review.
+  ocular_review:
+    enabled: true
+    # "eog" uses every channel typed as EOG. This montage has no dedicated EOG
+    # electrode, so frontopolar EEG channels stand in as blink surrogates. Because
+    # those channels are themselves part of the ICA decomposition, component-to-
+    # surrogate correlation is partly circular; the report states this caveat and
+    # excludes the surrogates from the global-field-power panels.
+    eog_channels: ["Fp1", "Fp2"]
   band_specific_report:
-    enabled: false
+    enabled: true
     fit_decim: 2
     tfr:
+      # Event-locked, baseline-relative time-frequency power for each component.
+      # Set false for resting-state or any continuous recording: fixed-length epochs
+      # have no event and no pre-stimulus interval, so there is no baseline for the
+      # power to be relative to. The component dossiers then show topography and
+      # Welch spectrum only, which is the interpretable evidence for rest.
+      enabled: true
       frequency_step_hz: 1.0
       time_min_s: -5.0
       time_max_s: 14.4
       time_step_s: 0.1
       baseline_tmin_s: -5.0
-      baseline_tmax_s: -0.01
+      # The DPSS tapers are centred and up to 3 s wide, so a baseline ending nearer
+      # than 1.5 s to the event estimates "pre-stimulus" power partly from
+      # post-stimulus data. The leak scales with each condition's own response, so it
+      # biases condition differences instead of cancelling in them.
+      baseline_tmax_s: -1.5
     comparisons: []
 
 epochs:
@@ -349,7 +389,7 @@ analysis:
 # 4.2 Time-Frequency (TFR)
 time_frequency_analysis:
   baseline_mode: "logratio"
-  baseline_window: *baseline_window_tfr
+  baseline_window: *baseline_window_tfr_morlet  # Morlet taper, see time_windows
   active_window: *active_window
   # Optional restriction for plotting/exports (null = use all configured bands).
   selected_bands: null
@@ -375,26 +415,86 @@ time_frequency_analysis:
       window_count: 5        # Number of time windows (for fixed-count windows)
   
   constants:
-    # Baseline processing
-    epsilon_baseline: 1.0e-10
-    min_epochs_for_tfr: 10
-    baseline_precision: 1.0e-6
+    # Only keys read by the pipeline belong here. A guard that nothing enforces is
+    # worse than no guard, because it reads as a safeguard while changing nothing.
     baseline_sentinel: "BASELINED:"
-    min_log_value: 1.0e-12
-    min_divisor: 1.0e-12
-    mad_scaling_factor: 1.4826
-    # Frequency resolution validation
-    low_freq_threshold: 15.0
-    low_cycles_warning_threshold: 4.0
-    freq_threshold_for_time_res: 8.0
-    # Statistics
-    min_samples_for_stats: 5
     min_samples_for_baseline_validation: 10
+
+# 4.1b Subject HTML Report
+#
+# These settings control what the report flags and how its figures are scaled. They do
+# not change any derivative: turning a threshold up or down alters the warnings a
+# reviewer sees, never the data. Sections whose inputs are absent are omitted rather
+# than rendered empty, so an EEG-only dataset simply has no scanner-correction section
+# and a resting-state run has no per-condition retention panel.
+report:
+  enabled: true
+  thresholds:
+    # Reference ratio of Analyzer R markers to scanner volumes used to group runs in
+    # the cohort figure. Analyzer writes one R marker per heartbeat and one per volume,
+    # so a complete set sits near one per volume at a short repetition time. This is a
+    # reporting reference, not a pass/fail rule; datasets recorded outside a scanner
+    # have no such section.
+    min_r_markers_per_volume: 0.5
+    # Reference line drawn on the region-coverage figure, and the count below which a
+    # region is listed in the coverage text. Interpreting the shortfall is left to the
+    # reviewer.
+    min_roi_channels: 2
+    # Reference value for samples per squared component, shown beside the measured
+    # value in the decomposition table (Onton and Makeig suggest 20 to 30).
+    min_samples_per_squared_component: 20.0
+    # Variance share used to split the excluded components into two groups in the
+    # decomposition text, so the rank spent on small components is visible.
+    low_variance_exclusion_floor: 0.01
+    # Distinct values above which an events column is treated as continuous and not
+    # reported as a retention grouping.
+    max_group_levels: 12
+    # Runs needed before a quantile band is drawn across runs; below this a band would
+    # only redraw the min-max envelope.
+    min_runs_for_quantile_band: 5
+    # Band searched for the residual gradient comb in the per-subject report. Matches
+    # preprocessing.scanner_harmonic_qc.frequency_range_hz so the per-subject and cohort
+    # views describe the same frequencies.
+    comb_frequency_range_hz: [15.0, 90.0]
+    # Welch window for the comb, in seconds. Longer than the sensor-spectra window
+    # because each harmonic is scored against the background *between* it and its
+    # neighbours, which a coarse resolution cannot resolve. At TR = 0.9 s the harmonics
+    # sit 1.11 Hz apart, so 8 s (0.125 Hz bins) leaves ~9 bins per spacing. If the
+    # resolution cannot separate the comb, the section reports itself absent rather than
+    # returning a number set by the window.
+    comb_welch_seconds: 8.0
+  display:
+    # Percentile of absolute values defining symmetric colour limits, so that one
+    # extreme component cannot flatten every other to the neutral colour.
+    color_limit_percentile: 98.0
+    # Columns in the all-components contact sheet.
+    component_overview_columns: 8
+    # Line-noise fundamental marked on the sensor spectra, with its harmonics. Leave
+    # unset to inherit preprocessing.notch_freq; set to null to mark nothing.
+    # spectra_line_frequency: 60.0
+    # Extra frequencies to mark on the sensor spectra, for example residual
+    # scanner-harmonic centres. Marks are reference lines only; the report draws no
+    # conclusion from what appears at them. The first few gradient harmonics are added
+    # automatically from the volume markers measured in each run; the full comb is
+    # measured in the "Residual scanner gradient" section rather than drawn here, because
+    # tens of vertical lines would bury the spectrum.
+    spectra_marked_frequencies: []
+    # Upper edge of the sensor-spectra axis. Above the low-pass the filter, not the
+    # recording, sets the trace, so leave unset to inherit preprocessing.h_freq. Set a
+    # number only to override; setting it above the low-pass plots roll-off as data.
+    # spectra_fmax: 100.0
+    # Window over which time-resolved amplitude is pooled in the "Data quality over
+    # time" section, in seconds. Short enough to localise a movement to a few seconds,
+    # long enough that a single window's RMS is a stable estimate.
+    continuity_window_seconds: 1.0
 
 # 4.2a ICA Component Time-Frequency Analysis
 component_time_frequency:
   condition_column: "stimulus_temp"
-  minimum_epochs_per_condition: 1
+  # A condition average computed from one or two trials is not an average: the
+  # log-ratio baseline is unstable and the resulting TFR is one trial's noise. Ten is
+  # the conventional floor for a per-condition time-frequency estimate.
+  minimum_epochs_per_condition: 10
   n_jobs: 1
   ica:
     band: [6.0, 14.0]
@@ -407,7 +507,7 @@ component_time_frequency:
     window_duration: 1.0
     frequency_smoothing: 2.0
     time_step: 0.1
-    baseline_window: *baseline_window_tfr
+    baseline_window: *baseline_window_tfr_multitaper  # 1.0 s multitaper window
     baseline_mode: "logratio"
   plotting:
     components_per_page: 6
@@ -1048,6 +1148,12 @@ statistics:
     min_dof_for_correlation: 2
     log_base: *log_base
     percentage_multiplier: *percentage_multiplier
+    # Neighbours per channel for the distance-based sensor adjacency used when MNE's
+    # Delaunay adjacency fails. Cluster-based permutation inference is sensitive to
+    # adjacency density, so this approximates what it replaces: symmetrized 5-nearest
+    # -neighbour adjacency has a mean degree of 5.78 against Delaunay's 5.43 on
+    # easycap-M1, the closest match among k = 3-6.
+    k_neighbors_adjacency: 5
 
 validation:
   min_epochs: 20

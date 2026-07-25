@@ -3,10 +3,10 @@ import mne
 import pandas as pd
 import numpy as np
 
-
 ###################################################################
 # MNE Object I/O
 ###################################################################
+
 
 def load_epochs(file_path, **kwargs):
     return mne.read_epochs(file_path, **kwargs)
@@ -24,6 +24,7 @@ def save_ica(ica, file_path, overwrite=True):
 # Channels TSV I/O
 ###################################################################
 
+
 def read_channels_tsv(file_path):
     return pd.read_csv(file_path, sep="\t")
 
@@ -35,6 +36,7 @@ def write_channels_tsv(channels_df, file_path, index=False):
 ###################################################################
 # Components TSV I/O
 ###################################################################
+
 
 def read_components_tsv(file_path):
     if not os.path.exists(file_path):

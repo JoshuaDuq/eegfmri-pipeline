@@ -23,12 +23,16 @@ from eeg_pipeline.analysis.features.rest import (
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
-from eeg_pipeline.utils.config.loader import get_config_value, get_feature_constant, get_frequency_bands
-
+from eeg_pipeline.utils.config.loader import (
+    get_config_value,
+    get_feature_constant,
+    get_frequency_bands,
+)
 
 ###################################################################
 # VALIDATION
 ###################################################################
+
 
 def validate_window_masks(
     precomputed: PrecomputedData,
@@ -59,10 +63,9 @@ def validate_window_masks(
             mask = windows.get_mask(target_name)
             if mask is not None and np.any(mask):
                 return True
-        
+
         has_active = any(
-            name.lower() != "baseline" and np.any(mask) 
-            for name, mask in windows.masks.items()
+            name.lower() != "baseline" and np.any(mask) for name, mask in windows.masks.items()
         )
         if not has_active:
             if logger:
@@ -76,6 +79,7 @@ def validate_window_masks(
 # BAND RATIO FEATURES
 ###################################################################
 
+
 def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
     """Extract PSD configuration from config."""
     psd_method = get_config_value(config, "feature_engineering.spectral.psd_method", "multitaper")
@@ -85,16 +89,20 @@ def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
             "feature_engineering.spectral.psd_method must be 'welch' or "
             f"'multitaper' (got '{psd_method}')."
         )
-    
+
     fmin_psd = float(get_config_value(config, "feature_engineering.spectral.fmin", 1.0))
-    fmax_psd = float(get_config_value(config, "feature_engineering.spectral.fmax", min(80.0, sfreq / 2.0 - 0.5)))
-    
-    multitaper_adaptive = bool(
-        get_config_value(config, "feature_engineering.spectral.multitaper_adaptive", False) or
-        get_config_value(config, "feature_engineering.spectral.psd_adaptive", False)
+    fmax_psd = float(
+        get_config_value(config, "feature_engineering.spectral.fmax", min(80.0, sfreq / 2.0 - 0.5))
     )
-    
-    exclude_line = bool(get_config_value(config, "feature_engineering.spectral.exclude_line_noise", True))
+
+    multitaper_adaptive = bool(
+        get_config_value(config, "feature_engineering.spectral.multitaper_adaptive", False)
+        or get_config_value(config, "feature_engineering.spectral.psd_adaptive", False)
+    )
+
+    exclude_line = bool(
+        get_config_value(config, "feature_engineering.spectral.exclude_line_noise", True)
+    )
 
     default_line_freq = get_config_value(config, "preprocessing.line_freq", 50.0)
     try:
@@ -122,10 +130,12 @@ def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
         raise ValueError(
             "feature_engineering.spectral.line_noise_freqs must contain finite positive numbers."
         )
-    
-    line_width = float(get_config_value(config, "feature_engineering.spectral.line_noise_width_hz", 1.0))
+
+    line_width = float(
+        get_config_value(config, "feature_engineering.spectral.line_noise_width_hz", 1.0)
+    )
     n_harm = int(get_config_value(config, "feature_engineering.spectral.line_noise_harmonics", 3))
-    
+
     return {
         "psd_method": psd_method,
         "fmin": fmin_psd,
@@ -146,21 +156,21 @@ def _compute_psd_band_power_for_segment(
     logger: Optional[logging.Logger] = None,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Compute PSD-integrated band power for a data segment.
-    
+
     Uses centralized PSD settings from config (method, fmin/fmax, line-noise exclusion).
     Returns dict mapping band names to power arrays:
     - (n_channels,) if data is 2D (channels, times)
     - (n_epochs, n_channels) if data is 3D (epochs, channels, times)
     """
     from eeg_pipeline.utils.analysis.spectral import compute_psd_bandpower
-    
+
     psd_cfg = _get_psd_config(config, sfreq)
-    
+
     if data.ndim == 2:
         data_3d = data[np.newaxis, :, :]
     else:
         data_3d = data
-    
+
     result = compute_psd_bandpower(
         data_3d,
         sfreq,
@@ -176,10 +186,10 @@ def _compute_psd_band_power_for_segment(
         n_harmonics=psd_cfg["n_harmonics"] if psd_cfg["exclude_line"] else None,
         logger=logger,
     )
-    
+
     if result is None:
         return None
-    
+
     if data.ndim == 2:
         return {band: arr[0] for band, arr in result.items()}
     return result
@@ -241,7 +251,7 @@ def extract_band_ratios_from_precomputed(
     config: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract band power ratios for ALL user-defined segments.
-    
+
     Uses PSD-integrated band power (scientifically valid for ratios).
     Power is bandwidth-normalized (power per Hz) for comparability across bands.
     """
@@ -262,23 +272,30 @@ def extract_band_ratios_from_precomputed(
 
     logger = getattr(precomputed, "logger", None)
     segment_masks = _get_segment_masks_with_fallback(precomputed, config, logger, "Band ratios")
-    
+
     if not segment_masks:
         return pd.DataFrame(), []
 
-    spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
+    spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
     roi_map = {}
-    if 'roi' in spatial_modes:
+    if "roi" in spatial_modes:
         from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
         from eeg_pipeline.utils.analysis.channels import build_roi_map
+
         roi_defs = get_roi_definitions(config)
         if roi_defs:
             roi_map = build_roi_map(precomputed.ch_names, roi_defs)
 
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
-    include_log = bool(get_config_value(config, "feature_engineering.spectral.include_log_ratios", True))
-    min_segment_sec = float(get_config_value(config, "feature_engineering.ratios.min_segment_sec", 1.0))
-    min_cycles = float(get_config_value(config, "feature_engineering.ratios.min_cycles_at_fmin", 3.0))
+    include_log = bool(
+        get_config_value(config, "feature_engineering.spectral.include_log_ratios", True)
+    )
+    min_segment_sec = float(
+        get_config_value(config, "feature_engineering.ratios.min_segment_sec", 1.0)
+    )
+    min_cycles = float(
+        get_config_value(config, "feature_engineering.ratios.min_cycles_at_fmin", 3.0)
+    )
     if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
         raise ValueError(
             "feature_engineering.ratios.min_segment_sec must be finite and >= 0 "
@@ -289,17 +306,17 @@ def extract_band_ratios_from_precomputed(
             "feature_engineering.ratios.min_cycles_at_fmin must be finite and > 0 "
             f"(got {min_cycles})."
         )
-    
+
     freq_bands = get_frequency_bands(config)
     needed_bands = {band for pair in pairs for band in pair}
     band_ranges = {b: tuple(freq_bands[b]) for b in needed_bands if b in freq_bands}
-    
+
     n_epochs = precomputed.data.shape[0]
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
     min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
-    
+
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
             continue
@@ -311,7 +328,7 @@ def extract_band_ratios_from_precomputed(
                 f"'{seg_label}' is too short for PSD ratios "
                 f"({seg_n / sfreq:.3f}s, {seg_n} samples < {min_segment_samples})."
             )
-        
+
         seg_data_all = precomputed.data[:, :, seg_mask]  # (epochs, ch, time)
         band_power = _compute_psd_band_power_for_segment(
             seg_data_all, sfreq, band_ranges, config, logger
@@ -334,7 +351,14 @@ def extract_band_ratios_from_precomputed(
                     f"{band_ranges.get(num)} / {band_ranges.get(den)}"
                 ) from exc
             fmin_pair = np.nanmin([fmin_num, fmin_den])
-            req_sec = max(float(min_segment_sec), (float(min_cycles) / float(fmin_pair)) if np.isfinite(fmin_pair) and fmin_pair > 0 else np.inf)
+            req_sec = max(
+                float(min_segment_sec),
+                (
+                    (float(min_cycles) / float(fmin_pair))
+                    if np.isfinite(fmin_pair) and fmin_pair > 0
+                    else np.inf
+                ),
+            )
             if seg_sec < req_sec:
                 raise ValueError(
                     "Band ratios: segment "
@@ -390,7 +414,9 @@ def extract_band_ratios_from_precomputed(
                         if np.any(roi_valid):
                             mean_num_roi = float(np.nanmean(p_num_ch[idx][roi_valid]))
                             mean_den_roi = float(np.nanmean(p_den_ch[idx][roi_valid]))
-                            val = float(mean_num_roi / mean_den_roi) if mean_den_roi > eps else np.nan
+                            val = (
+                                float(mean_num_roi / mean_den_roi) if mean_den_roi > eps else np.nan
+                            )
                             val_log = (
                                 float(np.log(mean_num_roi) - np.log(mean_den_roi))
                                 if mean_num_roi > eps and mean_den_roi > eps
@@ -406,7 +432,12 @@ def extract_band_ratios_from_precomputed(
                         rec[col] = float(val)
                         if include_log:
                             col_log = NamingSchema.build(
-                                "ratios", seg_label, pair_label, "roi", "log_ratio", channel=roi_name
+                                "ratios",
+                                seg_label,
+                                pair_label,
+                                "roi",
+                                "log_ratio",
+                                channel=roi_name,
                             )
                             rec[col_log] = float(val_log)
 
@@ -414,7 +445,11 @@ def extract_band_ratios_from_precomputed(
                     if np.any(valid_ch):
                         mean_num_global = float(np.nanmean(p_num_ch[valid_ch]))
                         mean_den_global = float(np.nanmean(p_den_ch[valid_ch]))
-                        val = float(mean_num_global / mean_den_global) if mean_den_global > eps else np.nan
+                        val = (
+                            float(mean_num_global / mean_den_global)
+                            if mean_den_global > eps
+                            else np.nan
+                        )
                         val_log = (
                             float(np.log(mean_num_global) - np.log(mean_den_global))
                             if mean_num_global > eps and mean_den_global > eps
@@ -424,18 +459,26 @@ def extract_band_ratios_from_precomputed(
                         val = np.nan
                         val_log = np.nan
 
-                    col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
+                    col = NamingSchema.build(
+                        "ratios", seg_label, pair_label, "global", "power_ratio"
+                    )
                     rec[col] = float(val)
                     if include_log:
-                        col_log = NamingSchema.build("ratios", seg_label, pair_label, "global", "log_ratio")
+                        col_log = NamingSchema.build(
+                            "ratios", seg_label, pair_label, "global", "log_ratio"
+                        )
                         rec[col_log] = float(val_log)
 
     if not records or all(len(r) == 0 for r in records):
         return pd.DataFrame(), []
     df = pd.DataFrame(records)
     df.attrs["precomputed_feature_family"] = str(getattr(precomputed, "feature_family", "") or "")
-    df.attrs["precomputed_spatial_transform"] = str(getattr(precomputed, "spatial_transform", "") or "")
-    df.attrs["precomputed_evoked_subtracted"] = bool(getattr(precomputed, "evoked_subtracted", False))
+    df.attrs["precomputed_spatial_transform"] = str(
+        getattr(precomputed, "spatial_transform", "") or ""
+    )
+    df.attrs["precomputed_evoked_subtracted"] = bool(
+        getattr(precomputed, "evoked_subtracted", False)
+    )
     df.attrs["precomputed_evoked_subtracted_conditionwise"] = bool(
         getattr(precomputed, "evoked_subtracted_conditionwise", False)
     )
@@ -445,6 +488,7 @@ def extract_band_ratios_from_precomputed(
 ###################################################################
 # ASYMMETRY FEATURES
 ###################################################################
+
 
 def _process_asymmetry_epoch(
     ep_idx: int,
@@ -457,7 +501,7 @@ def _process_asymmetry_epoch(
     activation_bands: set[str],
 ) -> Dict[str, float]:
     """Process asymmetry for a single epoch using pre-computed band power.
-    
+
     Args:
         ep_idx: Epoch index (for logging only)
         band_power: Dict mapping band names to (n_channels,) power arrays
@@ -465,20 +509,20 @@ def _process_asymmetry_epoch(
         segment_label: Name of the time segment
     """
     record: Dict[str, float] = {}
-    
+
     for band, p_mean in band_power.items():
         band_lc = str(band).strip().lower()
         for l_name, r_name, l_idx, r_idx in valid_pairs:
             pl, pr = p_mean[l_idx], p_mean[r_idx]
             pair = f"{l_name}-{r_name}"
-            
+
             # Use NaN when asymmetry is undefined (tiny denominator)
             denom = pr + pl
             if denom > eps and np.isfinite(pl) and np.isfinite(pr):
                 asym = (pr - pl) / denom
             else:
                 asym = np.nan
-            
+
             record[
                 NamingSchema.build(
                     "asymmetry",
@@ -489,13 +533,13 @@ def _process_asymmetry_epoch(
                     channel_pair=pair,
                 )
             ] = float(asym)
-            
+
             # Log-difference (ln(R) - ln(L)) - primary metric for frontal alpha asymmetry
             if pr > eps and pl > eps and np.isfinite(pl) and np.isfinite(pr):
                 logdiff = float(np.log(pr) - np.log(pl))
             else:
                 logdiff = np.nan
-            
+
             record[
                 NamingSchema.build(
                     "asymmetry",
@@ -517,7 +561,9 @@ def _process_asymmetry_epoch(
                         "logdiff_activation",
                         channel_pair=pair,
                     )
-                ] = float(-logdiff) if np.isfinite(logdiff) else np.nan
+                ] = (
+                    float(-logdiff) if np.isfinite(logdiff) else np.nan
+                )
     return record
 
 
@@ -526,13 +572,13 @@ def extract_asymmetry_from_precomputed(
     n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract hemispheric asymmetry features for ALL user-defined segments.
-    
+
     Uses PSD-integrated band power (scientifically valid for asymmetry indices).
     Power is bandwidth-normalized (power per Hz) for comparability across bands.
     """
     logger = getattr(precomputed, "logger", None)
     config = precomputed.config
-    
+
     default_pairs = [("F3", "F4"), ("F7", "F8"), ("C3", "C4"), ("P3", "P4"), ("O1", "O2")]
     pairs_cfg = get_config_value(config, "feature_engineering.asymmetry.channel_pairs", None)
     pairs: List[Tuple[str, str]] = []
@@ -551,7 +597,7 @@ def extract_asymmetry_from_precomputed(
         return pd.DataFrame(), []
 
     segment_masks = _get_segment_masks_with_fallback(precomputed, config, logger, "Asymmetry")
-    
+
     if not segment_masks:
         return pd.DataFrame(), []
 
@@ -562,8 +608,12 @@ def extract_asymmetry_from_precomputed(
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
-    min_segment_sec = float(get_config_value(config, "feature_engineering.asymmetry.min_segment_sec", 1.0))
-    min_cycles = float(get_config_value(config, "feature_engineering.asymmetry.min_cycles_at_fmin", 3.0))
+    min_segment_sec = float(
+        get_config_value(config, "feature_engineering.asymmetry.min_segment_sec", 1.0)
+    )
+    min_cycles = float(
+        get_config_value(config, "feature_engineering.asymmetry.min_cycles_at_fmin", 3.0)
+    )
     if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
         raise ValueError(
             "feature_engineering.asymmetry.min_segment_sec must be finite and >= 0 "
@@ -588,7 +638,7 @@ def extract_asymmetry_from_precomputed(
         if isinstance(activation_bands_cfg, (list, tuple))
         else {"alpha"}
     )
-    
+
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
             continue
@@ -600,7 +650,7 @@ def extract_asymmetry_from_precomputed(
                 f"'{seg_label}' is too short for PSD asymmetry "
                 f"({seg_n / sfreq:.3f}s, {seg_n} samples < {min_segment_samples})."
             )
-        
+
         seg_data_all = precomputed.data[:, :, seg_mask]
 
         seg_sec = float(seg_n) / float(sfreq) if sfreq > 0 else 0.0
@@ -610,7 +660,9 @@ def extract_asymmetry_from_precomputed(
                 fmin_f = float(fmin)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Invalid fmin for band '{band}': {fmin}") from exc
-            req_sec = max(float(min_segment_sec), (float(min_cycles) / fmin_f) if fmin_f > 0 else np.inf)
+            req_sec = max(
+                float(min_segment_sec), (float(min_cycles) / fmin_f) if fmin_f > 0 else np.inf
+            )
             if seg_sec >= req_sec:
                 eligible_bands[band] = (fmin, fmax)
             else:
@@ -622,23 +674,22 @@ def extract_asymmetry_from_precomputed(
                 )
 
         if not eligible_bands:
-            raise ValueError(
-                f"Asymmetry: no eligible bands for segment '{seg_label}'."
-            )
+            raise ValueError(f"Asymmetry: no eligible bands for segment '{seg_label}'.")
 
         band_power_all = _compute_psd_band_power_for_segment(
             seg_data_all, sfreq, eligible_bands if eligible_bands else band_ranges, config, logger
         )
         if band_power_all is None:
             band_power_all = {
-                b: np.full((n_epochs, len(precomputed.ch_names)), np.nan) for b in (eligible_bands if eligible_bands else band_ranges)
+                b: np.full((n_epochs, len(precomputed.ch_names)), np.nan)
+                for b in (eligible_bands if eligible_bands else band_ranges)
             }
-        
+
         epoch_band_power = [
             {band: arr[ep_idx] for band, arr in band_power_all.items()}
             for ep_idx in range(n_epochs)
         ]
-        
+
         if n_jobs != 1:
             seg_records = Parallel(n_jobs=n_jobs)(
                 delayed(_process_asymmetry_epoch)(
@@ -665,7 +716,7 @@ def extract_asymmetry_from_precomputed(
                 )
                 for ep_idx, power in enumerate(epoch_band_power)
             ]
-        
+
         for ep_idx, seg_rec in enumerate(seg_records):
             records[ep_idx].update(seg_rec)
 
@@ -674,8 +725,12 @@ def extract_asymmetry_from_precomputed(
 
     df = pd.DataFrame(records)
     df.attrs["precomputed_feature_family"] = str(getattr(precomputed, "feature_family", "") or "")
-    df.attrs["precomputed_spatial_transform"] = str(getattr(precomputed, "spatial_transform", "") or "")
-    df.attrs["precomputed_evoked_subtracted"] = bool(getattr(precomputed, "evoked_subtracted", False))
+    df.attrs["precomputed_spatial_transform"] = str(
+        getattr(precomputed, "spatial_transform", "") or ""
+    )
+    df.attrs["precomputed_evoked_subtracted"] = bool(
+        getattr(precomputed, "evoked_subtracted", False)
+    )
     df.attrs["precomputed_evoked_subtracted_conditionwise"] = bool(
         getattr(precomputed, "evoked_subtracted_conditionwise", False)
     )

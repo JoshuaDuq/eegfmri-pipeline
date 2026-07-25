@@ -6,10 +6,10 @@ from mne_bids_pipeline._logging import gen_log_kwargs, logger
 from . import utils
 from . import io
 
-
 ###################################################################
 # TFR Computation
 ###################################################################
+
 
 def compute_tfr_morlet(epochs, freqs, n_cycles, decim, n_jobs, return_itc, average):
     return mne.time_frequency.tfr_morlet(
@@ -27,6 +27,7 @@ def compute_tfr_morlet(epochs, freqs, n_cycles, decim, n_jobs, return_itc, avera
 # Single Subject TFR Computation
 ###################################################################
 
+
 def compute_tfr_single_subject(
     p,
     freqs,
@@ -41,37 +42,35 @@ def compute_tfr_single_subject(
     conditions=None,
 ):
     epo = io.load_epochs(p)
-    
+
     if interpolate_bads:
         epo = epo.interpolate_bads()
-    
+
     if conditions is not None:
         epo = epo[conditions]
-    
+
     subject, session = utils.get_subject_session(p)
-    
+
     msg = "Computing TFR"
     logger.info(**gen_log_kwargs(message=msg, subject=subject, session=session))
-    
+
     if not average:
-        power = compute_tfr_morlet(
-            epo, freqs, n_cycles, decim, n_jobs, return_itc, average=False
-        )
-        
+        power = compute_tfr_morlet(epo, freqs, n_cycles, decim, n_jobs, return_itc, average=False)
+
         if return_itc:
             power, itc = power
             if crop:
                 itc.crop(tmin=crop[0], tmax=crop[1], include_tmax=True)
-            
+
             itc_path = utils.get_derived_path(p, "_proc-clean_epo.fif", "_itc_epo-tfr.h5")
             itc.save(itc_path, overwrite=True)
-        
+
         if crop:
             power.crop(tmin=crop[0], tmax=crop[1], include_tmax=True)
-        
+
         power_path = utils.get_derived_path(p, "_proc-clean_epo.fif", "_power_epo-tfr.h5")
         power.save(power_path, overwrite=True)
-        
+
         if return_average:
             for cond in epo.event_id:
                 cond_save = utils.sanitize_condition_name(cond)
@@ -80,7 +79,7 @@ def compute_tfr_single_subject(
                     p, "_proc-clean_epo.fif", f"_power_{cond_save}_avg-tfr.h5"
                 )
                 power_cond.save(power_cond_path, overwrite=True)
-                
+
                 if return_itc:
                     itc_cond = itc[cond].average()
                     itc_cond_path = utils.get_derived_path(
@@ -91,29 +90,29 @@ def compute_tfr_single_subject(
         for cond in epo.event_id:
             cond_save = utils.sanitize_condition_name(cond)
             epochs_cond = epo[cond]
-            
+
             power_cond = compute_tfr_morlet(
                 epochs_cond, freqs, n_cycles, decim, n_jobs, return_itc, average=True
             )
-            
+
             if return_itc:
                 power_cond, itc_cond = power_cond
                 if crop:
                     itc_cond.crop(tmin=crop[0], tmax=crop[1], include_tmax=True)
-                
+
                 itc_cond_path = utils.get_derived_path(
                     p, "_proc-clean_epo.fif", f"_itc+{cond_save}_avg-tfr.h5"
                 )
                 itc_cond.save(itc_cond_path, overwrite=True)
-            
+
             if crop:
                 power_cond.crop(tmin=crop[0], tmax=crop[1], include_tmax=True)
-            
+
             power_cond_path = utils.get_derived_path(
                 p, "_proc-clean_epo.fif", f"_power+{cond_save}_avg-tfr.h5"
             )
             power_cond.save(power_cond_path, overwrite=True)
-    
+
     msg = "Done computing TFR"
     logger.info(**gen_log_kwargs(message=msg, subject=subject, session=session, emoji="✅"))
 
@@ -122,12 +121,13 @@ def compute_tfr_single_subject(
 # Main TFR Orchestrator
 ###################################################################
 
+
 def custom_tfr(
     pipeline_path,
     task,
     freqs=np.arange(1, 100, 1),
     n_cycles=None,
-    subjects='all',
+    subjects="all",
     decim=1,
     n_jobs=1,
     return_itc=True,
@@ -151,18 +151,17 @@ def custom_tfr(
         )
     )
     clean_epo_files.sort()
-    
-    if subjects != 'all':
+
+    if subjects != "all":
         clean_epo_files = [
-            f for f in clean_epo_files
-            if get_entities_from_fname(f)["subject"] in subjects
+            f for f in clean_epo_files if get_entities_from_fname(f)["subject"] in subjects
         ]
-    
+
     if n_cycles is None:
         n_cycles = freqs / 3.0
-    
+
     logger.title(f"Custom step - Computing TFR in {len(clean_epo_files)} files.")
-    
+
     for p in clean_epo_files:
         compute_tfr_single_subject(
             p,
@@ -177,4 +176,3 @@ def custom_tfr(
             return_average=return_average,
             conditions=None,
         )
-

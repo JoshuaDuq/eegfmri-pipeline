@@ -36,9 +36,7 @@ def parse_frequency_band_definitions(band_defs: Sequence[str]) -> dict[str, list
                 f"Invalid frequency values in '{band_def}'; expected numeric low:high"
             ) from exc
         if low >= high:
-            raise ValueError(
-                f"Invalid frequency range in '{band_def}'; low must be < high"
-            )
+            raise ValueError(f"Invalid frequency range in '{band_def}'; low must be < high")
         bands[name] = [low, high]
     return bands
 
@@ -49,9 +47,7 @@ def parse_roi_definitions(roi_defs: Sequence[str]) -> dict[str, list[str]]:
     for roi_def in roi_defs:
         text = str(roi_def)
         if ":" not in text:
-            raise ValueError(
-                f"Invalid ROI definition '{roi_def}'; expected 'name:ch1,ch2,...'"
-            )
+            raise ValueError(f"Invalid ROI definition '{roi_def}'; expected 'name:ch1,ch2,...'")
         name, channels_str = text.split(":", 1)
         name = name.strip()
         channels = [channel.strip() for channel in channels_str.split(",") if channel.strip()]
@@ -59,4 +55,3 @@ def parse_roi_definitions(roi_defs: Sequence[str]) -> dict[str, list[str]]:
             raise ValueError(f"Invalid ROI definition '{roi_def}'; no channels specified")
         rois[name] = [f"^({'|'.join(channels)})$"]
     return rois
-

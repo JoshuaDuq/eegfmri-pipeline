@@ -222,7 +222,9 @@ def merge_trial_tables(trial_paths: List[Path]) -> pd.DataFrame:
 
         if len(merged) == len(df):
             extra = df.drop(columns=[c for c in df.columns if c in merged.columns], errors="ignore")
-            merged = pd.concat([merged.reset_index(drop=True), extra.reset_index(drop=True)], axis=1)
+            merged = pd.concat(
+                [merged.reset_index(drop=True), extra.reset_index(drop=True)], axis=1
+            )
             continue
 
         raise ValueError(
@@ -237,8 +239,7 @@ def merge_trial_tables(trial_paths: List[Path]) -> pd.DataFrame:
 
 def _rename_feature_columns_with_prefix(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     rename_map = {
-        col: col if str(col).startswith(prefix) else f"{prefix}{col}"
-        for col in df.columns
+        col: col if str(col).startswith(prefix) else f"{prefix}{col}" for col in df.columns
     }
     if all(k == v for k, v in rename_map.items()):
         return df
@@ -270,7 +271,9 @@ def combine_feature_tables(
         prefix = f"{name}_"
         df_renamed = _rename_feature_columns_with_prefix(df, prefix)
         if df_renamed.columns.duplicated().any():
-            dup_names = [str(c) for c in df_renamed.columns[df_renamed.columns.duplicated()].unique()]
+            dup_names = [
+                str(c) for c in df_renamed.columns[df_renamed.columns.duplicated()].unique()
+            ]
             raise ValueError(f"Duplicate feature columns within {name}: {dup_names}")
 
         overlap = existing_columns.intersection(df_renamed.columns)
@@ -303,10 +306,7 @@ def compute_feature_tables_signature(
 
 
 def _schema_entries(df: pd.DataFrame) -> List[Dict[str, str]]:
-    return [
-        {"name": str(col), "dtype": str(df[col].dtype)}
-        for col in df.columns
-    ]
+    return [{"name": str(col), "dtype": str(df[col].dtype)} for col in df.columns]
 
 
 def compute_trial_table_schema_hash(df: pd.DataFrame) -> str:
@@ -348,8 +348,7 @@ def validate_trial_table_contract(
         actual_hash = compute_trial_table_schema_hash(df)
         if str(expected_hash) != actual_hash:
             errors.append(
-                "contract schema_hash mismatch: expected "
-                f"{expected_hash}, got {actual_hash}"
+                "contract schema_hash mismatch: expected " f"{expected_hash}, got {actual_hash}"
             )
 
     return errors
@@ -401,16 +400,12 @@ def add_predictor_residual(
     """Add a flexible predictor→outcome fit and define predictor_residual = outcome - f(predictor)."""
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    enabled = bool(
-        get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)
-    )
+    enabled = bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True))
     meta: Dict[str, Any] = {"enabled": enabled}
     if not enabled:
         return df, meta
 
-    has_required_columns = (
-        predictor_col in df.columns and outcome_col in df.columns
-    )
+    has_required_columns = predictor_col in df.columns and outcome_col in df.columns
     if not has_required_columns:
         meta["status"] = "skipped_missing_columns"
         return df, meta
@@ -431,9 +426,7 @@ def add_predictor_residual(
     result[out_pred_col] = prediction
     result[out_resid_col] = residual
     crossfit_enabled = bool(
-        get_config_value(
-            config, "behavior_analysis.predictor_residual.crossfit.enabled", False
-        )
+        get_config_value(config, "behavior_analysis.predictor_residual.crossfit.enabled", False)
     )
     if crossfit_enabled:
         default_group_col = get_config_value(
@@ -482,9 +475,11 @@ def save_trial_table(
     format_normalized = str(format).strip().lower()
     if format_normalized == "parquet":
         from eeg_pipeline.infra.tsv import write_parquet
+
         write_parquet(result.df, out_path)
     elif format_normalized in {"tsv", "txt"}:
         from eeg_pipeline.infra.tsv import write_tsv
+
         write_tsv(result.df, out_path, index=False)
     else:
         raise ValueError(f"Unsupported trial table format: {format}")

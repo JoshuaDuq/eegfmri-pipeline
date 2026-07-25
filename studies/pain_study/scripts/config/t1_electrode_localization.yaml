@@ -1,0 +1,25 @@
+output_root: ../../../../outputs/t1_electrode_localization
+montage: easycap-M1
+
+parameters:
+  threshold_scale: 0.40
+  closing_iterations: 2
+  candidate_radius_mm: 18.0
+  maximum_contact_displacement_mm: 12.0
+  min_evidence_z: 2.0
+  max_rotation_degrees: 25.0
+  registration_iterations: 3
+  minimum_artifact_separation_mm: 8.0
+  minimum_artifact_prominence_mm: 1.5
+  prominence_neighbor_count: 512
+  footprint_neighbor_count: 64
+  neighbor_query_chunk_size: 5000
+  minimum_head_spans_mm: [105.0, 125.0, 125.0]
+
+participants:
+  sub-0014:
+    t1w: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0014/anat/sub-0014_T1w.nii.gz
+    eeg_bids_subject_directory: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg_brainvision_analyzer_sub-0014/sub-0014
+  sub-0015:
+    t1w: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0015/anat/sub-0015_T1w.nii.gz
+    eeg_bids_subject_directory: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg_corrected_pipeline_sub-0015/sub-0015

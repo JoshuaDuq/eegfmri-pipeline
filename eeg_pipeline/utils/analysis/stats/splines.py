@@ -17,7 +17,6 @@ import pandas as pd
 
 from .base import get_config_value as _get_config_value
 
-
 # Constants
 MIN_KNOTS_FOR_NONLINEAR = 4
 MIN_SAMPLES_DEFAULT = 12
@@ -75,9 +74,7 @@ def _compute_knots(
     n_knots: int,
 ) -> np.ndarray:
     """Compute unique, sorted knots from predictor quantiles."""
-    quantile_low, quantile_high = _compute_knot_quantiles(
-        quantile_low, quantile_high, n_knots
-    )
+    quantile_low, quantile_high = _compute_knot_quantiles(quantile_low, quantile_high, n_knots)
     quantile_values = np.linspace(
         quantile_low, quantile_high, num=max(n_knots, MIN_KNOTS_FOR_NONLINEAR)
     )
@@ -150,8 +147,12 @@ def build_predictor_rcs_design(
 
     min_samples = int(_get_config_value(config, f"{key_prefix}.min_samples", MIN_SAMPLES_DEFAULT))
     n_knots = int(_get_config_value(config, f"{key_prefix}.n_knots", N_KNOTS_DEFAULT))
-    quantile_low = float(_get_config_value(config, f"{key_prefix}.quantile_low", QUANTILE_LOW_DEFAULT))
-    quantile_high = float(_get_config_value(config, f"{key_prefix}.quantile_high", QUANTILE_HIGH_DEFAULT))
+    quantile_low = float(
+        _get_config_value(config, f"{key_prefix}.quantile_low", QUANTILE_LOW_DEFAULT)
+    )
+    quantile_high = float(
+        _get_config_value(config, f"{key_prefix}.quantile_high", QUANTILE_HIGH_DEFAULT)
+    )
 
     meta: Dict[str, Any] = {
         "n_valid": int(finite_mask.sum()),
@@ -218,4 +219,3 @@ def build_predictor_rcs_design(
 
 
 __all__ = ["build_predictor_rcs_design"]
-

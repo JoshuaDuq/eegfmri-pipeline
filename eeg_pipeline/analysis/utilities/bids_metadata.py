@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 
-
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -30,9 +29,7 @@ def ensure_events_sidecar(events_tsv: Path, columns: list[str]) -> None:
     sidecar = events_json_path(events_tsv)
     data = _load_json(sidecar)
     clean_event_descriptions = {
-        "epoch_index": {
-            "Description": "Zero-based row index within the kept clean-epochs file."
-        },
+        "epoch_index": {"Description": "Zero-based row index within the kept clean-epochs file."},
         "trial_id": {
             "Description": "Zero-based trial index aligned to the kept clean-epochs axis."
         },
@@ -98,7 +95,10 @@ def ensure_task_events_json(bids_root: Path, task: str) -> None:
     if out.exists():
         return
     schema: dict[str, Any] = {
-        "onset": {"Description": "Event onset in seconds from the start of the EEG run.", "Units": "s"},
+        "onset": {
+            "Description": "Event onset in seconds from the start of the EEG run.",
+            "Units": "s",
+        },
         "duration": {"Description": "Event duration in seconds.", "Units": "s"},
         "trial_type": {"Description": "Event label (BrainVision/MNE annotation description)."},
         "value": {"Description": "Event code (trigger ID)."},

@@ -25,13 +25,13 @@ def extract_aligned_column_vector(
     n_samples: int,
 ) -> Optional[pd.Series]:
     """Extract a column vector from TFR metadata or events DataFrame.
-    
+
     Args:
         tfr: TFR object that may have metadata attribute
         events_df: Optional events DataFrame
         column_name: Name of column to extract
         n_samples: Number of samples to extract
-        
+
     Returns:
         Series with numeric values, or None if column not found
     """
@@ -49,13 +49,13 @@ def extract_predictor_series(
     n_samples: int,
 ) -> Optional[pd.Series]:
     """Extract predictor series from TFR or events DataFrame.
-    
+
     Args:
         tfr: TFR object that may have metadata attribute
         events_df: Optional events DataFrame
         temp_col: Name of predictor column, or None
         n_samples: Number of samples to extract
-        
+
     Returns:
         Series with numeric predictor values, or None if column not found
     """
@@ -69,17 +69,15 @@ def _extract_unique_predictors(
     predictor_rounding_decimals: int,
 ) -> list[float]:
     """Extract sorted unique predictor values from series.
-    
+
     Args:
         temp_series: Series with predictor values
         predictor_rounding_decimals: Decimal places for rounding
-        
+
     Returns:
         Sorted list of unique predictor values
     """
-    rounded_series = pd.to_numeric(temp_series, errors="coerce").round(
-        predictor_rounding_decimals
-    )
+    rounded_series = pd.to_numeric(temp_series, errors="coerce").round(predictor_rounding_decimals)
     unique_temps = rounded_series.dropna().unique()
     return sorted(map(float, unique_temps))
 
@@ -90,18 +88,16 @@ def _create_predictor_mask(
     predictor_rounding_decimals: int,
 ) -> np.ndarray:
     """Create boolean mask for samples matching target predictor.
-    
+
     Args:
         temp_series: Series with predictor values
         target_pred: Target predictor value to match
         predictor_rounding_decimals: Decimal places for rounding
-        
+
     Returns:
         Boolean array indicating matching samples
     """
-    rounded_series = pd.to_numeric(temp_series, errors="coerce").round(
-        predictor_rounding_decimals
-    )
+    rounded_series = pd.to_numeric(temp_series, errors="coerce").round(predictor_rounding_decimals)
     target_rounded = round(target_pred, predictor_rounding_decimals)
     return np.asarray(rounded_series == target_rounded, dtype=bool)
 
@@ -112,12 +108,12 @@ def get_predictor_range(
     min_predictors_required: int = 2,
 ) -> tuple[Optional[float], Optional[float]]:
     """Extract minimum and maximum predictor values from series.
-    
+
     Args:
         temp_series: Series with predictor values, or None
         predictor_rounding_decimals: Decimal places for rounding
         min_predictors_required: Minimum unique predictor levels needed
-        
+
     Returns:
         Tuple of (min_temp, max_temp), or (None, None) if insufficient data
     """
@@ -137,12 +133,12 @@ def create_predictor_masks(
     min_predictors_required: int = 2,
 ) -> tuple[Optional[float], Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
     """Create masks for minimum and maximum predictor conditions.
-    
+
     Args:
         temp_series: Series with predictor values, or None
         predictor_rounding_decimals: Decimal places for rounding
         min_predictors_required: Minimum unique predictor levels needed
-        
+
     Returns:
         Tuple of (t_min, t_max, mask_min, mask_max), with None values if insufficient data
     """
@@ -167,13 +163,13 @@ def create_predictor_masks_from_range(
     predictor_rounding_decimals: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Create masks for specified minimum and maximum predictor values.
-    
+
     Args:
         temp_series: Series with predictor values, or None
         t_min: Minimum predictor value
         t_max: Maximum predictor value
         predictor_rounding_decimals: Decimal places for rounding
-        
+
     Returns:
         Tuple of (mask_min, mask_max) boolean arrays, or empty arrays if invalid input
     """

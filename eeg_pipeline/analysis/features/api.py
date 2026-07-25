@@ -110,7 +110,9 @@ def _resolve_condition_labels_from_events(
     return None
 
 
-def _resolve_pac_segment_window(ctx: FeatureContext, times: np.ndarray) -> tuple[str, Optional[tuple[float, float]]]:
+def _resolve_pac_segment_window(
+    ctx: FeatureContext, times: np.ndarray
+) -> tuple[str, Optional[tuple[float, float]]]:
     """Resolve the PAC time window on the current TFR time axis."""
     windows = getattr(ctx, "windows", None)
     target_name = getattr(ctx, "name", None) or getattr(windows, "name", None)
@@ -144,7 +146,9 @@ def _resolve_pac_segment_window(ctx: FeatureContext, times: np.ndarray) -> tuple
         mask = np.asarray(mask, dtype=bool)
         selected_times = np.asarray(times[mask], dtype=float)
         if selected_times.size < 1:
-            raise ValueError(f"PAC: resolved segment '{selected_name}' has no samples on the TFR time axis.")
+            raise ValueError(
+                f"PAC: resolved segment '{selected_name}' has no samples on the TFR time axis."
+            )
         if selected_times.size == 1:
             sfreq = float(ctx.epochs.info["sfreq"])
             return selected_name, (float(selected_times[0]), float(selected_times[0] + 1.0 / sfreq))
@@ -186,10 +190,9 @@ def _prepare_precomputed_data(
     if not needs_precompute:
         return None
 
-    needs_baseline = (
-        bool(baseline_dependent_categories & set(ctx.feature_categories))
-        and not is_resting_state_feature_mode(ctx.config)
-    )
+    needs_baseline = bool(
+        baseline_dependent_categories & set(ctx.feature_categories)
+    ) and not is_resting_state_feature_mode(ctx.config)
     has_time_range = tmin is not None or tmax is not None
 
     cached = None
@@ -221,7 +224,9 @@ def _prepare_precomputed_data(
 
     precomputed_evoked_subtracted = False
     precomputed_evoked_subtracted_conditionwise = False
-    pre_cfg = ctx.config.get("feature_engineering.precomputed", {}) if hasattr(ctx.config, "get") else {}
+    pre_cfg = (
+        ctx.config.get("feature_engineering.precomputed", {}) if hasattr(ctx.config, "get") else {}
+    )
     subtract_evoked_cfg = pre_cfg.get("subtract_evoked", None)
     if subtract_evoked_cfg is None:
         subtract_evoked_cfg = (
@@ -275,8 +280,7 @@ def _prepare_precomputed_data(
     ctx.logger.info(f"Computing shared intermediate data for: {', '.join(relevant_categories)}...")
 
     needs_psd = any(
-        category in ctx.feature_categories
-        for category in ["erds", "aperiodic", "spectral"]
+        category in ctx.feature_categories for category in ["erds", "aperiodic", "spectral"]
     )
 
     precomputed_data = precompute_data(
@@ -292,7 +296,9 @@ def _prepare_precomputed_data(
         analysis_mode=getattr(ctx, "analysis_mode", None),
     )
     precomputed_data.evoked_subtracted = bool(precomputed_evoked_subtracted)
-    precomputed_data.evoked_subtracted_conditionwise = bool(precomputed_evoked_subtracted_conditionwise)
+    precomputed_data.evoked_subtracted_conditionwise = bool(
+        precomputed_evoked_subtracted_conditionwise
+    )
     setter = getattr(ctx, "set_precomputed_for_family", None)
     if callable(setter):
         setter("spectral", precomputed_data)
@@ -370,9 +376,7 @@ def _compute_complex_tfr_for_transform(
         epochs_for_complex = epochs.copy().pick_types(
             eeg=True, meg=False, eog=False, stim=False, exclude="bads"
         )
-        epochs_for_complex = _apply_spatial_transform(
-            epochs_for_complex, transform, config, logger
-        )
+        epochs_for_complex = _apply_spatial_transform(epochs_for_complex, transform, config, logger)
 
     tfr_complex = compute_complex_tfr(epochs_for_complex, config, logger)
     if tfr_complex is not None:
@@ -398,7 +402,7 @@ def _compute_tfr_for_features(
     tmax: Optional[float],
 ) -> tuple[Any, Optional[pd.DataFrame], List[str], Optional[float], Optional[float]]:
     """Compute TFR and baseline data for feature extraction.
-    
+
     IMPORTANT:
     - Power TFR is computed from the original (uncropped) epochs so baseline windows
       remain available for normalization.
@@ -408,12 +412,14 @@ def _compute_tfr_for_features(
     tfr_complex = None
     tfr_power = None
     epochs_for_complex = None
-    
+
     epochs_for_tfr = getattr(ctx, "_original_epochs", None) or ctx.epochs
     epochs_for_power_tfr = epochs_for_tfr
 
     # Evoked subtraction for induced power features (event-related paradigms)
-    power_cfg = ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
+    power_cfg = (
+        ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
+    )
     want_induced_power = bool(power_cfg.get("subtract_evoked", False))
     ctx.power_evoked_subtracted = False
     ctx.power_evoked_subtracted_conditionwise = False
@@ -450,15 +456,21 @@ def _compute_tfr_for_features(
 
     pac_needs_complex = False
     if "pac" in ctx.feature_categories:
-        pac_cfg = ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
+        pac_cfg = (
+            ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
+        )
         pac_source = str(pac_cfg.get("source", "precomputed")).strip().lower()
         pac_needs_complex = pac_source != "precomputed"
 
     needs_itpc_complex = ("itpc" in ctx.feature_categories) or ("phase" in ctx.feature_categories)
     needs_complex = needs_itpc_complex or pac_needs_complex
     if needs_complex:
-        itpc_transform = _get_family_spatial_transform(ctx.config, "itpc") if needs_itpc_complex else "none"
-        pac_transform = _get_family_spatial_transform(ctx.config, "pac") if pac_needs_complex else "none"
+        itpc_transform = (
+            _get_family_spatial_transform(ctx.config, "itpc") if needs_itpc_complex else "none"
+        )
+        pac_transform = (
+            _get_family_spatial_transform(ctx.config, "pac") if pac_needs_complex else "none"
+        )
         shared_transform = itpc_transform if needs_itpc_complex else pac_transform
         if needs_itpc_complex and pac_needs_complex and itpc_transform != pac_transform:
             ctx.logger.warning(
@@ -479,7 +491,9 @@ def _compute_tfr_for_features(
                     and hasattr(epochs_for_tfr, "times")
                     and len(existing_complex.times) == len(epochs_for_tfr.times)
                     and np.isclose(float(existing_complex.times[0]), float(epochs_for_tfr.times[0]))
-                    and np.isclose(float(existing_complex.times[-1]), float(epochs_for_tfr.times[-1]))
+                    and np.isclose(
+                        float(existing_complex.times[-1]), float(epochs_for_tfr.times[-1])
+                    )
                 ):
                     existing_transform = _resolve_complex_tfr_transform(ctx, existing_complex)
                     if existing_transform and existing_transform != shared_transform:
@@ -556,9 +570,7 @@ def _compute_tfr_for_features(
         crop_max = tmax if tmax is not None else tfr.times[-1]
 
         if crop_min is not None and crop_max is not None and crop_min > crop_max:
-            raise ValueError(
-                f"Requested TFR crop start ({crop_min}) must be <= end ({crop_max})."
-            )
+            raise ValueError(f"Requested TFR crop start ({crop_min}) must be <= end ({crop_max}).")
 
         tfr_min = float(tfr.times[0])
         tfr_max = float(tfr.times[-1])
@@ -608,7 +620,9 @@ def _save_tfr_with_sidecar(
     baseline_mode = str(ctx.config.get("time_frequency_analysis.baseline_mode", "logratio"))
     tfr_to_save = tfr.copy()
     tfr_to_save.apply_baseline(baseline=(baseline_start, baseline_end), mode=baseline_mode)
-    tfr_to_save.comment = f"BASELINED:mode={baseline_mode};win=({baseline_start:.3f},{baseline_end:.3f})"
+    tfr_to_save.comment = (
+        f"BASELINED:mode={baseline_mode};win=({baseline_start:.3f},{baseline_end:.3f})"
+    )
     tfr_output_path = (
         ctx.deriv_root
         / f"sub-{ctx.subject}"
@@ -653,7 +667,9 @@ def _extract_pac_features(
         # may have spatial_transform='none' and bias phase-based features.
         expected_transform = _get_family_spatial_transform(ctx.config, "pac")
 
-        current_transform = str(getattr(precomputed_pac, "spatial_transform", "none")).strip().lower()
+        current_transform = (
+            str(getattr(precomputed_pac, "spatial_transform", "none")).strip().lower()
+        )
         if precomputed_pac is not None and expected_transform in {"csd", "laplacian"}:
             if current_transform != expected_transform:
                 ctx.logger.warning(
@@ -739,21 +755,19 @@ def _extract_pac_features(
         np.asarray(tfr_complex.times, dtype=float),
     )
 
-    pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = (
-        compute_pac_comodulograms(
-            tfr_complex,
-            frequencies,
-            tfr_complex.times,
-            ctx.epochs.info,
-            ctx.config,
-            ctx.logger,
-            segment_name=segment_label,
-            segment_window=segment_window,
-            spatial_modes=ctx.spatial_modes,
-            analysis_mode=getattr(ctx, "analysis_mode", None),
-            train_mask=getattr(ctx, "train_mask", None),
-            frequency_bands=getattr(ctx, "frequency_bands", None),
-        )
+    pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
+        tfr_complex,
+        frequencies,
+        tfr_complex.times,
+        ctx.epochs.info,
+        ctx.config,
+        ctx.logger,
+        segment_name=segment_label,
+        segment_window=segment_window,
+        spatial_modes=ctx.spatial_modes,
+        analysis_mode=getattr(ctx, "analysis_mode", None),
+        train_mask=getattr(ctx, "train_mask", None),
+        frequency_bands=getattr(ctx, "frequency_bands", None),
     )
     return pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df
 
@@ -802,7 +816,10 @@ def _extract_feature_with_error_handling(
             raise ValueError(f"{feature_name} length mismatch: {len(df)} vs {expected_trials}")
         ctx.logger.info(
             "  ✓ %s: %d columns × %d trials (%.1fs)",
-            feature_name, df.shape[1], len(df), elapsed,
+            feature_name,
+            df.shape[1],
+            len(df),
+            elapsed,
         )
     else:
         ctx.logger.info("  – %s: no features produced (%.1fs)", feature_name, elapsed)
@@ -860,7 +877,9 @@ def _apply_spatial_filtering_to_results(
             total_before += df.shape[1]
             filtered_df = filter_features_by_spatial_modes(df, ctx.spatial_modes, ctx.config)
             setattr(results, df_attr, filtered_df)
-            setattr(results, cols_attr, list(filtered_df.columns) if filtered_df is not None else [])
+            setattr(
+                results, cols_attr, list(filtered_df.columns) if filtered_df is not None else []
+            )
             total_after += filtered_df.shape[1] if filtered_df is not None else 0
 
     if total_before == 0:
@@ -870,10 +889,17 @@ def _apply_spatial_filtering_to_results(
     if removed > 0:
         ctx.logger.info(
             "Spatial filtering (%s): kept %d/%d columns (removed %d)",
-            ", ".join(ctx.spatial_modes), total_after, total_before, removed,
+            ", ".join(ctx.spatial_modes),
+            total_after,
+            total_before,
+            removed,
         )
     else:
-        ctx.logger.info("Spatial filtering (%s): all %d columns retained", ", ".join(ctx.spatial_modes), total_after)
+        ctx.logger.info(
+            "Spatial filtering (%s): all %d columns retained",
+            ", ".join(ctx.spatial_modes),
+            total_after,
+        )
 
 
 def filter_features_by_spatial_modes(
@@ -882,13 +908,13 @@ def filter_features_by_spatial_modes(
     config: Any,
 ) -> Optional[pd.DataFrame]:
     """Filter feature DataFrame columns to only include those matching spatial_modes.
-    
+
     Feature columns are identified by naming patterns:
     - '_ch_': per-channel features (include if 'channels' in spatial_modes)
     - '_chpair_': channel pair features (include if 'channels' in spatial_modes)
     - '_global_' or '_global': global features (include if 'global' in spatial_modes)
     - '_roi_' or ROI name patterns: ROI features (include if 'roi' in spatial_modes)
-    
+
     Non-spatial features are always included.
     """
     if not spatial_modes or df is None or getattr(df, "empty", True):
@@ -938,7 +964,8 @@ def extract_all_features(
     range_label = f"[{tmin}, {tmax}]s" if (tmin is not None or tmax is not None) else "full epoch"
     ctx.logger.info(
         "Feature extraction: %d categories, %s, spatial=%s",
-        len(ctx.feature_categories), range_label,
+        len(ctx.feature_categories),
+        range_label,
         ", ".join(ctx.spatial_modes) if ctx.spatial_modes else "all",
     )
     validate_rest_configuration(ctx.config)
@@ -953,9 +980,11 @@ def extract_all_features(
     ctx.epochs = working_epochs
     ctx.logger.info(
         "Working epochs: %d trials, %d channels, %.0f Hz, %.3f–%.3fs",
-        expected_n_trials, len(working_epochs.ch_names),
+        expected_n_trials,
+        len(working_epochs.ch_names),
         working_epochs.info["sfreq"],
-        working_epochs.times[0], working_epochs.times[-1],
+        working_epochs.times[0],
+        working_epochs.times[-1],
     )
 
     # Rebase masks onto cropped time axis while preserving original ranges.
@@ -990,7 +1019,9 @@ def extract_all_features(
                 if key != "baseline":
                     active_key = key
                     break
-        active_range = ranges_full.get(active_key, (np.nan, np.nan)) if active_key else (np.nan, np.nan)
+        active_range = (
+            ranges_full.get(active_key, (np.nan, np.nan)) if active_key else (np.nan, np.nan)
+        )
 
         empty_mask = np.zeros_like(new_times, dtype=bool)
         ctx._windows = TimeWindows(
@@ -1016,7 +1047,8 @@ def extract_all_features(
         n_bands = len(precomputed_data.frequency_bands) if precomputed_data.frequency_bands else 0
         ctx.logger.info(
             "Precomputed intermediates ready: %d bands, transform=%s (%.1fs)",
-            n_bands, getattr(precomputed_data, "spatial_transform", "none"),
+            n_bands,
+            getattr(precomputed_data, "spatial_transform", "none"),
             _time.perf_counter() - t_pre,
         )
 
@@ -1049,7 +1081,9 @@ def extract_all_features(
 
         ctx.logger.info(
             "TFR ready: %d freqs, %d time points (%.1fs)",
-            len(tfr.freqs), len(tfr.times), _time.perf_counter() - t_tfr,
+            len(tfr.freqs),
+            len(tfr.times),
+            _time.perf_counter() - t_tfr,
         )
 
         if any(category in ctx.feature_categories for category in ["itpc", "pac"]):
@@ -1221,7 +1255,10 @@ def extract_all_features(
             time_info = f", time-resolved={pac_time_df.shape[1]}" if pac_time_df is not None else ""
             ctx.logger.info(
                 "  \u2713 PAC: %d columns \u00d7 %d trials%s (%.1fs)",
-                n_pac_cols, len(pac_trials_df), time_info, pac_elapsed,
+                n_pac_cols,
+                len(pac_trials_df),
+                time_info,
+                pac_elapsed,
             )
         else:
             if not _is_optional_feature_output(ctx.config, "pac"):
@@ -1321,17 +1358,33 @@ def extract_all_features(
     total_cols = sum(
         getattr(getattr(results, attr, None), "shape", (0, 0))[1]
         for attr in (
-            "pow_df", "conn_df", "dconn_df", "source_df", "source_contrast_df", "aper_df",
-            "erp_df", "phase_df", "pac_trials_df", "pac_time_df",
-            "comp_df", "bursts_df", "spectral_df", "erds_df",
-            "ratios_df", "asymmetry_df", "microstates_df", "quality_df",
+            "pow_df",
+            "conn_df",
+            "dconn_df",
+            "source_df",
+            "source_contrast_df",
+            "aper_df",
+            "erp_df",
+            "phase_df",
+            "pac_trials_df",
+            "pac_time_df",
+            "comp_df",
+            "bursts_df",
+            "spectral_df",
+            "erds_df",
+            "ratios_df",
+            "asymmetry_df",
+            "microstates_df",
+            "quality_df",
         )
         if getattr(results, attr, None) is not None
         and not getattr(getattr(results, attr, None), "empty", True)
     )
     ctx.logger.info(
         "Feature extraction complete: %d total columns, %d trials (%.1fs)",
-        total_cols, expected_n_trials, _time.perf_counter() - t_start,
+        total_cols,
+        expected_n_trials,
+        _time.perf_counter() - t_start,
     )
     return results
 
@@ -1341,7 +1394,7 @@ def _add_change_scores_to_results(
     results: FeatureExtractionResult,
 ) -> None:
     """Compute and add change scores (active - baseline) to feature DataFrames.
-    
+
     Change scores are computed once at feature extraction time and saved,
     eliminating redundant computation in downstream pipelines.
     """
@@ -1429,7 +1482,10 @@ def _extract_precomputed_feature_group(
         result.features[feature_name] = FeatureSet(df, cols, feature_name)
         logger.info(
             "  \u2713 %s: %d columns \u00d7 %d trials (%.1fs)",
-            feature_name, df.shape[1], len(df), elapsed,
+            feature_name,
+            df.shape[1],
+            len(df),
+            elapsed,
         )
         return
 
@@ -1463,9 +1519,7 @@ def extract_precomputed_features(
     validate_rest_feature_categories(feature_groups, config)
     validate_rest_analysis_mode(
         config,
-        config.get("feature_engineering.analysis_mode", None)
-        if hasattr(config, "get")
-        else None,
+        config.get("feature_engineering.analysis_mode", None) if hasattr(config, "get") else None,
     )
 
     band_dependent_groups = ["erds", "spectral", "connectivity", "pac", "ratios"]
@@ -1512,6 +1566,7 @@ def extract_precomputed_features(
 
     if "aperiodic" in feature_groups:
         from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_from_precomputed
+
         _extract_precomputed_feature_group(
             "aperiodic", extract_aperiodic_from_precomputed, precomputed, logger, result, bands
         )
@@ -1522,6 +1577,7 @@ def extract_precomputed_features(
         )
 
     if "directed_connectivity" in feature_groups:
+
         def extract_directed_connectivity_wrapper(precomputed, *args, **kwargs):
             return extract_directed_connectivity_from_precomputed(
                 precomputed, config=config, logger=logger
@@ -1551,7 +1607,9 @@ def extract_precomputed_features(
         )
 
     if "itpc" in feature_groups:
-        n_jobs_itpc = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_itpc")
+        n_jobs_itpc = get_n_jobs(
+            config, default=-1, config_path="feature_engineering.parallel.n_jobs_itpc"
+        )
         _extract_precomputed_feature_group(
             "itpc", extract_itpc_from_precomputed, precomputed, logger, result, n_jobs=n_jobs_itpc
         )
@@ -1559,13 +1617,23 @@ def extract_precomputed_features(
     if "asymmetry" in feature_groups:
         n_jobs = int(config.get("feature_engineering.parallel.n_jobs_bands", -1))
         _extract_precomputed_feature_group(
-            "asymmetry", extract_asymmetry_from_precomputed, precomputed, logger, result, n_jobs=n_jobs
+            "asymmetry",
+            extract_asymmetry_from_precomputed,
+            precomputed,
+            logger,
+            result,
+            n_jobs=n_jobs,
         )
 
     if "complexity" in feature_groups:
         n_jobs = int(config.get("feature_engineering.parallel.n_jobs_complexity", -1))
         _extract_precomputed_feature_group(
-            "complexity", extract_complexity_from_precomputed, precomputed, logger, result, n_jobs=n_jobs
+            "complexity",
+            extract_complexity_from_precomputed,
+            precomputed,
+            logger,
+            result,
+            n_jobs=n_jobs,
         )
 
     if "quality" in feature_groups:
@@ -1614,6 +1682,7 @@ def extract_precomputed_features(
             )
 
     return result
+
 
 __all__ = [
     "extract_all_features",

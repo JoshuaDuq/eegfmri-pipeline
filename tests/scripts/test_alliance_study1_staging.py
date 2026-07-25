@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests import REPO_ROOT
 
-
 WORKFLOW_ROOT = REPO_ROOT / "local_workflows" / "alliance_canada"
 MANIFEST_SCRIPT = WORKFLOW_ROOT / "build_upload_manifest.py"
 
@@ -89,8 +88,19 @@ def test_study1_subject_manifest_contains_complete_cohort_without_0006() -> None
     subjects = (WORKFLOW_ROOT / "study1_subjects.txt").read_text().splitlines()
 
     assert subjects == [
-        "0000", "0001", "0003", "0004", "0005", "0007", "0008",
-        "0009", "0010", "0011", "0012", "0013", "0014",
+        "0000",
+        "0001",
+        "0003",
+        "0004",
+        "0005",
+        "0007",
+        "0008",
+        "0009",
+        "0010",
+        "0011",
+        "0012",
+        "0013",
+        "0014",
     ]
 
 
@@ -118,13 +128,20 @@ def test_study1_manifest_fails_when_fmriprep_output_is_missing(tmp_path: Path) -
             sys.executable,
             str(MANIFEST_SCRIPT),
             "study1",
-            "--subjects-file", str(subjects),
-            "--local-fmri-root", str(fmri),
-            "--local-eeg-root", str(eeg),
-            "--local-deriv-root", str(derivatives),
-            "--local-external-root", str(external),
-            "--task", "thermalactive",
-            "--output-dir", str(tmp_path / "manifests"),
+            "--subjects-file",
+            str(subjects),
+            "--local-fmri-root",
+            str(fmri),
+            "--local-eeg-root",
+            str(eeg),
+            "--local-deriv-root",
+            str(derivatives),
+            "--local-external-root",
+            str(external),
+            "--task",
+            "thermalactive",
+            "--output-dir",
+            str(tmp_path / "manifests"),
         ],
         text=True,
         capture_output=True,

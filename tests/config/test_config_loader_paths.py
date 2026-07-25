@@ -52,7 +52,9 @@ def test_overrides_path_ignores_legacy_location(monkeypatch, tmp_path) -> None:
 
 
 def test_apply_config_overrides_raises_for_invalid_json(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(loader, "_get_overrides_path", lambda _config_path: tmp_path / ".tui_overrides.json")
+    monkeypatch.setattr(
+        loader, "_get_overrides_path", lambda _config_path: tmp_path / ".tui_overrides.json"
+    )
     overrides_path = tmp_path / ".tui_overrides.json"
     overrides_path.write_text("{bad", encoding="utf-8")
 
@@ -61,7 +63,9 @@ def test_apply_config_overrides_raises_for_invalid_json(tmp_path, monkeypatch) -
 
 
 def test_apply_config_overrides_raises_for_non_mapping_json(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(loader, "_get_overrides_path", lambda _config_path: tmp_path / ".tui_overrides.json")
+    monkeypatch.setattr(
+        loader, "_get_overrides_path", lambda _config_path: tmp_path / ".tui_overrides.json"
+    )
     overrides_path = tmp_path / ".tui_overrides.json"
     overrides_path.write_text('["not", "a", "mapping"]', encoding="utf-8")
 
@@ -195,12 +199,14 @@ def test_require_config_value_resolves_nested_keys_from_dict_and_configdict() ->
     plain = {"behavior_analysis": {"statistics": {"correlation_method": "spearman"}}}
     wrapped = loader.ConfigDict(plain)
 
-    assert loader.require_config_value(
-        plain, "behavior_analysis.statistics.correlation_method"
-    ) == "spearman"
-    assert loader.require_config_value(
-        wrapped, "behavior_analysis.statistics.correlation_method"
-    ) == "spearman"
+    assert (
+        loader.require_config_value(plain, "behavior_analysis.statistics.correlation_method")
+        == "spearman"
+    )
+    assert (
+        loader.require_config_value(wrapped, "behavior_analysis.statistics.correlation_method")
+        == "spearman"
+    )
 
 
 def test_require_config_value_raises_for_missing_nested_key() -> None:

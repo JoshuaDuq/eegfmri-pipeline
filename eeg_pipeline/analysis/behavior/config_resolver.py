@@ -34,9 +34,7 @@ def resolve_correlation_method(
     """Resolve correlation method from canonical behavior statistics config."""
     _ = logger
     config = ensure_behavior_config(config)
-    canonical_raw = require_config_value(
-        config, "behavior_analysis.statistics.correlation_method"
-    )
+    canonical_raw = require_config_value(config, "behavior_analysis.statistics.correlation_method")
     canonical = normalize_correlation_method(canonical_raw, default="")
     if not canonical:
         raise ValueError(

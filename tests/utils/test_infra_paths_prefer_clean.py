@@ -20,9 +20,7 @@ def _make_module(name: str, **attrs: object) -> types.ModuleType:
 
 def _paths_import_stubs() -> dict[str, types.ModuleType]:
     infra_package = _make_module("eeg_pipeline.infra")
-    infra_package.__path__ = [
-        str(Path(__file__).resolve().parents[2] / "eeg_pipeline" / "infra")
-    ]
+    infra_package.__path__ = [str(Path(__file__).resolve().parents[2] / "eeg_pipeline" / "infra")]
     return {
         "eeg_pipeline.infra": infra_package,
         "mne_bids": _make_module(
@@ -70,12 +68,7 @@ class TestInfraPathsPreferClean(unittest.TestCase):
 
     def test_find_clean_epochs_path_ignores_non_clean_epochs_files(self):
         deriv_root = Path(tempfile.mkdtemp())
-        epochs_path = (
-            deriv_root
-            / "sub-0001"
-            / "eeg"
-            / "sub-0001_task-task_epo.fif"
-        )
+        epochs_path = deriv_root / "sub-0001" / "eeg" / "sub-0001_task-task_epo.fif"
         epochs_path.parent.mkdir(parents=True, exist_ok=True)
         epochs_path.write_text("epochs", encoding="utf-8")
 
@@ -85,12 +78,7 @@ class TestInfraPathsPreferClean(unittest.TestCase):
 
     def test_find_clean_events_path_does_not_treat_raw_events_as_clean(self):
         deriv_root = Path(tempfile.mkdtemp())
-        epochs_path = (
-            deriv_root
-            / "sub-0001"
-            / "eeg"
-            / "sub-0001_task-task_epo.fif"
-        )
+        epochs_path = deriv_root / "sub-0001" / "eeg" / "sub-0001_task-task_epo.fif"
         raw_events_path = epochs_path.with_name("sub-0001_task-task_events.tsv")
         epochs_path.parent.mkdir(parents=True, exist_ok=True)
         epochs_path.write_text("epochs", encoding="utf-8")

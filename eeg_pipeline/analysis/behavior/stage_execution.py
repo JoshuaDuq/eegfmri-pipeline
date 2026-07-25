@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
-
 _STAGE_TO_ATTR_MAP = {
     "trial_table": "trial_table_path",
     "correlate_fdr": "correlations",
@@ -122,7 +121,9 @@ def run_selected_stages_impl(
                 step["total"],
             )
         except Exception as exc:
-            ctx.logger.error("Stage '%s' failed after %.1fs: %s", stage_name, _time.perf_counter() - t0, exc)
+            ctx.logger.error(
+                "Stage '%s' failed after %.1fs: %s", stage_name, _time.perf_counter() - t0, exc
+            )
             raise
 
     return outputs

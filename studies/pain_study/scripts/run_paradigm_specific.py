@@ -36,7 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     eeg.add_argument("--montage", default="easycap-M1")
     eeg.add_argument("--line-freq", type=float, default=60.0)
     eeg.add_argument("--overwrite", action="store_true")
-    eeg.add_argument("--trim-to-first-volume", action="store_true")
+    eeg.add_argument("--trim-to-volume-bounds", action="store_true")
     eeg.add_argument("--event-prefix", action="append", default=None)
     eeg.add_argument("--keep-all-annotations", action="store_true")
 
@@ -84,7 +84,7 @@ def main() -> int:
             montage=args.montage,
             line_freq=float(args.line_freq),
             overwrite=bool(args.overwrite),
-            do_trim_to_first_volume=bool(args.trim_to_first_volume),
+            do_trim_to_volume_bounds=bool(args.trim_to_volume_bounds),
             event_prefixes=args.event_prefix,
             keep_all_annotations=bool(args.keep_all_annotations),
             source_format=args.source_format,

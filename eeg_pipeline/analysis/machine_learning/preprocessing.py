@@ -95,7 +95,9 @@ class MissingnessThreshold(BaseEstimator, TransformerMixin):
                 group_mask = groups == group
                 if not np.any(group_mask):
                     continue
-                group_missing = np.isnan(X_retained[group_mask]).sum() / (group_mask.sum() * X_retained.shape[1])
+                group_missing = np.isnan(X_retained[group_mask]).sum() / (
+                    group_mask.sum() * X_retained.shape[1]
+                )
                 if group_missing > self.max_subject_missingness:
                     raise ValueError(
                         f"Missingness limit exceeded: subject {group} has {group_missing:.1%} "
@@ -194,8 +196,7 @@ class DropAllNaNColumns(BaseEstimator, TransformerMixin):
 
 
 class SpatialFeatureSelector(BaseEstimator, TransformerMixin):
-    """Keep only features whose inferred ROI is in ``allowed_regions``.
-    """
+    """Keep only features whose inferred ROI is in ``allowed_regions``."""
 
     def __init__(self, allowed_regions: Optional[List[str]] = None, config: Optional[Any] = None):
         self.allowed_regions = allowed_regions
@@ -261,59 +262,62 @@ class SpatialFeatureSelector(BaseEstimator, TransformerMixin):
 
 class Deconfounder(BaseEstimator, TransformerMixin):
     """Regress out covariates from EEG features to isolate specific variance.
-    
+
     This transformer takes the last `n_covariates` columns of X as confounders,
     fits a linear model to predict the remaining features from these confounders,
     and returns the residuals (the unconfounded features).
     """
-    
+
     def __init__(self, n_covariates: int = 0):
         self.n_covariates = int(n_covariates)
-        
+
     def fit(self, X, y=None):
         if self.n_covariates <= 0:
             return self
-            
+
         X_arr = np.asarray(X, dtype=float)
         n_features = X_arr.shape[1] - self.n_covariates
-        
+
         if n_features <= 0:
-            raise ValueError(f"X has {X_arr.shape[1]} columns, but n_covariates={self.n_covariates}. No features left to deconfound.")
-            
+            raise ValueError(
+                f"X has {X_arr.shape[1]} columns, but n_covariates={self.n_covariates}. No features left to deconfound."
+            )
+
         features = X_arr[:, :n_features]
         covariates = X_arr[:, n_features:]
-        
+
         from sklearn.linear_model import LinearRegression
+
         self.regressor_ = LinearRegression(fit_intercept=True)
         self.regressor_.fit(covariates, features)
-        
+
         return self
-        
+
     def transform(self, X):
         X_arr = np.asarray(X, dtype=float)
         if self.n_covariates <= 0:
             return X_arr
-            
+
         if not hasattr(self, "regressor_"):
             raise RuntimeError("Deconfounder is not fitted yet.")
-            
+
         n_features = X_arr.shape[1] - self.n_covariates
         features = X_arr[:, :n_features]
         covariates = X_arr[:, n_features:]
-        
+
         features_pred = self.regressor_.predict(covariates)
         features_residual = features - features_pred
-        
+
         # Return only the deconfounded features (dropping covariates as they are now accounted for)
         return features_residual
-        
+
     def get_feature_names_out(self, input_features: Optional[Sequence[str]] = None) -> List[str]:
         if input_features is None:
             raise ValueError("input_features is required for get_feature_names_out.")
-        
+
         if self.n_covariates <= 0:
             return list(input_features)
-            
+
         # Return names excluding the covariates
         n_features = len(input_features) - self.n_covariates
         return list(input_features)[:n_features]

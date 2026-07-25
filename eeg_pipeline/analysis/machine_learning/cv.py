@@ -50,12 +50,12 @@ def apply_fold_specific_hygiene(
 ) -> Optional[FoldSpecificParams]:
     """
     Apply CV hygiene for a fold: compute fold-specific parameters on training data only.
-    
+
     This prevents leakage from test trials into:
     - IAF (Individual Alpha Frequency) band definitions
     - Global/broadcast features (e.g., ITPC)
     - Feature scaling parameters
-    
+
     Parameters
     ----------
     fold_idx : int
@@ -70,7 +70,7 @@ def apply_fold_specific_hygiene(
         Configuration object
     log : logging.Logger, optional
         Logger instance
-        
+
     Returns
     -------
     FoldSpecificParams or None
@@ -78,7 +78,7 @@ def apply_fold_specific_hygiene(
     """
     if config is None:
         return None
-    
+
     cv_hygiene_enabled = bool(get_config_value(config, "machine_learning.cv.hygiene_enabled", True))
     if not cv_hygiene_enabled:
         return None
@@ -87,7 +87,7 @@ def apply_fold_specific_hygiene(
         FoldSpecificParams,
         create_fold_specific_context,
     )
-    
+
     if epochs is None:
         if log:
             log.debug("CV hygiene: epochs not provided, skipping fold-specific IAF")
@@ -96,7 +96,7 @@ def apply_fold_specific_hygiene(
             train_indices=train_indices,
             test_indices=test_indices,
         )
-    
+
     return create_fold_specific_context(
         epochs=epochs,
         train_indices=train_indices,
@@ -123,7 +123,9 @@ def set_random_seeds(seed: int, fold: int) -> None:
 ###################################################################
 
 
-def create_loso_folds(X: np.ndarray, groups: np.ndarray) -> List[Tuple[int, np.ndarray, np.ndarray]]:
+def create_loso_folds(
+    X: np.ndarray, groups: np.ndarray
+) -> List[Tuple[int, np.ndarray, np.ndarray]]:
     """Create leave-one-subject-out folds."""
     logo = LeaveOneGroupOut()
     return [
@@ -172,7 +174,7 @@ def apply_fold_feature_harmonization(
     n_covariates: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Apply fold-specific feature harmonization (intersection/union) safely.
-    
+
     Covariates (the last n_covariates columns) are protected and never dropped.
     """
     mode = (harmonization_mode or "union_impute").strip().lower()
@@ -210,9 +212,7 @@ def create_inner_cv(train_groups: np.ndarray, inner_cv_splits: int) -> GroupKFol
     """Create inner CV splitter for hyperparameter tuning."""
     n_unique = len(np.unique(train_groups))
     if n_unique < 2:
-        raise ValueError(
-            "Inner CV requires at least 2 unique groups in the training split."
-        )
+        raise ValueError("Inner CV requires at least 2 unique groups in the training split.")
     n_splits = max(2, min(inner_cv_splits, n_unique))
     return GroupKFold(n_splits=n_splits)
 
@@ -353,7 +353,9 @@ def grid_search_with_warning_logging(
         for warning in w:
             if isinstance(warning.message, (ConvergenceWarning, ConstantInputWarning)):
                 warning_type = type(warning.message).__name__
-                log.warning(f"Fold {fold_info}: {warning_type} during GridSearchCV - {warning.message}")
+                log.warning(
+                    f"Fold {fold_info}: {warning_type} during GridSearchCV - {warning.message}"
+                )
     return grid
 
 
@@ -364,9 +366,7 @@ def _raise_for_nonfinite_grid_search_scores(grid: GridSearchCV, fold_info: str) 
 
     bad_score_keys: List[str] = []
     for key, values in cv_results.items():
-        is_test_score = key.startswith("mean_test") or (
-            key.startswith("split") and "_test" in key
-        )
+        is_test_score = key.startswith("mean_test") or (key.startswith("split") and "_test" in key)
         if not is_test_score:
             continue
         scores = np.ma.asarray(values, dtype=float).filled(np.nan)
@@ -469,7 +469,7 @@ def compute_subject_level_r(
     ci_method: str = "fixed_effects",
 ) -> Tuple[float, List[Tuple[str, float]], float, float]:
     """Compute subject-level Pearson r with Fisher z aggregation.
-    
+
     Parameters
     ----------
     pred_df : pd.DataFrame
@@ -477,9 +477,9 @@ def compute_subject_level_r(
     config : Any, optional
         Configuration object
     ci_method : str
-        CI method: 'fixed_effects' (variance = 1/sum(n_i-3)) or 
+        CI method: 'fixed_effects' (variance = 1/sum(n_i-3)) or
         'bootstrap' (subject-level bootstrap, often preferable for EEG)
-    
+
     Returns
     -------
     agg_r : float
@@ -526,9 +526,11 @@ def compute_subject_level_r(
     r_vals = np.clip([r for _, r, _ in per_subject], clip_min, clip_max)
     n_trials_vals = np.asarray([n for _, _, n in per_subject], dtype=int)
 
-    weighting_mode = str(
-        get_config_value(config, "machine_learning.evaluation.subject_weighting", "equal")
-    ).strip().lower()
+    weighting_mode = (
+        str(get_config_value(config, "machine_learning.evaluation.subject_weighting", "equal"))
+        .strip()
+        .lower()
+    )
     if weighting_mode not in {"equal", "trial_count"}:
         weighting_mode = "equal"
 
@@ -545,11 +547,13 @@ def compute_subject_level_r(
 
     # Confidence interval
     ci_low, ci_high = np.nan, np.nan
-    
+
     if ci_method == "bootstrap" and len(z_vals) >= 3:
         # Subject-level bootstrap CI (often preferable for EEG)
         boot_seed = int(get_config_value(config, "project.random_state", 42))
-        n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+        n_boot = int(
+            get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000)
+        )
         rng = np.random.default_rng(boot_seed)
         boot_means = []
         n_subjects = len(z_vals)
@@ -638,7 +642,9 @@ def compute_subject_level_errors(
 
     if ci_method == "bootstrap" and len(per_subject) >= 3:
         boot_seed = int(get_config_value(config, "project.random_state", 42))
-        n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+        n_boot = int(
+            get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000)
+        )
         rng = np.random.default_rng(boot_seed + 11)
         n_sub = len(per_subject)
 
@@ -725,7 +731,7 @@ def create_within_subject_folds(
 ) -> List[Tuple[int, np.ndarray, np.ndarray, str, Optional[Any]]]:
     """
     Create within-subject CV folds with optional CV hygiene.
-    
+
     Returns list of (fold_idx, train_idx, test_idx, subject, fold_params)
     where fold_params contains fold-specific parameters computed on training data only.
     """
@@ -737,15 +743,15 @@ def create_within_subject_folds(
 
     blocks_arr = np.asarray(blocks_all)
     if blocks_arr.shape[0] != np.asarray(groups).shape[0]:
-        raise ValueError(
-            "Within-subject CV run labels must be aligned to the sample axis."
-        )
+        raise ValueError("Within-subject CV run labels must be aligned to the sample axis.")
 
     for subject in unique_subs:
         subject_indices = np.where(groups == subject)[0]
         n_samples = len(subject_indices)
 
-        requested_outer_splits = int(outer_cv_splits) if outer_cv_splits is not None else int(inner_cv_splits)
+        requested_outer_splits = (
+            int(outer_cv_splits) if outer_cv_splits is not None else int(inner_cv_splits)
+        )
         n_splits = min(max(2, requested_outer_splits), n_samples)
 
         subject_blocks = blocks_arr[subject_indices]
@@ -763,7 +769,9 @@ def create_within_subject_folds(
             get_config_value(config, "machine_learning.cv.within_subject_ordered_runs", False)
         )
         if ordered_runs:
-            subject_blocks_num = np.asarray(pd.to_numeric(subject_blocks, errors="coerce"), dtype=float)
+            subject_blocks_num = np.asarray(
+                pd.to_numeric(subject_blocks, errors="coerce"), dtype=float
+            )
             ordered_unique = sorted(np.unique(subject_blocks_num[np.isfinite(subject_blocks_num)]))
             ordered_splits: List[Tuple[np.ndarray, np.ndarray]] = []
             for idx_block in range(1, len(ordered_unique)):
@@ -802,8 +810,7 @@ def create_within_subject_folds(
                 continue
             raise ValueError(
                 "Subject %s: ordered within-subject CV requested but no valid ordered run "
-                "folds were found."
-                % subject
+                "folds were found." % subject
             )
 
         block_cv, _ = create_run_aware_cv(subject_blocks, n_splits)
@@ -815,7 +822,7 @@ def create_within_subject_folds(
             fold_counter += 1
             train_idx = subject_indices[train_local]
             test_idx = subject_indices[test_local]
-            
+
             # Apply CV hygiene to compute fold-specific parameters
             fold_params = None
             if apply_hygiene:
@@ -827,7 +834,7 @@ def create_within_subject_folds(
                     config=config,
                     log=logger,
                 )
-            
+
             folds.append((fold_counter, train_idx, test_idx, subject, fold_params))
 
     return folds
@@ -851,7 +858,9 @@ def create_run_aware_inner_cv(
     return cv_splits
 
 
-def get_inner_cv_splits(n_unique_groups: int, default: Optional[int] = None, config: Optional[Any] = None) -> int:
+def get_inner_cv_splits(
+    n_unique_groups: int, default: Optional[int] = None, config: Optional[Any] = None
+) -> int:
     """Get number of inner CV splits, capped by available groups."""
     if default is None:
         default = int(get_config_value(config, "machine_learning.cv.default_n_splits", 5))
@@ -915,12 +924,18 @@ def compute_metrics(
 ) -> Tuple[Dict[str, float], List[Dict]]:
     """
     Compute regression metrics, optionally per-subject.
-    
+
     Returns (pooled_metrics, per_subject_metrics).
     """
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
     if mask.sum() < 2:
-        empty = {"pearson_r": np.nan, "r2": np.nan, "explained_variance": np.nan, "avg_subject_r_fisher_z": np.nan, "n": 0}
+        empty = {
+            "pearson_r": np.nan,
+            "r2": np.nan,
+            "explained_variance": np.nan,
+            "avg_subject_r_fisher_z": np.nan,
+            "n": 0,
+        }
         return empty, []
 
     yt, yp = y_true[mask], y_pred[mask]
@@ -943,24 +958,22 @@ def compute_metrics(
                 continue
             ys, ps = yt[subj_mask], yp[subj_mask]
             rs, _ = safe_pearsonr(ys, ps)
-            per_subject.append({
-                "subject": str(subj),
-                "r": rs,
-                "n": int(subj_mask.sum()),
-            })
+            per_subject.append(
+                {
+                    "subject": str(subj),
+                    "r": rs,
+                    "n": int(subj_mask.sum()),
+                }
+            )
 
         # Compute average Fisher-z transformed r
         valid_entries = [
-            (p["r"], p["n"])
-            for p in per_subject
-            if np.isfinite(p["r"]) and p.get("n", 0) >= 2
+            (p["r"], p["n"]) for p in per_subject if np.isfinite(p["r"]) and p.get("n", 0) >= 2
         ]
         if valid_entries:
             r_vals, n_vals = zip(*valid_entries)
             clip_min, clip_max = get_fisher_z_clip_values(config)
-            fisher_z = np.arctanh(
-                np.clip(np.asarray(r_vals, dtype=float), clip_min, clip_max)
-            )
+            fisher_z = np.arctanh(np.clip(np.asarray(r_vals, dtype=float), clip_min, clip_max))
             weights = np.maximum(np.asarray(n_vals, dtype=float) - 3.0, 1.0)
             weight_sum = np.sum(weights)
             pooled["avg_subject_r_fisher_z"] = (
@@ -1000,7 +1013,7 @@ def nested_loso_predictions_matrix(
 ) -> Tuple[np.ndarray, np.ndarray, List[str], List[int], List[int]]:
     """
     Nested leave-one-subject-out cross-validation with hyperparameter tuning.
-    
+
     This is the canonical feature-matrix-based LOSO implementation.
     Epoch-based CV helpers were removed; keep ML synchronized with the feature-table pipeline.
 
@@ -1053,7 +1066,7 @@ def nested_loso_predictions_matrix(
         X_train, X_test = X[train_idx_f], X[test_idx_f]
         y_train, y_test = y[train_idx_f], y[test_idx_f]
         groups_train = groups[train_idx_f]
-        
+
         X_train, X_test, _ = apply_fold_feature_harmonization(
             X_train,
             X_test,
@@ -1067,7 +1080,9 @@ def nested_loso_predictions_matrix(
         if n_train_subjects < 2:
             logger.warning(f"Fold {fold}: <2 subjects for inner CV")
             estimator = clone(pipe)
-            best_estimator = fit_with_warning_logging(estimator, X_train, y_train, f"fold {fold}", logger)
+            best_estimator = fit_with_warning_logging(
+                estimator, X_train, y_train, f"fold {fold}", logger
+            )
             best_params_rec = None
         else:
             inner_cv = create_inner_cv(groups_train, inner_cv_splits)
@@ -1082,13 +1097,17 @@ def nested_loso_predictions_matrix(
                 refit="neg_mse",
                 error_score="raise",
             )
-            gs = grid_search_with_warning_logging(gs, X_train, y_train, f"fold {fold}", logger, groups=groups_train)
+            gs = grid_search_with_warning_logging(
+                gs, X_train, y_train, f"fold {fold}", logger, groups=groups_train
+            )
             best_estimator = gs.best_estimator_
 
             if best_params_log_path and hasattr(gs, "cv_results_"):
                 cv_df = pd.DataFrame(gs.cv_results_)
                 heldout = [str(groups[test_idx[0]])] if len(test_idx) > 0 else None
-                best_params_rec = create_best_params_record(model_name, fold, cv_df, gs, heldout_subjects=heldout)
+                best_params_rec = create_best_params_record(
+                    model_name, fold, cv_df, gs, heldout_subjects=heldout
+                )
             else:
                 best_params_rec = None
 
@@ -1114,8 +1133,19 @@ def nested_loso_predictions_matrix(
 
     if null_n_perm > 0 and null_output_path:
         run_permutation_test(
-            X, y, groups, blocks, pipe, param_grid, inner_cv_splits, inner_n_jobs,
-            seed, model_name, null_n_perm, null_output_path, config,
+            X,
+            y,
+            groups,
+            blocks,
+            pipe,
+            param_grid,
+            inner_cv_splits,
+            inner_n_jobs,
+            seed,
+            model_name,
+            null_n_perm,
+            null_output_path,
+            config,
             harmonization_mode=harmonization_mode,
             n_covariates=n_covariates,
         )
@@ -1153,9 +1183,11 @@ def run_permutation_test(
 
     perm_scheme = "within_subject"
     if config is not None:
-        perm_scheme = str(
-            get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)
-        ).strip().lower()
+        perm_scheme = (
+            str(get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme))
+            .strip()
+            .lower()
+        )
     if perm_scheme not in {"within_subject", "within_subject_within_run"}:
         raise ValueError(
             "Invalid machine_learning.cv.permutation_scheme: "
@@ -1214,9 +1246,19 @@ def run_permutation_test(
         n_effective += 1
 
         y_true_p, y_pred_p, groups_p, _, _ = nested_loso_predictions_matrix(
-            X=X, y=y_perm, groups=groups, blocks=blocks_arr, pipe=pipe, param_grid=param_grid,
-            inner_cv_splits=inner_cv_splits, n_jobs=inner_n_jobs, seed=seed + perm,
-            model_name=model_name, outer_n_jobs=1, null_n_perm=0, config=config,
+            X=X,
+            y=y_perm,
+            groups=groups,
+            blocks=blocks_arr,
+            pipe=pipe,
+            param_grid=param_grid,
+            inner_cv_splits=inner_cv_splits,
+            n_jobs=inner_n_jobs,
+            seed=seed + perm,
+            model_name=model_name,
+            outer_n_jobs=1,
+            null_n_perm=0,
+            config=config,
             harmonization_mode=harmonization_mode,
             n_covariates=n_covariates,
         )
@@ -1263,7 +1305,9 @@ def run_permutation_test(
         )
 
     completion_rate = n_completed / null_n_perm if null_n_perm > 0 else 0.0
-    min_completion = float(get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5))
+    min_completion = float(
+        get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5)
+    )
     if completion_rate < min_completion:
         raise RuntimeError(
             f"Insufficient valid permutations ({n_completed}/{null_n_perm}, "

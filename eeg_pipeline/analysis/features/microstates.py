@@ -34,7 +34,6 @@ from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 _DEFAULT_CLASS_LABELS = ("a", "b", "c", "d")
 _DEFAULT_N_STATES = 4
 _DEFAULT_MIN_PEAK_DISTANCE_MS = 10.0
@@ -60,8 +59,7 @@ def _load_microstate_config(config: Any) -> _MicrostateConfig:
     n_states = int(micro_cfg.get("n_states", _DEFAULT_N_STATES))
     if n_states < 2 or n_states > 12:
         raise ValueError(
-            "feature_engineering.microstates.n_states must be between 2 and 12; "
-            f"got {n_states}."
+            "feature_engineering.microstates.n_states must be between 2 and 12; " f"got {n_states}."
         )
 
     min_peak_distance_ms = float(
@@ -97,12 +95,13 @@ def _load_microstate_config(config: Any) -> _MicrostateConfig:
         )
 
     random_state = int(
-        micro_cfg.get("random_state", get_config_value(config, "project.random_state", _DEFAULT_RANDOM_STATE))
+        micro_cfg.get(
+            "random_state", get_config_value(config, "project.random_state", _DEFAULT_RANDOM_STATE)
+        )
     )
     if random_state < 0:
         raise ValueError(
-            "feature_engineering.microstates.random_state must be >= 0; "
-            f"got {random_state}."
+            "feature_engineering.microstates.random_state must be >= 0; " f"got {random_state}."
         )
     assign_from_gfp_peaks = bool(
         micro_cfg.get("assign_from_gfp_peaks", _DEFAULT_ASSIGN_FROM_GFP_PEAKS)
@@ -421,9 +420,7 @@ def _apply_min_duration(states: np.ndarray, min_samples: int) -> np.ndarray:
         prev_state = runs[run_idx - 1][2] if run_idx > 0 else None
         next_state = runs[run_idx + 1][2] if run_idx < len(runs) - 1 else None
         prev_len = (runs[run_idx - 1][1] - runs[run_idx - 1][0]) if run_idx > 0 else 0
-        next_len = (
-            (runs[run_idx + 1][1] - runs[run_idx + 1][0]) if run_idx < len(runs) - 1 else 0
-        )
+        next_len = (runs[run_idx + 1][1] - runs[run_idx + 1][0]) if run_idx < len(runs) - 1 else 0
 
         if prev_state is None and next_state is None:
             continue
@@ -776,8 +773,12 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
         return pd.DataFrame(), []
 
     out_df = pd.DataFrame(all_rows)
-    out_df.attrs["microstate_template_source"] = "fixed" if using_fixed_templates else "subject_fitted"
-    out_df.attrs["microstate_labels_canonical"] = bool(using_fixed_templates and fixed_templates_canonical)
+    out_df.attrs["microstate_template_source"] = (
+        "fixed" if using_fixed_templates else "subject_fitted"
+    )
+    out_df.attrs["microstate_labels_canonical"] = bool(
+        using_fixed_templates and fixed_templates_canonical
+    )
     out_df.attrs["microstate_assignment_method"] = (
         "gfp_peak_backfit" if cfg.assign_from_gfp_peaks else "samplewise_max_similarity"
     )

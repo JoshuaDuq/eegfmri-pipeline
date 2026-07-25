@@ -9,7 +9,6 @@ from typing import Any, Dict, List
 from eeg_pipeline.cli.common import get_deriv_root, resolve_task
 
 
-
 def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the validate command."""
     task = resolve_task(args.task, config)

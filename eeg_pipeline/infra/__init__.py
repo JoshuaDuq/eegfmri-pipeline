@@ -17,4 +17,9 @@ from . import machine_learning as _machine_learning
 for _module in (_logging, _paths, _tsv, _machine_learning):
     globals().update({name: getattr(_module, name) for name in _module.__all__})
 
-__all__ = list(_paths.__all__) + list(_logging.__all__) + list(_tsv.__all__) + list(_machine_learning.__all__)
+__all__ = (
+    list(_paths.__all__)
+    + list(_logging.__all__)
+    + list(_tsv.__all__)
+    + list(_machine_learning.__all__)
+)

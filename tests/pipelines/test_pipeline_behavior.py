@@ -49,7 +49,9 @@ def _make_pipeline_base_class() -> type:
                 "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
             }
 
-        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+        def _write_run_metadata(
+            self, run_context, *, status, error=None, outputs=None, summary=None
+        ):
             metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
             metadata_dir.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -91,7 +93,9 @@ def _make_pipeline_base_class() -> type:
                 "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
             }
 
-        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+        def _write_run_metadata(
+            self, run_context, *, status, error=None, outputs=None, summary=None
+        ):
             metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
             metadata_dir.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -158,11 +162,11 @@ def _behavior_import_stubs() -> dict[str, types.ModuleType]:
         "eeg_pipeline.analysis.behavior": _make_package("eeg_pipeline.analysis.behavior"),
         "eeg_pipeline.analysis.behavior.config_resolver": _make_module(
             "eeg_pipeline.analysis.behavior.config_resolver",
-            resolve_correlation_method=lambda config: config.get(
-                "behavior_analysis.statistics.correlation_method", "spearman"
-            )
-            if hasattr(config, "get")
-            else "spearman",
+            resolve_correlation_method=lambda config: (
+                config.get("behavior_analysis.statistics.correlation_method", "spearman")
+                if hasattr(config, "get")
+                else "spearman"
+            ),
         ),
         "eeg_pipeline.analysis.behavior.stage_catalog": _make_module(
             "eeg_pipeline.analysis.behavior.stage_catalog",
@@ -207,7 +211,9 @@ def _behavior_import_stubs() -> dict[str, types.ModuleType]:
         "eeg_pipeline.utils.analysis.stats.correlation": _make_module(
             "eeg_pipeline.utils.analysis.stats.correlation",
             format_correlation_method_label=lambda method, robust_method=None: method,
-            normalize_robust_correlation_method=lambda value, default=None, strict=False: value.strip() if isinstance(value, str) else value,
+            normalize_robust_correlation_method=lambda value, default=None, strict=False: (
+                value.strip() if isinstance(value, str) else value
+            ),
         ),
         "eeg_pipeline.utils.config": _make_package("eeg_pipeline.utils.config"),
         "eeg_pipeline.utils.config.behavior_loader": _make_module(
@@ -259,45 +265,46 @@ def _resolved_behavior_pipeline_config(**overrides):
 
 
 class TestBehaviorDeep(_BehaviorImportMixin, unittest.TestCase):
-        def test_behavior_process_subject_success_path(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+    def test_behavior_process_subject_success_path(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
-            p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = SimpleNamespace(
-                method="spearman",
-                bootstrap=0,
-                n_permutations=0,
-                control_predictor=True,
-                control_trial_order=True,
-                compute_change_scores=True,
-                compute_reliability=False,
-                run_correlations=True,
-                run_condition_comparison=True,
-                run_temporal_correlations=True,
-                run_cluster_tests=True,
-            )
-            p.feature_categories = None
-            p.feature_files = None
-            p.computation_features = {}
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = _behavior_process_config()
-            p.logger = Mock()
+        p = object.__new__(BehaviorPipeline)
+        p.pipeline_config = SimpleNamespace(
+            method="spearman",
+            bootstrap=0,
+            n_permutations=0,
+            control_predictor=True,
+            control_trial_order=True,
+            compute_change_scores=True,
+            compute_reliability=False,
+            run_correlations=True,
+            run_condition_comparison=True,
+            run_temporal_correlations=True,
+            run_cluster_tests=True,
+        )
+        p.feature_categories = None
+        p.feature_files = None
+        p.computation_features = {}
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = _behavior_process_config()
+        p.logger = Mock()
 
-            fake_paths = types.SimpleNamespace(
-                deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
-                ensure_dir=lambda path: None,
-            )
-            fake_logger = Mock()
-            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: fake_logger)
-            progress = SimpleNamespace(
-                subject_start=lambda *a, **k: None,
-                subject_done=lambda *a, **k: None,
-                error=lambda *a, **k: None,
-            )
-            fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: progress)
-            outdir = Path(tempfile.mkdtemp())
-            fake_orch = types.SimpleNamespace(_cache={})
-            with patch.dict(
+        fake_paths = types.SimpleNamespace(
+            deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
+            ensure_dir=lambda path: None,
+        )
+        fake_logger = Mock()
+        fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: fake_logger)
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+        fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: progress)
+        outdir = Path(tempfile.mkdtemp())
+        fake_orch = types.SimpleNamespace(_cache={})
+        with (
+            patch.dict(
                 sys.modules,
                 {
                     "eeg_pipeline.infra.paths": fake_paths,
@@ -305,535 +312,599 @@ class TestBehaviorDeep(_BehaviorImportMixin, unittest.TestCase):
                     "eeg_pipeline.cli.common": fake_cli,
                     "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
                 },
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.pipelines.behavior.BehaviorContext",
                 side_effect=lambda **kwargs: SimpleNamespace(**kwargs, data_qc={}),
-            ), patch(
-                "eeg_pipeline.pipelines.behavior.run_behavior_stages", side_effect=lambda **kwargs: None
-            ), patch(
-                "eeg_pipeline.pipelines.behavior.write_outputs_manifest",
-                side_effect=lambda *a, **k: outdir / "manifest.json",
-            ), patch(
-                "eeg_pipeline.pipelines.behavior.get_behavior_output_dir",
-                side_effect=lambda *a, **k: outdir,
-            ), patch(
-                "eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl",
-            ):
-                out = p.process_subject("0001")
-            self.assertEqual(out.subject, "0001")
-            self.assertTrue((outdir / "summary.json").exists())
-
-        def test_behavior_results_summary_rich(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
-
-            res = BehaviorPipelineResults(
-                subject="0001",
-                correlations=pd.DataFrame({"p_raw": [0.01, 0.2], "p_primary": [0.04, 0.6], "q_global": [0.03, 0.2]}),
-                condition_effects=pd.DataFrame({"p_value": [0.02], "q_global": [0.03]}),
-                regression=pd.DataFrame({"p_primary": [0.01], "q_global": [0.04], "hedges_g": [0.9]}),
-                icc=pd.DataFrame({"feature": ["power_alpha"], "icc": [0.72]}),
-                tf={"n_tests": 2, "n_sig_raw": 1, "n_sig_fdr": 1},
-                temporal={"n_tests": 3, "n_sig_raw": 2, "n_sig_fdr": 1},
-                cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}} ,
-            )
-            summary = res.to_summary()
-            self.assertGreater(summary["n_features"], 0)
-            self.assertGreater(summary["n_sig_raw"], 0)
-            self.assertGreater(summary["n_sig_fdr"], 0)
-            self.assertEqual(summary["n_clusters"], 2)
-            self.assertEqual(summary["n_icc_features"], 1)
-
-        def test_behavior_results_summary_counts_nested_temporal_outputs(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
-
-            res = BehaviorPipelineResults(
-                subject="0001",
-                temporal={
-                    "power": {"n_tests": 7, "n_sig_raw": 3, "n_sig_fdr": 1},
-                    "itpc": None,
-                    "erds": {"n_tests": 5, "n_sig_raw": 2, "n_sig_fdr": 0},
-                },
-            )
-
-            summary = res.to_summary()
-
-            self.assertEqual(summary["n_temporal_tests"], 12)
-            self.assertEqual(summary["n_features"], 12)
-            self.assertEqual(summary["n_sig_raw"], 5)
-            self.assertEqual(summary["n_sig_fdr"], 1)
-
-        def test_behavior_process_subject_failure_path(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-
-            p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = SimpleNamespace(
-                method="spearman",
-                bootstrap=0,
-                n_permutations=0,
-                control_predictor=True,
-                control_trial_order=True,
-                compute_change_scores=True,
-                compute_reliability=False,
-                run_correlations=True,
-                run_condition_comparison=True,
-                run_temporal_correlations=True,
-                run_cluster_tests=True,
-            )
-            p.feature_categories = None
-            p.feature_files = None
-            p.computation_features = {}
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = _behavior_process_config()
-            p.logger = Mock()
-
-            fake_paths = types.SimpleNamespace(
-                deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
-                ensure_dir=lambda path: None,
-            )
-            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
-            fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: SimpleNamespace(
-                subject_start=lambda *a, **k: None,
-                subject_done=lambda *a, **k: None,
-                error=lambda *a, **k: None,
-            ))
-            fake_orch = types.SimpleNamespace(_cache={}, run_behavior_stages=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
-            progress = SimpleNamespace(
-                subject_start=lambda *a, **k: None,
-                subject_done=lambda *a, **k: None,
-                error=lambda *a, **k: None,
-            )
-
-            with patch.dict(
-                sys.modules,
-                {
-                    "eeg_pipeline.infra.paths": fake_paths,
-                    "eeg_pipeline.infra.logging": fake_logging,
-                    "eeg_pipeline.cli.common": fake_cli,
-                    "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
-                },
-            ), patch(
-                "eeg_pipeline.pipelines.behavior.run_behavior_stages",
-                side_effect=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
-            ):
-                with self.assertRaises(RuntimeError):
-                    p.process_subject("0001", progress=progress)
-
-        def test_behavior_process_subject_marks_failure_when_output_persistence_fails(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-
-            p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = SimpleNamespace(
-                method="spearman",
-                bootstrap=0,
-                n_permutations=0,
-                control_predictor=True,
-                control_trial_order=True,
-                compute_change_scores=True,
-                compute_reliability=False,
-                run_correlations=True,
-                run_condition_comparison=True,
-                run_temporal_correlations=True,
-                run_cluster_tests=True,
-            )
-            p.feature_categories = None
-            p.feature_files = None
-            p.computation_features = {}
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = _behavior_process_config()
-            p.logger = Mock()
-
-            fake_paths = types.SimpleNamespace(
-                deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
-                ensure_dir=lambda path: None,
-            )
-            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
-            fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
-            progress = Mock()
-
-            with patch.dict(
-                sys.modules,
-                {
-                    "eeg_pipeline.infra.paths": fake_paths,
-                    "eeg_pipeline.infra.logging": fake_logging,
-                    "eeg_pipeline.cli.common": fake_cli,
-                    "eeg_pipeline.analysis.behavior.orchestration": types.SimpleNamespace(_cache={}),
-                },
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.pipelines.behavior.run_behavior_stages",
                 side_effect=lambda **kwargs: None,
-            ), patch(
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior.write_outputs_manifest",
+                side_effect=lambda *a, **k: outdir / "manifest.json",
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior.get_behavior_output_dir",
+                side_effect=lambda *a, **k: outdir,
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl",
+            ),
+        ):
+            out = p.process_subject("0001")
+        self.assertEqual(out.subject, "0001")
+        self.assertTrue((outdir / "summary.json").exists())
+
+    def test_behavior_results_summary_rich(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
+
+        res = BehaviorPipelineResults(
+            subject="0001",
+            correlations=pd.DataFrame(
+                {"p_raw": [0.01, 0.2], "p_primary": [0.04, 0.6], "q_global": [0.03, 0.2]}
+            ),
+            condition_effects=pd.DataFrame({"p_value": [0.02], "q_global": [0.03]}),
+            regression=pd.DataFrame({"p_primary": [0.01], "q_global": [0.04], "hedges_g": [0.9]}),
+            icc=pd.DataFrame({"feature": ["power_alpha"], "icc": [0.72]}),
+            tf={"n_tests": 2, "n_sig_raw": 1, "n_sig_fdr": 1},
+            temporal={"n_tests": 3, "n_sig_raw": 2, "n_sig_fdr": 1},
+            cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}},
+        )
+        summary = res.to_summary()
+        self.assertGreater(summary["n_features"], 0)
+        self.assertGreater(summary["n_sig_raw"], 0)
+        self.assertGreater(summary["n_sig_fdr"], 0)
+        self.assertEqual(summary["n_clusters"], 2)
+        self.assertEqual(summary["n_icc_features"], 1)
+
+    def test_behavior_results_summary_counts_nested_temporal_outputs(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
+
+        res = BehaviorPipelineResults(
+            subject="0001",
+            temporal={
+                "power": {"n_tests": 7, "n_sig_raw": 3, "n_sig_fdr": 1},
+                "itpc": None,
+                "erds": {"n_tests": 5, "n_sig_raw": 2, "n_sig_fdr": 0},
+            },
+        )
+
+        summary = res.to_summary()
+
+        self.assertEqual(summary["n_temporal_tests"], 12)
+        self.assertEqual(summary["n_features"], 12)
+        self.assertEqual(summary["n_sig_raw"], 5)
+        self.assertEqual(summary["n_sig_fdr"], 1)
+
+    def test_behavior_process_subject_failure_path(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+        p = object.__new__(BehaviorPipeline)
+        p.pipeline_config = SimpleNamespace(
+            method="spearman",
+            bootstrap=0,
+            n_permutations=0,
+            control_predictor=True,
+            control_trial_order=True,
+            compute_change_scores=True,
+            compute_reliability=False,
+            run_correlations=True,
+            run_condition_comparison=True,
+            run_temporal_correlations=True,
+            run_cluster_tests=True,
+        )
+        p.feature_categories = None
+        p.feature_files = None
+        p.computation_features = {}
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = _behavior_process_config()
+        p.logger = Mock()
+
+        fake_paths = types.SimpleNamespace(
+            deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
+            ensure_dir=lambda path: None,
+        )
+        fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
+        fake_cli = types.SimpleNamespace(
+            ProgressReporter=lambda enabled=False: SimpleNamespace(
+                subject_start=lambda *a, **k: None,
+                subject_done=lambda *a, **k: None,
+                error=lambda *a, **k: None,
+            )
+        )
+        fake_orch = types.SimpleNamespace(
+            _cache={},
+            run_behavior_stages=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.infra.paths": fake_paths,
+                    "eeg_pipeline.infra.logging": fake_logging,
+                    "eeg_pipeline.cli.common": fake_cli,
+                    "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
+                },
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior.run_behavior_stages",
+                side_effect=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                p.process_subject("0001", progress=progress)
+
+    def test_behavior_process_subject_marks_failure_when_output_persistence_fails(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+        p = object.__new__(BehaviorPipeline)
+        p.pipeline_config = SimpleNamespace(
+            method="spearman",
+            bootstrap=0,
+            n_permutations=0,
+            control_predictor=True,
+            control_trial_order=True,
+            compute_change_scores=True,
+            compute_reliability=False,
+            run_correlations=True,
+            run_condition_comparison=True,
+            run_temporal_correlations=True,
+            run_cluster_tests=True,
+        )
+        p.feature_categories = None
+        p.feature_files = None
+        p.computation_features = {}
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = _behavior_process_config()
+        p.logger = Mock()
+
+        fake_paths = types.SimpleNamespace(
+            deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
+            ensure_dir=lambda path: None,
+        )
+        fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
+        fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
+        progress = Mock()
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.infra.paths": fake_paths,
+                    "eeg_pipeline.infra.logging": fake_logging,
+                    "eeg_pipeline.cli.common": fake_cli,
+                    "eeg_pipeline.analysis.behavior.orchestration": types.SimpleNamespace(
+                        _cache={}
+                    ),
+                },
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior.run_behavior_stages",
+                side_effect=lambda **kwargs: None,
+            ),
+            patch(
                 "eeg_pipeline.pipelines.behavior.write_outputs_manifest",
                 side_effect=RuntimeError("persist-fail"),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "persist-fail"):
-                    p.process_subject("0001", progress=progress)
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "persist-fail"):
+                p.process_subject("0001", progress=progress)
 
-            progress.subject_done.assert_called_once_with("sub-0001", success=False)
+        progress.subject_done.assert_called_once_with("sub-0001", success=False)
 
-        def test_behavior_process_subject_marks_failure_when_setup_fails(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+    def test_behavior_process_subject_marks_failure_when_setup_fails(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
-            p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = SimpleNamespace(
-                method="spearman",
-                bootstrap=0,
-                n_permutations=0,
-                control_predictor=True,
-                control_trial_order=True,
-                compute_change_scores=True,
-                compute_reliability=False,
-                run_correlations=True,
-                run_condition_comparison=True,
-                run_temporal_correlations=True,
-                run_cluster_tests=True,
-            )
-            p.feature_categories = None
-            p.feature_files = None
-            p.computation_features = {}
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = _behavior_process_config()
-            p.logger = Mock()
+        p = object.__new__(BehaviorPipeline)
+        p.pipeline_config = SimpleNamespace(
+            method="spearman",
+            bootstrap=0,
+            n_permutations=0,
+            control_predictor=True,
+            control_trial_order=True,
+            compute_change_scores=True,
+            compute_reliability=False,
+            run_correlations=True,
+            run_condition_comparison=True,
+            run_temporal_correlations=True,
+            run_cluster_tests=True,
+        )
+        p.feature_categories = None
+        p.feature_files = None
+        p.computation_features = {}
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = _behavior_process_config()
+        p.logger = Mock()
 
-            fake_paths = types.SimpleNamespace(
-                deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
-                ensure_dir=lambda path: None,
-            )
-            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
-            fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
-            progress = Mock()
+        fake_paths = types.SimpleNamespace(
+            deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
+            ensure_dir=lambda path: None,
+        )
+        fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
+        fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
+        progress = Mock()
 
-            with patch.dict(
+        with (
+            patch.dict(
                 sys.modules,
                 {
                     "eeg_pipeline.infra.paths": fake_paths,
                     "eeg_pipeline.infra.logging": fake_logging,
                     "eeg_pipeline.cli.common": fake_cli,
-                    "eeg_pipeline.analysis.behavior.orchestration": types.SimpleNamespace(_cache={}),
+                    "eeg_pipeline.analysis.behavior.orchestration": types.SimpleNamespace(
+                        _cache={}
+                    ),
                 },
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.pipelines.behavior.BehaviorContext",
                 side_effect=RuntimeError("setup-fail"),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "setup-fail"):
-                    p.process_subject("0001", progress=progress)
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "setup-fail"):
+                p.process_subject("0001", progress=progress)
 
-            progress.subject_done.assert_called_once_with("sub-0001", success=False)
+        progress.subject_done.assert_called_once_with("sub-0001", success=False)
+
 
 class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
-        def test_behavior_init_and_group_level_logging_branches(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-            import pandas as pd
+    def test_behavior_init_and_group_level_logging_branches(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+        import pandas as pd
 
-            cfg = DotConfig({})
-            pcfg = _resolved_behavior_pipeline_config()
-            with patch("eeg_pipeline.pipelines.behavior.PipelineBase.__init__", lambda self, name, config=None: (setattr(self, "config", config or cfg), setattr(self, "logger", Mock()), setattr(self, "deriv_root", Path(tempfile.mkdtemp())))):
-                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["icc"])
-            self.assertTrue(b.pipeline_config.run_icc)
+        cfg = DotConfig({})
+        pcfg = _resolved_behavior_pipeline_config()
+        with patch(
+            "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+            lambda self, name, config=None: (
+                setattr(self, "config", config or cfg),
+                setattr(self, "logger", Mock()),
+                setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            ),
+        ):
+            b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["icc"])
+        self.assertTrue(b.pipeline_config.run_icc)
 
-            fake_result = SimpleNamespace(
-                    multilevel_correlations=pd.DataFrame({"q_within_family": [0.01, 0.2]}),
-                )
-            with patch(
+        fake_result = SimpleNamespace(
+            multilevel_correlations=pd.DataFrame({"q_within_family": [0.01, 0.2]}),
+        )
+        with (
+            patch(
                 "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
                 return_value=fake_result,
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
                 return_value=Path("/tmp/trials.parquet"),
-            ):
-                out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
-            self.assertIs(out, fake_result)
+            ),
+        ):
+            out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
+        self.assertIs(out, fake_result)
 
-        def test_behavior_summary_and_group_level_warning_reject_branches(self):
-            from eeg_pipeline.pipelines.behavior import (
-                BehaviorPipeline,
-                BehaviorPipelineResults,
-            )
+    def test_behavior_summary_and_group_level_warning_reject_branches(self):
+        from eeg_pipeline.pipelines.behavior import (
+            BehaviorPipeline,
+            BehaviorPipelineResults,
+        )
 
-            summary = BehaviorPipelineResults(
-                subject="0001",
-                regression=pd.DataFrame(
-                    {
-                        "p_feature": ["0.01", "0.20"],
-                        "p_primary": ["0.03", None],
-                        "p_fdr": ["0.04", "0.20"],
-                    }
-                ),
-            ).to_summary()
-            self.assertEqual(summary["n_regression_features"], 2)
-            self.assertEqual(summary["n_sig_raw"], 1)
-            self.assertEqual(summary["n_sig_controlled"], 1)
-            self.assertEqual(summary["n_sig_fdr"], 1)
+        summary = BehaviorPipelineResults(
+            subject="0001",
+            regression=pd.DataFrame(
+                {
+                    "p_feature": ["0.01", "0.20"],
+                    "p_primary": ["0.03", None],
+                    "p_fdr": ["0.04", "0.20"],
+                }
+            ),
+        ).to_summary()
+        self.assertEqual(summary["n_regression_features"], 2)
+        self.assertEqual(summary["n_sig_raw"], 1)
+        self.assertEqual(summary["n_sig_controlled"], 1)
+        self.assertEqual(summary["n_sig_fdr"], 1)
 
-            cfg = DotConfig({})
-            pcfg = _resolved_behavior_pipeline_config()
-            with patch(
-                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
-                lambda self, name, config=None: (
-                    setattr(self, "config", config or cfg),
-                    setattr(self, "logger", Mock()),
-                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
-                ),
-            ):
-                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, feature_files=["power"])
+        cfg = DotConfig({})
+        pcfg = _resolved_behavior_pipeline_config()
+        with patch(
+            "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+            lambda self, name, config=None: (
+                setattr(self, "config", config or cfg),
+                setattr(self, "logger", Mock()),
+                setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            ),
+        ):
+            b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, feature_files=["power"])
 
-            fake_result = SimpleNamespace(
-                multilevel_correlations=pd.DataFrame({"reject_within_family": [True, False, None]})
-            )
-            with patch(
+        fake_result = SimpleNamespace(
+            multilevel_correlations=pd.DataFrame({"reject_within_family": [True, False, None]})
+        )
+        with (
+            patch(
                 "eeg_pipeline.infra.paths.deriv_stats_path",
                 side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
                 side_effect=[Path("/tmp/0001.parquet"), None, Path("/tmp/0003.parquet")],
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
                 return_value=fake_result,
-            ):
-                out = b.run_group_level(["0001", "0002", "0003"], run_multilevel_correlations=True)
+            ),
+        ):
+            out = b.run_group_level(["0001", "0002", "0003"], run_multilevel_correlations=True)
 
-            self.assertIs(out, fake_result)
-            b.logger.warning.assert_called_once_with(
-                "Group-level multilevel_correlations: excluding subjects without trial tables: %s",
-                "0002",
+        self.assertIs(out, fake_result)
+        b.logger.warning.assert_called_once_with(
+            "Group-level multilevel_correlations: excluding subjects without trial tables: %s",
+            "0002",
+        )
+        self.assertTrue(
+            any(
+                call.args == ("Multilevel correlations: %d significant", 1)
+                for call in b.logger.info.call_args_list
             )
-            self.assertTrue(
-                any(
-                    call.args == ("Multilevel correlations: %d significant", 1)
-                    for call in b.logger.info.call_args_list
-                )
+        )
+
+    def test_behavior_group_level_skips_by_default_when_not_selected(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+        cfg = DotConfig({})
+        pcfg = _resolved_behavior_pipeline_config(run_multilevel_correlations=False)
+        with patch(
+            "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+            lambda self, name, config=None: (
+                setattr(self, "config", config or cfg),
+                setattr(self, "logger", Mock()),
+                setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            ),
+        ):
+            b = BehaviorPipeline(config=cfg, pipeline_config=pcfg)
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+        ) as run_group_level_analysis_mock:
+            out = b.run_group_level(["0001", "0002"])
+
+        self.assertIsNone(out)
+        run_group_level_analysis_mock.assert_not_called()
+
+    def test_behavior_group_level_forwards_feature_file_selection(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+        cfg = DotConfig({})
+        pcfg = _resolved_behavior_pipeline_config()
+        with patch(
+            "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+            lambda self, name, config=None: (
+                setattr(self, "config", config or cfg),
+                setattr(self, "logger", Mock()),
+                setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            ),
+        ):
+            b = BehaviorPipeline(
+                config=cfg,
+                pipeline_config=pcfg,
+                feature_files=["power"],
             )
 
-        def test_behavior_group_level_skips_by_default_when_not_selected(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-
-            cfg = DotConfig({})
-            pcfg = _resolved_behavior_pipeline_config(run_multilevel_correlations=False)
-            with patch(
-                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
-                lambda self, name, config=None: (
-                    setattr(self, "config", config or cfg),
-                    setattr(self, "logger", Mock()),
-                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
-                ),
-            ):
-                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg)
-
-            with patch(
-                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
-            ) as run_group_level_analysis_mock:
-                out = b.run_group_level(["0001", "0002"])
-
-            self.assertIsNone(out)
-            run_group_level_analysis_mock.assert_not_called()
-
-        def test_behavior_group_level_forwards_feature_file_selection(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-
-            cfg = DotConfig({})
-            pcfg = _resolved_behavior_pipeline_config()
-            with patch(
-                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
-                lambda self, name, config=None: (
-                    setattr(self, "config", config or cfg),
-                    setattr(self, "logger", Mock()),
-                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
-                ),
-            ):
-                b = BehaviorPipeline(
-                    config=cfg,
-                    pipeline_config=pcfg,
-                    feature_files=["power"],
-                )
-
-            fake_result = SimpleNamespace(multilevel_correlations=None)
-            with patch(
+        fake_result = SimpleNamespace(multilevel_correlations=None)
+        with (
+            patch(
                 "eeg_pipeline.infra.paths.deriv_stats_path",
                 side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
                 return_value=Path("/tmp/trials_power.parquet"),
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
                 return_value=fake_result,
-            ) as run_group_level_analysis_mock:
-                out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
+            ) as run_group_level_analysis_mock,
+        ):
+            out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
 
-            self.assertIs(out, fake_result)
-            self.assertEqual(
-                run_group_level_analysis_mock.call_args.kwargs["feature_files"],
-                ["power"],
+        self.assertIs(out, fake_result)
+        self.assertEqual(
+            run_group_level_analysis_mock.call_args.kwargs["feature_files"],
+            ["power"],
+        )
+
+    def test_behavior_group_level_requires_existing_trial_tables(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+        cfg = DotConfig({})
+        pcfg = _resolved_behavior_pipeline_config(run_multilevel_correlations=True)
+        with patch(
+            "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+            lambda self, name, config=None: (
+                setattr(self, "config", config or cfg),
+                setattr(self, "logger", Mock()),
+                setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            ),
+        ):
+            b = BehaviorPipeline(
+                config=cfg,
+                pipeline_config=pcfg,
+                feature_files=["power"],
             )
 
-        def test_behavior_group_level_requires_existing_trial_tables(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-
-            cfg = DotConfig({})
-            pcfg = _resolved_behavior_pipeline_config(run_multilevel_correlations=True)
-            with patch(
-                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
-                lambda self, name, config=None: (
-                    setattr(self, "config", config or cfg),
-                    setattr(self, "logger", Mock()),
-                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
-                ),
-            ):
-                b = BehaviorPipeline(
-                    config=cfg,
-                    pipeline_config=pcfg,
-                    feature_files=["power"],
-                )
-
-            with patch(
+        with (
+            patch(
                 "eeg_pipeline.infra.paths.deriv_stats_path",
                 side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
                 return_value=None,
-            ), patch(
+            ),
+            patch(
                 "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
-            ) as run_group_level_analysis_mock:
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "Group-level multilevel_correlations requires saved trial tables",
-                ):
-                    b.run_group_level(["0001", "0002"])
+            ) as run_group_level_analysis_mock,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Group-level multilevel_correlations requires saved trial tables",
+            ):
+                b.run_group_level(["0001", "0002"])
 
-            run_group_level_analysis_mock.assert_not_called()
+        run_group_level_analysis_mock.assert_not_called()
+
 
 class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
-        def test_behavior_small_helpers_cover_counts_and_defaults(self):
-            with patch.dict(sys.modules, _behavior_import_stubs()):
-                from eeg_pipeline.pipelines.behavior import (
-                    _get_optional_int,
-                    _summarize_nested_result_counts,
-                )
-
-                cfg = DotConfig({"behavior_analysis": {"n_jobs": "4"}})
-                self.assertEqual(_get_optional_int(cfg, "behavior_analysis.n_jobs", None), 4)
-                self.assertIsNone(_get_optional_int(cfg, "behavior_analysis.missing", None))
-
-                self.assertEqual(_summarize_nested_result_counts(None), (0, 0, 0))
-                self.assertEqual(
-                    _summarize_nested_result_counts({"n_tests": 5, "n_sig_raw": 2, "n_sig_fdr": 1}),
-                    (5, 2, 1),
-                )
-                self.assertEqual(
-                    _summarize_nested_result_counts(
-                        {
-                            "alpha": {"n_tests": 3, "n_sig_raw": 1, "n_sig_fdr": 1},
-                            "beta": {"n_tests": 2, "n_sig_raw": 0, "n_sig_fdr": 0},
-                        }
-                    ),
-                    (5, 1, 1),
-                    )
-
-        def test_behavior_computation_flags_expand_bundles_and_reject_unknown(self):
-            with patch.dict(sys.modules, _behavior_import_stubs()):
-                from eeg_pipeline.pipelines.behavior import (
-                    BEHAVIOR_COMPUTATION_BUNDLES,
-                    _resolve_behavior_computation_flags,
-                )
-
-                original_bundles = dict(BEHAVIOR_COMPUTATION_BUNDLES)
-                try:
-                    BEHAVIOR_COMPUTATION_BUNDLES.clear()
-                    BEHAVIOR_COMPUTATION_BUNDLES["bundle"] = ["icc", "regression"]
-
-                    logger = Mock()
-                    with self.assertRaisesRegex(ValueError, "unknown"):
-                        _resolve_behavior_computation_flags(["bundle", "unknown"], logger=logger)
-                    flags = _resolve_behavior_computation_flags(["bundle"], logger=logger)
-                    self.assertTrue(flags["icc"])
-                    self.assertTrue(flags["regression"])
-                    self.assertFalse(flags.get("run_cluster_tests", False))
-                    self.assertFalse(logger.warning.called)
-                finally:
-                    BEHAVIOR_COMPUTATION_BUNDLES.clear()
-                    BEHAVIOR_COMPUTATION_BUNDLES.update(original_bundles)
-
-        def test_behavior_helpers_and_init_logging(self):
+    def test_behavior_small_helpers_cover_counts_and_defaults(self):
+        with patch.dict(sys.modules, _behavior_import_stubs()):
             from eeg_pipeline.pipelines.behavior import (
-                _resolve_behavior_computation_flags,
-                BehaviorPipelineConfig,
-                _extract_p_value_column,
-                _count_significant,
-                BehaviorPipelineResults,
-                BehaviorPipeline,
+                _get_optional_int,
+                _summarize_nested_result_counts,
             )
 
-            self.assertIsNone(_resolve_behavior_computation_flags(None))
+            cfg = DotConfig({"behavior_analysis": {"n_jobs": "4"}})
+            self.assertEqual(_get_optional_int(cfg, "behavior_analysis.n_jobs", None), 4)
+            self.assertIsNone(_get_optional_int(cfg, "behavior_analysis.missing", None))
 
-            with self.assertRaises(TypeError):
-                BehaviorPipelineConfig()
-
-            cfg = DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}, "robust_correlation": " winsorized "}})
-            pcfg = BehaviorPipelineConfig.from_config(cfg)
-            self.assertEqual(pcfg.method, "pearson")
-            self.assertEqual(pcfg.robust_method, "winsorized")
-
-            df = pd.DataFrame({"q_value": [0.01]})
-            self.assertIsNotNone(_extract_p_value_column(df, ["p"], ["q_value"]))
-            self.assertIsNone(_extract_p_value_column(df, ["p"], ["q"]))
-            self.assertEqual(_count_significant(None), 0)
-
-            s = BehaviorPipelineResults(subject="0001", trial_table_path="/a")
-            out = s.to_summary()
-            self.assertEqual(out["trial_table_path"], "/a")
-
-            with patch(
-                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
-                lambda self, name, config=None: (
-                    setattr(self, "name", name),
-                    setattr(self, "config", config or DotConfig({})),
-                    setattr(self, "logger", Mock()),
-                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            self.assertEqual(_summarize_nested_result_counts(None), (0, 0, 0))
+            self.assertEqual(
+                _summarize_nested_result_counts({"n_tests": 5, "n_sig_raw": 2, "n_sig_fdr": 1}),
+                (5, 2, 1),
+            )
+            self.assertEqual(
+                _summarize_nested_result_counts(
+                    {
+                        "alpha": {"n_tests": 3, "n_sig_raw": 1, "n_sig_fdr": 1},
+                        "beta": {"n_tests": 2, "n_sig_raw": 0, "n_sig_fdr": 0},
+                    }
                 ),
-            ):
-                p = BehaviorPipeline(
-                    config=DotConfig({}),
-                    pipeline_config=_resolved_behavior_pipeline_config(),
-                    computations=["icc"],
-                    feature_categories=["power"],
-                    computation_features={"regression": ["power_alpha"]},
-                )
-            self.assertEqual(p.name, "behavior_analysis")
-
-        def test_behavior_process_subject_cluster_logs(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-
-            p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = _resolved_behavior_pipeline_config(
-                run_correlations=True,
-                run_condition_comparison=True,
-                run_temporal_correlations=True,
-                run_cluster_tests=True,
-            )
-            p.feature_categories = None
-            p.feature_files = None
-            p.computation_features = {}
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = _behavior_process_config()
-            p.logger = Mock()
-
-            stats_dir = Path(tempfile.mkdtemp())
-            summary_dir = Path(tempfile.mkdtemp())
-            fake_paths = types.SimpleNamespace(deriv_stats_path=lambda deriv_root, subject: stats_dir, ensure_dir=lambda path: None)
-            subject_log = Mock()
-            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: subject_log)
-            fake_cli = types.SimpleNamespace(
-                ProgressReporter=lambda enabled=False: SimpleNamespace(
-                    subject_start=lambda *a, **k: None,
-                    subject_done=lambda *a, **k: None,
-                    error=lambda *a, **k: None,
-                )
+                (5, 1, 1),
             )
 
-            def _run_stages(ctx, pipeline_config, results, progress):
-                results.cluster = {"alpha": {"cluster_records": [{"q_global": 0.01}, {"q_global": 0.2}]}}
+    def test_behavior_computation_flags_expand_bundles_and_reject_unknown(self):
+        with patch.dict(sys.modules, _behavior_import_stubs()):
+            from eeg_pipeline.pipelines.behavior import (
+                BEHAVIOR_COMPUTATION_BUNDLES,
+                _resolve_behavior_computation_flags,
+            )
 
-            fake_orch = types.SimpleNamespace(_cache={})
+            original_bundles = dict(BEHAVIOR_COMPUTATION_BUNDLES)
+            try:
+                BEHAVIOR_COMPUTATION_BUNDLES.clear()
+                BEHAVIOR_COMPUTATION_BUNDLES["bundle"] = ["icc", "regression"]
 
-            with patch.dict(
+                logger = Mock()
+                with self.assertRaisesRegex(ValueError, "unknown"):
+                    _resolve_behavior_computation_flags(["bundle", "unknown"], logger=logger)
+                flags = _resolve_behavior_computation_flags(["bundle"], logger=logger)
+                self.assertTrue(flags["icc"])
+                self.assertTrue(flags["regression"])
+                self.assertFalse(flags.get("run_cluster_tests", False))
+                self.assertFalse(logger.warning.called)
+            finally:
+                BEHAVIOR_COMPUTATION_BUNDLES.clear()
+                BEHAVIOR_COMPUTATION_BUNDLES.update(original_bundles)
+
+    def test_behavior_helpers_and_init_logging(self):
+        from eeg_pipeline.pipelines.behavior import (
+            _resolve_behavior_computation_flags,
+            BehaviorPipelineConfig,
+            _extract_p_value_column,
+            _count_significant,
+            BehaviorPipelineResults,
+            BehaviorPipeline,
+        )
+
+        self.assertIsNone(_resolve_behavior_computation_flags(None))
+
+        with self.assertRaises(TypeError):
+            BehaviorPipelineConfig()
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "statistics": {"correlation_method": "pearson"},
+                    "robust_correlation": " winsorized ",
+                }
+            }
+        )
+        pcfg = BehaviorPipelineConfig.from_config(cfg)
+        self.assertEqual(pcfg.method, "pearson")
+        self.assertEqual(pcfg.robust_method, "winsorized")
+
+        df = pd.DataFrame({"q_value": [0.01]})
+        self.assertIsNotNone(_extract_p_value_column(df, ["p"], ["q_value"]))
+        self.assertIsNone(_extract_p_value_column(df, ["p"], ["q"]))
+        self.assertEqual(_count_significant(None), 0)
+
+        s = BehaviorPipelineResults(subject="0001", trial_table_path="/a")
+        out = s.to_summary()
+        self.assertEqual(out["trial_table_path"], "/a")
+
+        with patch(
+            "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+            lambda self, name, config=None: (
+                setattr(self, "name", name),
+                setattr(self, "config", config or DotConfig({})),
+                setattr(self, "logger", Mock()),
+                setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+            ),
+        ):
+            p = BehaviorPipeline(
+                config=DotConfig({}),
+                pipeline_config=_resolved_behavior_pipeline_config(),
+                computations=["icc"],
+                feature_categories=["power"],
+                computation_features={"regression": ["power_alpha"]},
+            )
+        self.assertEqual(p.name, "behavior_analysis")
+
+    def test_behavior_process_subject_cluster_logs(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+        p = object.__new__(BehaviorPipeline)
+        p.pipeline_config = _resolved_behavior_pipeline_config(
+            run_correlations=True,
+            run_condition_comparison=True,
+            run_temporal_correlations=True,
+            run_cluster_tests=True,
+        )
+        p.feature_categories = None
+        p.feature_files = None
+        p.computation_features = {}
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = _behavior_process_config()
+        p.logger = Mock()
+
+        stats_dir = Path(tempfile.mkdtemp())
+        summary_dir = Path(tempfile.mkdtemp())
+        fake_paths = types.SimpleNamespace(
+            deriv_stats_path=lambda deriv_root, subject: stats_dir, ensure_dir=lambda path: None
+        )
+        subject_log = Mock()
+        fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: subject_log)
+        fake_cli = types.SimpleNamespace(
+            ProgressReporter=lambda enabled=False: SimpleNamespace(
+                subject_start=lambda *a, **k: None,
+                subject_done=lambda *a, **k: None,
+                error=lambda *a, **k: None,
+            )
+        )
+
+        def _run_stages(ctx, pipeline_config, results, progress):
+            results.cluster = {
+                "alpha": {"cluster_records": [{"q_global": 0.01}, {"q_global": 0.2}]}
+            }
+
+        fake_orch = types.SimpleNamespace(_cache={})
+
+        with (
+            patch.dict(
                 sys.modules,
                 {
                     "eeg_pipeline.infra.paths": fake_paths,
@@ -841,42 +912,49 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
                     "eeg_pipeline.cli.common": fake_cli,
                     "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
                 },
-            ), patch("eeg_pipeline.pipelines.behavior.run_behavior_stages", side_effect=_run_stages), patch(
-                "eeg_pipeline.pipelines.behavior.write_outputs_manifest", return_value=stats_dir / "manifest.json"
-            ), patch(
+            ),
+            patch("eeg_pipeline.pipelines.behavior.run_behavior_stages", side_effect=_run_stages),
+            patch(
+                "eeg_pipeline.pipelines.behavior.write_outputs_manifest",
+                return_value=stats_dir / "manifest.json",
+            ),
+            patch(
                 "eeg_pipeline.pipelines.behavior.get_behavior_output_dir", return_value=summary_dir
-            ), patch(
-                "eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl"
-            ):
-                p.process_subject("0001")
+            ),
+            patch("eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl"),
+        ):
+            p.process_subject("0001")
 
-        def test_behavior_process_subject_cluster_output_log_lines(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineResults
+    def test_behavior_process_subject_cluster_output_log_lines(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineResults
 
-            p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = _resolved_behavior_pipeline_config()
-            p.feature_categories = None
-            p.feature_files = None
-            p.computation_features = {}
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = _behavior_process_config()
-            p.logger = Mock()
+        p = object.__new__(BehaviorPipeline)
+        p.pipeline_config = _resolved_behavior_pipeline_config()
+        p.feature_categories = None
+        p.feature_files = None
+        p.computation_features = {}
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = _behavior_process_config()
+        p.logger = Mock()
 
-            stats_dir = Path(tempfile.mkdtemp())
-            summary_dir = Path(tempfile.mkdtemp())
-            fake_paths = types.SimpleNamespace(deriv_stats_path=lambda deriv_root, subject: stats_dir, ensure_dir=lambda path: None)
-            subject_log = Mock()
-            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: subject_log)
-            fake_cli = types.SimpleNamespace(
-                ProgressReporter=lambda enabled=False: SimpleNamespace(
-                    subject_start=lambda *a, **k: None,
-                    subject_done=lambda *a, **k: None,
-                    error=lambda *a, **k: None,
-                )
+        stats_dir = Path(tempfile.mkdtemp())
+        summary_dir = Path(tempfile.mkdtemp())
+        fake_paths = types.SimpleNamespace(
+            deriv_stats_path=lambda deriv_root, subject: stats_dir, ensure_dir=lambda path: None
+        )
+        subject_log = Mock()
+        fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: subject_log)
+        fake_cli = types.SimpleNamespace(
+            ProgressReporter=lambda enabled=False: SimpleNamespace(
+                subject_start=lambda *a, **k: None,
+                subject_done=lambda *a, **k: None,
+                error=lambda *a, **k: None,
             )
-            fake_orch = types.SimpleNamespace(_cache={})
+        )
+        fake_orch = types.SimpleNamespace(_cache={})
 
-            with patch.dict(
+        with (
+            patch.dict(
                 sys.modules,
                 {
                     "eeg_pipeline.infra.paths": fake_paths,
@@ -884,18 +962,36 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
                     "eeg_pipeline.cli.common": fake_cli,
                     "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
                 },
-            ), patch("eeg_pipeline.pipelines.behavior.run_behavior_stages", side_effect=lambda **kwargs: None), patch(
-                "eeg_pipeline.pipelines.behavior.write_outputs_manifest", return_value=stats_dir / "manifest.json"
-            ), patch(
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior.run_behavior_stages",
+                side_effect=lambda **kwargs: None,
+            ),
+            patch(
+                "eeg_pipeline.pipelines.behavior.write_outputs_manifest",
+                return_value=stats_dir / "manifest.json",
+            ),
+            patch(
                 "eeg_pipeline.pipelines.behavior.get_behavior_output_dir", return_value=summary_dir
-            ), patch(
-                "eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl"
-            ), patch.object(
+            ),
+            patch("eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl"),
+            patch.object(
                 BehaviorPipelineResults,
                 "to_summary",
-                return_value={"n_features": 1, "n_sig_raw": 1, "n_sig_controlled": 1, "n_sig_fdr": 1, "n_clusters": 2, "n_sig_clusters": 1},
-            ):
-                p.process_subject("0001")
-            self.assertTrue(
-                any("Clusters identified" in str(call.args[0]) for call in subject_log.info.call_args_list)
+                return_value={
+                    "n_features": 1,
+                    "n_sig_raw": 1,
+                    "n_sig_controlled": 1,
+                    "n_sig_fdr": 1,
+                    "n_clusters": 2,
+                    "n_sig_clusters": 1,
+                },
+            ),
+        ):
+            p.process_subject("0001")
+        self.assertTrue(
+            any(
+                "Clusters identified" in str(call.args[0])
+                for call in subject_log.info.call_args_list
             )
+        )

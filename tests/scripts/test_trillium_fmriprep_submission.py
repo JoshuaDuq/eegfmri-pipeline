@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 WORKFLOW_DIR = Path("local_workflows/alliance_canada")
 
 

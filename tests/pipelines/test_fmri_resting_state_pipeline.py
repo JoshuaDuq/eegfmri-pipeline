@@ -78,16 +78,25 @@ class TestFmriRestingStatePipeline(unittest.TestCase):
         progress = Mock()
         temp_root = Path(tempfile.mkdtemp())
 
-        with patch.object(module, "resolve_fmri_bids_root", return_value=temp_root / "bids"), patch.object(
-            module,
-            "resolve_fmri_deriv_root",
-            return_value=temp_root / "derivatives",
+        with (
+            patch.object(module, "resolve_fmri_bids_root", return_value=temp_root / "bids"),
+            patch.object(
+                module,
+                "resolve_fmri_deriv_root",
+                return_value=temp_root / "derivatives",
+            ),
         ):
             cfg = module.RestingStateAnalysisConfig(atlas_labels_img="/tmp/atlas.nii.gz")
             pipeline.process_subject("0001", "rest", rest_cfg=cfg, dry_run=True, progress=progress)
 
         expected_output_dir = (
-            temp_root / "derivatives" / "sub-0001" / "fmri" / "rest" / "task-rest" / "atlas-fake-atlas"
+            temp_root
+            / "derivatives"
+            / "sub-0001"
+            / "fmri"
+            / "rest"
+            / "task-rest"
+            / "atlas-fake-atlas"
         )
         self.assertTrue(expected_output_dir.exists())
         progress.subject_start.assert_called_once_with("sub-0001")
@@ -102,10 +111,13 @@ class TestFmriRestingStatePipeline(unittest.TestCase):
         temp_root = Path(tempfile.mkdtemp())
         explicit_output_dir = temp_root / "custom-out"
 
-        with patch.object(module, "resolve_fmri_bids_root", return_value=temp_root / "bids"), patch.object(
-            module,
-            "resolve_fmri_deriv_root",
-            return_value=temp_root / "derivatives",
+        with (
+            patch.object(module, "resolve_fmri_bids_root", return_value=temp_root / "bids"),
+            patch.object(
+                module,
+                "resolve_fmri_deriv_root",
+                return_value=temp_root / "derivatives",
+            ),
         ):
             cfg = module.RestingStateAnalysisConfig(atlas_labels_img="/tmp/atlas.nii.gz")
             pipeline.process_subject(
@@ -135,10 +147,13 @@ class TestFmriRestingStatePipeline(unittest.TestCase):
         progress = Mock()
         temp_root = Path(tempfile.mkdtemp())
 
-        with patch.object(module, "resolve_fmri_bids_root", return_value=temp_root / "bids"), patch.object(
-            module,
-            "resolve_fmri_deriv_root",
-            return_value=temp_root / "derivatives",
+        with (
+            patch.object(module, "resolve_fmri_bids_root", return_value=temp_root / "bids"),
+            patch.object(
+                module,
+                "resolve_fmri_deriv_root",
+                return_value=temp_root / "derivatives",
+            ),
         ):
             cfg = module.RestingStateAnalysisConfig(atlas_labels_img="/tmp/atlas.nii.gz")
             with self.assertRaisesRegex(RuntimeError, "rest-fail"):

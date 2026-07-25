@@ -21,7 +21,6 @@ import numpy as np
 
 from eeg_pipeline.utils.analysis.channels import build_roi_map
 
-
 _SPATIAL_MODE_ROI = "roi"
 _SPATIAL_MODE_CHANNELS = "channels"
 _SPATIAL_MODE_GLOBAL = "global"
@@ -118,7 +117,7 @@ def aggregate_by_spatial_modes(
 ) -> Dict[str, np.ndarray]:
     """
     Aggregate data according to spatial modes.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -133,31 +132,29 @@ def aggregate_by_spatial_modes(
         Prefix for feature names
     aggregation_method : str
         'mean' or 'median'
-        
+
     Returns
     -------
     dict mapping feature names to arrays of shape (n_epochs,) or (n_epochs, n_times)
     """
     if data.ndim not in (2, 3):
-        raise ValueError(
-            f"Expected 2D or 3D data, got {data.ndim}D array with shape {data.shape}"
-        )
+        raise ValueError(f"Expected 2D or 3D data, got {data.ndim}D array with shape {data.shape}")
     if len(ch_names) != data.shape[1]:
         raise ValueError(
             f"Channel count mismatch: {len(ch_names)} names for {data.shape[1]} channels"
         )
-    
+
     results: Dict[str, np.ndarray] = {}
     aggregation_func = _get_aggregation_function(aggregation_method)
     has_time_dimension = data.ndim == 3
-    
+
     if _SPATIAL_MODE_GLOBAL in spatial_modes:
         global_data = _aggregate_channels(
             data, np.arange(data.shape[1]), aggregation_func, has_time_dimension
         )
         feature_name = _build_feature_name(feature_prefix, _SPATIAL_MODE_GLOBAL)
         results[feature_name] = global_data
-    
+
     if _SPATIAL_MODE_ROI in spatial_modes:
         roi_definitions = get_roi_definitions(config)
         if not roi_definitions:
@@ -176,13 +173,13 @@ def aggregate_by_spatial_modes(
             )
             feature_name = _build_feature_name(feature_prefix, roi_name)
             results[feature_name] = roi_data
-    
+
     if _SPATIAL_MODE_CHANNELS in spatial_modes:
         for channel_idx, channel_name in enumerate(ch_names):
             channel_data = _extract_channel_data(data, channel_idx, has_time_dimension)
             feature_name = _build_feature_name(feature_prefix, channel_name)
             results[feature_name] = channel_data
-    
+
     return results
 
 
@@ -194,18 +191,18 @@ def crop_epochs_to_time_range(
 ) -> Any:
     """
     Crop epochs to specified time range.
-    
+
     Returns cropped epochs (copy) or original if no cropping needed.
     """
     if tmin is None and tmax is None:
         return epochs
-    
+
     available_tmin = epochs.tmin
     available_tmax = epochs.tmax
-    
+
     requested_tmin = tmin if tmin is not None else available_tmin
     requested_tmax = tmax if tmax is not None else available_tmax
-    
+
     if requested_tmin > requested_tmax:
         raise ValueError(
             f"Epoch crop requires tmin <= tmax (got tmin={requested_tmin}, "
@@ -220,16 +217,12 @@ def crop_epochs_to_time_range(
         )
 
     if requested_tmin == requested_tmax:
-        raise ValueError(
-            f"Epoch crop requires a non-empty time range (got {requested_tmin})."
-        )
-    
+        raise ValueError(f"Epoch crop requires a non-empty time range (got {requested_tmin}).")
+
     if logger:
-        logger.info(
-            f"Cropping epochs to time range [{requested_tmin:.2f}, {requested_tmax:.2f}] s"
-        )
-    
+        logger.info(f"Cropping epochs to time range [{requested_tmin:.2f}, {requested_tmax:.2f}] s")
+
     if not epochs.preload:
         epochs.load_data()
-        
+
     return epochs.copy().crop(tmin=requested_tmin, tmax=requested_tmax)

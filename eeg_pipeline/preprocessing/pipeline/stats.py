@@ -107,4 +107,7 @@ def collect_preprocessing_stats(bids_path, pipeline_path, task):
     preprocessing_stats.to_csv(stats_path, sep="\t", index=False)
 
     desc_path = os.path.join(pipeline_path, f"task_{task}_preprocessing_stats_desc.tsv")
-    preprocessing_stats.describe().to_csv(desc_path, sep="\t", index=False)
+    # describe() carries its statistic names in the index. Dropping them leaves eight
+    # anonymous numeric rows with no way to tell mean from std from min, so the index is
+    # written out and named.
+    preprocessing_stats.describe().rename_axis("statistic").to_csv(desc_path, sep="\t")

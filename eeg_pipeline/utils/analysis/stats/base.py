@@ -47,9 +47,7 @@ def get_statistics_constants(config=None):
 def _normalize_cluster_structure(constants: dict) -> None:
     """Convert cluster_structure_2d to numpy array if present."""
     if "cluster_structure_2d" in constants:
-        constants["cluster_structure_2d"] = np.array(
-            constants["cluster_structure_2d"], dtype=int
-        )
+        constants["cluster_structure_2d"] = np.array(constants["cluster_structure_2d"], dtype=int)
 
 
 def _require_min_samples_for_correlation(constants: dict) -> None:
@@ -72,15 +70,15 @@ def get_ci_level(config: Optional[Any] = None) -> float:
 
 def get_z_critical_value(ci_level: float) -> float:
     """Compute z-critical value for given confidence interval level.
-    
+
     Consolidated utility function for computing z-critical values used
     throughout the statistics modules.
-    
+
     Parameters
     ----------
     ci_level : float
         Confidence level (e.g., 0.95 for 95% CI)
-        
+
     Returns
     -------
     float
@@ -111,17 +109,17 @@ def get_min_samples_for_correlation(config: Optional[Any] = None) -> int:
 
 def get_subject_seed(base_seed: int, subject: str) -> int:
     """Generate reproducible seed from subject ID.
-    
+
     Useful for ensuring bootstrap/permutation results are reproducible
     per subject while varying across subjects.
-    
+
     Parameters
     ----------
     base_seed : int
         Base random seed.
     subject : str
         Subject identifier
-        
+
     Returns
     -------
     int
@@ -133,15 +131,15 @@ def get_subject_seed(base_seed: int, subject: str) -> int:
 
 def _safe_float(value: Any) -> float:
     """Safely convert value to float, returning NaN on failure.
-    
+
     Consolidated utility for safely converting values to float used throughout
     the statistics modules. Handles None, non-numeric types, and infinite values.
-    
+
     Parameters
     ----------
     value : Any
         Value to convert to float
-        
+
     Returns
     -------
     float

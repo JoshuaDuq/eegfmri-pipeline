@@ -41,8 +41,14 @@ class TestTuiPipelineSmokeScript(unittest.TestCase):
             repo_root = Path(tmpdir)
 
             with (
-                patch.object(module, "_has_core_deps", side_effect=lambda cmd, _repo: cmd == ["py", "-3"]),
-                patch.object(module.shutil, "which", side_effect=lambda name: "C:\\Windows\\py.exe" if name == "py" else None),
+                patch.object(
+                    module, "_has_core_deps", side_effect=lambda cmd, _repo: cmd == ["py", "-3"]
+                ),
+                patch.object(
+                    module.shutil,
+                    "which",
+                    side_effect=lambda name: "C:\\Windows\\py.exe" if name == "py" else None,
+                ),
                 patch.object(sys, "executable", ""),
             ):
                 command = module._resolve_python_command(repo_root, os_name="nt")

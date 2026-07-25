@@ -22,7 +22,7 @@ def fdr_bh(
 ) -> np.ndarray:
     """
     Benjamini-Hochberg FDR correction.
-    
+
     Returns q-values (adjusted p-values).
     """
     if alpha is None:
@@ -59,7 +59,7 @@ def fdr_bh_reject(
 ) -> Tuple[np.ndarray, float]:
     """
     BH-FDR rejection decision.
-    
+
     Returns (reject_mask, critical_value).
     """
     if alpha is None:
@@ -77,7 +77,7 @@ def fdr_bh_reject(
     sort_order = np.argsort(valid_p_values)
     sorted_p_values = valid_p_values[sort_order]
     n_tests = len(valid_p_values)
-    
+
     ranks = np.arange(1, n_tests + 1)
     thresholds = (ranks / n_tests) * alpha
     passed_threshold = sorted_p_values <= thresholds
@@ -127,14 +127,14 @@ def hierarchical_fdr(
     config: Optional[Any] = None,
 ) -> pd.DataFrame:
     """Apply hierarchical FDR correction with explicit family structure.
-    
+
     Two-level procedure:
     1) Family-level gate: compute one p-value per family (Simes) and run BH-FDR
     2) Within-family BH-FDR, with final within-family rejection requiring a
        passed family-level gate.
 
     Also computes global BH q-values across all tests for reporting.
-    
+
     Parameters
     ----------
     df : pd.DataFrame
@@ -147,7 +147,7 @@ def hierarchical_fdr(
         FDR alpha level
     config : Any, optional
         Configuration object
-    
+
     Returns
     -------
     pd.DataFrame
@@ -166,15 +166,15 @@ def hierarchical_fdr(
     """
     if alpha is None:
         alpha = get_fdr_alpha(config)
-    
+
     df = df.copy()
-    
+
     if family_col not in df.columns:
         df["family_id"] = "default"
         family_col = "family_id"
     else:
         df["family_id"] = df[family_col]
-    
+
     if "family_kind" not in df.columns:
         if "feature_type" in df.columns:
             df["family_kind"] = "feature_type"
@@ -182,7 +182,7 @@ def hierarchical_fdr(
             df["family_kind"] = "analysis_type"
         else:
             df["family_kind"] = "inferred"
-    
+
     df["q_within_family"] = np.nan
     df["reject_within_family"] = False
     df["family_n_tests"] = 0
@@ -190,23 +190,23 @@ def hierarchical_fdr(
     df["family_p_gate"] = np.nan
     df["family_q_gate"] = np.nan
     df["family_reject_gate"] = False
-    
+
     for family in df["family_id"].unique():
         mask = df["family_id"] == family
         family_df = df.loc[mask]
-        
+
         if p_col not in family_df.columns:
             continue
-        
+
         p_values = pd.to_numeric(family_df[p_col], errors="coerce").to_numpy()
         valid_mask = np.isfinite(p_values)
-        
+
         if not np.any(valid_mask):
             continue
-        
+
         q_values = fdr_bh(p_values, alpha=alpha, config=config)
         reject_mask = q_values < alpha
-        
+
         df.loc[mask, "q_within_family"] = q_values
         df.loc[mask, "reject_within_family"] = reject_mask
         df.loc[mask, "family_n_tests"] = int(valid_mask.sum())
@@ -233,24 +233,18 @@ def hierarchical_fdr(
 
     # Final within-family rejection requires both:
     # (i) within-family BH significance and (ii) family-level gate pass.
-    df["reject_within_family"] = (
-        df["reject_within_family"].astype(bool) & df["family_reject_gate"].astype(bool)
-    )
+    df["reject_within_family"] = df["reject_within_family"].astype(bool) & df[
+        "family_reject_gate"
+    ].astype(bool)
     if not df.empty:
         family_reject_counts = (
-            df.groupby("family_id")["reject_within_family"]
-            .sum()
-            .astype(int)
-            .to_dict()
+            df.groupby("family_id")["reject_within_family"].sum().astype(int).to_dict()
         )
         df["family_n_reject"] = df["family_id"].map(family_reject_counts).fillna(0).astype(int)
-    
+
     if p_col in df.columns:
         all_p = pd.to_numeric(df[p_col], errors="coerce").to_numpy()
         df["q_global"] = fdr_bh(all_p, alpha=alpha, config=config)
         df["reject_global"] = df["q_global"] < alpha
-    
+
     return df
-
-
-

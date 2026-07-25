@@ -95,7 +95,9 @@ def stage_export_impl(
     if is_valid_df(getattr(results, "condition_effects", None)):
         out_dir = get_stats_subfolder_fn(ctx, "condition_effects")
         filename = build_output_filename_fn(ctx, pipeline_config, "condition_effects")
-        saved.append(write_stats_table_fn(ctx, results.condition_effects, out_dir / f"{filename}.tsv"))
+        saved.append(
+            write_stats_table_fn(ctx, results.condition_effects, out_dir / f"{filename}.tsv")
+        )
 
     if is_valid_df(getattr(results, "icc", None)):
         out_dir = get_stats_subfolder_fn(ctx, "icc_reliability")
@@ -124,7 +126,11 @@ def write_outputs_manifest_impl(
 
     outputs = []
     for path in sorted(p for p in ctx.stats_dir.rglob("*") if p.is_file()):
-        if path.name.startswith(".") or path.suffix == ".log" or path.name == "outputs_manifest.json":
+        if (
+            path.name.startswith(".")
+            or path.suffix == ".log"
+            or path.name == "outputs_manifest.json"
+        ):
             continue
         rel = path.relative_to(ctx.stats_dir)
         parts = rel.parts
@@ -142,7 +148,9 @@ def write_outputs_manifest_impl(
             }
         )
 
-    feature_types = [name for name, df in ctx.iter_feature_tables() if df is not None and not df.empty]
+    feature_types = [
+        name for name, df in ctx.iter_feature_tables() if df is not None and not df.empty
+    ]
 
     payload = {
         "subject": ctx.subject,
@@ -156,8 +164,16 @@ def write_outputs_manifest_impl(
         "feature_categories": ctx.feature_categories or [],
         "feature_files": ctx.selected_feature_files or [],
         "targets": {
-            "outcome": bool(ctx._find_outcome_column() is not None) if hasattr(ctx, "_find_outcome_column") else False,
-            "predictor": bool(ctx.predictor_series is not None and ctx.predictor_series.notna().any()) if ctx.predictor_series is not None else False,
+            "outcome": (
+                bool(ctx._find_outcome_column() is not None)
+                if hasattr(ctx, "_find_outcome_column")
+                else False
+            ),
+            "predictor": (
+                bool(ctx.predictor_series is not None and ctx.predictor_series.notna().any())
+                if ctx.predictor_series is not None
+                else False
+            ),
         },
         "covariates_qc": ctx.data_qc.get("covariates_qc", {}),
         "outputs": outputs,

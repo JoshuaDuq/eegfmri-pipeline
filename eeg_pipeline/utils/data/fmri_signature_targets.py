@@ -11,6 +11,7 @@ import pandas as pd
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.utils.config.loader import require_config_value
 
+
 def parse_run_label_to_int(run_value: Any) -> Optional[int]:
     if run_value is None:
         return None
@@ -50,16 +51,14 @@ def find_run_column(aligned_events: pd.DataFrame) -> Optional[pd.Series]:
 def _signature_target_defaults(config: Any, *, config_path: str) -> dict[str, Any]:
     return {
         "method": str(require_config_value(config, f"{config_path}.method")).strip().lower(),
-        "contrast_name": str(
-            require_config_value(config, f"{config_path}.contrast_name")
-        ).strip(),
+        "contrast_name": str(require_config_value(config, f"{config_path}.contrast_name")).strip(),
         "signature_name": str(
             require_config_value(config, f"{config_path}.signature_name")
         ).strip(),
         "metric": str(require_config_value(config, f"{config_path}.metric")).strip().lower(),
-        "normalization": str(
-            require_config_value(config, f"{config_path}.normalization")
-        ).strip().lower(),
+        "normalization": str(require_config_value(config, f"{config_path}.normalization"))
+        .strip()
+        .lower(),
         "round_decimals": int(require_config_value(config, f"{config_path}.round_decimals")),
     }
 
@@ -174,9 +173,7 @@ def _unique_values_by_key(
 def _values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
     return pd.Series(
         [
-            float(values.get(key))
-            if key is not None and key in values.index
-            else np.nan
+            float(values.get(key)) if key is not None and key in values.index else np.nan
             for key in keys
         ]
     )
@@ -184,12 +181,7 @@ def _values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
 
 def _metadata_values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
     return pd.Series(
-        [
-            values.get(key)
-            if key is not None and key in values.index
-            else np.nan
-            for key in keys
-        ]
+        [values.get(key) if key is not None and key in values.index else np.nan for key in keys]
     )
 
 
@@ -202,8 +194,7 @@ def _read_target_table(table_path: Path) -> pd.DataFrame:
     if suffix == ".tsv":
         return pd.read_csv(table_path, sep="\t")
     raise ValueError(
-        "Configured fMRI signature target table must be .parquet or .tsv, "
-        f"got: {table_path}"
+        "Configured fMRI signature target table must be .parquet or .tsv, " f"got: {table_path}"
     )
 
 
@@ -233,8 +224,7 @@ def _load_target_table_values_for_subject(
         )
 
     subject_rows = table.loc[
-        (table["subject_id"].astype(str) == subject_bids)
-        & (table["task"].astype(str) == str(task))
+        (table["subject_id"].astype(str) == subject_bids) & (table["task"].astype(str) == str(task))
     ].copy()
     if subject_rows.empty:
         raise ValueError(
@@ -243,7 +233,9 @@ def _load_target_table_values_for_subject(
         )
 
     target_runs = pd.to_numeric(subject_rows["run"], errors="coerce").to_numpy(dtype=float)
-    target_trials = pd.to_numeric(subject_rows["trial_index"], errors="coerce").to_numpy(dtype=float)
+    target_trials = pd.to_numeric(subject_rows["trial_index"], errors="coerce").to_numpy(
+        dtype=float
+    )
     target_onset = pd.to_numeric(subject_rows["onset"], errors="coerce").to_numpy(dtype=float)
     target_duration = pd.to_numeric(subject_rows["duration"], errors="coerce").to_numpy(dtype=float)
     target_values = pd.to_numeric(subject_rows[target_column], errors="coerce")
@@ -267,8 +259,7 @@ def _load_target_table_values_for_subject(
         for run_num, onset, duration in zip(target_runs, target_onset, target_duration)
     ]
     target_trial_keys = [
-        _mk_trial_key(run_num, trial_num)
-        for run_num, trial_num in zip(target_runs, target_trials)
+        _mk_trial_key(run_num, trial_num) for run_num, trial_num in zip(target_runs, target_trials)
     ]
 
     target_frame = pd.DataFrame(
@@ -361,9 +352,11 @@ def _aligned_numeric_target_table_columns(
     source = subject_rows.copy()
     if active_key_column == "__trial_key__":
         source[active_key_column] = [
-            f"{int(run_num)}|{int(round(float(trial_num)))}"
-            if np.isfinite(run_num) and np.isfinite(trial_num)
-            else None
+            (
+                f"{int(run_num)}|{int(round(float(trial_num)))}"
+                if np.isfinite(run_num) and np.isfinite(trial_num)
+                else None
+            )
             for run_num, trial_num in zip(
                 pd.to_numeric(source["run"], errors="coerce").to_numpy(dtype=float),
                 pd.to_numeric(source["trial_index"], errors="coerce").to_numpy(dtype=float),
@@ -371,11 +364,13 @@ def _aligned_numeric_target_table_columns(
         ]
     else:
         source[active_key_column] = [
-            f"{int(run_num)}|"
-            f"{round(float(onset), round_decimals):.{round_decimals}f}|"
-            f"{round(float(duration), round_decimals):.{round_decimals}f}"
-            if np.isfinite(run_num) and np.isfinite(onset) and np.isfinite(duration)
-            else None
+            (
+                f"{int(run_num)}|"
+                f"{round(float(onset), round_decimals):.{round_decimals}f}|"
+                f"{round(float(duration), round_decimals):.{round_decimals}f}"
+                if np.isfinite(run_num) and np.isfinite(onset) and np.isfinite(duration)
+                else None
+            )
             for run_num, onset, duration in zip(
                 pd.to_numeric(source["run"], errors="coerce").to_numpy(dtype=float),
                 pd.to_numeric(source["onset"], errors="coerce").to_numpy(dtype=float),
@@ -419,7 +414,9 @@ def load_fmri_signature_target_for_subject(
         method = "beta-series"
 
     if "onset" not in events_df.columns or "duration" not in events_df.columns:
-        raise ValueError("Clean events.tsv must contain onset and duration to align fMRI trial signatures.")
+        raise ValueError(
+            "Clean events.tsv must contain onset and duration to align fMRI trial signatures."
+        )
 
     run_series = find_run_column(events_df)
     if run_series is None or not np.any(np.isfinite(run_series.to_numpy(dtype=float))):
@@ -453,7 +450,9 @@ def load_fmri_signature_target_for_subject(
         ]
     _raise_on_missing_or_duplicate_trial_keys(eeg_trial_keys, "EEG event")
 
-    subject_bids = f"sub-{subject_raw}" if not str(subject_raw).startswith("sub-") else str(subject_raw)
+    subject_bids = (
+        f"sub-{subject_raw}" if not str(subject_raw).startswith("sub-") else str(subject_raw)
+    )
     target_table_raw = _optional_config_value(config, f"{config_path}.target_table_path")
     if target_table_raw:
         norm = str(cfg["normalization"]).strip().lower()
@@ -486,7 +485,9 @@ def load_fmri_signature_target_for_subject(
         )
         return y, y_label, extra_meta
 
-    base = deriv_root / subject_bids / "fmri" / ("beta_series" if method == "beta-series" else "lss")
+    base = (
+        deriv_root / subject_bids / "fmri" / ("beta_series" if method == "beta-series" else "lss")
+    )
     contrast = str(cfg["contrast_name"]).strip() or "contrast"
     sig_dir = base / f"task-{task}" / f"contrast-{contrast}" / "signatures"
     sig_path = sig_dir / "trial_signature_expression.tsv"
@@ -572,11 +573,7 @@ def load_fmri_signature_target_for_subject(
     finite_metric = np.isfinite(sig_df[metric].to_numpy(dtype=float))
     available_signatures = sorted({val for val in signature_values if val})
     available_signatures_with_metric = sorted(
-        {
-            val
-            for val in signature_values[finite_metric]
-            if isinstance(val, str) and val.strip()
-        }
+        {val for val in signature_values[finite_metric] if isinstance(val, str) and val.strip()}
     )
     if not available_signatures:
         raise ValueError(f"No signature names found in {sig_path}")
@@ -611,7 +608,9 @@ def load_fmri_signature_target_for_subject(
             )
         ]
 
-    sig_trial = _first_finite_numeric(sig_df, ["events_trial_number", "trial_number", "trial_index"])
+    sig_trial = _first_finite_numeric(
+        sig_df, ["events_trial_number", "trial_number", "trial_index"]
+    )
     sig_df["__trial_key__"] = None
     if sig_trial is not None:
         sig_df["__trial_key__"] = [
@@ -664,9 +663,7 @@ def load_fmri_signature_target_for_subject(
             out = np.full_like(y_arr, np.nan, dtype=float)
             for run in sorted({int(r) for r in run_int[np.isfinite(run_int)]}):
                 idx = np.where(
-                    (np.isfinite(y_arr))
-                    & (np.isfinite(run_int))
-                    & (run_int.astype(int) == run)
+                    (np.isfinite(y_arr)) & (np.isfinite(run_int)) & (run_int.astype(int) == run)
                 )[0]
                 if idx.size == 0:
                     continue

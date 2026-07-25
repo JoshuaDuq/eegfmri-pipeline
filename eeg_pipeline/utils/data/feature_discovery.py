@@ -15,7 +15,6 @@ from eeg_pipeline.utils.data.source_localization_paths import (
     source_localization_candidate_paths,
 )
 
-
 _BYTES_PER_KILOBYTE = 1024
 
 
@@ -71,6 +70,7 @@ FEATURE_FILE_DISPLAY_NAMES = {
 @dataclass
 class FeatureFileInfo:
     """Information about a feature file."""
+
     key: str
     display_name: str
     filename: str
@@ -84,15 +84,15 @@ class FeatureFileInfo:
 def _count_columns_and_rows(path: Path) -> tuple[int, int]:
     """
     Count columns and rows in a feature file.
-    
+
     Supports Parquet and TSV formats. Returns (0, 0) if file doesn't exist
     or cannot be read.
-    
+
     Parameters
     ----------
     path : Path
         Path to the feature file
-        
+
     Returns
     -------
     tuple[int, int]
@@ -100,37 +100,38 @@ def _count_columns_and_rows(path: Path) -> tuple[int, int]:
     """
     if not path.exists():
         return 0, 0
-    
+
     try:
         if path.suffix == ".parquet":
             import pandas as pd
+
             dataframe = pd.read_parquet(path)
             return len(dataframe.columns), len(dataframe)
-        
+
         if path.suffix == ".tsv":
-            with open(path, 'r', encoding='utf-8') as file:
+            with open(path, "r", encoding="utf-8") as file:
                 header_line = file.readline().strip()
                 if not header_line:
                     return 0, 0
-                
-                column_count = len(header_line.split('\t'))
+
+                column_count = len(header_line.split("\t"))
                 row_count = sum(1 for _ in file)
                 return column_count, row_count
     except (OSError, ValueError, ImportError):
         return 0, 0
-    
+
     return 0, 0
 
 
 def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path:
     """
     Find the feature file path.
-    
+
     Features are stored in: features/{key}/{filename}
-    
+
     For source localization features, checks method-specific subfolders
     (`sourcelocalization/lcmv`, `sourcelocalization/eloreta`).
-    
+
     Parameters
     ----------
     features_dir : Path
@@ -139,7 +140,7 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
         Feature key (e.g., 'power', 'connectivity')
     filename : str
         Feature filename (e.g., 'features_power.parquet')
-        
+
     Returns
     -------
     Path
@@ -166,7 +167,7 @@ def discover_feature_files(
 ) -> dict[str, FeatureFileInfo]:
     """
     Discover available feature files for a subject.
-    
+
     Parameters
     ----------
     subject : str
@@ -175,7 +176,7 @@ def discover_feature_files(
         Path to derivatives root
     include_empty : bool
         If True, include files that don't exist in the result
-    
+
     Returns
     -------
     dict[str, FeatureFileInfo]
@@ -185,28 +186,28 @@ def discover_feature_files(
         raise ValueError("Subject ID cannot be empty")
     if not deriv_root.exists():
         raise ValueError(f"Derivatives root does not exist: {deriv_root}")
-    
+
     features_dir = deriv_features_path(deriv_root, subject)
     result: dict[str, FeatureFileInfo] = {}
-    
+
     for key, filename in STANDARD_FEATURE_FILES.items():
         file_path = _find_feature_file_path(features_dir, key, filename)
         file_exists = file_path.exists()
-        
+
         if not file_exists and not include_empty:
             continue
-        
+
         column_count = 0
         row_count = 0
         file_size_kb = 0.0
-        
+
         if file_exists:
             column_count, row_count = _count_columns_and_rows(file_path)
             file_size_bytes = file_path.stat().st_size
             file_size_kb = file_size_bytes / _BYTES_PER_KILOBYTE
-        
+
         display_name = FEATURE_FILE_DISPLAY_NAMES.get(key, key.title())
-        
+
         result[key] = FeatureFileInfo(
             key=key,
             display_name=display_name,
@@ -217,7 +218,5 @@ def discover_feature_files(
             n_rows=row_count,
             file_size_kb=file_size_kb,
         )
-    
+
     return result
-
-

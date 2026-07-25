@@ -91,7 +91,9 @@ class TestFmriSecondLevelPipeline(unittest.TestCase):
                 setattr(self, "logger", Mock()),
             ),
         ):
-            pipeline = module.FmriSecondLevelPipeline(config=DotConfig({"project": {"task": "pain"}}))
+            pipeline = module.FmriSecondLevelPipeline(
+                config=DotConfig({"project": {"task": "pain"}})
+            )
 
         self.assertEqual(pipeline.name, "fmri_second_level")
 
@@ -118,7 +120,9 @@ class TestFmriSecondLevelPipeline(unittest.TestCase):
         pipeline, module = self._build_pipeline()
         cfg = module.SecondLevelConfig(model="one-sample", contrast_names=("pain",))
 
-        with patch.object(module, "run_second_level_analysis", return_value={"status": "ok"}) as mock_run:
+        with patch.object(
+            module, "run_second_level_analysis", return_value={"status": "ok"}
+        ) as mock_run:
             result = pipeline.run_group_level(
                 ["0001", "0002"],
                 task="pain",
@@ -135,15 +139,18 @@ class TestFmriSecondLevelPipeline(unittest.TestCase):
         cfg = module.SecondLevelConfig(model="one-sample", contrast_names=("pain",))
         progress = Mock()
 
-        with patch.object(
-            pipeline,
-            "run_group_level",
-            return_value={"n_subjects": 2},
-        ) as mock_run_group, patch.object(
-            pipeline,
-            "_write_run_metadata",
-            return_value=Path("/tmp/run.json"),
-        ) as mock_write_metadata:
+        with (
+            patch.object(
+                pipeline,
+                "run_group_level",
+                return_value={"n_subjects": 2},
+            ) as mock_run_group,
+            patch.object(
+                pipeline,
+                "_write_run_metadata",
+                return_value=Path("/tmp/run.json"),
+            ) as mock_write_metadata,
+        ):
             result = pipeline.run_batch(
                 ["0001", "0002"],
                 task="pain",
@@ -163,15 +170,18 @@ class TestFmriSecondLevelPipeline(unittest.TestCase):
         cfg = module.SecondLevelConfig(model="one-sample", contrast_names=("pain",))
         progress = Mock()
 
-        with patch.object(
-            pipeline,
-            "run_group_level",
-            side_effect=RuntimeError("group-fail"),
-        ), patch.object(
-            pipeline,
-            "_write_run_metadata",
-            return_value=Path("/tmp/run.json"),
-        ) as mock_write_metadata:
+        with (
+            patch.object(
+                pipeline,
+                "run_group_level",
+                side_effect=RuntimeError("group-fail"),
+            ),
+            patch.object(
+                pipeline,
+                "_write_run_metadata",
+                return_value=Path("/tmp/run.json"),
+            ) as mock_write_metadata,
+        ):
             with self.assertRaisesRegex(RuntimeError, "group-fail"):
                 pipeline.run_batch(
                     ["0001", "0002"],

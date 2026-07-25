@@ -268,11 +268,14 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             control_trial_order=False,
         )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr.get_rois",
-            return_value={"frontal": ["^Fp"]},
-        ), patch(
-            "eeg_pipeline.analysis.behavior.feature_correlator.write_tsv",
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_rois",
+                return_value={"frontal": ["^Fp"]},
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.feature_correlator.write_tsv",
+            ),
         ):
             out = correlator.compute_roi_correlations(
                 power_df,
@@ -395,12 +398,16 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         feature_path = features_dir / "features_power.parquet"
         feature_path.write_text("power_alpha\n1.0\n", encoding="utf-8")
 
-        with patch("eeg_pipeline.context.behavior.deriv_features_path", return_value=features_dir), patch(
-            "eeg_pipeline.utils.data.feature_discovery._find_feature_file_path",
-            return_value=feature_path,
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=ValueError("bad table"),
+        with (
+            patch("eeg_pipeline.context.behavior.deriv_features_path", return_value=features_dir),
+            patch(
+                "eeg_pipeline.utils.data.feature_discovery._find_feature_file_path",
+                return_value=feature_path,
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=ValueError("bad table"),
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "bad table"):
                 ctx._load_selected_feature_files()
@@ -422,7 +429,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             pac_trials = pd.DataFrame({"pac_trial_metric": [10.0, 20.0]})
             bundle = SimpleNamespace(
                 manifests={"pac": {"kind": "summary"}, "pac_trials": {"kind": "trials"}},
-                paths={"pac": Path("/tmp/features_pac.parquet"), "pac_trials": Path("/tmp/features_pac_trials.parquet")},
+                paths={
+                    "pac": Path("/tmp/features_pac.parquet"),
+                    "pac_trials": Path("/tmp/features_pac_trials.parquet"),
+                },
                 power_df=None,
                 connectivity_df=None,
                 directed_connectivity_df=None,
@@ -454,7 +464,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 stats_dir=Path(tempfile.mkdtemp()),
             )
 
-            with patch("eeg_pipeline.utils.data.feature_io.load_feature_bundle", return_value=bundle):
+            with patch(
+                "eeg_pipeline.utils.data.feature_io.load_feature_bundle", return_value=bundle
+            ):
                 ctx._load_all_features_from_bundle()
 
         self.assertIs(ctx.pac_df, pac_trials)
@@ -507,9 +519,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 "eeg_pipeline.context.features": types.SimpleNamespace(FeatureContext=object),
             },
         ):
-            module = importlib.import_module(
-                "eeg_pipeline.analysis.behavior.feature_correlator"
-            )
+            module = importlib.import_module("eeg_pipeline.analysis.behavior.feature_correlator")
             with patch.object(
                 module,
                 "read_table",
@@ -535,9 +545,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "power": {"bands_to_use": ["alpha"]},
                 "time_frequency_analysis": {"rois": {"frontal": ["^Fz$"]}},
-                "behavior_analysis": {
-                    "correlations": {"power_segment_preference": "baseline"}
-                },
+                "behavior_analysis": {"correlations": {"power_segment_preference": "baseline"}},
             }
         )
         default_corr = module.CorrelationConfig(
@@ -546,10 +554,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             control_predictor=False,
             control_trial_order=False,
         )
-        with patch.object(module, "get_feature_registry", return_value=SimpleNamespace(files={})), patch.object(
-            module.CorrelationConfig,
-            "from_config",
-            return_value=default_corr,
+        with (
+            patch.object(module, "get_feature_registry", return_value=SimpleNamespace(files={})),
+            patch.object(
+                module.CorrelationConfig,
+                "from_config",
+                return_value=default_corr,
+            ),
         ):
             correlator = module.FeatureBehaviorCorrelator(
                 subject="0001",
@@ -595,10 +606,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             control_trial_order=False,
             groups=np.array([10, 10, 20, 20], dtype=int),
         )
-        with patch.object(module, "get_feature_registry", return_value=SimpleNamespace(files={})), patch.object(
-            module.CorrelationConfig,
-            "from_config",
-            return_value=corr_cfg,
+        with (
+            patch.object(module, "get_feature_registry", return_value=SimpleNamespace(files={})),
+            patch.object(
+                module.CorrelationConfig,
+                "from_config",
+                return_value=corr_cfg,
+            ),
         ):
             correlator = module.FeatureBehaviorCorrelator(
                 subject="0001",
@@ -615,14 +629,40 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         targets = pd.Series([1.0, 2.0, 3.0, 4.0], name="rating")
         captured_groups = []
 
-        def _capture_perm(record, feature_series, target_series, cov_aligned, pred_aligned, method, n_permutations, rng, perm_groups, config):
-            del record, feature_series, target_series, cov_aligned, pred_aligned, method, n_permutations, rng, config
-            captured_groups.append(np.asarray(perm_groups).copy() if perm_groups is not None else None)
+        def _capture_perm(
+            record,
+            feature_series,
+            target_series,
+            cov_aligned,
+            pred_aligned,
+            method,
+            n_permutations,
+            rng,
+            perm_groups,
+            config,
+        ):
+            del (
+                record,
+                feature_series,
+                target_series,
+                cov_aligned,
+                pred_aligned,
+                method,
+                n_permutations,
+                rng,
+                config,
+            )
+            captured_groups.append(
+                np.asarray(perm_groups).copy() if perm_groups is not None else None
+            )
 
-        with patch.object(module, "_add_permutation_pvalues", side_effect=_capture_perm), patch.object(
-            module,
-            "write_tsv",
-            return_value=None,
+        with (
+            patch.object(module, "_add_permutation_pvalues", side_effect=_capture_perm),
+            patch.object(
+                module,
+                "write_tsv",
+                return_value=None,
+            ),
         ):
             out = correlator.compute_roi_correlations(
                 power_df,
@@ -635,7 +675,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(captured_groups)
         self.assertTrue(all(group_values is not None for group_values in captured_groups))
         self.assertTrue(
-            all(np.array_equal(group_values, np.array([10, 10, 20, 20], dtype=int)) for group_values in captured_groups)
+            all(
+                np.array_equal(group_values, np.array([10, 10, 20, 20], dtype=int))
+                for group_values in captured_groups
+            )
         )
 
     def test_predictor_residual_stage_updates_trial_table_cache(self):
@@ -675,12 +718,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         setattr(ctx, "_behavior_runtime", runtime)
         runtime.cache._trial_table_df = base_df
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+                return_value=None,
+            ),
         ):
             orch.stage_predictor_residual(ctx, SimpleNamespace())
             df_after_resid = orch._load_trial_table_df(ctx)
@@ -913,18 +959,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.api.split_by_condition",
-            return_value=(np.array([True, False]), np.array([False, True]), 1, 1),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
-            side_effect=_fake_effects,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
-            side_effect=lambda _ctx, _cfg, df, **_kw: df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.api.split_by_condition",
+                return_value=(np.array([True, False]), np.array([False, True]), 1, 1),
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+                side_effect=_fake_effects,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+                side_effect=lambda _ctx, _cfg, df, **_kw: df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
         ):
             out = stage_condition_column(
                 ctx,
@@ -979,18 +1030,28 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.api.split_by_condition",
-            return_value=(np.array([True, False, True, False]), np.array([False, True, False, True]), 2, 2),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
-            side_effect=_fake_effects,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
-            side_effect=lambda _ctx, _cfg, df, **_kw: df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.api.split_by_condition",
+                return_value=(
+                    np.array([True, False, True, False]),
+                    np.array([False, True, False, True]),
+                    2,
+                    2,
+                ),
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+                side_effect=_fake_effects,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+                side_effect=lambda _ctx, _cfg, df, **_kw: df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
         ):
             stage_condition_column(
                 ctx,
@@ -1052,18 +1113,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.api.split_by_condition",
-            side_effect=_fake_split,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
-            side_effect=_fake_effects,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
-            side_effect=lambda _ctx, _cfg, df, **_kw: df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.api.split_by_condition",
+                side_effect=_fake_split,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+                side_effect=_fake_effects,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+                side_effect=lambda _ctx, _cfg, df, **_kw: df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
         ):
             stage_condition_column(
                 ctx,
@@ -1182,23 +1248,28 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.api.split_by_condition",
-            return_value=(
-                np.array([True, False, True, False, True, False, True, False, True, False]),
-                np.array([False, True, False, True, False, True, False, True, False, True]),
-                5,
-                5,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.api.split_by_condition",
+                return_value=(
+                    np.array([True, False, True, False, True, False, True, False, True, False]),
+                    np.array([False, True, False, True, False, True, False, True, False, True]),
+                    5,
+                    5,
+                ),
             ),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
-            side_effect=_fake_effects,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
-            side_effect=lambda _ctx, _cfg, df, **_kw: df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
+            patch(
+                "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+                side_effect=_fake_effects,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+                side_effect=lambda _ctx, _cfg, df, **_kw: df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
         ):
             out = stage_condition_column(
                 ctx,
@@ -1270,22 +1341,26 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
-            return_value=pd.DataFrame(
-                {
-                    "feature": ["power_alpha"],
-                    "hedges_g": [0.6],
-                    "p_value": [0.2],
-                    "p_primary": [0.2],
-                }
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+                return_value=pd.DataFrame(
+                    {
+                        "feature": ["power_alpha"],
+                        "hedges_g": [0.6],
+                        "p_value": [0.2],
+                        "p_primary": [0.2],
+                    }
+                ),
             ),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
-            side_effect=lambda _ctx, _cfg, df, **_kw: df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+                side_effect=lambda _ctx, _cfg, df, **_kw: df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
         ):
             out = stage_condition_column(
                 ctx,
@@ -1402,21 +1477,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=fake_trial_path,
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, _sub: Path("/tmp"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=_fake_read_table,
-        ) as read_table_mock, patch(
-            "eeg_pipeline.analysis.behavior.orchestration.compute_correlation",
-            return_value=(0.2, 0.5),
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=fake_trial_path,
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, _sub: Path("/tmp"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=_fake_read_table,
+            ) as read_table_mock,
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration.compute_correlation",
+                return_value=(0.2, 0.5),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -1430,7 +1511,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertFalse(out.empty)
         self.assertGreaterEqual(read_table_mock.call_count, 2)
-        self.assertTrue(all(call.args[0].suffix == ".tsv" for call in read_table_mock.call_args_list))
+        self.assertTrue(
+            all(call.args[0].suffix == ".tsv" for call in read_table_mock.call_args_list)
+        )
 
     def test_group_correlations_use_within_subject_centering(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
@@ -1453,15 +1536,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -1600,7 +1687,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         by_feature = out.set_index("feature")
         self.assertTrue(bool(by_feature.loc["power_big", "reportable_effect"]))
         self.assertFalse(bool(by_feature.loc["power_small", "reportable_effect"]))
-        self.assertAlmostEqual(float(by_feature.loc["power_big", "effect_size_threshold"]), 0.5, places=12)
+        self.assertAlmostEqual(
+            float(by_feature.loc["power_big", "effect_size_threshold"]), 0.5, places=12
+        )
 
     def test_permutation_groups_with_singletons_raise_by_default(self):
         from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
@@ -1645,12 +1734,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             captured["groups"] = groups
             return 0.25
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.permutation._build_predictor_covariates",
-            return_value=pd.DataFrame({"predictor": predictor}, index=index),
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.permutation.perm_pval_partial_freedman_lane",
-            side_effect=_fake_perm,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.permutation._build_predictor_covariates",
+                return_value=pd.DataFrame({"predictor": predictor}, index=index),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.permutation.perm_pval_partial_freedman_lane",
+                side_effect=_fake_perm,
+            ),
         ):
             out = _compute_combined_covariates_predictor_pvalue(
                 x_aligned=x,
@@ -1838,18 +1930,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -1892,12 +1989,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaises(ValueError):
                 stage_regression(
@@ -1958,18 +2058,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 {"status": "ok", "predictor_control": "linear"},
             )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.trialwise_regression.run_trialwise_feature_regressions",
-            side_effect=_fake_regression,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            return_value=Path("/tmp/regression.parquet"),
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.trialwise_regression.run_trialwise_feature_regressions",
+                side_effect=_fake_regression,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+                return_value=Path("/tmp/regression.parquet"),
+            ),
         ):
             out = stage_regression(
                 ctx,
@@ -2012,12 +2117,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "grouped labels"):
                 stage_regression(
@@ -2080,21 +2188,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.analysis.behavior.group_level.compute_correlation",
-            return_value=(0.2, 0.5),
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.group_level.compute_correlation",
+                return_value=(0.2, 0.5),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -2133,12 +2247,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2170,12 +2287,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2208,12 +2328,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2247,12 +2370,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaises(ValueError):
                 stage_correlate_design(
@@ -2288,12 +2414,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaises(ValueError):
                 stage_correlate_design(
@@ -2354,12 +2483,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaises(ValueError):
                 stage_correlate_design(
@@ -2390,12 +2522,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaises(ValueError):
                 stage_correlate_design(
@@ -2427,12 +2562,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "grouped permutation labels"):
                 stage_correlate_design(
@@ -2466,12 +2604,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2504,14 +2645,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "behavior_analysis\\.correlations\\.target_column"):
+            with self.assertRaisesRegex(
+                ValueError, "behavior_analysis\\.correlations\\.target_column"
+            ):
                 stage_correlate_design(
                     ctx,
                     SimpleNamespace(control_predictor=True, control_trial_order=True),
@@ -2541,12 +2687,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "behavior_analysis\\.correlations\\.targets"):
                 stage_correlate_design(
@@ -2582,12 +2731,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2624,12 +2776,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2665,12 +2820,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -2703,18 +2861,25 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         runtime = create_behavior_runtime()
         setattr(ctx, "_behavior_runtime", runtime)
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_trial_table_input_hash",
-            return_value="abc",
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration.compute_trial_table",
-            side_effect=AssertionError("compute_trial_table should not run when cache key matches"),
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_trial_table_input_hash",
+                return_value="abc",
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration.compute_trial_table",
+                side_effect=AssertionError(
+                    "compute_trial_table should not run when cache key matches"
+                ),
+            ),
         ):
             resolved = stage_trial_table(ctx, SimpleNamespace())
         self.assertEqual(resolved, out_path)
 
     def test_trial_table_input_hash_raises_when_event_hashing_fails(self):
-        from eeg_pipeline.analysis.behavior.trial_table_helpers import compute_trial_table_input_hash
+        from eeg_pipeline.analysis.behavior.trial_table_helpers import (
+            compute_trial_table_input_hash,
+        )
 
         ctx = self._ctx(DotConfig({}))
         ctx.aligned_events = pd.DataFrame({"epoch": [1, 2], "rating": [10.0, 20.0]})
@@ -2803,12 +2968,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.effect_size.compute_multigroup_condition_effects",
-            side_effect=_fake_multigroup,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.effect_size.compute_multigroup_condition_effects",
+                side_effect=_fake_multigroup,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+                return_value=None,
+            ),
         ):
             out = stage_condition_multigroup(
                 ctx,
@@ -2903,13 +3071,17 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx.use_spearman = True
         ctx.selected_feature_files = ["power"]
 
-        with patch("eeg_pipeline.analysis.behavior.api.compute_temporal_from_context") as compute_mock:
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context"
+        ) as compute_mock:
             with self.assertRaisesRegex(ValueError, "n_permutations > 0"):
                 stage_temporal_stats(ctx)
 
         compute_mock.assert_not_called()
 
-    def test_temporal_cluster_mode_explicit_zero_permutations_do_not_fallback_to_legacy_default(self):
+    def test_temporal_cluster_mode_explicit_zero_permutations_do_not_fallback_to_legacy_default(
+        self,
+    ):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
 
         cfg = DotConfig(
@@ -2926,7 +3098,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx.use_spearman = True
         ctx.selected_feature_files = ["power"]
 
-        with patch("eeg_pipeline.analysis.behavior.api.compute_temporal_from_context") as compute_mock:
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context"
+        ) as compute_mock:
             with self.assertRaisesRegex(ValueError, "n_permutations > 0"):
                 stage_temporal_stats(ctx)
 
@@ -2956,7 +3130,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx.covariates_df = None
         ctx.use_spearman = True
 
-        with self.assertRaisesRegex(ValueError, "cannot also be used as the split-by-condition column"):
+        with self.assertRaisesRegex(
+            ValueError, "cannot also be used as the split-by-condition column"
+        ):
             compute_temporal_from_context(ctx)
 
     def test_temporal_target_resolver_honors_canonical_outcome_override(self):
@@ -3149,23 +3325,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx.feature_categories = None
         ctx.aligned_events = aligned_events
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context",
-            return_value={
-                "records": [
-                    {"feature": "power", "channel": "Cz", "p_raw": 0.01, "r": 0.2, "n": 12}
-                ]
-            },
-        ) as power_mock, patch(
-            "eeg_pipeline.utils.analysis.stats.temporal.compute_itpc_temporal_from_context",
-            return_value={
-                "records": [
-                    {"feature": "itpc", "channel": "Cz", "p_raw": 0.02, "r": 0.3, "n": 12}
-                ]
-            },
-        ) as itpc_mock, patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context",
+                return_value={
+                    "records": [
+                        {"feature": "power", "channel": "Cz", "p_raw": 0.01, "r": 0.2, "n": 12}
+                    ]
+                },
+            ) as power_mock,
+            patch(
+                "eeg_pipeline.utils.analysis.stats.temporal.compute_itpc_temporal_from_context",
+                return_value={
+                    "records": [
+                        {"feature": "itpc", "channel": "Cz", "p_raw": 0.02, "r": 0.3, "n": 12}
+                    ]
+                },
+            ) as itpc_mock,
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+                return_value=None,
+            ),
         ):
             out = stage_temporal_stats(ctx)
 
@@ -3175,8 +3355,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         power_mock.assert_not_called()
         itpc_mock.assert_called_once()
 
-    def test_correlate_primary_selection_does_not_fallback_to_raw_when_controlled_stat_missing(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+    def test_correlate_primary_selection_does_not_fallback_to_raw_when_controlled_stat_missing(
+        self,
+    ):
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_primary_selection,
+        )
 
         cfg = DotConfig(
             {
@@ -3184,7 +3369,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     "statistics": {"allow_iid_trials": False},
                     "correlations": {
                         "p_primary_mode": "perm_if_available",
-                    }
+                    },
                 }
             }
         )
@@ -3226,7 +3411,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(out[0]["p_primary_source"]), "perm_missing_required")
 
     def test_correlate_primary_selection_uses_robust_permutation_when_available(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_primary_selection,
+        )
 
         cfg = DotConfig(
             {
@@ -3270,7 +3458,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(out[0]["p_primary_source"]), "raw_robust_perm")
 
     def test_correlate_primary_selection_run_mean_uses_controlled_estimand(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_primary_selection,
+        )
 
         cfg = DotConfig(
             {
@@ -3320,7 +3511,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(out[0]["p_primary_source"]), "run_mean_partial_cov_predictor")
 
     def test_correlate_primary_selection_honors_requested_raw_type(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_primary_selection,
+        )
 
         cfg = DotConfig(
             {
@@ -3372,7 +3566,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(out[0]["p_primary_source"]), "raw_perm")
 
     def test_correlate_primary_selection_does_not_downgrade_combined_control_request(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_primary_selection,
+        )
 
         cfg = DotConfig(
             {
@@ -3572,12 +3769,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 dtype=float,
             )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_spline_model",
-            side_effect=_fake_fit,
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.predictor_residual._predict_spline_model",
-            side_effect=_fake_predict,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_spline_model",
+                side_effect=_fake_fit,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.predictor_residual._predict_spline_model",
+                side_effect=_fake_predict,
+            ),
         ):
             prediction, residual, metadata = crossfit_predictor_outcome_curve(
                 predictor,
@@ -3615,15 +3815,18 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_polynomial_model",
-            return_value=(np.poly1d([1.0, 0.0]), {"model": "poly", "status": "ok"}),
-        ) as poly_fit, patch(
-            "eeg_pipeline.utils.analysis.stats.predictor_residual._predict_polynomial_model",
-            side_effect=lambda _model, pred_values: pd.Series(
-                np.zeros(len(pred_values)),
-                index=pred_values.index,
-                dtype=float,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_polynomial_model",
+                return_value=(np.poly1d([1.0, 0.0]), {"model": "poly", "status": "ok"}),
+            ) as poly_fit,
+            patch(
+                "eeg_pipeline.utils.analysis.stats.predictor_residual._predict_polynomial_model",
+                side_effect=lambda _model, pred_values: pd.Series(
+                    np.zeros(len(pred_values)),
+                    index=pred_values.index,
+                    dtype=float,
+                ),
             ),
         ):
             prediction, residual, metadata = crossfit_predictor_outcome_curve(
@@ -3706,7 +3909,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
 
     def test_correlate_primary_selection_non_iid_overrides_asymptotic_to_permutation(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_primary_selection,
+        )
 
         cfg = DotConfig(
             {
@@ -3751,7 +3957,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(out[0]["p_kind_primary"]), "p_perm_raw")
 
     def test_correlate_effect_sizes_rejects_robust_mode_with_covariate_controls(self):
-        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_effect_sizes
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_effect_sizes,
+        )
 
         ctx = self._ctx(DotConfig({}))
         design = CorrelateDesign(
@@ -3852,7 +4061,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             want_partial_predictor=True,
             want_partial_cov_predictor=True,
             want_run_mean=True,
-            config=DotConfig({"behavior_analysis": {"statistics": {"predictor_control": "linear"}}}),
+            config=DotConfig(
+                {"behavior_analysis": {"statistics": {"predictor_control": "linear"}}}
+            ),
         )
 
         self.assertEqual(int(rec.get("n_runs", 0)), 6)
@@ -3883,18 +4094,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -3936,18 +4152,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -4007,15 +4228,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -4052,18 +4277,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -4095,22 +4325,28 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, _sub: Path("/tmp"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df, df],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.group_level.np.random.default_rng",
-            wraps=np.random.default_rng,
-        ) as rng_factory:
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, _sub: Path("/tmp"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df, df],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.group_level.np.random.default_rng",
+                wraps=np.random.default_rng,
+            ) as rng_factory,
+        ):
             run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
@@ -4136,18 +4372,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, _sub: Path("/tmp"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df.copy(), df.copy()],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df_in, **_kwargs: df_in,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, _sub: Path("/tmp"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df.copy(), df.copy()],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df_in, **_kwargs: df_in,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -4240,7 +4481,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue((pd.to_numeric(moderate["p_fdr"], errors="coerce") >= 0.05).all())
 
     def test_regression_permutation_uses_feature_valid_subset_length(self):
-        from eeg_pipeline.utils.analysis.stats.trialwise_regression import _compute_permutation_pvalues
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+            _compute_permutation_pvalues,
+        )
 
         calls = []
 
@@ -4281,7 +4524,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(all(n == int(valid_feat.sum()) for n in calls))
 
     def test_regression_permutation_uses_configured_scheme(self):
-        from eeg_pipeline.utils.analysis.stats.trialwise_regression import _compute_permutation_pvalues
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+            _compute_permutation_pvalues,
+        )
 
         captured = {}
 
@@ -4321,7 +4566,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(captured.get("scheme")), "circular_shift")
 
     def test_regression_permutation_rejects_failed_permutation_fits(self):
-        from eeg_pipeline.utils.analysis.stats.trialwise_regression import _compute_permutation_pvalues
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+            _compute_permutation_pvalues,
+        )
 
         X = np.array([[1.0, 0.2], [1.0, -0.2]], dtype=float)
         y_f = np.array([0.1, -0.1], dtype=float)
@@ -4353,7 +4600,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 )
 
     def test_regression_strict_non_iid_marks_missing_when_permutation_unavailable(self):
-        from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+            run_trialwise_feature_regressions,
+        )
 
         cfg = DotConfig(
             {
@@ -4514,7 +4763,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx = BehaviorContext(
             subject="0001",
             task="task",
-            config=DotConfig({"behavior_analysis": {"trial_table": {"disallow_positional_alignment": True}}}),
+            config=DotConfig(
+                {"behavior_analysis": {"trial_table": {"disallow_positional_alignment": True}}}
+            ),
             logger=Mock(),
             deriv_root=Path(tempfile.mkdtemp()),
             stats_dir=Path(tempfile.mkdtemp()),
@@ -4619,15 +4870,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
-            return_value=(0.75, 0.60, 0.85),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            side_effect=lambda _ctx, df, path: path,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
+                return_value=(0.75, 0.60, 0.85),
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+                side_effect=lambda _ctx, df, path: path,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+                return_value=None,
+            ),
         ):
             out = orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
 
@@ -4666,15 +4921,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
-            return_value=(0.75, 0.60, 0.85),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            side_effect=lambda _ctx, df, path: path,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
+                return_value=(0.75, 0.60, 0.85),
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+                side_effect=lambda _ctx, df, path: path,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+                return_value=None,
+            ),
         ):
             out = orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
 
@@ -4712,15 +4971,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
-            return_value=(0.75, 0.60, 0.85),
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            side_effect=lambda _ctx, df, path: path,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
-            return_value=None,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
+                return_value=(0.75, 0.60, 0.85),
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+                side_effect=lambda _ctx, df, path: path,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+                return_value=None,
+            ),
         ):
             out = orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
 
@@ -4751,7 +5014,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(ValueError, "behavior_analysis.icc.unit_columns must not be empty"):
+        with self.assertRaisesRegex(
+            ValueError, "behavior_analysis.icc.unit_columns must not be empty"
+        ):
             _resolve_configured_icc_unit_columns(
                 df_trials,
                 config=config,
@@ -4809,21 +5074,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             captured_schemes.append(str(scheme))
             return np.arange(n, dtype=int)
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
-            side_effect=_perm,
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
+                side_effect=_perm,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -4862,15 +5133,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "block permutation"):
                 run_group_level_correlations(
@@ -4901,18 +5176,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -4948,21 +5228,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
-            side_effect=ValueError("forced failure"),
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
+                side_effect=ValueError("forced failure"),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             with self.assertRaisesRegex(
                 RuntimeError,
@@ -5116,12 +5402,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
-            return_value=df_trials,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
-            return_value=["power_alpha"],
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+                return_value=df_trials,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+                return_value=["power_alpha"],
+            ),
         ):
             design = stage_correlate_design(
                 ctx,
@@ -5173,15 +5462,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             captured["analysis_type"] = kwargs.get("analysis_type")
             return df.assign(p_fdr=[0.02], q_global=[0.02])
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.effect_size.compute_multigroup_condition_effects",
-            return_value=base_df,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
-            side_effect=_capture_fdr,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            return_value=Path("/tmp/fake.tsv"),
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.effect_size.compute_multigroup_condition_effects",
+                return_value=base_df,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+                side_effect=_capture_fdr,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+                return_value=Path("/tmp/fake.tsv"),
+            ),
         ):
             out = stage_condition_multigroup(
                 ctx,
@@ -5217,21 +5510,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             captured_groups.append(np.asarray(groups).copy())
             return np.arange(int(n), dtype=int)
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
-            side_effect=_capture_perm,
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
-            side_effect=lambda df, **_kwargs: df,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
+                side_effect=_capture_perm,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+                side_effect=lambda df, **_kwargs: df,
+            ),
         ):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
@@ -5289,20 +5588,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         correlation_results = [(0.5, 0.1), (0.4, 0.1)] + [(np.nan, np.nan)] * 8
 
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
-            return_value=Path("/tmp/trials.tsv"),
-        ), patch(
-            "eeg_pipeline.infra.paths.deriv_stats_path",
-            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
-        ), patch(
-            "eeg_pipeline.infra.tsv.read_table",
-            side_effect=[df_a, df_b],
-        ), patch(
-            "eeg_pipeline.analysis.behavior.group_level.compute_correlation",
-            side_effect=correlation_results,
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+                return_value=Path("/tmp/trials.tsv"),
+            ),
+            patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ),
+            patch(
+                "eeg_pipeline.infra.tsv.read_table",
+                side_effect=[df_a, df_b],
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.group_level.compute_correlation",
+                side_effect=correlation_results,
+            ),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Insufficient valid group-level permutations"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Insufficient valid group-level permutations"
+            ):
                 run_group_level_correlations(
                     subjects=["0001", "0002"],
                     deriv_root=Path("/tmp"),
@@ -5361,12 +5667,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 2.0,
             )
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.temporal.compute_partial_corr",
-            side_effect=_fake_partial,
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.temporal.compute_cluster_correction_2d",
-            side_effect=_fake_cluster,
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.temporal.compute_partial_corr",
+                side_effect=_fake_partial,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.temporal.compute_cluster_correction_2d",
+                side_effect=_fake_cluster,
+            ),
         ):
             records = _compute_metric_records_with_cluster(
                 band_metrics=[
@@ -5409,7 +5718,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(all(bool(record["cluster_significant"]) for record in records))
 
     def test_temporal_roi_cluster_failure_surfaces_instead_of_falling_back(self):
-        from eeg_pipeline.utils.analysis.stats.temporal import _compute_roi_correlations_for_condition
+        from eeg_pipeline.utils.analysis.stats.temporal import (
+            _compute_roi_correlations_for_condition,
+        )
 
         class _FakeTFR:
             def __init__(self) -> None:
@@ -5423,12 +5734,15 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         mask = np.ones(10, dtype=bool)
         fake_band_power = np.linspace(0.1, 1.0, 10, dtype=float).reshape(-1, 1)
 
-        with patch(
-            "eeg_pipeline.utils.analysis.stats.temporal.extract_trial_band_power",
-            return_value=fake_band_power,
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.cluster.compute_cluster_correction_2d",
-            side_effect=RuntimeError("cluster-broken"),
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.stats.temporal.extract_trial_band_power",
+                return_value=fake_band_power,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.cluster.compute_cluster_correction_2d",
+                side_effect=RuntimeError("cluster-broken"),
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "cluster-broken"):
                 _compute_roi_correlations_for_condition(
@@ -5550,7 +5864,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
             side_effect=lambda epochs, *_args, **_kwargs: epochs,
         ):
-            with self.assertRaisesRegex(ValueError, "behavior_analysis\\.cluster\\.condition_column"):
+            with self.assertRaisesRegex(
+                ValueError, "behavior_analysis\\.cluster\\.condition_column"
+            ):
                 _run_cluster_test_core(
                     "0001",
                     _FakeEpochs(),
@@ -5593,18 +5909,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         aligned_events = pd.DataFrame({"pain_binary_coded": [0, 1, 0, 1]})
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
-            side_effect=lambda epochs, *_args, **_kwargs: epochs,
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.get_tfr_config",
-            return_value=(1.0, 20.0, 10, 2.0, 1, "eeg"),
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.get_bands_for_tfr",
-            return_value={"alpha": (8.0, 12.0)},
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.cluster.compute_two_condition_time_cluster_test",
-            return_value={},
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
+                side_effect=lambda epochs, *_args, **_kwargs: epochs,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_tfr_config",
+                return_value=(1.0, 20.0, 10, 2.0, 1, "eeg"),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_bands_for_tfr",
+                return_value={"alpha": (8.0, 12.0)},
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.cluster.compute_two_condition_time_cluster_test",
+                return_value={},
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "condition_values"):
                 _run_cluster_test_core(
@@ -5649,19 +5970,24 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         aligned_events = pd.DataFrame({"trial_type": ["safe", "pain", "safe", "pain"]})
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
-            side_effect=lambda epochs, *_args, **_kwargs: epochs,
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.get_tfr_config",
-            return_value=(1.0, 20.0, 10, 2.0, 1, "eeg"),
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.get_bands_for_tfr",
-            return_value={"alpha": (8.0, 12.0)},
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.cluster.compute_two_condition_time_cluster_test",
-            return_value={"status": "ok"},
-        ) as cluster_test:
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
+                side_effect=lambda epochs, *_args, **_kwargs: epochs,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_tfr_config",
+                return_value=(1.0, 20.0, 10, 2.0, 1, "eeg"),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_bands_for_tfr",
+                return_value={"alpha": (8.0, 12.0)},
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.cluster.compute_two_condition_time_cluster_test",
+                return_value={"status": "ok"},
+            ) as cluster_test,
+        ):
             result = _run_cluster_test_core(
                 "0001",
                 _FakeEpochs(),
@@ -5710,18 +6036,23 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         aligned_events = pd.DataFrame({"pain_binary_coded": [0, 1, np.nan, 1]})
 
-        with patch(
-            "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
-            side_effect=lambda epochs, *_args, **_kwargs: epochs,
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.get_tfr_config",
-            return_value=(1.0, 20.0, 10, 2.0, 1, "eeg"),
-        ), patch(
-            "eeg_pipeline.utils.analysis.tfr.get_bands_for_tfr",
-            return_value={"alpha": (8.0, 12.0)},
-        ), patch(
-            "eeg_pipeline.utils.analysis.stats.cluster.compute_two_condition_time_cluster_test",
-            return_value={},
+        with (
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.restrict_epochs_to_roi",
+                side_effect=lambda epochs, *_args, **_kwargs: epochs,
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_tfr_config",
+                return_value=(1.0, 20.0, 10, 2.0, 1, "eeg"),
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.tfr.get_bands_for_tfr",
+                return_value={"alpha": (8.0, 12.0)},
+            ),
+            patch(
+                "eeg_pipeline.utils.analysis.stats.cluster.compute_two_condition_time_cluster_test",
+                return_value={},
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "missing condition labels"):
                 _run_cluster_test_core(
@@ -5737,9 +6068,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
     def test_resolve_correlation_method_uses_behavior_defaults(self):
         from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 
-        cfg = DotConfig(
-            {"behavior_analysis": {"statistics": {"correlation_method": "pearson"}}}
-        )
+        cfg = DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}}})
         self.assertEqual(resolve_correlation_method(cfg), "pearson")
 
     def test_temporal_feature_selection_uses_behavior_defaults(self):
@@ -5761,9 +6090,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             feature_categories=None,
             computation_features=None,
         )
-        self.assertEqual(
-            resolve_temporal_feature_selection_impl(ctx), ["power", "itpc"]
-        )
+        self.assertEqual(resolve_temporal_feature_selection_impl(ctx), ["power", "itpc"])
 
     def test_resolve_correlation_method_requires_config(self):
         from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method

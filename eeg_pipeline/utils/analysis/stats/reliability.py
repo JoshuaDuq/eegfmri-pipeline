@@ -13,7 +13,6 @@ from scipy import stats
 
 from .base import get_subject_seed
 
-
 DEFAULT_ALPHA = 0.05
 DEFAULT_RANDOM_STATE = 42
 DEFAULT_N_SPLITS = 100

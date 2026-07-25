@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import Any, Callable, List
 
-
 CLI_COMMAND_GROUP = "eeg_pipeline.cli_commands"
 
 
 @dataclass
 class Command:
     """CLI command definition."""
+
     name: str
     setup: Callable[[argparse._SubParsersAction], argparse.ArgumentParser]
     run: Callable[[argparse.Namespace, List[str], Any], None]

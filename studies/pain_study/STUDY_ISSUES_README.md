@@ -20,6 +20,55 @@ Follow-up:
 
 ## Issues
 
+### 2026-07-24 - Cohort - Analyzer Pulse Artifact Correction Failed On 39% Of Runs
+
+Study/stage: BrainVision Analyzer scanner artifact correction, upstream of all EEG
+preprocessing and every pulse-artifact-dependent analysis.
+
+Issue: Analyzer writes the R markers it uses to build the pulse-artifact template. In
+35 of the 90 task runs on disk (39%) fewer than 0.5 `Pulse Artifact,R` markers per
+scanner volume reached the exported files, so those runs were very likely never
+pulse-corrected. Counting markers per volume rather than raw counts accounts for
+recording length. The distribution is bimodal: 34 runs sit near zero markers per
+volume against a healthy cluster at 0.75 to 1.0, with almost nothing between, so these
+are outright failures rather than borderline cases. **No subject has all six runs
+usable** (0 of 15, and 0 of 14 after excluding `sub-0006`). Affected runs per subject:
+
+```text
+0000:1/6  0001:2/6  0003:2/6  0004:4/6  0005:1/6  0006:5/6  0007:2/6  0008:1/6
+0009:3/6  0010:1/6  0011:1/6  0012:3/6  0013:5/6  0014:1/6  0015:3/6
+```
+
+Analyzer's own log is close to reliable. For the 11 subjects confirmed present in the
+2026-07 batch it raised `The time delay cannot be computed. Do you accept the default
+value of 0.21 s?` for 28 of that batch's 29 broken runs, with no false positives. The
+one miss in that batch is `sub-0012` run 2 (5 markers against 543 volumes). `sub-0005`
+run 4 (69 markers, a partial failure) and `sub-0010` run 1 remain unclassified because
+those subjects appear nowhere in the batch log. `sub-0014` and `sub-0015` were not in
+that batch, so their 4 broken runs are expected to raise dialogs when processed.
+
+The ECG channel is not the cause. In `sub-0015` it is healthy in all six runs (217 to
+239 microvolts RMS) and MNE detects 474 to 530 R peaks at 57 to 64 bpm in every run,
+including the three Analyzer could not mark. Marker-locked residual EEG amplitude is
+about 18 times higher in the affected runs (11 to 12 microvolts against 0.6 to 0.7),
+consistent with real uncorrected artifact rather than a measurement quirk.
+
+Decision: Treat runs below the marker threshold as **not pulse-corrected**. Do not
+assume Analyzer correction succeeded for any run without checking its marker count. No
+exclusion decision is recorded yet, because the affected fraction is large enough that
+exclusion would compromise the analytic sample; repair is the preferred route.
+
+Follow-up: Investigate why Analyzer fails to mark R peaks on roughly 40% of runs when
+the ECG channel is healthy, most plausibly a detection-parameter or channel-scaling
+issue in its template step; fixing it there is cleaner than working around it. If
+Analyzer cannot be made reliable, mark R peaks from the ECG channel outside Analyzer
+and re-run pulse correction with those markers. Re-check `sub-0005` run 4 and
+`sub-0010` run 1 against the batch records to classify them. Marker availability is
+reported automatically: per subject and run in the `Scanner artifact correction
+(Analyzer)` section of each subject report, and cohort-wide via
+`eeg_pipeline/preprocessing/report/cohort_qc.py`, which accepts a subject filter so a
+single processing batch can be summarized on its own.
+
 ### 2026-06-30 - `sub-0006` - Pilot Participant Exclusion
 
 Study/stage: Study 1 and Study 2 eligibility.

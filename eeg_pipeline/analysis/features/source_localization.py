@@ -42,11 +42,12 @@ if TYPE_CHECKING:
     import mne
 
 
-
 def _as_path(value: Any) -> Optional[Path]:
     if value is None:
         return None
     return Path(str(value)).expanduser()
+
+
 def _resolve_source_segment(
     *,
     times: Optional[np.ndarray],
@@ -180,9 +181,7 @@ def _load_fmri_constraint_config(
             f"(got '{provenance}')."
         )
     require_provenance = bool(fmri_cfg.get("require_provenance", True))
-    allow_same_dataset_provenance = bool(
-        fmri_cfg.get("allow_same_dataset_provenance", False)
-    )
+    allow_same_dataset_provenance = bool(fmri_cfg.get("allow_same_dataset_provenance", False))
 
     contrast_cfg = fmri_cfg.get("contrast", {}) or {}
     contrast_enabled = bool(contrast_cfg.get("enabled", False))
@@ -195,7 +194,9 @@ def _load_fmri_constraint_config(
         if bids_derivatives is None:
             missing_paths.append("bids_derivatives (paths.deriv_root or --deriv-root)")
         if freesurfer_subjects_dir is None:
-            missing_paths.append("freesurfer_subjects_dir (feature_engineering.sourcelocalization.subjects_dir or --source-subjects-dir)")
+            missing_paths.append(
+                "freesurfer_subjects_dir (feature_engineering.sourcelocalization.subjects_dir or --source-subjects-dir)"
+            )
         if not subject:
             missing_paths.append("subject")
         if not str(task or "").strip():
@@ -203,8 +204,7 @@ def _load_fmri_constraint_config(
 
         if missing_paths:
             raise ValueError(
-                "Cannot build fMRI contrast: missing required inputs: "
-                + ", ".join(missing_paths)
+                "Cannot build fMRI contrast: missing required inputs: " + ", ".join(missing_paths)
             )
 
         from fmri_pipeline.analysis.contrast_builder import ensure_fmri_stats_map
@@ -242,7 +242,9 @@ def _load_fmri_constraint_config(
         )
 
     thresholding_cfg = fmri_cfg.get("thresholding", {}) or {}
-    threshold_mode = str(thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))).strip().lower()
+    threshold_mode = (
+        str(thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))).strip().lower()
+    )
     if threshold_mode not in {"z", "fdr"}:
         raise ValueError(
             "feature_engineering.sourcelocalization.fmri.thresholding.mode must be one of {'z','fdr'} "
@@ -325,9 +327,7 @@ def _load_fmri_constraint_config(
             "feature_engineering.sourcelocalization.fmri.cluster_min_voxels must be > 0."
         )
     if max_clusters <= 0:
-        raise ValueError(
-            "feature_engineering.sourcelocalization.fmri.max_clusters must be > 0."
-        )
+        raise ValueError("feature_engineering.sourcelocalization.fmri.max_clusters must be > 0.")
     if max_voxels_per_cluster < 0:
         raise ValueError(
             "feature_engineering.sourcelocalization.fmri.max_voxels_per_cluster must be >= 0."
@@ -380,6 +380,7 @@ def _load_fmri_constraint_config(
         prethresholded_mask=prethresholded_mask,
     )
 
+
 ###################################################################
 # Forward Model Setup
 ###################################################################
@@ -396,9 +397,9 @@ def _setup_forward_model(
 ) -> Tuple[Any, Any, Any]:
     """
     Set up forward model for source localization.
-    
+
     Uses fsaverage template if no subject-specific MRI is available.
-    
+
     Returns
     -------
     fwd : mne.Forward
@@ -410,16 +411,16 @@ def _setup_forward_model(
     """
     import mne
     from mne.datasets import fetch_fsaverage
-    
+
     if logger:
         logger.info(f"Setting up forward model using {subject} template")
-    
+
     if subjects_dir is None:
         fs_dir = Path(fetch_fsaverage(verbose=False))
         subjects_dir = str(fs_dir.parent)
     else:
         fs_dir = Path(subjects_dir) / subject
-    
+
     src = mne.setup_source_space(
         subject,
         spacing=spacing,
@@ -427,11 +428,11 @@ def _setup_forward_model(
         add_dist=False,
         verbose=False,
     )
-    
+
     bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
     trans_path = fs_dir / "bem" / "fsaverage-trans.fif"
     trans = str(trans_path) if trans_path.exists() else "fsaverage"
-    
+
     fwd = mne.make_forward_solution(
         info,
         trans=trans,
@@ -441,10 +442,10 @@ def _setup_forward_model(
         mindist=mindist,
         verbose=False,
     )
-    
+
     if logger:
         logger.info(f"Forward model: {fwd['nsource']} sources")
-    
+
     return fwd, src, bem
 
 
@@ -702,13 +703,9 @@ def _read_stats_map_sidecar(stats_map_path: Path) -> Dict[str, Any]:
     try:
         payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"fMRI stats map sidecar is not valid JSON: {sidecar_path}"
-        ) from exc
+        raise ValueError(f"fMRI stats map sidecar is not valid JSON: {sidecar_path}") from exc
     if not isinstance(payload, dict):
-        raise ValueError(
-            f"fMRI stats map sidecar is not a JSON object: {sidecar_path}"
-        )
+        raise ValueError(f"fMRI stats map sidecar is not a JSON object: {sidecar_path}")
     return payload
 
 
@@ -742,7 +739,13 @@ def _assert_fdr_compatible_z_map(
     evidence: List[str] = []
 
     sidecar = _read_stats_map_sidecar(stats_map_path)
-    for key in ("output_type_actual", "output_type_requested", "output_type", "stat_type", "StatisticType"):
+    for key in (
+        "output_type_actual",
+        "output_type_requested",
+        "output_type",
+        "stat_type",
+        "StatisticType",
+    ):
         if key in sidecar and _is_z_type_value(sidecar.get(key)):
             evidence.append(f"sidecar:{key}")
 
@@ -751,12 +754,10 @@ def _assert_fdr_compatible_z_map(
         evidence.append("filename")
 
     intent_code = int(
-        getattr(getattr(img, "header", None), "get_intent", lambda: (0, (), ""))()[0]
-        or 0
+        getattr(getattr(img, "header", None), "get_intent", lambda: (0, (), ""))()[0] or 0
     )
     intent_code_map = (
-        getattr(getattr(getattr(nib, "nifti1", None), "intent_codes", None), "code", {})
-        or {}
+        getattr(getattr(getattr(nib, "nifti1", None), "intent_codes", None), "code", {}) or {}
     )
     z_intent_code = int(intent_code_map.get("z score", -1))
     if intent_code > 0 and intent_code == z_intent_code:
@@ -831,9 +832,7 @@ def _map_selected_voxels_to_aparcaseg(
 
     selected_voxels = np.asarray(selected_voxels_ijk, dtype=int)
     if selected_voxels.ndim != 2 or selected_voxels.shape[1] != 3:
-        raise ValueError(
-            f"Selected voxels must have shape (n, 3), got {selected_voxels.shape}."
-        )
+        raise ValueError(f"Selected voxels must have shape (n, 3), got {selected_voxels.shape}.")
     if np.any(selected_voxels < 0):
         raise ValueError("Selected voxel indices must be non-negative.")
     if (
@@ -842,8 +841,7 @@ def _map_selected_voxels_to_aparcaseg(
         or np.any(selected_voxels[:, 2] >= atlas_data.shape[2])
     ):
         raise ValueError(
-            "Selected voxel indices exceed aparc+aseg bounds "
-            f"(atlas_shape={atlas_data.shape})."
+            "Selected voxel indices exceed aparc+aseg bounds " f"(atlas_shape={atlas_data.shape})."
         )
 
     atlas_ids = atlas_data[
@@ -940,8 +938,7 @@ def _select_fmri_constrained_voxels(
         thr = float(cfg.threshold)
         if not np.isfinite(thr) or thr <= 0:
             raise ValueError(
-                "feature_engineering.sourcelocalization.fmri.threshold must be > 0 "
-                f"(got {thr})."
+                "feature_engineering.sourcelocalization.fmri.threshold must be > 0 " f"(got {thr})."
             )
 
         if str(cfg.threshold_mode).lower() == "fdr":
@@ -972,7 +969,7 @@ def _select_fmri_constrained_voxels(
             if n < 1:
                 raise ValueError("No finite voxels found in fMRI stats map.")
 
-            bh_thresh = (q * (np.arange(1, n + 1, dtype=float) / float(n)))
+            bh_thresh = q * (np.arange(1, n + 1, dtype=float) / float(n))
             below = ranked <= bh_thresh
             if not np.any(below):
                 mask = np.zeros_like(data, dtype=bool)
@@ -1030,13 +1027,17 @@ def _select_fmri_constrained_voxels(
 
     if not clusters:
         if cfg.prethresholded_mask:
-            raise ValueError("The prethresholded fMRI constraint mask contains no connected components.")
+            raise ValueError(
+                "The prethresholded fMRI constraint mask contains no connected components."
+            )
         if cfg.cluster_min_volume_mm3 is not None and voxel_vol_mm3 is not None:
             raise ValueError(
                 "All clusters were smaller than "
                 f"cluster_min_volume_mm3={float(cfg.cluster_min_volume_mm3):g} (voxel_vol_mm3={float(voxel_vol_mm3):g})."
             )
-        raise ValueError(f"All clusters were smaller than cluster_min_voxels={cfg.cluster_min_voxels}.")
+        raise ValueError(
+            f"All clusters were smaller than cluster_min_voxels={cfg.cluster_min_voxels}."
+        )
 
     clusters.sort(key=lambda t: (t[2], t[1]), reverse=True)
     clusters = clusters[: max(1, int(cfg.max_clusters))]
@@ -1051,8 +1052,12 @@ def _select_fmri_constrained_voxels(
         if vox.size == 0:
             continue
 
-        if int(cfg.max_voxels_per_cluster) > 0 and int(vox.shape[0]) > int(cfg.max_voxels_per_cluster):
-            pick = rng.choice(int(vox.shape[0]), size=int(cfg.max_voxels_per_cluster), replace=False)
+        if int(cfg.max_voxels_per_cluster) > 0 and int(vox.shape[0]) > int(
+            cfg.max_voxels_per_cluster
+        ):
+            pick = rng.choice(
+                int(vox.shape[0]), size=int(cfg.max_voxels_per_cluster), replace=False
+            )
             vox = vox[pick]
 
         if int(cfg.max_total_voxels) > 0:
@@ -1270,7 +1275,7 @@ def _compute_lcmv_source_estimates(
 ) -> Tuple[List[Any], Any]:
     """
     Compute LCMV beamformer source estimates for epochs.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -1287,7 +1292,7 @@ def _compute_lcmv_source_estimates(
         Orientation picking strategy
     weight_norm : str
         Weight normalization method
-        
+
     Returns
     -------
     stcs : list of mne.SourceEstimate
@@ -1297,10 +1302,10 @@ def _compute_lcmv_source_estimates(
     """
     import mne
     from mne.beamformer import make_lcmv, apply_lcmv_epochs
-    
+
     if logger:
         logger.info("Computing LCMV beamformer source estimates")
-    
+
     epochs_for_cov = epochs_fit if epochs_fit is not None else epochs_apply
     if data_cov is None:
         data_cov = mne.compute_covariance(
@@ -1309,7 +1314,7 @@ def _compute_lcmv_source_estimates(
             keep_sample_mean=False,
             verbose=False,
         )
-    
+
     filters = make_lcmv(
         epochs_apply.info,
         fwd,
@@ -1321,12 +1326,12 @@ def _compute_lcmv_source_estimates(
         rank="info",
         verbose=False,
     )
-    
+
     stcs = apply_lcmv_epochs(epochs_apply, filters, verbose=False)
-    
+
     if logger:
         logger.info(f"LCMV: {len(stcs)} epochs, {stcs[0].data.shape[0]} sources")
-    
+
     return stcs, filters
 
 
@@ -1347,7 +1352,7 @@ def _compute_eloreta_source_estimates(
 ) -> Tuple[List[Any], Any]:
     """
     Compute eLORETA inverse solution source estimates.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -1365,7 +1370,7 @@ def _compute_eloreta_source_estimates(
     pick_ori : {'normal', None, 'vector'}
         Orientation selection for inverse estimates. Use ``None`` for
         volume/discrete source spaces.
-        
+
     Returns
     -------
     stcs : list of mne.SourceEstimate
@@ -1394,19 +1399,18 @@ def _compute_eloreta_source_estimates(
         )
     if has_nonsurface and float(loose) < 1.0:
         raise ValueError(
-            "eLORETA with volume/discrete source spaces requires loose=1.0 "
-            "(free orientation)."
+            "eLORETA with volume/discrete source spaces requires loose=1.0 " "(free orientation)."
         )
 
     import mne
     from mne.minimum_norm import make_inverse_operator, apply_inverse_epochs
-    
+
     if logger:
         logger.info("Computing eLORETA source estimates")
-    
+
     if noise_cov is None:
         noise_cov = mne.make_ad_hoc_cov(epochs.info, verbose=False)
-    
+
     inv = make_inverse_operator(
         epochs.info,
         fwd,
@@ -1415,9 +1419,9 @@ def _compute_eloreta_source_estimates(
         depth=depth,
         verbose=False,
     )
-    
-    lambda2 = 1.0 / snr ** 2
-    
+
+    lambda2 = 1.0 / snr**2
+
     stcs = apply_inverse_epochs(
         epochs,
         inv,
@@ -1426,10 +1430,10 @@ def _compute_eloreta_source_estimates(
         pick_ori=pick_ori,
         verbose=False,
     )
-    
+
     if logger:
         logger.info(f"eLORETA: {len(stcs)} epochs, {stcs[0].data.shape[0]} sources")
-    
+
     return stcs, inv
 
 
@@ -1446,7 +1450,7 @@ def _extract_roi_timecourses(
 ) -> np.ndarray:
     """
     Extract ROI time courses from source estimates.
-    
+
     Parameters
     ----------
     stcs : list of mne.SourceEstimate
@@ -1457,14 +1461,14 @@ def _extract_roi_timecourses(
         Source space used for the forward model
     mode : str
         Extraction mode: 'mean', 'mean_flip', 'pca_flip', 'max'
-        
+
     Returns
     -------
     roi_data : ndarray, shape (n_epochs, n_rois, n_times)
         ROI time courses
     """
     import mne
-    
+
     try:
         tcs = mne.extract_label_time_course(
             stcs,
@@ -1479,7 +1483,7 @@ def _extract_roi_timecourses(
             "ROI extraction failed because one or more labels have no vertices in the source space. "
             "Check parcellation/source-space compatibility and do not use empty labels."
         ) from exc
-        
+
     return np.asarray(tcs, dtype=float)
 
 
@@ -1491,7 +1495,7 @@ def _compute_roi_power(
 ) -> np.ndarray:
     """
     Compute band power for ROI time courses.
-    
+
     Parameters
     ----------
     roi_data : ndarray, shape (n_epochs, n_rois, n_times)
@@ -1500,14 +1504,14 @@ def _compute_roi_power(
         Sampling frequency
     fmin, fmax : float
         Frequency band limits
-        
+
     Returns
     -------
     power : ndarray, shape (n_epochs, n_rois)
         Band power per epoch and ROI
     """
     from mne.time_frequency import psd_array_welch
-    
+
     n_epochs, n_rois, n_times = roi_data.shape
     power = np.zeros((n_epochs, n_rois))
 
@@ -1520,17 +1524,17 @@ def _compute_roi_power(
         raise ValueError(
             f"ROI power band upper edge must be below Nyquist ({nyquist:.6g} Hz), got fmax={fmax}."
         )
-    
+
     bad_mask = np.any(np.isnan(roi_data), axis=-1) | (np.std(roi_data, axis=-1) < 1e-12)
     valid_mask = ~bad_mask
 
     if not np.any(valid_mask):
         power[:] = np.nan
         return power
-    
+
     valid_data = roi_data[valid_mask]
     nperseg = min(n_times, int(sfreq * 2))
-    
+
     psds, freqs = psd_array_welch(
         valid_data,
         sfreq=sfreq,
@@ -1542,20 +1546,20 @@ def _compute_roi_power(
         n_jobs=1,
         verbose=False,
     )
-    
+
     if len(freqs) < 1:
         raise ValueError(
             "ROI power band has no Welch frequency bins; increase segment length or use a lower band. "
             f"(fmin={fmin}, fmax={fmax}, sfreq={sfreq}, n_times={n_times})"
         )
-    
+
     # Integrate discrete PSD over frequency to compute total band power
     df = freqs[1] - freqs[0] if len(freqs) > 1 else sfreq / nperseg
     valid_power = np.sum(psds, axis=-1) * df
-    
+
     power[valid_mask] = valid_power
     power[bad_mask] = np.nan
-    
+
     return power
 
 
@@ -1567,7 +1571,7 @@ def _compute_roi_envelope(
 ) -> np.ndarray:
     """
     Compute band-limited amplitude envelope for ROI time courses.
-    
+
     Parameters
     ----------
     roi_data : ndarray, shape (n_epochs, n_rois, n_times)
@@ -1576,7 +1580,7 @@ def _compute_roi_envelope(
         Sampling frequency
     fmin, fmax : float
         Frequency band limits
-        
+
     Returns
     -------
     envelope : ndarray, shape (n_epochs, n_rois, n_times)
@@ -1584,15 +1588,17 @@ def _compute_roi_envelope(
     """
     from mne.filter import filter_data
     from scipy.signal import hilbert
-    
+
     n_epochs, n_rois, n_times = roi_data.shape
     envelope = np.zeros_like(roi_data)
-    
+
     if not np.isfinite(sfreq) or sfreq <= 0:
         raise ValueError(f"Sampling frequency must be > 0 for ROI envelope (got {sfreq}).")
     nyq = sfreq / 2.0
     if fmin <= 0 or fmax >= nyq or fmin >= fmax:
-        raise ValueError(f"Invalid bandpass range for ROI envelope: fmin={fmin}, fmax={fmax}, sfreq={sfreq}.")
+        raise ValueError(
+            f"Invalid bandpass range for ROI envelope: fmin={fmin}, fmax={fmax}, sfreq={sfreq}."
+        )
 
     bad_mask = np.any(np.isnan(roi_data), axis=-1) | (np.std(roi_data, axis=-1) < 1e-12)
     valid_mask = ~bad_mask
@@ -1600,9 +1606,9 @@ def _compute_roi_envelope(
     if not np.any(valid_mask):
         envelope[:] = np.nan
         return envelope
-    
+
     valid_data = roi_data[valid_mask]
-    
+
     # Use zero-phase IIR filtering to avoid FIR-kernel-length distortion on short windows.
     filtered_data = filter_data(
         valid_data,
@@ -1615,14 +1621,14 @@ def _compute_roi_envelope(
         copy=True,
         verbose=False,
     )
-    
+
     # Hilbert transform applies across last axis
     analytic = hilbert(filtered_data)
     valid_envelope = np.abs(analytic)
-    
+
     envelope[valid_mask] = valid_envelope
     envelope[bad_mask] = np.nan
-    
+
     return envelope
 
 
@@ -1634,6 +1640,7 @@ def _compute_roi_envelope(
 @dataclass(frozen=True)
 class SourceLocalizationConfig:
     """Source localization configuration parameters."""
+
     mode: str
     allow_template_fallback: bool
     method: str
@@ -1707,9 +1714,7 @@ def _load_source_contrast_config(config: Any) -> SourceContrastConfig:
         src_cfg = {}
     contrast_cfg = src_cfg.get("contrast", {}) or {}
     if not isinstance(contrast_cfg, dict):
-        raise ValueError(
-            "feature_engineering.sourcelocalization.contrast must be a mapping."
-        )
+        raise ValueError("feature_engineering.sourcelocalization.contrast must be a mapping.")
 
     enabled = _parse_bool_config(
         contrast_cfg.get("enabled", False),
@@ -1881,11 +1886,17 @@ def _load_source_localization_config(
     trans_path = _as_path(src_cfg.get("trans"))
     bem_path = _as_path(src_cfg.get("bem"))
 
-    mindist_mm = float(get_config_float(config, "feature_engineering.sourcelocalization.mindist_mm", 5.0))
+    mindist_mm = float(
+        get_config_float(config, "feature_engineering.sourcelocalization.mindist_mm", 5.0)
+    )
     lcmv_reg = float(get_config_float(config, "feature_engineering.sourcelocalization.reg", 0.05))
     eloreta_snr = float(get_config_float(config, "feature_engineering.sourcelocalization.snr", 3.0))
-    eloreta_loose = float(get_config_float(config, "feature_engineering.sourcelocalization.loose", 0.2))
-    eloreta_depth = float(get_config_float(config, "feature_engineering.sourcelocalization.depth", 0.8))
+    eloreta_loose = float(
+        get_config_float(config, "feature_engineering.sourcelocalization.loose", 0.2)
+    )
+    eloreta_depth = float(
+        get_config_float(config, "feature_engineering.sourcelocalization.depth", 0.8)
+    )
 
     if not np.isfinite(mindist_mm) or mindist_mm < 0:
         raise ValueError(
@@ -1943,9 +1954,7 @@ def _load_source_localization_config(
         task=fmri_task,
     )
 
-    allow_template_fallback = bool(
-        src_cfg.get("allow_template_fallback", False)
-    )
+    allow_template_fallback = bool(src_cfg.get("allow_template_fallback", False))
     if mode == "fmri_informed" and not bool(fmri_cfg.enabled):
         raise ValueError(
             "feature_engineering.sourcelocalization.mode='fmri_informed' requires "
@@ -2011,9 +2020,7 @@ def extract_source_contrast_features(
             "Enable and validate source localization first."
         )
     if not isinstance(getattr(ctx, "aligned_events", None), pd.DataFrame):
-        raise ValueError(
-            "Source contrast requires trial-aligned events in ctx.aligned_events."
-        )
+        raise ValueError("Source contrast requires trial-aligned events in ctx.aligned_events.")
     events_df = ctx.aligned_events.reset_index(drop=True)
     if events_df.empty:
         raise ValueError("Source contrast requires non-empty aligned events.")
@@ -2169,9 +2176,7 @@ def _require_lcmv_train_mask_if_trial_safe(
 
 def _resolve_source_connectivity_min_cycles(config: Any) -> float:
     """Resolve minimum cycle count for source connectivity validity checks."""
-    raw = require_config_value(
-        config, "feature_engineering.sourcelocalization.min_cycles_per_band"
-    )
+    raw = require_config_value(config, "feature_engineering.sourcelocalization.min_cycles_per_band")
     try:
         value = float(raw)
     except (TypeError, ValueError) as exc:
@@ -2416,7 +2421,7 @@ def extract_source_localization_features(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Extract source-localized ROI features from epochs.
-    
+
     Parameters
     ----------
     ctx : FeatureContext
@@ -2429,7 +2434,7 @@ def extract_source_localization_features(
         ROI label names to extract (uses aparc if None)
     n_jobs : int
         Number of parallel jobs (unused, kept for API compatibility)
-        
+
     Returns
     -------
     features_df : pd.DataFrame
@@ -2438,7 +2443,7 @@ def extract_source_localization_features(
         Feature column names
     """
     import mne
-    
+
     epochs = ctx.epochs
     config = ctx.config
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
@@ -2482,6 +2487,7 @@ def extract_source_localization_features(
             )
 
         from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+
         trans_path, _, bem_path = ensure_bem_and_trans_files(
             subject=src_cfg.subject,
             subjects_dir=src_cfg.subjects_dir,
@@ -2560,8 +2566,7 @@ def extract_source_localization_features(
                     "labels survived in the selected voxels."
                 )
             requested_roi_sets["atlas"] = {
-                str(name): list(indices)
-                for name, indices in voxel_selection.atlas_indices.items()
+                str(name): list(indices) for name, indices in voxel_selection.atlas_indices.items()
             }
         if not requested_roi_sets:
             raise ValueError(
@@ -2646,6 +2651,7 @@ def extract_source_localization_features(
         # This makes --source-create-trans/bem work in EEG-only mode (no fMRI constraint needed).
         if src_cfg.subjects_dir is not None and (trans_path is None or bem_path is None):
             from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+
             resolved_trans, _, resolved_bem = ensure_bem_and_trans_files(
                 subject=src_cfg.subject,
                 subjects_dir=src_cfg.subjects_dir,
@@ -2722,11 +2728,13 @@ def extract_source_localization_features(
             )
 
         roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
-    
+
     segment_label, segment_mask = _resolve_source_segment(
-        times=np.asarray(getattr(epochs, "times", None), dtype=float)
-        if getattr(epochs, "times", None) is not None
-        else None,
+        times=(
+            np.asarray(getattr(epochs, "times", None), dtype=float)
+            if getattr(epochs, "times", None) is not None
+            else None
+        ),
         windows=getattr(ctx, "windows", None),
         target_name=getattr(ctx, "name", None),
         config=config,
@@ -2852,7 +2860,7 @@ def extract_source_localization_features(
                 feature_cols.append(col_name)
                 for epoch_idx in range(n_epochs):
                     records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
-    
+
     if src_cfg.save_stc and hasattr(ctx, "aligned_events") and ctx.aligned_events is not None:
         from eeg_pipeline.utils.data.columns import get_condition_column_from_config
 
@@ -2943,31 +2951,33 @@ def extract_source_localization_features(
                 if fmri_cfg.enabled and fmri_family_series and "fmri_cluster" in fmri_family_series:
                     cluster_roi_data, cluster_roi_names = fmri_family_series["fmri_cluster"]
                     cond_cluster_data = cluster_roi_data[cond_indices]
-                    
+
                     if len(cond_indices) > 0 and cond_cluster_data.shape[-1] > 100:
                         from mne.time_frequency import AverageTFR, tfr_array_morlet
-                        
+
                         freqs = np.logspace(*np.log10([3.0, 100.0]), num=40)
                         n_cycles = freqs / 3.0
-                        
+
                         try:
                             if logger:
-                                logger.info(f"Computing source-level Morlet TFR for {len(cluster_roi_names)} clusters for condition '{cond}'...")
+                                logger.info(
+                                    f"Computing source-level Morlet TFR for {len(cluster_roi_names)} clusters for condition '{cond}'..."
+                                )
                             power_tfr = tfr_array_morlet(
                                 cond_cluster_data,
                                 sfreq=sfreq,
                                 freqs=freqs,
                                 n_cycles=n_cycles,
-                                output='power',
+                                output="power",
                                 n_jobs=getattr(ctx, "n_jobs", 1),
-                                verbose=False
+                                verbose=False,
                             )
-                            mean_power_tfr = np.nanmean(power_tfr, axis=0) # shape (n_rois, n_freqs, n_times)
-                            
+                            mean_power_tfr = np.nanmean(
+                                power_tfr, axis=0
+                            )  # shape (n_rois, n_freqs, n_times)
+
                             info = mne.create_info(
-                                ch_names=list(cluster_roi_names),
-                                sfreq=sfreq,
-                                ch_types='eeg'
+                                ch_names=list(cluster_roi_names), sfreq=sfreq, ch_types="eeg"
                             )
                             tfr_obj = AverageTFR(
                                 info=info,
@@ -2975,18 +2985,23 @@ def extract_source_localization_features(
                                 times=segment_times,
                                 freqs=freqs,
                                 nave=len(cond_indices),
-                                comment=f"Source cluster TFR: {cond}"
+                                comment=f"Source cluster TFR: {cond}",
                             )
-                            
+
                             safe_cond = str(cond).replace(" ", "_").replace("/", "_")
                             safe_segment = _sanitize_feature_token(segment_label)
-                            tfr_path = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_seg-{safe_segment}_cond-{safe_cond}_{src_cfg.method}-tfr.h5"
+                            tfr_path = (
+                                out_dir
+                                / f"sub-{ctx.subject}_task-{ctx.task}_seg-{safe_segment}_cond-{safe_cond}_{src_cfg.method}-tfr.h5"
+                            )
                             tfr_obj.save(str(tfr_path), overwrite=True)
                             if logger:
                                 logger.info(f"Saved cluster Source TFR to {tfr_path.name}")
                         except Exception as e:
                             if logger:
-                                logger.warning(f"Failed to compute/save Source TFR for condition '{cond}': {e}")
+                                logger.warning(
+                                    f"Failed to compute/save Source TFR for condition '{cond}': {e}"
+                                )
 
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
@@ -3000,11 +3015,13 @@ def extract_source_localization_features(
         metadata_path = fmri_metadata_payload.get("metadata_sidecar_path")
         if metadata_path:
             features_df.attrs["fmri_constraint_metadata_sidecar"] = str(metadata_path)
-    features_df.attrs["train_mask_used_for_covariance"] = bool(epochs_fit is not None and src_cfg.method == "lcmv")
-    
+    features_df.attrs["train_mask_used_for_covariance"] = bool(
+        epochs_fit is not None and src_cfg.method == "lcmv"
+    )
+
     if logger:
         logger.info(f"Source localization: {len(feature_cols)} features extracted")
-    
+
     return features_df, feature_cols
 
 
@@ -3018,7 +3035,7 @@ def extract_source_connectivity_features(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Extract source-space connectivity features.
-    
+
     Parameters
     ----------
     ctx : FeatureContext
@@ -3033,7 +3050,7 @@ def extract_source_connectivity_features(
         ROI labels to use
     n_jobs : int
         Number of parallel jobs
-        
+
     Returns
     -------
     features_df : pd.DataFrame
@@ -3043,7 +3060,7 @@ def extract_source_connectivity_features(
     """
     import mne
     from mne_connectivity import spectral_connectivity_epochs, envelope_correlation
-    
+
     epochs = ctx.epochs
     config = getattr(ctx, "config", None)
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
@@ -3067,7 +3084,7 @@ def extract_source_connectivity_features(
         n_epochs=n_epochs,
         context_name="Source connectivity",
     )
-    
+
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
     min_cycles_per_band = _resolve_source_connectivity_min_cycles(config)
@@ -3077,7 +3094,7 @@ def extract_source_connectivity_features(
             "source connectivity method must be one of {'aec','wpli','plv'} "
             f"(got '{connectivity_method}')."
         )
-    
+
     if logger:
         logger.info(f"Extracting source-space {connectivity_method_l.upper()} connectivity")
 
@@ -3141,6 +3158,7 @@ def extract_source_connectivity_features(
         # Auto-generate or discover BEM/trans if subjects_dir is set but paths aren't.
         if src_cfg.subjects_dir is not None and (trans_path is None or bem_path is None):
             from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+
             resolved_trans, _, resolved_bem = ensure_bem_and_trans_files(
                 subject=src_cfg.subject,
                 subjects_dir=src_cfg.subjects_dir,
@@ -3195,16 +3213,17 @@ def extract_source_connectivity_features(
             return pd.DataFrame(), []
         label_names = [l.name for l in labels]
 
-
     n_rois = len(label_names)
     if not fmri_cfg.enabled and n_rois < 2:
         logger.warning("Need at least 2 ROIs for connectivity")
         return pd.DataFrame(), []
 
     segment_label, segment_mask = _resolve_source_segment(
-        times=np.asarray(getattr(epochs, "times", None), dtype=float)
-        if getattr(epochs, "times", None) is not None
-        else None,
+        times=(
+            np.asarray(getattr(epochs, "times", None), dtype=float)
+            if getattr(epochs, "times", None) is not None
+            else None
+        ),
         windows=getattr(ctx, "windows", None),
         target_name=getattr(ctx, "name", None),
         config=config,
@@ -3213,20 +3232,20 @@ def extract_source_connectivity_features(
     )
     if segment_mask is not None and not np.any(segment_mask):
         return pd.DataFrame(), []
-    
+
     records = [{} for _ in range(n_epochs)]
     feature_cols = []
-    
+
     for band in bands:
         if band not in freq_bands:
             continue
-        
+
         fmin, fmax = freq_bands[band]
         if connectivity_method_l == "aec":
             epochs_for_source = epochs.copy().filter(fmin, fmax, n_jobs=n_jobs, verbose=False)
         else:
             epochs_for_source = epochs.copy()
-        
+
         if src_cfg.method == "lcmv":
             epochs_fit = None
             if analysis_mode == "trial_ml_safe" and train_mask is not None and np.any(train_mask):
@@ -3285,7 +3304,7 @@ def extract_source_connectivity_features(
             logger=logger,
         ):
             continue
-        
+
         if connectivity_method_l == "aec":
             con = envelope_correlation(
                 roi_data,
@@ -3322,7 +3341,7 @@ def extract_source_connectivity_features(
                     connectivity_method=connectivity_method_l,
                 )
                 records[epoch_idx][col_name] = mean_conn
-                
+
         elif connectivity_method_l in {"wpli", "plv"}:
             roi_data_fit = roi_data
             if (
@@ -3383,7 +3402,7 @@ def extract_source_connectivity_features(
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)
                 records[epoch_idx][col_name] = mean_conn
-    
+
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
 
@@ -3400,9 +3419,7 @@ def extract_source_connectivity_features(
             "Treat rows as non-i.i.d.; aggregate before trial-level inference."
         )
         features_df.attrs["threshold_train_mask_used"] = bool(
-            analysis_mode == "trial_ml_safe"
-            and train_mask is not None
-            and np.any(train_mask)
+            analysis_mode == "trial_ml_safe" and train_mask is not None and np.any(train_mask)
         )
     features_df.attrs["train_mask_used_for_covariance"] = bool(
         src_cfg.method == "lcmv"
@@ -3410,10 +3427,10 @@ def extract_source_connectivity_features(
         and train_mask is not None
         and np.any(train_mask)
     )
-    
+
     if logger:
         logger.info(f"Source connectivity: {len(feature_cols)} features extracted")
-    
+
     return features_df, feature_cols
 
 
@@ -3425,10 +3442,10 @@ def extract_source_localization_from_precomputed(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Extract source-localized features from precomputed data.
-    
+
     This is a wrapper that extracts source features when precomputed
     band-limited data is available.
-    
+
     Parameters
     ----------
     precomputed : PrecomputedData
@@ -3439,7 +3456,7 @@ def extract_source_localization_from_precomputed(
         Bands to process
     n_jobs : int
         Number of parallel jobs
-        
+
     Returns
     -------
     features_df : pd.DataFrame
@@ -3448,11 +3465,11 @@ def extract_source_localization_from_precomputed(
         Feature column names
     """
     logger = getattr(precomputed, "logger", None) or logging.getLogger(__name__)
-    
+
     if not hasattr(precomputed, "epochs") or precomputed.epochs is None:
         logger.warning("Source localization requires epochs in precomputed data")
         return pd.DataFrame(), []
-    
+
     class MockContext:
         def __init__(self, precomputed):
             self.epochs = precomputed.epochs
@@ -3463,12 +3480,12 @@ def extract_source_localization_from_precomputed(
                 for band_name, band_info in precomputed.band_data.items():
                     if hasattr(band_info, "fmin") and hasattr(band_info, "fmax"):
                         self.frequency_bands[band_name] = (band_info.fmin, band_info.fmax)
-    
+
     ctx = MockContext(precomputed)
-    
+
     if bands is None:
         bands = list(ctx.frequency_bands.keys())
-    
+
     return extract_source_localization_features(
         ctx,
         bands=bands,

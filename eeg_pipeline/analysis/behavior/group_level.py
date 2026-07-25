@@ -18,7 +18,6 @@ from eeg_pipeline.utils.data.columns import (
     resolve_outcome_column,
 )
 
-
 _PARTIAL_DESIGN_CONDITION_THRESHOLD = 1e10
 
 
@@ -227,38 +226,29 @@ def run_group_level_correlations_impl(
     from eeg_pipeline.infra.tsv import read_table
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
     multilevel_cfg = require_config_value(
         config, "behavior_analysis.group_level.multilevel_correlations"
     )
     if not isinstance(multilevel_cfg, dict):
-        raise ValueError(
-            "behavior_analysis.group_level.multilevel_correlations must be a mapping."
-        )
+        raise ValueError("behavior_analysis.group_level.multilevel_correlations must be a mapping.")
 
     if use_block_permutation is None:
         use_block_permutation = bool(
             require_config_value(config, "behavior_analysis.group_level.block_permutation")
         )
     if n_perm is None:
-        n_perm = int(
-            require_config_value(config, "behavior_analysis.statistics.n_permutations")
-        )
+        n_perm = int(require_config_value(config, "behavior_analysis.statistics.n_permutations"))
     if fdr_alpha is None:
-        fdr_alpha = float(
-            require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
-        )
+        fdr_alpha = float(require_config_value(config, "behavior_analysis.statistics.fdr_alpha"))
     if target_col is None:
         target_col = str(require_config_value(multilevel_cfg, "target")).strip()
     if control_predictor is None:
         control_predictor = bool(require_config_value(multilevel_cfg, "control_predictor"))
     if control_trial_order is None:
-        control_trial_order = bool(
-            require_config_value(multilevel_cfg, "control_trial_order")
-        )
+        control_trial_order = bool(require_config_value(multilevel_cfg, "control_trial_order"))
     if control_run_effects is None:
-        control_run_effects = bool(
-            require_config_value(multilevel_cfg, "control_run_effects")
-        )
+        control_run_effects = bool(require_config_value(multilevel_cfg, "control_run_effects"))
     if max_run_dummies is None:
         max_run_dummies = int(require_config_value(multilevel_cfg, "max_run_dummies"))
     if random_state is None:
@@ -325,7 +315,9 @@ def run_group_level_correlations_impl(
         logger=logger,
     )
     if not feature_cols:
-        logger.warning("Multilevel correlations: no trialwise-valid feature columns after filtering.")
+        logger.warning(
+            "Multilevel correlations: no trialwise-valid feature columns after filtering."
+        )
         return pd.DataFrame()
 
     outcome = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
@@ -367,7 +359,9 @@ def run_group_level_correlations_impl(
             x_sub_s = pd.to_numeric(subj_df[str(feat)], errors="coerce")
             y_sub_s = pd.to_numeric(subj_df[target_column], errors="coerce")
 
-            valid_xy = np.isfinite(x_sub_s.to_numpy(dtype=float)) & np.isfinite(y_sub_s.to_numpy(dtype=float))
+            valid_xy = np.isfinite(x_sub_s.to_numpy(dtype=float)) & np.isfinite(
+                y_sub_s.to_numpy(dtype=float)
+            )
             if int(valid_xy.sum()) < 3:
                 continue
 
@@ -394,7 +388,9 @@ def run_group_level_correlations_impl(
                     "trial_number",
                 ):
                     if trial_col in subj_df.columns:
-                        cov_df["trial_index"] = pd.to_numeric(subj_df.loc[x_valid.index, trial_col], errors="coerce")
+                        cov_df["trial_index"] = pd.to_numeric(
+                            subj_df.loc[x_valid.index, trial_col], errors="coerce"
+                        )
                         break
 
             if control_run_effects:
@@ -407,7 +403,9 @@ def run_group_level_correlations_impl(
                 n_levels = int(pd.Series(block_sub_s).nunique(dropna=True))
                 max_levels = max(1, int(max_run_dummies)) + 1
                 if n_levels > 1 and n_levels <= max_levels:
-                    run_dummies = pd.get_dummies(block_sub_s.astype("category"), prefix=str(block_col), drop_first=True)
+                    run_dummies = pd.get_dummies(
+                        block_sub_s.astype("category"), prefix=str(block_col), drop_first=True
+                    )
                     cov_df = pd.concat([cov_df, run_dummies], axis=1)
                 elif n_levels > max_levels:
                     raise ValueError(
@@ -435,10 +433,14 @@ def run_group_level_correlations_impl(
 
             if cov_df is not None and not cov_df.empty:
                 finite_cov = np.all(np.isfinite(cov_df.to_numpy(dtype=float)), axis=1)
-                finite_xy_sub = np.isfinite(x_valid.to_numpy(dtype=float)) & np.isfinite(y_valid.to_numpy(dtype=float))
+                finite_xy_sub = np.isfinite(x_valid.to_numpy(dtype=float)) & np.isfinite(
+                    y_valid.to_numpy(dtype=float)
+                )
                 valid_final = finite_xy_sub & finite_cov
             else:
-                valid_final = np.isfinite(x_valid.to_numpy(dtype=float)) & np.isfinite(y_valid.to_numpy(dtype=float))
+                valid_final = np.isfinite(x_valid.to_numpy(dtype=float)) & np.isfinite(
+                    y_valid.to_numpy(dtype=float)
+                )
 
             if int(valid_final.sum()) < 3:
                 continue
@@ -447,7 +449,10 @@ def run_group_level_correlations_impl(
             y_final = pd.to_numeric(y_valid.loc[valid_final], errors="coerce")
             cov_final = cov_df.loc[x_final.index] if cov_df is not None else None
 
-            if int(len(x_final)) < 3 or float(np.nanstd(x_final.to_numpy(dtype=float))) <= constant_variance_threshold:
+            if (
+                int(len(x_final)) < 3
+                or float(np.nanstd(x_final.to_numpy(dtype=float))) <= constant_variance_threshold
+            ):
                 continue
             if float(np.nanstd(y_final.to_numpy(dtype=float))) <= constant_variance_threshold:
                 continue
@@ -515,7 +520,9 @@ def run_group_level_correlations_impl(
 
         n_block_ready = int(sum(1 for p in subject_payloads if p.get("can_block_permute", False)))
         block_permutation_requested = bool(use_block_permutation and block_col is not None)
-        perm_method = "subject_block_restricted" if block_permutation_requested else "subject_restricted"
+        perm_method = (
+            "subject_block_restricted" if block_permutation_requested else "subject_restricted"
+        )
 
         null_rs: List[float] = []
         permutation_failed = False
@@ -530,7 +537,10 @@ def run_group_level_correlations_impl(
                         x_vals = np.asarray(payload["x_vals"], dtype=float)
 
                         if block_permutation_requested:
-                            if not payload.get("can_block_permute", False) or payload.get("block_sub") is None:
+                            if (
+                                not payload.get("can_block_permute", False)
+                                or payload.get("block_sub") is None
+                            ):
                                 permutation_failed = True
                                 break
                             groups_for_perm = np.asarray(payload["block_sub"], dtype=object)
@@ -598,16 +608,19 @@ def run_group_level_correlations_impl(
             p_perm = np.nan
             null_q_lower = np.nan
             null_q_upper = np.nan
-            
+
         # Parametric fallback using 1-sample t-test on Fisher Z-transformed correlations
         p_parametric = np.nan
-        r_observed_list = [float(p["r_obs"]) for p in subject_payloads if np.isfinite(float(p["r_obs"]))]
+        r_observed_list = [
+            float(p["r_obs"]) for p in subject_payloads if np.isfinite(float(p["r_obs"]))
+        ]
         if len(r_observed_list) > 1:
             z_obs = np.arctanh(np.clip(np.asarray(r_observed_list), -0.999999, 0.999999))
             if np.std(z_obs) > 1e-10:
                 from scipy import stats
+
                 _, p_parametric = stats.ttest_1samp(z_obs, popmean=0.0)
-            
+
         estimator = (
             f"subject_balanced_partial_{correlation_method}"
             if used_partial
@@ -641,7 +654,7 @@ def run_group_level_correlations_impl(
         return pd.DataFrame()
 
     results_df = pd.DataFrame(records)
-    
+
     results_df["p_primary"] = results_df["p_perm"].copy()
     results_df["p_primary_kind"] = "p_perm"
     missing_perm = results_df["p_primary"].isna()
@@ -691,18 +704,10 @@ def run_group_level_analysis_impl(
             )
 
         target_col = str(require_config_value(gl_corr_cfg, "target")).strip()
-        control_predictor = bool(
-            require_config_value(gl_corr_cfg, "control_predictor")
-        )
-        control_trial_order = bool(
-            require_config_value(gl_corr_cfg, "control_trial_order")
-        )
-        _ = bool(
-            require_config_value(config, "behavior_analysis.run_adjustment.enabled")
-        )
-        control_run_effects = bool(
-            require_config_value(gl_corr_cfg, "control_run_effects")
-        )
+        control_predictor = bool(require_config_value(gl_corr_cfg, "control_predictor"))
+        control_trial_order = bool(require_config_value(gl_corr_cfg, "control_trial_order"))
+        _ = bool(require_config_value(config, "behavior_analysis.run_adjustment.enabled"))
+        control_run_effects = bool(require_config_value(gl_corr_cfg, "control_run_effects"))
         max_run_dummies = int(require_config_value(gl_corr_cfg, "max_run_dummies"))
         random_state = gl_corr_cfg.get("random_state", None)
         if random_state is None:
@@ -716,12 +721,8 @@ def run_group_level_analysis_impl(
             use_block_permutation=bool(
                 require_config_value(config, "behavior_analysis.group_level.block_permutation")
             ),
-            n_perm=int(
-                require_config_value(config, "behavior_analysis.statistics.n_permutations")
-            ),
-            fdr_alpha=float(
-                require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
-            ),
+            n_perm=int(require_config_value(config, "behavior_analysis.statistics.n_permutations")),
+            fdr_alpha=float(require_config_value(config, "behavior_analysis.statistics.fdr_alpha")),
             target_col=target_col,
             control_predictor=control_predictor,
             control_trial_order=control_trial_order,

@@ -56,20 +56,14 @@ def _build_stats_config_snapshot(config: Any) -> Dict[str, Any]:
     if not predictor_control:
         raise ValueError("behavior_analysis.statistics.predictor_control must be set.")
 
-    perm_scheme_raw = require_config_value(
-        config, "behavior_analysis.permutation.scheme"
-    )
+    perm_scheme_raw = require_config_value(config, "behavior_analysis.permutation.scheme")
     perm_scheme = str(perm_scheme_raw).strip().lower()
     if not perm_scheme:
         raise ValueError("behavior_analysis.permutation.scheme must be set.")
 
-    spline_cfg = require_config_value(
-        config, "behavior_analysis.regression.predictor_spline"
-    )
+    spline_cfg = require_config_value(config, "behavior_analysis.regression.predictor_spline")
     if not isinstance(spline_cfg, dict):
-        raise ValueError(
-            "behavior_analysis.regression.predictor_spline must be a mapping."
-        )
+        raise ValueError("behavior_analysis.regression.predictor_spline must be a mapping.")
     spline_cfg = dict(spline_cfg)
 
     return {
@@ -113,7 +107,7 @@ class CorrelationConfig:
     @classmethod
     def from_config(cls, config: Any, ctx: Optional[BehaviorContext] = None) -> "CorrelationConfig":
         """Build configuration from config dict with optional context overrides.
-        
+
         Parameters
         ----------
         config : Any
@@ -125,9 +119,7 @@ class CorrelationConfig:
         logger = getattr(ctx, "logger", None) if ctx is not None else None
         method = resolve_correlation_method(config, logger=logger)
         min_samples = get_min_samples(config, "channel")
-        fdr_alpha_value = get_config_value(
-            config, "behavior_analysis.statistics.fdr_alpha", None
-        )
+        fdr_alpha_value = get_config_value(config, "behavior_analysis.statistics.fdr_alpha", None)
         if fdr_alpha_value is None:
             fdr_alpha_value = require_config_value(config, "statistics.fdr_alpha")
         fdr_alpha = float(fdr_alpha_value)
@@ -139,9 +131,7 @@ class CorrelationConfig:
             require_config_value(config, "behavior_analysis.statistics.n_permutations")
         )
         compute_bayes_factor = bool(
-            require_config_value(
-                config, "behavior_analysis.correlations.compute_bayes_factors"
-            )
+            require_config_value(config, "behavior_analysis.correlations.compute_bayes_factors")
         )
         robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
         if robust_method is not None:
@@ -153,14 +143,14 @@ class CorrelationConfig:
             require_config_value(config, "behavior_analysis.statistics.compute_reliability")
         )
         n_jobs = int(require_config_value(config, "behavior_analysis.n_jobs"))
-        
+
         if ctx is not None:
             method = normalize_correlation_method(ctx.method or method, default=method)
             min_samples = ctx.min_samples_channel or min_samples
             n_bootstrap = ctx.bootstrap if ctx.bootstrap is not None else n_bootstrap
             n_permutations = ctx.n_perm if ctx.n_perm is not None else n_permutations
             compute_reliability = ctx.compute_reliability
-        
+
         method_label = format_correlation_method_label(method, robust_method)
 
         return cls(
@@ -346,12 +336,15 @@ def _add_bootstrap_ci(
 ) -> None:
     """Add bootstrap confidence intervals to record."""
     from eeg_pipeline.utils.analysis.stats.bootstrap import compute_bootstrap_ci
-    
+
     valid_mask = np.isfinite(col_values) & np.isfinite(targets)
     ci_low, ci_high = compute_bootstrap_ci(
-        col_values[valid_mask], targets[valid_mask],
-        n_bootstrap=n_bootstrap, ci_level=0.95,
-        method=method, rng=rng
+        col_values[valid_mask],
+        targets[valid_mask],
+        n_bootstrap=n_bootstrap,
+        ci_level=0.95,
+        method=method,
+        rng=rng,
     )
     record["ci_low"] = ci_low
     record["ci_high"] = ci_high
@@ -365,7 +358,7 @@ def _add_bayes_factor(
 ) -> None:
     """Add Bayes factor to record."""
     from eeg_pipeline.utils.analysis.stats.correlation import compute_bayes_factor_correlation
-    
+
     bf10, bf_interp = compute_bayes_factor_correlation(col_values, targets, method=method)
     record["bf10"] = bf10
     record["bf_interpretation"] = bf_interp
@@ -384,9 +377,15 @@ def _add_partial_correlations(
 ) -> None:
     """Add partial correlation results to record."""
     (
-        r_pc, p_pc, n_pc,
-        r_temp, p_temp, n_temp,
-        r_cov_predictor, p_cov_predictor, n_cov_predictor,
+        r_pc,
+        p_pc,
+        n_pc,
+        r_temp,
+        p_temp,
+        n_temp,
+        r_cov_predictor,
+        p_cov_predictor,
+        n_cov_predictor,
     ) = compute_partial_correlations_with_cov_predictor(
         roi_values=feature_series,
         target_values=target_series,
@@ -453,6 +452,7 @@ def _select_primary_correlation(
     control_trial_order: bool,
 ) -> None:
     """Select primary correlation based on control settings (no fallback downgrades)."""
+
     def _set_missing(kind: str, source: str) -> None:
         record["p_kind_primary"] = kind
         record["p_primary"] = np.nan
@@ -515,21 +515,21 @@ def _apply_fdr_correction(
     """Apply FDR correction to correlation records."""
     if not records or not config.apply_fdr:
         return
-    
+
     if use_permutation_pvalues:
         p_values = [record.get("p_primary_perm", np.nan) for record in records]
         p_kind = "p_primary_perm"
     else:
         p_values = [record.get("p_primary", np.nan) for record in records]
         p_kind = "p_primary"
-    
+
     valid_indices = [i for i, p_val in enumerate(p_values) if pd.notna(p_val)]
     if not valid_indices:
         return
-    
+
     valid_p_values = np.array([p_values[i] for i in valid_indices])
     q_values = fdr_bh(valid_p_values, alpha=config.fdr_alpha, config=analysis_config)
-    
+
     for index, q_value in zip(valid_indices, q_values):
         records[index]["p_fdr"] = float(q_value)
         records[index]["q_within_family"] = float(q_value)
@@ -564,17 +564,16 @@ def _apply_fdr_to_dataframe(
     """Apply FDR correction to a dataframe of correlation results."""
     if not config.apply_fdr or dataframe.empty:
         return
-    
+
     has_permutation_pvalues = (
-        "p_primary_perm" in dataframe.columns
-        and dataframe["p_primary_perm"].notna().any()
+        "p_primary_perm" in dataframe.columns and dataframe["p_primary_perm"].notna().any()
     )
-    
+
     if has_permutation_pvalues:
         p_values = pd.to_numeric(dataframe["p_primary_perm"], errors="coerce").to_numpy()
     else:
         p_values = pd.to_numeric(dataframe["p_primary"], errors="coerce").to_numpy()
-    
+
     dataframe["p_fdr"] = fdr_bh(p_values, alpha=config.fdr_alpha, config=analysis_config)
     dataframe["q_within_family"] = dataframe["p_fdr"]
     dataframe["within_family_p_kind"] = "p_primary_perm" if has_permutation_pvalues else "p_primary"
@@ -589,7 +588,7 @@ def _add_loso_stability(
 ) -> None:
     """Add LOSO stability metrics to record."""
     from eeg_pipeline.utils.analysis.stats.correlation import compute_loso_correlation_stability
-    
+
     r_mean, r_std, stability, _ = compute_loso_correlation_stability(
         col_values, targets, loso_groups, method
     )
@@ -601,9 +600,9 @@ def _add_loso_stability(
 def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str, Any]]:
     """Process correlations for a single column. Designed for parallel execution."""
     from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
-    
+
     random_generator = np.random.default_rng(params.random_seed)
-    
+
     correlation_coefficient, p_value, n_valid = safe_correlation(
         params.column_values,
         params.targets_aligned,
@@ -613,8 +612,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
     )
     if not np.isfinite(correlation_coefficient):
         return None
-    
-    n_covariates = int(params.covariates_aligned.shape[1]) if params.covariates_aligned is not None else 0
+
+    n_covariates = (
+        int(params.covariates_aligned.shape[1]) if params.covariates_aligned is not None else 0
+    )
     record = _build_base_record(
         params.column_name,
         params.feature_type,
@@ -630,7 +631,7 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
         params.method_label,
         params.target_name,
     )
-    
+
     feature_series = pd.Series(params.column_values)
     target_series = pd.Series(params.targets_aligned)
 
@@ -753,7 +754,7 @@ class FeatureBehaviorCorrelator:
             raise ValueError("config cannot be None")
         if logger is None:
             raise ValueError("logger cannot be None")
-        
+
         self.subject = subject
         self.deriv_root = deriv_root
         self.config = config
@@ -768,14 +769,17 @@ class FeatureBehaviorCorrelator:
     def load_all_features(self) -> Dict[str, int]:
         """Load all available feature files. Returns feature counts."""
         if self._loaded:
-            return {feature_type: len(dataframe.columns) for feature_type, dataframe in self._feature_dfs.items()}
+            return {
+                feature_type: len(dataframe.columns)
+                for feature_type, dataframe in self._feature_dfs.items()
+            }
 
         feature_counts = {}
         for feature_type, filename in self.registry.files.items():
             file_path = _find_feature_file_path(self.features_dir, feature_type, filename)
             if not file_path.exists():
                 continue
-            
+
             dataframe = read_table(file_path)
             if dataframe is not None and not dataframe.empty:
                 self._feature_dfs[feature_type] = dataframe
@@ -783,7 +787,9 @@ class FeatureBehaviorCorrelator:
 
         self._loaded = True
         total_features = sum(feature_counts.values())
-        self.logger.info(f"Loaded {len(self._feature_dfs)} feature files, {total_features} features")
+        self.logger.info(
+            f"Loaded {len(self._feature_dfs)} feature files, {total_features} features"
+        )
         return feature_counts
 
     def correlate_all(
@@ -798,7 +804,7 @@ class FeatureBehaviorCorrelator:
             raise ValueError("targets must be a non-empty Series")
         if not isinstance(target_name, str) or not target_name:
             raise ValueError("target_name must be a non-empty string")
-        
+
         if not self._loaded:
             self.load_all_features()
 
@@ -807,7 +813,7 @@ class FeatureBehaviorCorrelator:
 
         n_jobs_actual = get_n_jobs(self.config, n_jobs)
         self.logger.info(f"Correlating features with {target_name}... (n_jobs={n_jobs_actual})")
-        
+
         def correlate_with_groups(dataframe, target_values, correlation_config, feature_type_name):
             return self._correlate_df(
                 dataframe,
@@ -826,7 +832,7 @@ class FeatureBehaviorCorrelator:
             n_jobs=n_jobs_actual,
             logger=self.logger,
         )
-        
+
         for feature_type_name, result in results.items():
             if result.n_features > 0:
                 n_dropped = result.n_dropped
@@ -843,30 +849,34 @@ class FeatureBehaviorCorrelator:
         targets_aligned: pd.Series,
         config: CorrelationConfig,
         subject_ids: Optional[np.ndarray],
-    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> Tuple[
+        Optional[pd.DataFrame], Optional[pd.Series], Optional[np.ndarray], Optional[np.ndarray]
+    ]:
         """Align covariates, predictor, and groups for correlation analysis."""
         covariates_aligned = None
         if config.control_predictor:
             if config.covariates_without_predictor_df is not None:
-                covariates_aligned = config.covariates_without_predictor_df.reindex(df_aligned.index)
+                covariates_aligned = config.covariates_without_predictor_df.reindex(
+                    df_aligned.index
+                )
         elif config.covariates_df is not None:
             covariates_aligned = config.covariates_df.reindex(df_aligned.index)
 
         predictor_aligned = None
         if config.control_predictor and config.predictor_series is not None:
             predictor_aligned = config.predictor_series.reindex(df_aligned.index)
-        
+
         loso_groups = None
         permutation_groups = None
         if subject_ids is not None:
             loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
             permutation_groups = loso_groups
-        
+
         if permutation_groups is None and config.groups is not None:
             permutation_groups = _align_groups_to_series(targets_aligned, config.groups)
             if loso_groups is None:
                 loso_groups = permutation_groups
-        
+
         return covariates_aligned, predictor_aligned, loso_groups, permutation_groups
 
     def _correlate_df(
@@ -902,27 +912,31 @@ class FeatureBehaviorCorrelator:
         cov_aligned, pred_aligned, loso_groups, perm_groups = self._align_data_for_correlation(
             df_aligned, targets_aligned, effective_config, subject_ids
         )
-        
-        n_jobs_actual = effective_config.n_jobs if effective_config.n_jobs != -1 else max(1, cpu_count() - 1)
-        
-        base_seed = int(
-            require_config_value(self.config, "behavior_analysis.statistics.base_seed")
+
+        n_jobs_actual = (
+            effective_config.n_jobs if effective_config.n_jobs != -1 else max(1, cpu_count() - 1)
         )
+
+        base_seed = int(require_config_value(self.config, "behavior_analysis.statistics.base_seed"))
         if effective_config.rng is not None:
             base_seed = int(effective_config.rng.integers(0, 2**31))
-        
-        targets_arr = targets_aligned.values if hasattr(targets_aligned, 'values') else np.asarray(targets_aligned)
+
+        targets_arr = (
+            targets_aligned.values
+            if hasattr(targets_aligned, "values")
+            else np.asarray(targets_aligned)
+        )
         n_total = int(len(targets_arr))
         loso_groups_arr = loso_groups if loso_groups is not None else None
         perm_groups_arr = perm_groups if perm_groups is not None else None
-        
+
         column_params_list = []
         screening_records = []
         method_label = effective_config.method_label or format_correlation_method_label(
             effective_config.method, effective_config.robust_method
         )
         stats_config_snapshot = _build_stats_config_snapshot(self.config)
-        
+
         for column_index, column_name in enumerate(df_aligned.columns):
             column_values = pd.to_numeric(df_aligned[column_name], errors="coerce").values
             min_samples = _infer_min_samples_for_column(column_name, feature_type, self.config)
@@ -930,7 +944,7 @@ class FeatureBehaviorCorrelator:
             n_valid = int(valid_mask.sum())
             missing_fraction = 1.0 - (float(n_valid) / n_total) if n_total > 0 else 1.0
             variance = float(np.nanvar(column_values[valid_mask])) if n_valid > 1 else np.nan
-            
+
             has_zero_variance = not np.isfinite(variance) or np.isclose(variance, 0.0)
             status = "dropped" if has_zero_variance else "kept"
             reason = "zero_variance" if has_zero_variance else None
@@ -981,11 +995,13 @@ class FeatureBehaviorCorrelator:
             )
             column_params_list.append(params)
 
-        _save_screening_records(screening_records, feature_type, target_name, self.stats_dir, self.logger)
+        _save_screening_records(
+            screening_records, feature_type, target_name, self.stats_dir, self.logger
+        )
 
         n_columns = len(column_params_list)
         should_use_parallel = n_jobs_actual > 1 and n_columns > 10
-        
+
         if should_use_parallel:
             record_dicts = Parallel(n_jobs=n_jobs_actual, backend="loky")(
                 delayed(_process_single_column)(params) for params in column_params_list
@@ -1001,13 +1017,12 @@ class FeatureBehaviorCorrelator:
         use_permutation_pvalues = config.n_permutations > 0
         _apply_fdr_correction(record_dicts, config, use_permutation_pvalues, self.config)
 
-        significance_alpha = float(
-            require_config_value(self.config, "statistics.sig_alpha")
-        )
+        significance_alpha = float(require_config_value(self.config, "statistics.sig_alpha"))
         n_significant = sum(
             1
             for record in record_dicts
-            if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
+            if pd.notna(record.get("p_primary", np.nan))
+            and float(record.get("p_primary")) < significance_alpha
         )
         n_dropped = len(df_aligned.columns) - len(column_params_list)
         return FeatureCorrelationResult(
@@ -1018,7 +1033,7 @@ class FeatureBehaviorCorrelator:
             n_dropped=n_dropped,
             records=record_dicts,
         )
-    
+
     def save_results(
         self,
         results: Dict[str, FeatureCorrelationResult],
@@ -1028,6 +1043,7 @@ class FeatureBehaviorCorrelator:
     ) -> List[Path]:
         """Save correlation results to TSV files in correlations subfolder."""
         from eeg_pipeline.infra.paths import ensure_dir
+
         corr_dir = self.stats_dir / "correlations"
         ensure_dir(corr_dir)
         saved_files = []
@@ -1057,20 +1073,20 @@ class FeatureBehaviorCorrelator:
         corr_config: CorrelationConfig,
     ) -> Optional[pd.DataFrame]:
         """Compute ROI-level power correlations by averaging channels within ROIs.
-        
+
         Handles column naming patterns:
         - power_{segment}_{band}_ch_{channel}_{stat} (e.g., power_active_delta_ch_Fp2_logratio)
         """
         from eeg_pipeline.utils.analysis.tfr import get_rois
-        
+
         if power_df is None or power_df.empty or targets is None or len(targets) == 0:
             return None
-        
+
         roi_definitions = get_rois(self.config)
         if not roi_definitions:
             self.logger.debug("No ROI definitions found in config")
             return None
-        
+
         bands = require_config_value(self.config, "power.bands_to_use")
         preferred_segment_value = get_config_value(
             self.config, "behavior_analysis.correlations.power_segment_preference", None
@@ -1078,7 +1094,7 @@ class FeatureBehaviorCorrelator:
         preferred_segment = str(preferred_segment_value or "").strip().lower()
         if preferred_segment in {"", "auto", "none"}:
             preferred_segment = ""
-        
+
         parsed_columns: List[Tuple[str, str, str, str]] = []
         column_to_channel: Dict[str, str] = {}
         for column in power_df.columns:
@@ -1087,14 +1103,14 @@ class FeatureBehaviorCorrelator:
             is_channel_scope = parsed.get("scope") == "ch"
             if not (is_valid_power_column and is_channel_scope):
                 continue
-            
+
             band = parsed.get("band")
             segment = parsed.get("segment")
             identifier = parsed.get("identifier")
             if band and segment and identifier:
                 parsed_columns.append((str(column), str(band), str(segment), str(identifier)))
                 column_to_channel[str(column)] = str(identifier)
-        
+
         effective_config = corr_config
         if corr_config.control_predictor and _is_predictor_target_name(target_name):
             effective_config = replace(
@@ -1104,7 +1120,9 @@ class FeatureBehaviorCorrelator:
                 covariates_df=corr_config.covariates_without_predictor_df,
             )
 
-        method_label = format_correlation_method_label(effective_config.method, effective_config.robust_method)
+        method_label = format_correlation_method_label(
+            effective_config.method, effective_config.robust_method
+        )
         permutation_group_series = None
         if effective_config.groups is not None:
             aligned_groups = _align_groups_to_series(targets, effective_config.groups)
@@ -1116,7 +1134,8 @@ class FeatureBehaviorCorrelator:
 
             if preferred_segment:
                 preferred_columns = [
-                    col for col, b, seg, _ch in parsed_columns
+                    col
+                    for col, b, seg, _ch in parsed_columns
                     if b.lower() == band_lower and seg.lower() == preferred_segment
                 ]
                 if preferred_columns:
@@ -1126,7 +1145,7 @@ class FeatureBehaviorCorrelator:
                         "Configured behavior_analysis.correlations.power_segment_preference="
                         f"{preferred_segment!r} but no matching power columns were found for band {band!r}."
                     )
-            
+
             if not band_columns:
                 continue
 
@@ -1142,10 +1161,10 @@ class FeatureBehaviorCorrelator:
                         if re.match(pattern, channel_name, re.IGNORECASE):
                             roi_columns.append(col)
                             break
-                
+
                 if not roi_columns:
                     continue
-                
+
                 roi_values = band_matrix[roi_columns].mean(axis=1, skipna=False)
                 df_pair = pd.concat([roi_values.rename("x"), targets.rename("y")], axis=1).dropna()
                 if df_pair.empty:
@@ -1155,12 +1174,17 @@ class FeatureBehaviorCorrelator:
                 if effective_config.control_trial_order:
                     if effective_config.control_predictor:
                         if effective_config.covariates_without_predictor_df is not None:
-                            cov_aligned = effective_config.covariates_without_predictor_df.reindex(df_pair.index)
+                            cov_aligned = effective_config.covariates_without_predictor_df.reindex(
+                                df_pair.index
+                            )
                     elif effective_config.covariates_df is not None:
                         cov_aligned = effective_config.covariates_df.reindex(df_pair.index)
 
                 pred_aligned = None
-                if effective_config.control_predictor and effective_config.predictor_series is not None:
+                if (
+                    effective_config.control_predictor
+                    and effective_config.predictor_series is not None
+                ):
                     pred_aligned = effective_config.predictor_series.reindex(df_pair.index)
 
                 perm_groups = None
@@ -1247,12 +1271,17 @@ class FeatureBehaviorCorrelator:
                 if effective_config.control_trial_order:
                     if effective_config.control_predictor:
                         if effective_config.covariates_without_predictor_df is not None:
-                            cov_aligned = effective_config.covariates_without_predictor_df.reindex(df_pair.index)
+                            cov_aligned = effective_config.covariates_without_predictor_df.reindex(
+                                df_pair.index
+                            )
                     elif effective_config.covariates_df is not None:
                         cov_aligned = effective_config.covariates_df.reindex(df_pair.index)
 
                 pred_aligned = None
-                if effective_config.control_predictor and effective_config.predictor_series is not None:
+                if (
+                    effective_config.control_predictor
+                    and effective_config.predictor_series is not None
+                ):
                     pred_aligned = effective_config.predictor_series.reindex(df_pair.index)
 
                 perm_groups = None
@@ -1331,11 +1360,11 @@ class FeatureBehaviorCorrelator:
                     _update_primary_perm_pvalue(record)
 
                 records.append(record)
-        
+
         if not records:
             self.logger.warning("No ROI correlations computed - check power column naming")
             return None
-        
+
         df = pd.DataFrame(records)
 
         if effective_config.apply_fdr:
@@ -1345,6 +1374,7 @@ class FeatureBehaviorCorrelator:
             target_suffix = "target"
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.infra.paths import ensure_dir
+
         corr_dir = self.stats_dir / "correlations"
         ensure_dir(corr_dir)
         output_path = corr_dir / f"corr_stats_pow_roi_vs_{target_suffix}{method_suffix}.tsv"
@@ -1374,7 +1404,9 @@ class FeatureBehaviorCorrelator:
         outcome_records: List[Dict[str, Any]] = []
         predictor_records: List[Dict[str, Any]] = []
         metadata = {"n_feature_types": len(self._feature_dfs)}
-        method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
+        method_label = format_correlation_method_label(
+            corr_config.method, corr_config.robust_method
+        )
 
         if outcome_series is not None and len(outcome_series) > 0:
             outcome_results = self.correlate_all(outcome_series, "outcome", corr_config)
@@ -1386,7 +1418,7 @@ class FeatureBehaviorCorrelator:
                 metadata[f"{name}_n_dropped"] = result.n_dropped
                 metadata[f"{name}_n_significant"] = result.n_significant
                 outcome_records.extend(result.records)
-            
+
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
                     self._feature_dfs["power"], outcome_series, "outcome", corr_config
@@ -1412,9 +1444,7 @@ class FeatureBehaviorCorrelator:
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.analysis.behavior.orchestration import _get_stats_subfolder_with_overwrite
 
-        overwrite = bool(
-            require_config_value(self.config, "behavior_analysis.output.overwrite")
-        )
+        overwrite = bool(require_config_value(self.config, "behavior_analysis.output.overwrite"))
         corr_dir = _get_stats_subfolder_with_overwrite(self.stats_dir, "correlations", overwrite)
         combined_outcome_df = pd.DataFrame(outcome_records) if outcome_records else pd.DataFrame()
         if not combined_outcome_df.empty:
@@ -1422,18 +1452,20 @@ class FeatureBehaviorCorrelator:
             combined_path = corr_dir / f"corr_stats_all_features_vs_outcome{method_suffix}.tsv"
             save_correlation_results(combined_outcome_df, combined_path)
 
-        combined_predictor_df = pd.DataFrame(predictor_records) if predictor_records else pd.DataFrame()
+        combined_predictor_df = (
+            pd.DataFrame(predictor_records) if predictor_records else pd.DataFrame()
+        )
         if not combined_predictor_df.empty:
             _apply_fdr_to_dataframe(combined_predictor_df, corr_config, self.config)
             combined_path = corr_dir / f"corr_stats_all_features_vs_predictor{method_suffix}.tsv"
             save_correlation_results(combined_predictor_df, combined_path)
 
-        significance_alpha = float(
-            require_config_value(self.config, "statistics.sig_alpha")
-        )
+        significance_alpha = float(require_config_value(self.config, "statistics.sig_alpha"))
         n_significant_outcome = sum(
-            1 for record in outcome_records
-            if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
+            1
+            for record in outcome_records
+            if pd.notna(record.get("p_primary", np.nan))
+            and float(record.get("p_primary")) < significance_alpha
         )
         self.logger.info(
             f"Complete (outcome): {len(outcome_records)} correlations, {n_significant_outcome} significant "
@@ -1442,15 +1474,21 @@ class FeatureBehaviorCorrelator:
 
         if predictor_records:
             n_significant_predictor = sum(
-                1 for record in predictor_records
-                if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
+                1
+                for record in predictor_records
+                if pd.notna(record.get("p_primary", np.nan))
+                and float(record.get("p_primary")) < significance_alpha
             )
             self.logger.info(
                 f"Complete (predictor): {len(predictor_records)} correlations, {n_significant_predictor} significant "
                 f"(alpha={significance_alpha})"
             )
 
-        combined_df = pd.DataFrame([*outcome_records, *predictor_records]) if (outcome_records or predictor_records) else pd.DataFrame()
+        combined_df = (
+            pd.DataFrame([*outcome_records, *predictor_records])
+            if (outcome_records or predictor_records)
+            else pd.DataFrame()
+        )
 
         return ComputationResult(
             name="feature_correlator",
@@ -1474,22 +1512,22 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
         logger=ctx.logger,
         stats_dir=ctx.stats_dir,
     )
-    
+
     # Inject loaded data from context so context is the source of truth for data loading.
     # Keys here should match registry feature file types where possible.
     for name, df in ctx.iter_feature_tables():
         if df is not None and not df.empty:
             correlator._feature_dfs[name] = df
-    
+
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True
-    
+
     # Resolve outcome from aligned_events using event_columns.outcome config.
     outcome_series = None
     outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
     if outcome_col is not None and ctx.aligned_events is not None:
         outcome_series = pd.to_numeric(ctx.aligned_events[outcome_col], errors="coerce")
-    
+
     return correlator.run_complete_analysis(
         outcome_series=outcome_series,
         predictor_series=ctx.predictor_series,

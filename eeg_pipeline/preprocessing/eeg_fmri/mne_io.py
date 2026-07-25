@@ -6,6 +6,15 @@ import mne
 import numpy as np
 
 
+def validate_unambiguous_vas_markers(raw: mne.io.BaseRaw) -> None:
+    """Reject the known VAS/scanner-description collision."""
+    descriptions = set(raw.annotations.description)
+    if "Vas_on/V  1" in descriptions:
+        raise ValueError(
+            "Ambiguous BrainVision marker 'Vas_on/V  1' remains; " "use marker-sanitized metadata"
+        )
+
+
 def validate_acquisition(
     raw: mne.io.BaseRaw,
     *,
@@ -14,6 +23,7 @@ def validate_acquisition(
     ecg_channel: str,
 ) -> None:
     """Validate the original acquisition and assign its recorded ECG channel."""
+    validate_unambiguous_vas_markers(raw)
     sampling_frequency = float(raw.info["sfreq"])
     if not np.isclose(
         sampling_frequency,
@@ -51,6 +61,7 @@ def extract_volume_samples(
     annotation_description: str,
 ) -> np.ndarray:
     """Return zero-based samples for exact scanner-volume annotations."""
+    validate_unambiguous_vas_markers(raw)
     descriptions = np.asarray(raw.annotations.description, dtype=str)
     remaining_collisions = sorted(
         {

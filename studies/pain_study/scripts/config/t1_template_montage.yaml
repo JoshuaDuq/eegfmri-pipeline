@@ -1,0 +1,38 @@
+output_root: ../../../../outputs/t1_template_montage
+montage: easycap-M1
+
+parameters:
+  threshold_scale: 0.40
+  closing_iterations: 2
+  surface_smoothing_neighbors: 512
+  surface_footprint_neighbors: 64
+  neighbor_query_chunk_size: 5000
+  minimum_head_spans_mm: [105.0, 125.0, 125.0]
+  orientation_uncertainty_degrees: 10.0
+  surface_uncertainty_mm: 3.0
+  minimum_electrode_separation_mm: 15.0
+  maximum_smooth_scalp_gap_mm: 8.0
+  anatomical_reference:
+    superior_crop_depth_mm: 125.0
+    anterior_crop_margin_mm: 50.0
+    tissue_threshold_scale: 0.90
+    head_center_offset_mm: [0.0, 7.0, -5.0]
+    reference_uncertainty_mm: 10.0
+    head_center_offset_uncertainty_mm: 8.0
+    minimum_candidate_volume_mm3: 500000.0
+    maximum_candidate_volume_mm3: 3000000.0
+    minimum_candidate_spans_mm: [80.0, 80.0, 90.0]
+    minimum_scalp_radii_mm: [60.0, 70.0, 65.0]
+    maximum_scalp_radii_mm: [100.0, 115.0, 110.0]
+    minimum_superior_radius_ratio: 0.75
+    maximum_superior_radius_ratio: 1.25
+    maximum_median_residual_mm: 6.0
+    maximum_p95_residual_mm: 15.0
+
+participants:
+  sub-0014:
+    t1w: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0014/anat/sub-0014_T1w.nii.gz
+    eeg_bids_subject_directory: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg_brainvision_analyzer_sub-0014/sub-0014
+  sub-0015:
+    t1w: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0015/anat/sub-0015_T1w.nii.gz
+    eeg_bids_subject_directory: /Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg_corrected_pipeline_sub-0015/sub-0015

@@ -122,11 +122,9 @@ from .partial import (
 )
 
 
-
 from .paired_comparisons import compute_paired_cohens_d
 
 from .validation import validate_baseline_window_pre_stimulus
-
 
 __all__ = [
     # Base

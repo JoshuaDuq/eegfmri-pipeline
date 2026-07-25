@@ -23,10 +23,12 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
     task = resolve_task(args.task, config)
     deriv_root = resolve_deriv_root(config=config)
 
-    bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects = _collect_all_subjects(
-        deriv_root,
-        task,
-        config,
+    bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects = (
+        _collect_all_subjects(
+            deriv_root,
+            task,
+            config,
+        )
     )
 
     fmri_first_level, fmri_beta_series, fmri_lss = _collect_fmri_analysis_subjects(deriv_root)

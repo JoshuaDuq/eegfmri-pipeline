@@ -98,13 +98,9 @@ class TestFeatureIoPacOutputs(unittest.TestCase):
     def test_save_all_features_writes_distinct_pac_and_pac_trials(self):
         features_dir = Path(tempfile.mkdtemp())
 
-        pow_df = pd.DataFrame(
-            {"power_active_alpha_global_logratio_mean": [0.1, 0.2]}
-        )
+        pow_df = pd.DataFrame({"power_active_alpha_global_logratio_mean": [0.1, 0.2]})
         pac_df = pd.DataFrame({"pac_summary_metric": [1.0, 2.0]})
-        pac_trials_df = pd.DataFrame(
-            {"pac_active_theta_gamma_global_mvl": [10.0, 20.0]}
-        )
+        pac_trials_df = pd.DataFrame({"pac_active_theta_gamma_global_mvl": [10.0, 20.0]})
 
         save_all_features(
             pow_df=pow_df,
@@ -137,12 +133,8 @@ class TestFeatureIoPacOutputs(unittest.TestCase):
     def test_save_all_features_routes_source_localization_by_method(self):
         features_dir = Path(tempfile.mkdtemp())
 
-        pow_df = pd.DataFrame(
-            {"power_active_alpha_global_logratio_mean": [0.1, 0.2]}
-        )
-        source_df = pd.DataFrame(
-            {"src_full_eloreta_alpha_global_power": [0.3, 0.4]}
-        )
+        pow_df = pd.DataFrame({"power_active_alpha_global_logratio_mean": [0.1, 0.2]})
+        source_df = pd.DataFrame({"src_full_eloreta_alpha_global_power": [0.3, 0.4]})
         source_df.attrs["method"] = "eloreta"
 
         save_all_features(
@@ -169,16 +161,10 @@ class TestFeatureIoPacOutputs(unittest.TestCase):
         )
 
         eloreta_path = (
-            features_dir
-            / "sourcelocalization"
-            / "eloreta"
-            / "features_sourcelocalization.parquet"
+            features_dir / "sourcelocalization" / "eloreta" / "features_sourcelocalization.parquet"
         )
         lcmv_path = (
-            features_dir
-            / "sourcelocalization"
-            / "lcmv"
-            / "features_sourcelocalization.parquet"
+            features_dir / "sourcelocalization" / "lcmv" / "features_sourcelocalization.parquet"
         )
 
         self.assertTrue(eloreta_path.exists())
@@ -187,9 +173,7 @@ class TestFeatureIoPacOutputs(unittest.TestCase):
     def test_save_all_features_persists_trial_alignment_columns_for_trialwise_tables(self):
         features_dir = Path(tempfile.mkdtemp())
 
-        pow_df = pd.DataFrame(
-            {"power_active_alpha_global_logratio_mean": [0.1, 0.2]}
-        )
+        pow_df = pd.DataFrame({"power_active_alpha_global_logratio_mean": [0.1, 0.2]})
         aligned_events = pd.DataFrame(
             {
                 "trial_id": [10, 11],

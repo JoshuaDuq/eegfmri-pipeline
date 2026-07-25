@@ -14,10 +14,10 @@ Usage:
         compute_shap_importance,
         compute_shap_values,
     )
-    
+
     # Get importance
     importance_df = compute_shap_importance(model, X, feature_names)
-    
+
     # Get detailed SHAP values
     shap_values, explainer = compute_shap_values(model, X)
 """
@@ -33,7 +33,9 @@ import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.model_selection import GroupKFold, GridSearchCV
 
-from eeg_pipeline.analysis.machine_learning.preprocessing import transform_feature_names_through_steps
+from eeg_pipeline.analysis.machine_learning.preprocessing import (
+    transform_feature_names_through_steps,
+)
 from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmonization
 
 ###################################################################
@@ -103,20 +105,28 @@ def _extract_estimator_transform_and_feature_names(
 def _create_predict_fn(model: Any):
     """Create prediction function for KernelExplainer."""
     if hasattr(model, "predict_proba"):
+
         def predict_fn(x):
             return model.predict_proba(x)[:, 1]
+
         return predict_fn
     return model.predict
 
 
-def _handle_binary_classification_output(shap_values: Union[np.ndarray, List], expected_value: Optional[Union[float, np.ndarray]] = None) -> Tuple[np.ndarray, Optional[Union[float, np.ndarray]]]:
+def _handle_binary_classification_output(
+    shap_values: Union[np.ndarray, List], expected_value: Optional[Union[float, np.ndarray]] = None
+) -> Tuple[np.ndarray, Optional[Union[float, np.ndarray]]]:
     """Handle binary classification output format."""
     if isinstance(shap_values, list) and len(shap_values) == 2:
         shap_values = shap_values[1]
-    
-    if expected_value is not None and isinstance(expected_value, np.ndarray) and len(expected_value) == 2:
+
+    if (
+        expected_value is not None
+        and isinstance(expected_value, np.ndarray)
+        and len(expected_value) == 2
+    ):
         expected_value = expected_value[1]
-    
+
     return shap_values, expected_value
 
 
@@ -128,19 +138,19 @@ def _handle_binary_classification_output(shap_values: Union[np.ndarray, List], e
 @dataclass
 class SHAPResult:
     """Container for SHAP analysis results."""
-    
+
     shap_values: np.ndarray  # (n_samples, n_features) or list for multi-output
     expected_value: Union[float, np.ndarray]  # Base value(s)
     feature_names: List[str]
     X: np.ndarray  # Feature matrix
-    
+
     # Computed importance
     importance_df: Optional[pd.DataFrame] = None
-    
+
     # Per-feature statistics
     mean_abs_shap: Optional[np.ndarray] = None
     std_shap: Optional[np.ndarray] = None
-    
+
     def __post_init__(self):
         """Compute importance statistics."""
         if self.shap_values is not None:
@@ -151,22 +161,28 @@ class SHAPResult:
                     np.abs(np.stack(shap_values_array)),
                     axis=0,
                 )
-            
+
             self.mean_abs_shap = np.mean(np.abs(shap_values_array), axis=0)
             self.std_shap = np.std(shap_values_array, axis=0)
-            
-            self.importance_df = pd.DataFrame({
-                "feature": self.feature_names,
-                "shap_importance": self.mean_abs_shap,
-                "shap_std": self.std_shap,
-            }).sort_values("shap_importance", ascending=False).reset_index(drop=True)
-    
+
+            self.importance_df = (
+                pd.DataFrame(
+                    {
+                        "feature": self.feature_names,
+                        "shap_importance": self.mean_abs_shap,
+                        "shap_std": self.std_shap,
+                    }
+                )
+                .sort_values("shap_importance", ascending=False)
+                .reset_index(drop=True)
+            )
+
     def get_top_features(self, n: int = 20) -> pd.DataFrame:
         """Get top N most important features."""
         if self.importance_df is None:
             return pd.DataFrame()
         return self.importance_df.head(n)
-    
+
     def get_feature_shap(self, feature: str) -> np.ndarray:
         """Get SHAP values for a specific feature."""
         if feature not in self.feature_names:
@@ -189,9 +205,9 @@ def compute_shap_values(
 ) -> SHAPResult:
     """
     Compute SHAP values for model predictions.
-    
+
     Automatically selects appropriate SHAP explainer based on model type.
-    
+
     Parameters
     ----------
     model : Any
@@ -206,7 +222,7 @@ def compute_shap_values(
         Whether to check SHAP additivity (slower)
     seed : int
         Random seed for background sampling
-    
+
     Returns
     -------
     SHAPResult
@@ -214,11 +230,11 @@ def compute_shap_values(
     """
     if not _check_shap_available():
         raise ImportError("SHAP not installed. Install with: pip install shap")
-    
+
     import shap
-    
+
     X = np.asarray(X)
-    
+
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
 
@@ -229,9 +245,9 @@ def compute_shap_values(
         # Backward compatibility with older helper signatures returning 3 values.
         estimator, X, feature_names = extracted  # type: ignore[misc]
         target_transformer = None
-    
+
     rng = np.random.default_rng(seed)
-    
+
     try:
         if hasattr(estimator, "feature_importances_"):
             explainer = shap.TreeExplainer(estimator)
@@ -243,7 +259,7 @@ def compute_shap_values(
             n_bg = min(background_samples, len(X))
             bg_idx = rng.choice(len(X), n_bg, replace=False)
             background = X[bg_idx]
-            
+
             # KernelExplainer must consume the same feature space used for background/X.
             # At this point X has already been transformed through pipeline preprocessing,
             # so predict_fn must target the extracted estimator (not the full pipeline).
@@ -252,7 +268,7 @@ def compute_shap_values(
             shap_values = explainer.shap_values(X, nsamples=100)
     except Exception as e:
         raise RuntimeError(f"SHAP computation failed: {e}")
-    
+
     expected_value = explainer.expected_value
     shap_values, expected_value = _handle_binary_classification_output(shap_values, expected_value)
 
@@ -260,7 +276,9 @@ def compute_shap_values(
     if target_transformer is not None and hasattr(target_transformer, "inverse_transform"):
         try:
             if np.isscalar(expected_value):
-                expected_value = float(target_transformer.inverse_transform([[expected_value]])[0, 0])
+                expected_value = float(
+                    target_transformer.inverse_transform([[expected_value]])[0, 0]
+                )
             elif isinstance(expected_value, np.ndarray):
                 orig_shape = expected_value.shape
                 expected_value = target_transformer.inverse_transform(
@@ -269,7 +287,7 @@ def compute_shap_values(
         except Exception:
             # Keep the transformed expected_value when inverse transform is unavailable.
             expected_value = expected_value
-    
+
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
     if shap_values.shape[1] != len(feature_names):
@@ -291,9 +309,9 @@ def compute_shap_importance(
 ) -> pd.DataFrame:
     """
     Compute SHAP-based feature importance.
-    
+
     Convenience function that returns just the importance DataFrame.
-    
+
     Parameters
     ----------
     model : Any
@@ -304,7 +322,7 @@ def compute_shap_importance(
         Feature names
     **kwargs
         Additional arguments passed to compute_shap_values
-    
+
     Returns
     -------
     pd.DataFrame
@@ -334,10 +352,10 @@ def compute_shap_for_cv_folds(
 ) -> pd.DataFrame:
     """
     Compute SHAP importance aggregated across CV folds.
-    
+
     This provides robust importance estimates by averaging
     across different train/test splits.
-    
+
     Parameters
     ----------
     model_factory : callable
@@ -352,7 +370,7 @@ def compute_shap_for_cv_folds(
         Feature names
     seed : int
         Random seed
-    
+
     Returns
     -------
     pd.DataFrame
@@ -360,13 +378,13 @@ def compute_shap_for_cv_folds(
     """
     if not _check_shap_available():
         raise ImportError("SHAP not installed")
-    
+
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
-    
+
     # Collect SHAP importances from each fold (feature-name keyed for robustness)
     fold_importances: List[pd.DataFrame] = []
-    
+
     for fold_idx, (train_idx, test_idx) in enumerate(cv_splits):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
@@ -387,9 +405,7 @@ def compute_shap_for_cv_folds(
 
         if param_grid:
             if groups_train is None:
-                raise RuntimeError(
-                    f"SHAP fold {fold_idx + 1}: inner CV requires group labels."
-                )
+                raise RuntimeError(f"SHAP fold {fold_idx + 1}: inner CV requires group labels.")
             n_unique_groups = len(np.unique(groups_train))
             n_splits = min(int(inner_cv_splits), n_unique_groups)
             if n_splits < 2:
@@ -411,9 +427,7 @@ def compute_shap_for_cv_folds(
                 gs.fit(X_train, y_train, groups=groups_train)
                 model = gs.best_estimator_
             except Exception as exc:
-                raise RuntimeError(
-                    f"SHAP fold {fold_idx + 1}: inner CV failed."
-                ) from exc
+                raise RuntimeError(f"SHAP fold {fold_idx + 1}: inner CV failed.") from exc
         else:
             model.fit(X_train, y_train)
 
@@ -421,23 +435,25 @@ def compute_shap_for_cv_folds(
             result = compute_shap_values(
                 model,
                 X_test,
-                [f for f, keep in zip(feature_names or _generate_feature_names(X.shape[1]), keep_mask) if keep],
+                [
+                    f
+                    for f, keep in zip(
+                        feature_names or _generate_feature_names(X.shape[1]), keep_mask
+                    )
+                    if keep
+                ],
                 seed=seed + fold_idx,
             )
         except Exception as exc:
-            raise RuntimeError(
-                f"SHAP fold {fold_idx + 1}: SHAP computation failed."
-            ) from exc
+            raise RuntimeError(f"SHAP fold {fold_idx + 1}: SHAP computation failed.") from exc
 
         if result.importance_df is None or result.importance_df.empty:
-            raise RuntimeError(
-                f"SHAP fold {fold_idx + 1}: empty SHAP importance result."
-            )
+            raise RuntimeError(f"SHAP fold {fold_idx + 1}: empty SHAP importance result.")
 
         df = result.importance_df[["feature", "shap_importance"]].copy()
         df["fold"] = int(fold_idx)
         fold_importances.append(df)
-    
+
     if not fold_importances:
         return pd.DataFrame()
 

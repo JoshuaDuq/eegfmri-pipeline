@@ -87,6 +87,10 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
             get_condition_column_candidates=lambda config: (
                 config.get("event_columns.condition", []) if hasattr(config, "get") else []
             ),
+            # eeg_pipeline.infra.paths imports this at module scope. Leaving it off the
+            # stub made every test that reaches infra.paths depend on whether some
+            # earlier test had already imported it for real.
+            ConfigDict=dict,
         ),
         "eeg_pipeline.utils.config.roots": _make_module(
             "eeg_pipeline.utils.config.roots",
@@ -385,6 +389,9 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         pipeline.logger = Mock()
         pipeline._run_marker_ctps_qc = Mock(return_value=Path("/tmp/ctps.tsv"))
         pipeline._run_cardiac_attenuation_qc = Mock(return_value=Path("/tmp/attenuation.tsv"))
+        # The report review sections append to subject reports; this test covers the
+        # recorded output paths only.
+        pipeline._append_report_review_sections = Mock()
 
         outputs = pipeline._execute_steps(
             steps=[STEP_ICA_CARDIAC_QC, STEP_CARDIAC_ATTENUATION_QC],
@@ -404,6 +411,59 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
                 "cardiac_attenuation_qc_png": "/tmp/attenuation.png",
             },
         )
+
+    def test_report_review_sections_do_not_depend_on_the_analyzer_steps(self):
+        """An EEG-only run must still get provenance, spectra, coverage, and continuity.
+
+        These sections describe what preprocessing produced. Gating them on an
+        Analyzer-only step made every one of them unreachable without a scanner.
+        """
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_EPOCHS,
+            STEP_STATS,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.logger = Mock()
+        pipeline._run_epoch_creation = Mock()
+        pipeline._collect_stats = Mock()
+        pipeline._append_report_review_sections = Mock()
+
+        pipeline._execute_steps(
+            steps=[STEP_EPOCHS, STEP_STATS],
+            subjects=["0001"],
+            task="rest",
+            use_pyprep=True,
+            task_is_rest=True,
+            n_jobs=1,
+            progress=_NoopProgress(),
+        )
+
+        pipeline._append_report_review_sections.assert_called_once_with(
+            subjects=["0001"], task="rest"
+        )
+
+    def test_report_review_sections_are_skipped_without_ica_or_epochs(self):
+        """Bad-channel detection alone produces no report to append to."""
+        from eeg_pipeline.pipelines.preprocessing import STEP_BAD_CHANNELS, PreprocessingPipeline
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.logger = Mock()
+        pipeline._run_bad_channel_detection = Mock()
+        pipeline._append_report_review_sections = Mock()
+
+        pipeline._execute_steps(
+            steps=[STEP_BAD_CHANNELS],
+            subjects=["0001"],
+            task="rest",
+            use_pyprep=True,
+            task_is_rest=True,
+            n_jobs=1,
+            progress=_NoopProgress(),
+        )
+
+        pipeline._append_report_review_sections.assert_not_called()
 
     def test_analyzer_cardiac_qc_methods_use_dedicated_config(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -1087,6 +1147,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
             patch.object(PreprocessingPipeline, "_run_ica_cardiac_review", create=True) as review,
+            patch.object(PreprocessingPipeline, "_run_ica_ocular_review", create=True),
         ):
             p._run_ica_fitting(["0001"], "pain")
 
@@ -1108,10 +1169,16 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 "_run_ica_cardiac_review",
                 create=True,
             ) as disabled_review,
+            patch.object(
+                PreprocessingPipeline,
+                "_run_ica_ocular_review",
+                create=True,
+            ) as disabled_ocular_review,
         ):
             p._run_ica_fitting(["0001"], "pain")
 
         disabled_review.assert_not_called()
+        disabled_ocular_review.assert_not_called()
 
     def test_cardiac_review_uses_filtered_runs_and_standard_ica(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -1139,6 +1206,10 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             "eeg_pipeline.preprocessing.ica_cardiac_report": _make_module(
                 "eeg_pipeline.preprocessing.ica_cardiac_report",
                 generate_ica_cardiac_review=generate,
+            ),
+            "eeg_pipeline.preprocessing.ica_ocular_report": _make_module(
+                "eeg_pipeline.preprocessing.ica_ocular_report",
+                generate_ica_ocular_review=generate,
             ),
             "eeg_pipeline.preprocessing.ica_cardiac_review": _make_module(
                 "eeg_pipeline.preprocessing.ica_cardiac_review",
@@ -1574,6 +1645,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_run_ica_fitting") as m2,
             patch.object(PreprocessingPipeline, "_run_epoch_creation") as m4,
             patch.object(PreprocessingPipeline, "_collect_stats") as m5,
+            patch.object(PreprocessingPipeline, "_append_report_review_sections"),
         ):
             p._execute_steps(
                 ["bad-channels", "ica-fit", "epochs", "stats"],
@@ -1634,9 +1706,13 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         p.bids_root = Path(tempfile.mkdtemp())
         p.deriv_root = Path(tempfile.mkdtemp())
 
+        # Appending the review sections is a separate concern with its own tests, and
+        # reaching it here would depend on the report package escaping this class's
+        # module stubs.
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne,
             patch.object(PreprocessingPipeline, "_write_clean_events_tsv") as write_clean,
+            patch.object(PreprocessingPipeline, "_append_epoch_rejection_review"),
         ):
             p._run_epoch_creation(["0001"], "t", task_is_rest=False)
         run_mne.assert_called_once()
@@ -1645,6 +1721,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne,
             patch.object(PreprocessingPipeline, "_write_clean_events_tsv") as write_clean,
+            patch.object(PreprocessingPipeline, "_append_epoch_rejection_review"),
         ):
             p._run_epoch_creation(["0001"], "t", task_is_rest=True)
         run_mne.assert_called_once()

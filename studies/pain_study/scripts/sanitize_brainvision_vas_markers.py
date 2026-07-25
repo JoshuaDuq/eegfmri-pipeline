@@ -26,10 +26,11 @@ DEFAULT_RECORDING_OVERRIDES_PATH = (
 
 @dataclass(frozen=True)
 class CohortRecording:
-    """One cohort run mapped to its original 5 kHz BrainVision header."""
+    """One cohort run and source representation."""
 
     subject: str
     run: int
+    source_layout: str
     source_vhdr: Path
 
 
@@ -136,27 +137,30 @@ def discover_cohort_recordings(
     subjects: Sequence[str] | None = None,
     recording_overrides: Mapping[str, int | None] | None = None,
 ) -> list[CohortRecording]:
-    """Discover unique original 5 kHz recordings for all or selected subjects."""
+    """Discover thermal recordings in the original and Analyzer-processed layouts."""
+    source_layouts = ("brainvision_processed_1khz", "original_5khz")
     source_headers = sorted(
         source_vhdr
+        for source_layout in source_layouts
         for source_vhdr in source_data_root.glob(
-            "sub-*/eeg/original_5khz/ThermalPainEEGFMRI_run*_sub*_*.vhdr"
+            f"sub-*/eeg/{source_layout}/ThermalPainEEGFMRI_run*_sub*_*.vhdr"
         )
         if not source_vhdr.name.startswith("._")
     )
     if not source_headers:
         raise FileNotFoundError(
-            f"No original 5 kHz thermal EEG-fMRI recordings found in {source_data_root}"
+            f"No supported thermal EEG-fMRI recordings found in {source_data_root}"
         )
 
     recordings: list[CohortRecording] = []
-    seen_subject_runs: set[tuple[str, int]] = set()
+    seen_layout_subject_runs: set[tuple[str, str, int]] = set()
     overrides = dict(recording_overrides or {})
     matched_overrides: set[str] = set()
     requested_subjects = set(subjects) if subjects is not None else None
     discovered_subjects: set[str] = set()
     for source_vhdr in source_headers:
         subject, run = _parse_source_header(source_vhdr)
+        source_layout = source_vhdr.parent.name
         directory_subject = source_vhdr.parent.parent.parent.name.removeprefix("sub-")
         if subject != directory_subject:
             raise ValueError(
@@ -175,15 +179,20 @@ def discover_cohort_recordings(
                 continue
             logical_run = override_run
 
-        subject_run = (subject, logical_run)
-        if subject_run in seen_subject_runs:
+        layout_subject_run = (source_layout, subject, logical_run)
+        if layout_subject_run in seen_layout_subject_runs:
             raise ValueError(
-                f"Ambiguous original recordings map to sub-{subject} run-{logical_run}; "
+                f"Ambiguous {source_layout} recordings map to sub-{subject} run-{logical_run}; "
                 "add explicit recording overrides"
             )
-        seen_subject_runs.add(subject_run)
+        seen_layout_subject_runs.add(layout_subject_run)
         recordings.append(
-            CohortRecording(subject=subject, run=logical_run, source_vhdr=source_vhdr)
+            CohortRecording(
+                subject=subject,
+                run=logical_run,
+                source_layout=source_layout,
+                source_vhdr=source_vhdr,
+            )
         )
 
     if requested_subjects is not None:
@@ -206,7 +215,14 @@ def discover_cohort_recordings(
             f"Recording overrides do not match discovered source headers: {unmatched_overrides}"
         )
 
-    return sorted(recordings, key=lambda recording: (recording.subject, recording.run))
+    return sorted(
+        recordings,
+        key=lambda recording: (
+            recording.subject,
+            recording.source_layout,
+            recording.run,
+        ),
+    )
 
 
 def _source_files(source_vhdr: Path) -> tuple[Path, Path, str]:
@@ -226,8 +242,8 @@ def _source_files(source_vhdr: Path) -> tuple[Path, Path, str]:
 
 
 def _validate_raw(raw: mne.io.BaseRaw, source_vhdr: Path) -> None:
-    if raw.info["sfreq"] != 5_000.0:
-        raise ValueError(f"Expected 5000 Hz in {source_vhdr}, got {raw.info['sfreq']}")
+    if float(raw.info["sfreq"]) <= 0.0:
+        raise ValueError(f"Sampling frequency must be positive in {source_vhdr}")
     if len(raw.ch_names) != 64:
         raise ValueError(f"Expected 64 channels in {source_vhdr}, got {len(raw.ch_names)}")
     if raw.ch_names.count("ECG") != 1:
@@ -268,7 +284,11 @@ def _verify_staged_raw(source_vhdr: Path, staged_vhdr: Path) -> None:
         )
 
 
-def stage_recording(recording: CohortRecording, output_root: Path) -> dict[str, object]:
+def stage_recording(
+    recording: CohortRecording,
+    source_data_root: Path,
+    output_root: Path,
+) -> dict[str, object]:
     """Write and verify one metadata-only sanitized BrainVision view."""
     source_marker, source_data, header_text = _source_files(recording.source_vhdr)
     source_marker_text = _read_text(source_marker)
@@ -280,8 +300,11 @@ def stage_recording(recording: CohortRecording, output_root: Path) -> dict[str, 
     )
     _validate_raw(source_raw, recording.source_vhdr)
     result = sanitize_vas_marker_text(source_marker_text, n_samples=source_raw.n_times)
+    if result.volume_count == 0:
+        raise ValueError(f"Marker file contains no Volume,V  1 markers: {source_marker}")
 
-    output_dir = output_root / f"sub-{recording.subject}" / "eeg"
+    source_relative_vhdr = recording.source_vhdr.relative_to(source_data_root)
+    output_dir = output_root / source_relative_vhdr.parent
     output_dir.mkdir(parents=True, exist_ok=True)
     staged_vhdr = output_dir / recording.source_vhdr.name
     staged_vmrk = staged_vhdr.with_suffix(".vmrk")
@@ -317,12 +340,15 @@ def stage_recording(recording: CohortRecording, output_root: Path) -> dict[str, 
     return {
         "subject": f"sub-{recording.subject}",
         "run": recording.run,
+        "source_layout": recording.source_layout,
+        "source_relative_vhdr": str(source_relative_vhdr),
         "source_vhdr": str(recording.source_vhdr),
         "source_vmrk": str(source_marker),
         "source_eeg": str(source_data),
         "staged_vhdr": str(staged_vhdr),
         "volume_count": result.volume_count,
         "vas_count": result.vas_count,
+        "sampling_frequency_hz": float(source_raw.info["sfreq"]),
         "source_vhdr_sha256": _sha256(recording.source_vhdr),
         "source_vmrk_sha256": _sha256(source_marker),
         "source_eeg_size": source_data_stat.st_size,
@@ -365,7 +391,10 @@ def run_sanitization(
     )
     succeeded = False
     try:
-        rows = [stage_recording(recording, temporary_root) for recording in recordings]
+        rows = [
+            stage_recording(recording, source_data_root, temporary_root)
+            for recording in recordings
+        ]
         published_rows = []
         for row in rows:
             staged_vhdr = Path(str(row["staged_vhdr"]))
@@ -388,7 +417,7 @@ def run_sanitization(
         )
         (temporary_root / "README.md").write_text(
             "# BrainVision marker-sanitized metadata\n\n"
-            "These headers and marker files reference the immutable original 5 kHz `.eeg` files.\n"
+            "These headers and marker files reference immutable source `.eeg` files.\n"
             "Only `Vas_on,V  1` descriptions were changed to `Vas_on,VAS_ON`.\n",
             encoding="utf-8",
         )
@@ -403,7 +432,7 @@ def run_sanitization(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Stage unambiguous VAS markers for the 5 kHz BrainVision cohort."
+        description="Stage unambiguous VAS markers for supported BrainVision recordings."
     )
     parser.add_argument(
         "--source-data-root",
@@ -413,7 +442,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1"),
+        default=Path("/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v2"),
     )
     parser.add_argument(
         "--subject",

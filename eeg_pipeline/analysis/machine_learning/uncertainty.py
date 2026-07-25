@@ -9,7 +9,7 @@ Usage:
         compute_prediction_intervals,
         PredictionIntervalResult,
     )
-    
+
     result = compute_prediction_intervals(model, X_train, y_train, X_test, alpha=0.1)
     print(f"Coverage: {result.coverage:.1%}")
 """
@@ -23,7 +23,6 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 
-
 ###################################################################
 # Conformal Prediction
 ###################################################################
@@ -32,42 +31,44 @@ from sklearn.base import clone
 @dataclass
 class PredictionIntervalResult:
     """Container for prediction interval results."""
-    
+
     y_pred: np.ndarray  # Point predictions
     lower: np.ndarray  # Lower bounds
     upper: np.ndarray  # Upper bounds
     alpha: float  # Significance level (1 - coverage)
-    
+
     # Computed metrics
     coverage: float = np.nan
     mean_width: float = np.nan
     median_width: float = np.nan
-    
+
     # Per-sample confidence
     widths: Optional[np.ndarray] = None
-    
+
     def __post_init__(self):
         """Compute interval width-based summary metrics."""
         self.widths = self.upper - self.lower
         self.mean_width = float(np.mean(self.widths))
         self.median_width = float(np.median(self.widths))
-    
+
     def compute_coverage(self, y_true: np.ndarray) -> float:
         """Compute empirical coverage given true values."""
         y_true = np.asarray(y_true)
         in_interval = (y_true >= self.lower) & (y_true <= self.upper)
         self.coverage = float(np.mean(in_interval))
         return self.coverage
-    
+
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to DataFrame."""
-        return pd.DataFrame({
-            "y_pred": self.y_pred,
-            "lower": self.lower,
-            "upper": self.upper,
-            "width": self.widths,
-        })
-    
+        return pd.DataFrame(
+            {
+                "y_pred": self.y_pred,
+                "lower": self.lower,
+                "upper": self.upper,
+                "width": self.widths,
+            }
+        )
+
     def summary(self) -> str:
         """Human-readable summary."""
         return (
@@ -92,10 +93,10 @@ def compute_prediction_intervals(
 ) -> PredictionIntervalResult:
     """
     Compute conformal prediction intervals.
-    
+
     Provides distribution-free prediction intervals with guaranteed
     coverage probability of at least (1 - alpha) for exchangeable data.
-    
+
     Parameters
     ----------
     model : Any
@@ -117,7 +118,7 @@ def compute_prediction_intervals(
         Number of CV splits for cv_plus method
     seed : int
         Random seed
-    
+
     Returns
     -------
     PredictionIntervalResult
@@ -126,15 +127,17 @@ def compute_prediction_intervals(
     X_train = np.asarray(X_train)
     y_train = np.asarray(y_train)
     X_test = np.asarray(X_test)
-    
+
     rng = np.random.default_rng(seed)
-    
+
     if method == "split":
         return _conformal_split(model, X_train, y_train, X_test, alpha, rng, groups=groups)
     elif method == "cv_plus":
         return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
     elif method == "cqr":
-        return _conformalized_quantile_regression(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
+        return _conformalized_quantile_regression(
+            model, X_train, y_train, X_test, alpha, cv_splits, seed, groups
+        )
     else:
         raise ValueError(f"Unknown method: {method}")
 
@@ -174,7 +177,7 @@ def _get_cv_splitter(
 ):
     """Get cross-validation splitter based on groups."""
     from sklearn.model_selection import KFold, GroupKFold, LeaveOneGroupOut
-    
+
     if groups is not None:
         unique_groups = np.unique(groups)
         n_groups = len(unique_groups)
@@ -200,7 +203,7 @@ def _conformal_split(
 ) -> PredictionIntervalResult:
     """
     Split conformal prediction.
-    
+
     Split training data into proper training and calibration sets.
     """
     n = len(X_train)
@@ -253,23 +256,23 @@ def _conformal_split(
                 "Group-aware split conformal could not form valid train/calibration splits "
                 f"(train={len(train_idx)}, cal={len(cal_idx)})."
             )
-    
+
     X_proper = X_train[train_idx]
     y_proper = y_train[train_idx]
     X_cal = X_train[cal_idx]
     y_cal = y_train[cal_idx]
-    
+
     # Fit on proper training set
     model_fit = clone(model)
     model_fit.fit(X_proper, y_proper)
-    
+
     y_cal_pred = model_fit.predict(X_cal)
     residuals = np.abs(y_cal - y_cal_pred)
     q_hat = _compute_conformal_quantile(residuals, alpha)
-    
+
     # Predict on test set
     y_test_pred = model_fit.predict(X_test)
-    
+
     return PredictionIntervalResult(
         y_pred=y_test_pred,
         lower=y_test_pred - q_hat,
@@ -290,7 +293,7 @@ def _conformal_cv_plus(
 ) -> PredictionIntervalResult:
     """
     CV+ conformal prediction (Jackknife+).
-    
+
     Uses cross-validation residuals for more efficient calibration.
     Supports group-aware CV via GroupKFold or LeaveOneGroupOut.
     """
@@ -356,7 +359,7 @@ def _conformalized_quantile_regression(
 ) -> PredictionIntervalResult:
     """
     Conformalized Quantile Regression (CQR).
-    
+
     Better for heteroscedastic data where prediction uncertainty
     varies across the feature space.
     Supports group-aware CV via GroupKFold or LeaveOneGroupOut.
@@ -365,50 +368,42 @@ def _conformalized_quantile_regression(
         from sklearn.ensemble import GradientBoostingRegressor
     except ImportError:
         return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
-    
+
     n = len(X_train)
     alpha_lo = alpha / 2
     alpha_hi = 1 - alpha / 2
     split_iter = _get_cv_splitter(cv_splits, seed, groups, X_train, y_train)
-    
+
     loo_lower = np.zeros(n)
     loo_upper = np.zeros(n)
-    
+
     for train_idx, val_idx in split_iter:
-        qr_low = GradientBoostingRegressor(
-            loss="quantile", alpha=alpha_lo, random_state=seed
-        )
+        qr_low = GradientBoostingRegressor(loss="quantile", alpha=alpha_lo, random_state=seed)
         qr_low.fit(X_train[train_idx], y_train[train_idx])
         loo_lower[val_idx] = qr_low.predict(X_train[val_idx])
-        
-        qr_high = GradientBoostingRegressor(
-            loss="quantile", alpha=alpha_hi, random_state=seed
-        )
+
+        qr_high = GradientBoostingRegressor(loss="quantile", alpha=alpha_hi, random_state=seed)
         qr_high.fit(X_train[train_idx], y_train[train_idx])
         loo_upper[val_idx] = qr_high.predict(X_train[val_idx])
-    
+
     E_lo = loo_lower - y_train
     E_hi = y_train - loo_upper
     scores = np.maximum(E_lo, E_hi)
     Q_hat = _compute_conformal_quantile(scores, alpha)
-    
-    qr_low_full = GradientBoostingRegressor(
-        loss="quantile", alpha=alpha_lo, random_state=seed
-    )
+
+    qr_low_full = GradientBoostingRegressor(loss="quantile", alpha=alpha_lo, random_state=seed)
     qr_low_full.fit(X_train, y_train)
-    
-    qr_high_full = GradientBoostingRegressor(
-        loss="quantile", alpha=alpha_hi, random_state=seed
-    )
+
+    qr_high_full = GradientBoostingRegressor(loss="quantile", alpha=alpha_hi, random_state=seed)
     qr_high_full.fit(X_train, y_train)
-    
+
     lower_pred = qr_low_full.predict(X_test) - Q_hat
     upper_pred = qr_high_full.predict(X_test) + Q_hat
-    
+
     model_full = clone(model)
     model_full.fit(X_train, y_train)
     y_test_pred = model_full.predict(X_test)
-    
+
     return PredictionIntervalResult(
         y_pred=y_test_pred,
         lower=lower_pred,

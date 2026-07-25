@@ -14,7 +14,6 @@ import pandas as pd
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 
-
 _DEFAULT_SPATIAL_MODES = ["roi", "global"]
 
 
@@ -39,6 +38,7 @@ class FeatureContext:
     ``trial_ml_safe`` forbids them unless ``train_mask`` is provided, while
     ``group_stats`` allows cross-trial estimates for group-level analysis.
     """
+
     subject: str
     task: str
     config: Any
@@ -82,24 +82,24 @@ class FeatureContext:
             config_mode = self.config.get("feature_engineering.analysis_mode")
             if config_mode and str(config_mode).strip().lower() in VALID_ANALYSIS_MODES:
                 self.analysis_mode = str(config_mode).strip().lower()
-        
+
         if self.analysis_mode not in VALID_ANALYSIS_MODES:
             raise ValueError(
                 f"Invalid analysis_mode: {self.analysis_mode}. "
                 f"Must be one of {VALID_ANALYSIS_MODES}"
             )
-        
+
         self._validate_analysis_mode()
-    
+
     def _validate_analysis_mode(self) -> None:
         """Validate analysis mode constraints for cross-trial features."""
         if self.analysis_mode != ANALYSIS_MODE_TRIAL_ML_SAFE:
             return
-        
+
         cross_trial_requested = self._cross_trial_features_requested()
         if not cross_trial_requested:
             return
-        
+
         if self.train_mask is None:
             requested = ", ".join(sorted(cross_trial_requested))
             raise ValueError(
@@ -113,13 +113,15 @@ class FeatureContext:
         if "bursts" not in set(self.feature_categories):
             return requested
 
-        threshold_reference = str(
-            self.config.get("feature_engineering.bursts.threshold_reference", "trial")
-        ).strip().lower()
+        threshold_reference = (
+            str(self.config.get("feature_engineering.bursts.threshold_reference", "trial"))
+            .strip()
+            .lower()
+        )
         if threshold_reference in {"subject", "condition"}:
             requested.add("bursts")
         return requested
-    
+
     def _resolve_spatial_modes(self) -> None:
         """Resolve spatial modes from config if using default."""
         if self.spatial_modes == _DEFAULT_SPATIAL_MODES:
@@ -134,6 +136,7 @@ class FeatureContext:
                 TimeWindowSpec,
                 time_windows_from_spec,
             )
+
             spec = TimeWindowSpec(
                 times=self.epochs.times,
                 config=self.config,
@@ -144,9 +147,7 @@ class FeatureContext:
                 tmin=self.tmin,
                 tmax=self.tmax,
             )
-            self._windows = time_windows_from_spec(
-                spec, logger=self.logger, strict=False
-            )
+            self._windows = time_windows_from_spec(spec, logger=self.logger, strict=False)
 
     @property
     def windows(self) -> Any:
@@ -165,13 +166,13 @@ class FeatureContext:
         self.precomputed = precomputed
 
         if precomputed is not None:
-            precomputed.spatial_modes = (
-                list(self.spatial_modes) if self.spatial_modes else None
-            )
+            precomputed.spatial_modes = list(self.spatial_modes) if self.spatial_modes else None
             if precomputed.frequency_bands is not None:
                 self.frequency_bands = dict(precomputed.frequency_bands)
 
-    def set_precomputed_for_family(self, family: str, precomputed: Optional[PrecomputedData]) -> None:
+    def set_precomputed_for_family(
+        self, family: str, precomputed: Optional[PrecomputedData]
+    ) -> None:
         if not family:
             return
         if precomputed is None:

@@ -61,9 +61,27 @@ class TestMachineLearningPlottingOutputs(unittest.TestCase):
         for fold, subj in enumerate(["sub-0001", "sub-0002", "sub-0003"]):
             rows.extend(
                 [
-                    {"model": "elasticnet", "fold": fold, "test_subject": subj, "r2": 0.22 + fold * 0.01, "mae": 4.0},
-                    {"model": "ridge", "fold": fold, "test_subject": subj, "r2": 0.19 + fold * 0.01, "mae": 4.3},
-                    {"model": "rf", "fold": fold, "test_subject": subj, "r2": 0.25 + fold * 0.01, "mae": 3.8},
+                    {
+                        "model": "elasticnet",
+                        "fold": fold,
+                        "test_subject": subj,
+                        "r2": 0.22 + fold * 0.01,
+                        "mae": 4.0,
+                    },
+                    {
+                        "model": "ridge",
+                        "fold": fold,
+                        "test_subject": subj,
+                        "r2": 0.19 + fold * 0.01,
+                        "mae": 4.3,
+                    },
+                    {
+                        "model": "rf",
+                        "fold": fold,
+                        "test_subject": subj,
+                        "r2": 0.25 + fold * 0.01,
+                        "mae": 3.8,
+                    },
                 ]
             )
         pd.DataFrame(rows).to_csv(out_dir / "model_comparison.tsv", sep="\t", index=False)
@@ -138,7 +156,9 @@ class TestMachineLearningPlottingOutputs(unittest.TestCase):
                 for plot_path in generated:
                     path = Path(plot_path)
                     self.assertTrue(path.exists(), f"Missing plot for mode={mode}: {path}")
-                    self.assertGreater(path.stat().st_size, 0, f"Empty plot file for mode={mode}: {path}")
+                    self.assertGreater(
+                        path.stat().st_size, 0, f"Empty plot file for mode={mode}: {path}"
+                    )
 
     def test_plotting_respects_formats_and_top_n(self) -> None:
         from eeg_pipeline.analysis.machine_learning.plotting import generate_ml_mode_plots

@@ -92,7 +92,10 @@ def attach_predictor_metadata_impl(
     if target_col and target_col in df.columns:
         ctrl_by_out = metadata_dict.get("predictor_control_by_outcome", None)
         if isinstance(ctrl_by_out, dict):
-            used_map = {str(k): (v or {}).get("predictor_control_used", None) for k, v in ctrl_by_out.items()}
+            used_map = {
+                str(k): (v or {}).get("predictor_control_used", None)
+                for k, v in ctrl_by_out.items()
+            }
             status_map = {}
             nknots_map = {}
             for k, v in ctrl_by_out.items():

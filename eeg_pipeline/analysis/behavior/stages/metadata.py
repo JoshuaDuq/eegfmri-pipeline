@@ -63,7 +63,9 @@ def _matches_condition_value(series: pd.Series, value: Any) -> pd.Series:
     return series.astype(str).str.strip().str.lower() == str(value).strip().lower()
 
 
-def _resolve_condition_qc_values(condition_series: pd.Series, config: Any) -> tuple[str, str, pd.Series, pd.Series]:
+def _resolve_condition_qc_values(
+    condition_series: pd.Series, config: Any
+) -> tuple[str, str, pd.Series, pd.Series]:
     compare_values = get_config_value(config, "behavior_analysis.condition.compare_values", None)
     if compare_values and len(compare_values) >= 2:
         if len(compare_values) > 2:
@@ -121,13 +123,22 @@ def _build_condition_qc_frame(
 
     required_columns = [outcome_col, condition_col]
     run_col = str(
-        get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+        get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id")
+        or "run_id"
     ).strip()
-    primary_unit = str(
-        get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial") or "trial"
-    ).strip().lower()
+    primary_unit = (
+        str(
+            get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial")
+            or "trial"
+        )
+        .strip()
+        .lower()
+    )
 
-    if primary_unit in {"run", "run_mean", "runmean", "run_level"} and run_col in ctx.aligned_events.columns:
+    if (
+        primary_unit in {"run", "run_mean", "runmean", "run_level"}
+        and run_col in ctx.aligned_events.columns
+    ):
         required_columns.append(run_col)
 
     frame = ctx.aligned_events[required_columns].copy()
@@ -138,9 +149,7 @@ def _build_condition_qc_frame(
 
     if run_col in frame.columns:
         aggregated = (
-            frame.groupby([run_col, condition_col], dropna=True)[outcome_col]
-            .mean()
-            .reset_index()
+            frame.groupby([run_col, condition_col], dropna=True)[outcome_col].mean().reset_index()
         )
         return aggregated
 
@@ -228,8 +237,16 @@ def build_behavior_qc_impl(
                             "condition_value2": value2,
                             "n_condition_a": n_condition_a,
                             "n_condition_b": n_condition_b,
-                            "mean_outcome_condition_a": float(cond_a_outcomes.mean()) if cond_a_outcomes.notna().any() else np.nan,
-                            "mean_outcome_condition_b": float(cond_b_outcomes.mean()) if cond_b_outcomes.notna().any() else np.nan,
+                            "mean_outcome_condition_a": (
+                                float(cond_a_outcomes.mean())
+                                if cond_a_outcomes.notna().any()
+                                else np.nan
+                            ),
+                            "mean_outcome_condition_b": (
+                                float(cond_b_outcomes.mean())
+                                if cond_b_outcomes.notna().any()
+                                else np.nan
+                            ),
                             "mean_outcome_difference_a_minus_b": (
                                 float(cond_a_outcomes.mean() - cond_b_outcomes.mean())
                                 if cond_a_outcomes.notna().any() and cond_b_outcomes.notna().any()
@@ -306,19 +323,27 @@ def write_analysis_metadata_impl(
         },
         "outputs": {
             "has_trial_table": bool(getattr(results, "trial_table_path", None)),
-            "has_regression": bool(getattr(results, "regression", None) is not None and not results.regression.empty),
-            "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
+            "has_regression": bool(
+                getattr(results, "regression", None) is not None and not results.regression.empty
+            ),
+            "has_correlations": bool(
+                getattr(results, "correlations", None) is not None
+                and not results.correlations.empty
+            ),
             "has_condition_effects": bool(
-                getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty
+                getattr(results, "condition_effects", None) is not None
+                and not results.condition_effects.empty
             ),
         },
         "qc": build_behavior_qc_fn(ctx),
     }
 
     payload["predictor_status"] = {
-        "available": bool(ctx.predictor_series is not None and ctx.predictor_series.notna().any())
-        if ctx.predictor_series is not None
-        else False,
+        "available": (
+            bool(ctx.predictor_series is not None and ctx.predictor_series.notna().any())
+            if ctx.predictor_series is not None
+            else False
+        ),
         "control_enabled": bool(ctx.control_predictor),
     }
     if not payload["predictor_status"]["available"]:
@@ -356,10 +381,14 @@ def write_analysis_metadata_impl(
             payload["partial_correlation_feasibility"] = partial_ok
 
         if "p_primary_source" in df.columns and df["p_primary_source"].notna().any():
-            payload["primary_test_source_counts"] = df["p_primary_source"].fillna("unknown").value_counts().to_dict()
+            payload["primary_test_source_counts"] = (
+                df["p_primary_source"].fillna("unknown").value_counts().to_dict()
+            )
 
         if "within_family_p_kind" in df.columns and df["within_family_p_kind"].notna().any():
-            payload["within_family_p_kind_counts"] = df["within_family_p_kind"].fillna("unknown").value_counts().to_dict()
+            payload["within_family_p_kind_counts"] = (
+                df["within_family_p_kind"].fillna("unknown").value_counts().to_dict()
+            )
 
     out_dir = get_stats_subfolder_fn(ctx, "analysis_metadata")
     path = out_dir / "analysis_metadata.json"

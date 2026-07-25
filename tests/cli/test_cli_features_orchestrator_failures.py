@@ -37,20 +37,23 @@ class TestFeaturesOrchestratorFailures(unittest.TestCase):
             {"subject": "0001", "status": "failed"},
         ]
 
-        with patch(
-            "eeg_pipeline.cli.commands.features_orchestrator.create_progress_reporter",
-            return_value=None,
-        ), patch(
-            "eeg_pipeline.cli.commands.features_orchestrator._apply_feature_config_overrides"
-        ), patch(
-            "eeg_pipeline.cli.commands.features_orchestrator.apply_set_overrides"
-        ), patch(
-            "eeg_pipeline.cli.commands.features_orchestrator.resolve_task",
-            return_value="thermalactive",
-        ), patch(
-            "eeg_pipeline.pipelines.features.FeaturePipeline",
-            return_value=pipeline_instance,
+        with (
+            patch(
+                "eeg_pipeline.cli.commands.features_orchestrator.create_progress_reporter",
+                return_value=None,
+            ),
+            patch(
+                "eeg_pipeline.cli.commands.features_orchestrator._apply_feature_config_overrides"
+            ),
+            patch("eeg_pipeline.cli.commands.features_orchestrator.apply_set_overrides"),
+            patch(
+                "eeg_pipeline.cli.commands.features_orchestrator.resolve_task",
+                return_value="thermalactive",
+            ),
+            patch(
+                "eeg_pipeline.pipelines.features.FeaturePipeline",
+                return_value=pipeline_instance,
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "subjects failed"):
                 run_features(args, subjects, config)
-

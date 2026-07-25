@@ -7,7 +7,6 @@ import yaml
 
 from tests import REPO_ROOT
 
-
 FORBIDDEN_TRACKED_PREFIXES = (
     "eeg_pipeline/cli/tui/.cache/",
     "eeg_pipeline/cli/tui/.gocache/",
@@ -39,9 +38,7 @@ REMOVED_LEGACY_ENTRYPOINTS = (
     "eeg_pipeline/preprocessing/scripts/__init__.py",
 )
 
-REMOVED_WORKTREE_PATHS = (
-    "paradigm-specific-scripts",
-)
+REMOVED_WORKTREE_PATHS = ("paradigm-specific-scripts",)
 
 REQUIRED_SOURCE_CONTROL_PATHS = (
     "studies/pain_study/study2/alliance/lib/study2_alliance_common.sh",
@@ -152,7 +149,9 @@ def test_targeted_pytest_invocations_do_not_inherit_coverage_gate() -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
     windows_steps = workflow["jobs"]["windows-compat"]["steps"]
     targeted_step = next(
-        step for step in windows_steps if step.get("name") == "Run targeted Windows compatibility tests"
+        step
+        for step in windows_steps
+        if step.get("name") == "Run targeted Windows compatibility tests"
     )
 
     assert "--no-cov" in targeted_step["run"]

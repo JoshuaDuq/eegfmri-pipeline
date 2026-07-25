@@ -1,22 +1,56 @@
-# FieldTrip ICA TFR
+# MNE ICA component review in MATLAB
 
-This adapts `do_ICA_TFR.m` to the pain study and runs it for every available participant.
-The Python export converts the pre-ICA FIF derivatives to FieldTrip data, MATLAB computes
-ICA, and `computeTfrBatch` computes the component-space TFR variables and saves `comp` in
-one `<subject>_ICA_pow_EEG.mat` file per participant.
+This workflow visualizes the exact ICA decomposition saved by the MNE preprocessing
+pipeline. It does not refit ICA in FieldTrip. Component numbers therefore match the MNE
+rejection decisions exactly.
 
-No blinded component selection, review manifest, artifact-category prompt, or browser UI is
-part of this analysis.
+The exporter constructs thermal-event epochs directly from the pre-ICA filtered runs,
+projects them through the saved MNE ICA, and exports all component time series and
+topographies. This runs immediately after ICA labeling, before ICA application or trial
+rejection. Components automatically proposed as bad by MNE-ICALabel remain present and are
+marked in red in MATLAB; the plots do not treat that proposal as a manual decision.
 
-```matlab
-addpath('/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/fieldtrip_tfr/matlab');
-runtimeConfig = '/Volumes/KINGSTON/EEG_fMRI_data/derivatives/fieldtrip_manual_ica_tfr/fieldtrip_tfr_runtime.json';
-prepareIcaBatch(runtimeConfig);
-computeTfrBatch(runtimeConfig);
-```
+## Configure
 
-The TFR spans 1--100 Hz. Outputs are written under:
+Edit `config/mne_ica_review.yaml`:
+
+- `paths.mne_derivatives`: one or more MNE `preprocessed/eeg` roots;
+- `study.participants`: `"all"` or a list such as `["sub-0015"]`;
+- `conditions`: any combination of the supported condition names;
+- `plots.frequency_view`: `alpha`, `beta`, `gamma`, or `full`;
+- `execution.overwrite_exports` and `execution.overwrite_tfr`: output replacement controls.
+
+Supported conditions are:
 
 ```text
-/Volumes/KINGSTON/EEG_fMRI_data/derivatives/fieldtrip_manual_ica_tfr/pow
+high_vs_low
+high_temperature
+low_temperature
+painful_vs_nonpainful
+painful
+nonpainful
+individual_temperatures
+temperature_slope
+grand_average
 ```
+
+Condition plots are baseline-normalized in decibels. Contrast plots are differences of
+baseline-normalized decibel power.
+
+## Run
+
+In MATLAB:
+
+```matlab
+run('/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/fieldtrip_tfr/run_MNE_ICA_review.m')
+```
+
+Then open the figures:
+
+```matlab
+run('/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/fieldtrip_tfr/plot_MNE_ICA_review.m')
+```
+
+The plotting script creates topography pages and TFR pages containing 16 components per
+figure. Red component titles and red axes identify components automatically proposed as
+bad by MNE-ICALabel.

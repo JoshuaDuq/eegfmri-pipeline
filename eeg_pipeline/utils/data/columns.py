@@ -14,6 +14,7 @@ def _is_numeric_series(df: pd.DataFrame, column: str) -> bool:
 def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> Optional[str]:
     """Find first matching column in events dataframe."""
     from eeg_pipeline.utils.data.manipulation import find_column
+
     return find_column(events_df, column_names)
 
 
@@ -21,7 +22,7 @@ def find_binary_outcome_column_in_events(events_df: pd.DataFrame, config: Any) -
     """Find binary outcome column in events dataframe using config."""
     if config is None:
         raise ValueError("config is required")
-    
+
     event_columns = config.get("event_columns", {})
     column_names = event_columns.get("binary_outcome", [])
     return find_column_in_events(events_df, column_names)
@@ -112,9 +113,7 @@ def pick_target_column(df: pd.DataFrame, *, target_columns: List[str]) -> Option
 def _available_numeric_columns(events_df: pd.DataFrame) -> List[str]:
     """Return numeric columns available for behavior column resolution."""
     return [
-        str(column)
-        for column in events_df.columns
-        if _is_numeric_series(events_df, str(column))
+        str(column) for column in events_df.columns if _is_numeric_series(events_df, str(column))
     ]
 
 

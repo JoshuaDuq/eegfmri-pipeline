@@ -54,13 +54,19 @@ def compute_unified_fdr_impl(
             df.get("q_within_family", pd.Series(np.nan, index=df.index)),
             errors="coerce",
         )
-        gate_pass = df.get("family_reject_gate", pd.Series(True, index=df.index)).fillna(False).astype(bool)
+        gate_pass = (
+            df.get("family_reject_gate", pd.Series(True, index=df.index)).fillna(False).astype(bool)
+        )
         df["p_fdr"] = np.where(gate_pass.to_numpy(), q_within.to_numpy(), 1.0)
 
         family_stats = []
         for family_id, family_group in df.groupby("fdr_family"):
-            fam_reject = family_group.get("reject_within_family", pd.Series(False, index=family_group.index))
-            fam_gate = family_group.get("family_reject_gate", pd.Series(False, index=family_group.index))
+            fam_reject = family_group.get(
+                "reject_within_family", pd.Series(False, index=family_group.index)
+            )
+            fam_gate = family_group.get(
+                "family_reject_gate", pd.Series(False, index=family_group.index)
+            )
             family_stats.append(
                 {
                     "family": family_id,
@@ -70,7 +76,11 @@ def compute_unified_fdr_impl(
                 }
             )
 
-        reject_within = df.get("reject_within_family", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+        reject_within = (
+            df.get("reject_within_family", pd.Series(False, index=df.index))
+            .fillna(False)
+            .astype(bool)
+        )
         q_global = pd.to_numeric(
             df.get("q_global", pd.Series(np.nan, index=df.index)),
             errors="coerce",

@@ -74,10 +74,13 @@ def test_prepare_second_level_one_sample_builds_intercept_design(tmp_path: Path)
 
     cfg = SecondLevelConfig(model="one-sample", contrast_names=("pain",)).normalized()
 
-    with patch(
-        "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
-        side_effect=_discover,
-    ), patch("fmri_pipeline.analysis.second_level._validate_same_grid"):
+    with (
+        patch(
+            "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
+            side_effect=_discover,
+        ),
+        patch("fmri_pipeline.analysis.second_level._validate_same_grid"),
+    ):
         prepared = prepare_second_level_input(
             config=cfg,
             subjects=["0001", "0002"],
@@ -123,10 +126,13 @@ def test_prepare_second_level_two_sample_uses_group_columns_and_covariates(
         group_b_value="patient",
     ).normalized()
 
-    with patch(
-        "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
-        side_effect=_discover,
-    ), patch("fmri_pipeline.analysis.second_level._validate_same_grid"):
+    with (
+        patch(
+            "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
+            side_effect=_discover,
+        ),
+        patch("fmri_pipeline.analysis.second_level._validate_same_grid"),
+    ):
         prepared = prepare_second_level_input(
             config=cfg,
             subjects=["0001", "0002", "0003", "0004"],
@@ -164,10 +170,13 @@ def test_prepare_second_level_repeated_measures_defaults_to_omnibus_f(
         contrast_names=("low", "med", "high"),
     ).normalized()
 
-    with patch(
-        "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
-        side_effect=_discover,
-    ), patch("fmri_pipeline.analysis.second_level._validate_same_grid"):
+    with (
+        patch(
+            "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
+            side_effect=_discover,
+        ),
+        patch("fmri_pipeline.analysis.second_level._validate_same_grid"),
+    ):
         prepared = prepare_second_level_input(
             config=cfg,
             subjects=["0001", "0002"],
@@ -233,10 +242,13 @@ def test_prepare_second_level_rejects_cross_contrast_model_mismatch(
         contrast_names=("low", "high"),
     ).normalized()
 
-    with patch(
-        "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
-        side_effect=_discover,
-    ), patch("fmri_pipeline.analysis.second_level._validate_same_grid"):
+    with (
+        patch(
+            "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
+            side_effect=_discover,
+        ),
+        patch("fmri_pipeline.analysis.second_level._validate_same_grid"),
+    ):
         with pytest.raises(ValueError, match="same first-level model settings"):
             prepare_second_level_input(
                 config=cfg,
@@ -274,10 +286,13 @@ def test_prepare_second_level_rejects_rank_deficient_design(
         covariate_columns=("age", "age_copy"),
     ).normalized()
 
-    with patch(
-        "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
-        side_effect=_discover,
-    ), patch("fmri_pipeline.analysis.second_level._validate_same_grid"):
+    with (
+        patch(
+            "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
+            side_effect=_discover,
+        ),
+        patch("fmri_pipeline.analysis.second_level._validate_same_grid"),
+    ):
         with pytest.raises(ValueError, match="rank-deficient"):
             prepare_second_level_input(
                 config=cfg,
@@ -337,10 +352,13 @@ def test_prepare_second_level_rejects_inconsistent_run_inclusion(tmp_path: Path)
 
     cfg = SecondLevelConfig(model="one-sample", contrast_names=("pain",)).normalized()
 
-    with patch(
-        "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
-        side_effect=_discover,
-    ), patch("fmri_pipeline.analysis.second_level._validate_same_grid"):
+    with (
+        patch(
+            "fmri_pipeline.analysis.second_level._discover_first_level_effect_size_map",
+            side_effect=_discover,
+        ),
+        patch("fmri_pipeline.analysis.second_level._validate_same_grid"),
+    ):
         with pytest.raises(ValueError, match="same discovered and included runs"):
             prepare_second_level_input(
                 config=cfg,

@@ -64,10 +64,19 @@ def _resolve_correlation_permutation_count(config: Any, *, perm_enabled: bool) -
 
 def _resolve_correlation_request(config: Any) -> CorrelationRequest:
     """Resolve requested correlation outputs from configuration."""
-    primary_unit = str(
-        get_config_value(config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
-    ).strip().lower()
-    default_types = ["partial_cov_predictor"] if primary_unit in {"run", "run_mean", "runmean", "run_level"} else ["raw"]
+    primary_unit = (
+        str(
+            get_config_value(config, "behavior_analysis.correlations.primary_unit", "trial")
+            or "trial"
+        )
+        .strip()
+        .lower()
+    )
+    default_types = (
+        ["partial_cov_predictor"]
+        if primary_unit in {"run", "run_mean", "runmean", "run_level"}
+        else ["raw"]
+    )
     raw_correlation_types = get_config_value(
         config,
         "behavior_analysis.correlations.types",
@@ -79,9 +88,7 @@ def _resolve_correlation_request(config: Any) -> CorrelationRequest:
         correlation_types = [correlation_types]
 
     normalized_types = {
-        str(item).strip().lower()
-        for item in correlation_types
-        if str(item).strip()
+        str(item).strip().lower() for item in correlation_types if str(item).strip()
     }
     return CorrelationRequest(
         want_raw="raw" in normalized_types,
@@ -108,11 +115,7 @@ def _has_explicit_raw_only_correlation_types(config: Any) -> bool:
     if not isinstance(configured_types, (list, tuple)):
         configured_types = [configured_types]
 
-    normalized_types = {
-        str(item).strip().lower()
-        for item in configured_types
-        if str(item).strip()
-    }
+    normalized_types = {str(item).strip().lower() for item in configured_types if str(item).strip()}
     return bool(normalized_types) and normalized_types.issubset({"raw", "run_mean"})
 
 
@@ -209,10 +212,7 @@ def _correlation_measure_is_available(
     if measure == "partial_cov":
         return design.cov_df is not None and not design.cov_df.empty
     if measure == "partial_predictor":
-        return (
-            design.predictor_series is not None
-            and str(target) != str(design.predictor_column)
-        )
+        return design.predictor_series is not None and str(target) != str(design.predictor_column)
     if measure == "partial_cov_predictor":
         return _correlation_measure_is_available(
             measure="partial_cov",
@@ -234,7 +234,7 @@ def _select_requested_primary_measure(
     design: CorrelateDesign,
     target: str,
     run_mean: bool,
-    ) -> tuple[str, str, str]:
+) -> tuple[str, str, str]:
     """Select the configured primary measure without downgrading estimands."""
     requested_trial_measures: List[tuple[bool, str, tuple[str, str, str]]] = [
         (
@@ -278,13 +278,10 @@ def _select_requested_primary_measure(
     for is_requested, measure_name, keys in requested_trial_measures:
         if not is_requested:
             continue
-        if (
-            not request.types_explicitly_configured
-            and not _correlation_measure_is_available(
-                measure=measure_name,
-                design=design,
-                target=target,
-            )
+        if not request.types_explicitly_configured and not _correlation_measure_is_available(
+            measure=measure_name,
+            design=design,
+            target=target,
         ):
             continue
         if (
@@ -339,9 +336,7 @@ def _drop_constant_covariates(cov_df: Optional[pd.DataFrame]) -> Optional[pd.Dat
         return None
 
     varying_columns = [
-        column
-        for column in normalized.columns
-        if int(normalized[column].nunique(dropna=True)) > 1
+        column for column in normalized.columns if int(normalized[column].nunique(dropna=True)) > 1
     ]
     if not varying_columns:
         return None
@@ -422,13 +417,26 @@ def stage_correlate_design_impl(
         ctx.logger.warning("Correlations design: trial table missing; skipping.")
         return None
 
-    primary_unit = str(
-        get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
-    ).strip().lower()
-    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
-    perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
+    primary_unit = (
+        str(
+            get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial")
+            or "trial"
+        )
+        .strip()
+        .lower()
+    )
+    allow_iid_trials = get_config_bool(
+        ctx.config, "behavior_analysis.statistics.allow_iid_trials", False
+    )
+    perm_enabled = get_config_bool(
+        ctx.config, "behavior_analysis.correlations.permutation.enabled", False
+    )
     n_perm = _resolve_correlation_permutation_count(ctx.config, perm_enabled=perm_enabled)
-    if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
+    if (
+        primary_unit in {"trial", "trialwise"}
+        and (not perm_enabled or n_perm <= 0)
+        and not allow_iid_trials
+    ):
         raise ValueError(
             "Trial-level correlations require a valid non-i.i.d inference method. "
             "Enable permutation testing with a positive permutation count "
@@ -446,7 +454,9 @@ def stage_correlate_design_impl(
     explicit_target_column = str(
         get_config_value(ctx.config, "behavior_analysis.correlations.target_column", "") or ""
     ).strip()
-    configured_targets = get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
+    configured_targets = get_config_value(
+        ctx.config, "behavior_analysis.correlations.targets", None
+    )
     if explicit_target_column:
         targets = _require_explicit_correlation_targets(
             df_trials,
@@ -476,7 +486,10 @@ def stage_correlate_design_impl(
             and use_cv_resid
             and _target_has_finite_numeric_values(df_trials, "predictor_residual_cv")
         ):
-            targets = ["predictor_residual_cv", *[t for t in targets if t != "predictor_residual_cv"]]
+            targets = [
+                "predictor_residual_cv",
+                *[t for t in targets if t != "predictor_residual_cv"],
+            ]
         prefer_predictor_residual = get_config_bool(
             ctx.config,
             "behavior_analysis.correlations.prefer_predictor_residual",
@@ -484,14 +497,19 @@ def stage_correlate_design_impl(
         )
         if prefer_predictor_residual:
             preferred_target: Optional[str] = None
-            if use_cv_resid and _target_has_finite_numeric_values(df_trials, "predictor_residual_cv"):
+            if use_cv_resid and _target_has_finite_numeric_values(
+                df_trials, "predictor_residual_cv"
+            ):
                 preferred_target = "predictor_residual_cv"
             elif _target_has_finite_numeric_values(df_trials, "predictor_residual"):
                 preferred_target = "predictor_residual"
             if preferred_target is not None:
                 updated_targets: List[str] = []
                 for target_name in targets:
-                    if target_name == "predictor_residual" and preferred_target == "predictor_residual_cv":
+                    if (
+                        target_name == "predictor_residual"
+                        and preferred_target == "predictor_residual_cv"
+                    ):
                         if preferred_target not in updated_targets:
                             updated_targets.append(preferred_target)
                     elif target_name != preferred_target:
@@ -501,7 +519,10 @@ def stage_correlate_design_impl(
                     or "predictor_residual" in targets
                     or "predictor_residual_cv" in targets
                 ):
-                    targets = [preferred_target, *[t for t in updated_targets if t != preferred_target]]
+                    targets = [
+                        preferred_target,
+                        *[t for t in updated_targets if t != preferred_target],
+                    ]
     if configured_targets is None and not explicit_target_column:
         targets = [t for t in targets if t in df_trials.columns]
 
@@ -509,17 +530,27 @@ def stage_correlate_design_impl(
         ctx.logger.warning("Correlations design: no valid target columns found.")
         return None
 
-    run_adjust_enabled = get_config_bool(ctx.config, "behavior_analysis.run_adjustment.enabled", False)
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_adjust_enabled = get_config_bool(
+        ctx.config, "behavior_analysis.run_adjustment.enabled", False
+    )
+    run_col = str(
+        get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id")
+        or "run_id"
+    ).strip()
     if not run_col:
         run_col = "run_id"
-    if primary_unit in {"run", "run_mean", "runmean", "run_level"} and run_col not in df_trials.columns:
+    if (
+        primary_unit in {"run", "run_mean", "runmean", "run_level"}
+        and run_col not in df_trials.columns
+    ):
         raise ValueError(
             f"Run-level correlations requested (primary_unit={primary_unit!r}) "
             f"but run column '{run_col}' is missing from the trial table."
         )
     include_run_adjustment = bool(
-        get_config_value(ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", True)
+        get_config_value(
+            ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", True
+        )
     )
     run_adjust_in_correlations = bool(run_adjust_enabled and include_run_adjustment)
     if primary_unit in {"run", "run_mean", "runmean", "run_level"} and run_adjust_in_correlations:
@@ -533,7 +564,11 @@ def stage_correlate_design_impl(
     if bool(getattr(config, "control_trial_order", True)):
         for c in ["trial_index_within_group", "trial_index"]:
             if c in df_trials.columns:
-                cov_parts.append(pd.DataFrame({c: pd.to_numeric(df_trials[c], errors="coerce")}, index=df_trials.index))
+                cov_parts.append(
+                    pd.DataFrame(
+                        {c: pd.to_numeric(df_trials[c], errors="coerce")}, index=df_trials.index
+                    )
+                )
                 break
     if run_adjust_in_correlations:
         if run_col not in df_trials.columns:
@@ -585,7 +620,12 @@ def stage_correlate_design_impl(
         ctx.logger,
         "Correlations",
     )
-    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and perm_enabled and groups_for_perm is None:
+    if (
+        primary_unit in {"trial", "trialwise"}
+        and not allow_iid_trials
+        and perm_enabled
+        and groups_for_perm is None
+    ):
         raise ValueError(
             "Trial-level correlations require grouped permutation labels for non-i.i.d trials. "
             "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
@@ -662,7 +702,9 @@ def _compute_single_effect_size(
         elif target_std <= constant_variance_threshold:
             skip_reason = "target_constant"
 
-    r_raw, p_raw, n = safe_correlation(x_arr, y_arr, method, min_samples, robust_method=robust_method)
+    r_raw, p_raw, n = safe_correlation(
+        x_arr, y_arr, method, min_samples, robust_method=robust_method
+    )
 
     rec: Dict[str, Any] = {
         "feature": str(feat),
@@ -684,22 +726,22 @@ def _compute_single_effect_size(
     }
 
     temp_for_partial = (
-        predictor_series
-        if (predictor_series is not None and target != predictor_column)
-        else None
+        predictor_series if (predictor_series is not None and target != predictor_column) else None
     )
 
     if want_partial_cov or want_partial_predictor or want_partial_cov_predictor:
-        r_pc, p_pc, n_pc, r_pt, p_pt, n_pt, r_pct, p_pct, n_pct = compute_partial_correlations_with_cov_predictor(
-            roi_values=x,
-            target_values=y,
-            covariates_df=cov_df,
-            predictor_series=temp_for_partial,
-            method=method,
-            context="trial_table",
-            logger=None,
-            min_samples=min_samples,
-            config=config,
+        r_pc, p_pc, n_pc, r_pt, p_pt, n_pt, r_pct, p_pct, n_pct = (
+            compute_partial_correlations_with_cov_predictor(
+                roi_values=x,
+                target_values=y,
+                covariates_df=cov_df,
+                predictor_series=temp_for_partial,
+                method=method,
+                context="trial_table",
+                logger=None,
+                min_samples=min_samples,
+                config=config,
+            )
         )
 
         if want_partial_cov:
@@ -847,7 +889,11 @@ def stage_correlate_effect_sizes_impl(
                 "Disable robust correlation or explicitly set behavior_analysis.correlations.types "
                 "to raw-only outputs to avoid silently dropping controlled estimands."
             )
-        if request.want_partial_cov or request.want_partial_predictor or request.want_partial_cov_predictor:
+        if (
+            request.want_partial_cov
+            or request.want_partial_predictor
+            or request.want_partial_cov_predictor
+        ):
             ctx.logger.info(
                 "Correlations: robust_method=%s disables partial correlations; using raw only.",
                 robust_method,
@@ -951,7 +997,9 @@ def _compute_single_pvalue(
     perm_ok_robust: bool,
 ) -> Dict[str, Any]:
     """Compute permutation p-values for a single record."""
-    from eeg_pipeline.utils.analysis.stats.permutation import compute_permutation_pvalues_with_cov_predictor
+    from eeg_pipeline.utils.analysis.stats.permutation import (
+        compute_permutation_pvalues_with_cov_predictor,
+    )
 
     feat = rec["feature"]
     target = rec["target"]
@@ -991,7 +1039,9 @@ def _compute_single_pvalue(
             y_v = y_vec[valid]
             groups_v = np.asarray(groups_for_perm)[valid] if groups_for_perm is not None else None
 
-            r_obs, _ = compute_robust_correlation(x_v, y_v, method=str(robust_method).strip().lower())
+            r_obs, _ = compute_robust_correlation(
+                x_v, y_v, method=str(robust_method).strip().lower()
+            )
             if not np.isfinite(r_obs):
                 p_perm_raw = np.nan
             else:
@@ -1010,7 +1060,9 @@ def _compute_single_pvalue(
                     except ValueError as exc:
                         raise ValueError("invalid robust permutation draw") from exc
                     y_perm = y_v[perm_idx]
-                    r_perm, _ = compute_robust_correlation(x_v, y_perm, method=str(robust_method).strip().lower())
+                    r_perm, _ = compute_robust_correlation(
+                        x_v, y_perm, method=str(robust_method).strip().lower()
+                    )
                     if not np.isfinite(r_perm):
                         invalid_permutations += 1
                         continue
@@ -1044,17 +1096,19 @@ def _compute_single_pvalue(
             if (predictor_series is not None and target != predictor_column)
             else None
         )
-        p_perm, p_perm_cov, p_perm_temp, p_perm_cov_predictor = compute_permutation_pvalues_with_cov_predictor(
-            x_aligned=pd.Series(x.to_numpy(dtype=float), index=df_index),
-            y_aligned=pd.Series(y.to_numpy(dtype=float), index=df_index),
-            covariates_df=cov_df,
-            predictor_series=temp_for_partial,
-            method=method.strip().lower(),
-            n_perm=n_perm,
-            n_eff=int(n),
-            rng=rng,
-            config=config,
-            groups=groups_for_perm,
+        p_perm, p_perm_cov, p_perm_temp, p_perm_cov_predictor = (
+            compute_permutation_pvalues_with_cov_predictor(
+                x_aligned=pd.Series(x.to_numpy(dtype=float), index=df_index),
+                y_aligned=pd.Series(y.to_numpy(dtype=float), index=df_index),
+                covariates_df=cov_df,
+                predictor_series=temp_for_partial,
+                method=method.strip().lower(),
+                n_perm=n_perm,
+                n_eff=int(n),
+                rng=rng,
+                config=config,
+                groups=groups_for_perm,
+            )
         )
         result.update(
             {
@@ -1072,8 +1126,7 @@ def _compute_single_pvalue(
                 ),
                 "p_perm_partial_cov_predictor": (
                     float(p_perm_cov_predictor)
-                    if "p_partial_cov_predictor" in rec
-                    and np.isfinite(p_perm_cov_predictor)
+                    if "p_partial_cov_predictor" in rec and np.isfinite(p_perm_cov_predictor)
                     else np.nan
                 ),
             }
@@ -1098,9 +1151,18 @@ def stage_correlate_pvalues_impl(
 
     method = getattr(config, "method", "spearman")
     robust_method = getattr(config, "robust_method", None)
-    perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
+    perm_enabled = get_config_bool(
+        ctx.config, "behavior_analysis.correlations.permutation.enabled", False
+    )
     n_perm = _resolve_correlation_permutation_count(ctx.config, perm_enabled=perm_enabled)
-    perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
+    perm_scheme = (
+        str(
+            get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle")
+            or "shuffle"
+        )
+        .strip()
+        .lower()
+    )
     if perm_scheme not in {"shuffle", "circular_shift"}:
         raise ValueError(
             "Invalid behavior_analysis.permutation.scheme value: "
@@ -1124,7 +1186,9 @@ def stage_correlate_pvalues_impl(
 
     if not (perm_ok_standard or perm_ok_robust):
         if perm_enabled and robust_method not in (None, "", False):
-            ctx.logger.debug("Correlations pvalues: permutation disabled for robust_method=%s", robust_method)
+            ctx.logger.debug(
+                "Correlations pvalues: permutation disabled for robust_method=%s", robust_method
+            )
         for rec in records:
             rec.update(
                 {
@@ -1191,7 +1255,9 @@ def stage_correlate_pvalues_impl(
         ]
 
     n_computed = sum(1 for r in updated_records if np.isfinite(r.get("p_perm_raw", np.nan)))
-    ctx.logger.info("Correlations pvalues: computed %d permutation tests (n_perm=%d)", n_computed, n_perm)
+    ctx.logger.info(
+        "Correlations pvalues: computed %d permutation tests (n_perm=%d)", n_computed, n_perm
+    )
     return updated_records
 
 
@@ -1206,10 +1272,24 @@ def stage_correlate_primary_selection_impl(
         ctx.logger.warning("Correlations primary selection: no valid records; skipping.")
         return []
 
-    p_primary_mode = str(get_config_value(ctx.config, "behavior_analysis.correlations.p_primary_mode", "perm_if_available")).strip().lower()
-    primary_unit = str(get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial")).strip().lower()
+    p_primary_mode = (
+        str(
+            get_config_value(
+                ctx.config, "behavior_analysis.correlations.p_primary_mode", "perm_if_available"
+            )
+        )
+        .strip()
+        .lower()
+    )
+    primary_unit = (
+        str(get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial"))
+        .strip()
+        .lower()
+    )
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
-    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    allow_iid_trials = get_config_bool(
+        ctx.config, "behavior_analysis.statistics.allow_iid_trials", False
+    )
     request = _resolve_correlation_request(ctx.config)
     if (not use_run_unit) and (not allow_iid_trials):
         if p_primary_mode not in {"perm", "permutation"}:
@@ -1246,7 +1326,12 @@ def stage_correlate_primary_selection_impl(
             p_primary = rec.get("p_raw", np.nan)
             r_primary = rec.get("r_raw", np.nan)
             src = "raw_robust"
-            if p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}:
+            if p_primary_mode in {
+                "perm",
+                "permutation",
+                "perm_if_available",
+                "permutation_if_available",
+            }:
                 p_perm_raw = rec.get("p_perm_raw", np.nan)
                 if pd.notna(p_perm_raw):
                     p_kind = "p_perm_raw"
@@ -1266,7 +1351,12 @@ def stage_correlate_primary_selection_impl(
             p_primary = rec.get(p_kind, np.nan)
             r_primary = rec.get(r_kind, np.nan)
 
-            if p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}:
+            if p_primary_mode in {
+                "perm",
+                "permutation",
+                "perm_if_available",
+                "permutation_if_available",
+            }:
                 perm_map = {
                     "p_raw": "p_perm_raw",
                     "p_partial_cov": "p_perm_partial_cov",
@@ -1325,7 +1415,9 @@ def stage_correlate_fdr_impl(
         return corr_df
 
     if "p_primary" not in corr_df.columns:
-        ctx.logger.error("Missing 'p_primary' column. Ensure 'correlate_primary_selection' stage runs before 'correlate_fdr'.")
+        ctx.logger.error(
+            "Missing 'p_primary' column. Ensure 'correlate_primary_selection' stage runs before 'correlate_fdr'."
+        )
         raise KeyError("p_primary")
 
     if "analysis_kind" not in corr_df.columns:
@@ -1347,8 +1439,12 @@ def stage_correlate_impl(
     *,
     stage_correlate_design_fn: Callable[[Any, Any], Optional[CorrelateDesign]],
     stage_correlate_effect_sizes_fn: Callable[[Any, Any, CorrelateDesign], List[Dict[str, Any]]],
-    stage_correlate_pvalues_fn: Callable[[Any, Any, CorrelateDesign, List[Dict[str, Any]]], List[Dict[str, Any]]],
-    stage_correlate_primary_selection_fn: Callable[[Any, Any, CorrelateDesign, List[Dict[str, Any]]], List[Dict[str, Any]]],
+    stage_correlate_pvalues_fn: Callable[
+        [Any, Any, CorrelateDesign, List[Dict[str, Any]]], List[Dict[str, Any]]
+    ],
+    stage_correlate_primary_selection_fn: Callable[
+        [Any, Any, CorrelateDesign, List[Dict[str, Any]]], List[Dict[str, Any]]
+    ],
     stage_correlate_fdr_fn: Callable[[Any, Any, List[Dict[str, Any]]], pd.DataFrame],
 ) -> pd.DataFrame:
     """Composed correlations stage."""

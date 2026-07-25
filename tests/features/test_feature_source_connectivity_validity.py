@@ -346,9 +346,7 @@ class TestSourceConnectivityValidity(unittest.TestCase):
 
             fake_nib = types.ModuleType("nibabel")
             fake_nib.load = lambda p: img_map if Path(p) == map_path else img_ref
-            fake_nib.nifti1 = SimpleNamespace(
-                intent_codes=SimpleNamespace(code={"z score": 5})
-            )
+            fake_nib.nifti1 = SimpleNamespace(intent_codes=SimpleNamespace(code={"z score": 5}))
 
             base = self._default_fmri_constraint()
             cfg = FMRIConstraintConfig(
@@ -411,7 +409,9 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         fake_conn_mod.spectral_connectivity_epochs = _fake_spectral_connectivity_epochs
         fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: None
 
-        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        fmri_cfg = SimpleNamespace(
+            enabled=False, provenance="independent", require_provenance=False
+        )
         src_cfg = SimpleNamespace(
             method="lcmv",
             fmri_cfg=fmri_cfg,
@@ -499,7 +499,9 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         )
         fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: None
 
-        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        fmri_cfg = SimpleNamespace(
+            enabled=False, provenance="independent", require_provenance=False
+        )
         src_cfg = SimpleNamespace(
             method="lcmv",
             fmri_cfg=fmri_cfg,
@@ -585,7 +587,9 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         fake_conn_mod.spectral_connectivity_epochs = _fake_spectral_connectivity_epochs
         fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: None
 
-        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        fmri_cfg = SimpleNamespace(
+            enabled=False, provenance="independent", require_provenance=False
+        )
         src_cfg = SimpleNamespace(
             method="lcmv",
             fmri_cfg=fmri_cfg,
@@ -650,7 +654,9 @@ class TestSourceConnectivityValidity(unittest.TestCase):
                 return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
             ),
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_source_connectivity_features(
                     ctx,
                     bands=["alpha"],
@@ -680,7 +686,9 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         fake_conn_mod.spectral_connectivity_epochs = lambda *_args, **_kwargs: None
         fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: _FakeEnvelopeCon()
 
-        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        fmri_cfg = SimpleNamespace(
+            enabled=False, provenance="independent", require_provenance=False
+        )
         src_cfg = SimpleNamespace(
             method="lcmv",
             fmri_cfg=fmri_cfg,
@@ -855,7 +863,9 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         fake_conn_mod.spectral_connectivity_epochs = spectral_connectivity_mock
         fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: None
 
-        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        fmri_cfg = SimpleNamespace(
+            enabled=False, provenance="independent", require_provenance=False
+        )
         src_cfg = SimpleNamespace(
             method="lcmv",
             fmri_cfg=fmri_cfg,
@@ -882,7 +892,7 @@ class TestSourceConnectivityValidity(unittest.TestCase):
                         "sourcelocalization": {"min_cycles_per_band": 3.0},
                         "connectivity": {
                             "min_cycles_per_band": 3.0,
-                        }
+                        },
                     }
                 }
             ),

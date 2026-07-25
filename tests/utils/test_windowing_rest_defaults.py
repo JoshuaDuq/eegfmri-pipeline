@@ -18,7 +18,9 @@ class TestWindowingRestDefaults(unittest.TestCase):
             sampling_rate=2.0,
             logger=logging.getLogger("windowing-default"),
         )
-        windows = time_windows_from_spec(spec, logger=logging.getLogger("windowing-default"), strict=False)
+        windows = time_windows_from_spec(
+            spec, logger=logging.getLogger("windowing-default"), strict=False
+        )
 
         self.assertIn("analysis", windows.masks)
         self.assertTrue(np.array_equal(windows.masks["analysis"], np.ones(times.shape, dtype=bool)))
@@ -36,7 +38,9 @@ class TestWindowingRestDefaults(unittest.TestCase):
             logger=logging.getLogger("windowing-named-default"),
             name="active",
         )
-        windows = time_windows_from_spec(spec, logger=logging.getLogger("windowing-named-default"), strict=False)
+        windows = time_windows_from_spec(
+            spec, logger=logging.getLogger("windowing-named-default"), strict=False
+        )
 
         self.assertIn("active", windows.masks)
         self.assertTrue(np.array_equal(windows.masks["active"], np.ones(times.shape, dtype=bool)))

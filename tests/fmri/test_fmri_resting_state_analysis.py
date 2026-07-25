@@ -31,9 +31,7 @@ def test_prepare_confounds_and_sample_mask_builds_sample_mask_and_drops_scrub_co
         }
     )
 
-    cleaned_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(
-        confounds_df
-    )
+    cleaned_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(confounds_df)
 
     assert cleaned_confounds is not None
     assert list(cleaned_confounds.columns) == ["trans_x", "white_matter"]
@@ -49,9 +47,7 @@ def test_prepare_confounds_and_sample_mask_returns_none_when_only_scrub_columns_
         }
     )
 
-    cleaned_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(
-        confounds_df
-    )
+    cleaned_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(confounds_df)
 
     assert cleaned_confounds is None
     assert scrub_columns == ["motion_outlier00", "outlier01"]
@@ -138,13 +134,11 @@ def test_run_resting_state_analysis_uses_matching_brain_mask_for_roi_extraction(
     tmp_path: Path,
 ) -> None:
     bold_path = (
-        tmp_path
-        / "sub-0001_task-rest_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+        tmp_path / "sub-0001_task-rest_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
     )
     bold_path.write_bytes(b"")
     mask_path = (
-        tmp_path
-        / "sub-0001_task-rest_run-01_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"
+        tmp_path / "sub-0001_task-rest_run-01_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"
     )
     mask_path.write_bytes(b"")
     atlas_path = tmp_path / "atlas.nii.gz"
@@ -173,18 +167,22 @@ def test_run_resting_state_analysis_uses_matching_brain_mask_for_roi_extraction(
     cfg = RestingStateAnalysisConfig(atlas_labels_img=atlas_path)
 
     with patch.dict(sys.modules, {"nilearn.maskers": fake_maskers}):
-        with patch(
-            "fmri_pipeline.analysis.resting_state._discover_rest_runs",
-            return_value=[(bold_path, 1)],
-        ), patch(
-            "fmri_pipeline.analysis.resting_state._load_rest_confounds",
-            return_value=(
-                pd.DataFrame({"trans_x": [0.0, 0.0, 0.0, 0.0]}),
-                ["trans_x"],
+        with (
+            patch(
+                "fmri_pipeline.analysis.resting_state._discover_rest_runs",
+                return_value=[(bold_path, 1)],
             ),
-        ), patch(
-            "fmri_pipeline.analysis.resting_state.get_tr_from_bold",
-            return_value=2.0,
+            patch(
+                "fmri_pipeline.analysis.resting_state._load_rest_confounds",
+                return_value=(
+                    pd.DataFrame({"trans_x": [0.0, 0.0, 0.0, 0.0]}),
+                    ["trans_x"],
+                ),
+            ),
+            patch(
+                "fmri_pipeline.analysis.resting_state.get_tr_from_bold",
+                return_value=2.0,
+            ),
         ):
             run_resting_state_analysis_for_subject(
                 bids_fmri_root=tmp_path,

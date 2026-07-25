@@ -147,8 +147,8 @@ class TestPacSurrogates(unittest.TestCase):
         phase = np.ones((3, 4), dtype=np.complex128)
         amplitudes = np.array(
             [
-                [1.0, 1.0, 1.0, 1.0],      # epoch 0
-                [2.0, 2.0, 2.0, 2.0],      # epoch 1
+                [1.0, 1.0, 1.0, 1.0],  # epoch 0
+                [2.0, 2.0, 2.0, 2.0],  # epoch 1
                 [100.0, 100.0, 100.0, 100.0],  # epoch 2 (excluded donor)
             ],
             dtype=float,
@@ -209,13 +209,7 @@ class TestPacSurrogates(unittest.TestCase):
     def test_invalid_surrogate_method_raises(self):
         with self.assertRaisesRegex(ValueError, "surrogate_method"):
             _extract_pac_config(
-                DotConfig(
-                    {
-                        "feature_engineering": {
-                            "pac": {"surrogate_method": "bad_method"}
-                        }
-                    }
-                )
+                DotConfig({"feature_engineering": {"pac": {"surrogate_method": "bad_method"}}})
             )
 
         with self.assertRaisesRegex(ValueError, "surrogate_method"):

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests import REPO_ROOT
 
-
 SCRIPT = REPO_ROOT / "local_workflows" / "alliance_canada" / "build_upload_manifest.py"
 PRUNE_SCRIPT = REPO_ROOT / "local_workflows" / "alliance_canada" / "prune_upload_root.py"
 
@@ -193,8 +192,14 @@ def test_study2_manifest_uploads_required_handoff_files_only(tmp_path: Path) -> 
     assert "sub-0001/eeg/sub-0001_task-thermalactive_eeg.vhdr" in eeg_files
     assert "sub-0001/eeg/sub-0001_task-rest_eeg.vhdr" not in eeg_files
     assert "sub-0001/eeg/sub-0001_space-CapTrak_electrodes.tsv" in eeg_files
-    assert "preprocessed/eeg/sub-0001/eeg/sub-0001_task-thermalactive_proc-clean_epo.fif" in deriv_files
-    assert "preprocessed/eeg/sub-0001/eeg/sub-0001_task-thermalactive_proc-clean_events.tsv" in deriv_files
+    assert (
+        "preprocessed/eeg/sub-0001/eeg/sub-0001_task-thermalactive_proc-clean_epo.fif"
+        in deriv_files
+    )
+    assert (
+        "preprocessed/eeg/sub-0001/eeg/sub-0001_task-thermalactive_proc-clean_events.tsv"
+        in deriv_files
+    )
     assert "preprocessed/eeg/sub-0001/eeg/sub-0001_task-rest_proc-clean_epo.fif" not in deriv_files
     assert "dataset_description.json" in deriv_files
     assert "group/multimodal/study1/reports/study1_report.tsv" in deriv_files
@@ -272,12 +277,7 @@ def test_study2_manifest_can_preserve_missing_exact_handoff_paths_for_cleanup(
     _write_eeg_bids(eeg_root)
     _write_derivatives(deriv_root)
     (
-        deriv_root
-        / "group"
-        / "multimodal"
-        / "study2"
-        / "source_stage"
-        / "source_stage_input.tsv"
+        deriv_root / "group" / "multimodal" / "study2" / "source_stage" / "source_stage_input.tsv"
     ).unlink()
 
     result = subprocess.run(
@@ -310,9 +310,8 @@ def test_study2_manifest_can_preserve_missing_exact_handoff_paths_for_cleanup(
 
     assert result.returncode == 0, result.stderr
     assert "Missing required Study 2 source-stage input" in result.stderr
-    assert (
-        "group/multimodal/study2/source_stage/source_stage_input.tsv"
-        in _read_manifest(manifest_dir / "derivative_files.txt")
+    assert "group/multimodal/study2/source_stage/source_stage_input.tsv" in _read_manifest(
+        manifest_dir / "derivative_files.txt"
     )
 
 

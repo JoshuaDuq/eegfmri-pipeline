@@ -65,7 +65,9 @@ from eeg_pipeline.infra.machine_learning import (
 )
 from eeg_pipeline.infra.tsv import write_tsv, write_parquet
 from eeg_pipeline.infra.logging import get_logger
-from eeg_pipeline.analysis.machine_learning.time_generalization import time_generalization_regression
+from eeg_pipeline.analysis.machine_learning.time_generalization import (
+    time_generalization_regression,
+)
 from eeg_pipeline.analysis.machine_learning.target_residualization import (
     configured_target_residualization_columns,
     fit_nuisance_model_for_fold,
@@ -112,6 +114,7 @@ def _copy_if_exists(src: Path, dst: Path) -> None:
 # Within-Subject Helper
 ###################################################################
 
+
 def _warn_or_raise_if_binary_like_regression_target(
     y: np.ndarray,
     target: Optional[str],
@@ -133,13 +136,20 @@ def _warn_or_raise_if_binary_like_regression_target(
         uniques_list = uniques_list[:10]
 
     if binary_like:
-        strict = bool(get_config_value(config, "machine_learning.targets.strict_regression_target_continuous", False))
+        strict = bool(
+            get_config_value(
+                config, "machine_learning.targets.strict_regression_target_continuous", False
+            )
+        )
         msg = (
             f"{context}: regression target appears binary-like (unique={unique.tolist()}). "
             f"target={target!r}. Prefer ML mode 'classify' for binary outcomes."
         )
         if strict:
-            raise ValueError(msg + " (Blocked by machine_learning.targets.strict_regression_target_continuous=true)")
+            raise ValueError(
+                msg
+                + " (Blocked by machine_learning.targets.strict_regression_target_continuous=true)"
+            )
         logger.warning(msg)
 
     return {"binary_like": bool(binary_like), "unique_values": uniques_list}
@@ -264,9 +274,11 @@ def _paired_signflip_p_value(
 
 
 def _resolve_permutation_scheme(config: Any) -> str:
-    scheme = str(
-        get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")
-    ).strip().lower()
+    scheme = (
+        str(get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject"))
+        .strip()
+        .lower()
+    )
     valid = {"within_subject", "within_subject_within_run", "circular_shift_within_run"}
     if scheme not in valid:
         raise ValueError(
@@ -285,9 +297,7 @@ def _validate_permutation_runs(
     if scheme not in {"within_subject_within_run", "circular_shift_within_run"}:
         return None
     if runs is None:
-        raise ValueError(
-            f"machine_learning.cv.permutation_scheme='{scheme}' requires run labels."
-        )
+        raise ValueError(f"machine_learning.cv.permutation_scheme='{scheme}' requires run labels.")
 
     runs_arr = np.asarray(runs)
     if len(runs_arr) != len(y):
@@ -296,9 +306,7 @@ def _validate_permutation_runs(
             f"machine_learning.cv.permutation_scheme='{scheme}'."
         )
     if np.all(pd.isna(runs_arr)):
-        raise ValueError(
-            f"machine_learning.cv.permutation_scheme='{scheme}' requires run labels."
-        )
+        raise ValueError(f"machine_learning.cv.permutation_scheme='{scheme}' requires run labels.")
     return runs_arr
 
 
@@ -366,8 +374,7 @@ def _permutation_indices_by_scheme(
     valid = {"within_subject", "within_subject_within_run", "circular_shift_within_run"}
     if mode not in valid:
         raise ValueError(
-            f"Unsupported permutation scheme: {scheme!r}. "
-            f"Expected one of: {sorted(valid)}."
+            f"Unsupported permutation scheme: {scheme!r}. " f"Expected one of: {sorted(valid)}."
         )
     runs_arr = _validate_permutation_runs(source_indices, runs, scheme=mode)
     trial_indices_arr = _validate_permutation_trial_indices(
@@ -483,13 +490,17 @@ def _generate_effective_permutation(
 
 
 def _resolve_target_residualization_strategy(config: Any) -> str:
-    strategy = str(
-        get_config_value(
-            config,
-            "machine_learning.target_residualization.strategy",
-            "residualized_target",
+    strategy = (
+        str(
+            get_config_value(
+                config,
+                "machine_learning.target_residualization.strategy",
+                "residualized_target",
+            )
         )
-    ).strip().lower()
+        .strip()
+        .lower()
+    )
     valid = {"residualized_target", "staged_residual_learning"}
     if strategy not in valid:
         raise ValueError(
@@ -570,9 +581,7 @@ def filter_circular_shift_permutation_rows(
         "machine_learning.cv.circular_shift.min_retained_trials_per_subject",
         None,
     )
-    min_valid_runs = (
-        int(min_valid_runs_raw) if min_valid_runs_raw is not None else None
-    )
+    min_valid_runs = int(min_valid_runs_raw) if min_valid_runs_raw is not None else None
     min_retained_trials = (
         int(min_retained_trials_raw) if min_retained_trials_raw is not None else None
     )
@@ -583,13 +592,9 @@ def filter_circular_shift_permutation_rows(
         subject_valid_mask = (groups_arr == subject_id) & valid_run_mask
         retained_trials = int(np.sum(subject_valid_mask))
         valid_runs = int(len(np.unique(blocks[subject_valid_mask])))
-        too_few_runs = (
-            min_valid_runs is not None
-            and valid_runs < int(min_valid_runs)
-        )
-        too_few_trials = (
-            min_retained_trials is not None
-            and retained_trials < int(min_retained_trials)
+        too_few_runs = min_valid_runs is not None and valid_runs < int(min_valid_runs)
+        too_few_trials = min_retained_trials is not None and retained_trials < int(
+            min_retained_trials
         )
         if too_few_runs or too_few_trials:
             subject_exclusion_records.append(
@@ -784,7 +789,9 @@ def _fit_tuned_regression_estimator(
         refit="neg_mse",
         error_score="raise",
     )
-    gs = grid_search_with_warning_logging(gs, X_train, y_train, fold_info=fold_info, log=logger, groups=groups_train)
+    gs = grid_search_with_warning_logging(
+        gs, X_train, y_train, fold_info=fold_info, log=logger, groups=groups_train
+    )
     return gs.best_estimator_
 
 
@@ -835,7 +842,9 @@ def export_subject_selection_report(
     n_requested = len(requested_ids)
     n_excluded = len(excluded_ids)
     exclusion_fraction = float(n_excluded / n_requested) if n_requested > 0 else 0.0
-    threshold = float(get_config_value(config, "machine_learning.data.max_excluded_subject_fraction", 1.0))
+    threshold = float(
+        get_config_value(config, "machine_learning.data.max_excluded_subject_fraction", 1.0)
+    )
     return {
         "n_requested": n_requested,
         "n_included": int(len(included_ids)),
@@ -861,19 +870,25 @@ def _fit_within_subject_fold(
     if blocks_train is not None:
         n_unique_blocks = len(np.unique(blocks_train))
         n_splits_inner = max(2, min(n_unique_blocks, int(inner_splits)))
-        
+
         if n_splits_inner < 2:
             return _fit_default_pipeline(pipe, X_train, y_train, fold)
-        
-        inner_cv_splits = create_run_aware_inner_cv(blocks_train, n_splits_inner, random_state, fold, subject_id)
-        
+
+        inner_cv_splits = create_run_aware_inner_cv(
+            blocks_train, n_splits_inner, random_state, fold, subject_id
+        )
+
         if inner_cv_splits is not None and len(inner_cv_splits) >= 2:
             scoring = create_scoring_dict()
-            refit_metric = 'neg_mse'
-            
+            refit_metric = "neg_mse"
+
             pipe_seeded = clone(pipe)
             regressor_step = pipe_seeded.named_steps.get("regressor")
-            if regressor_step is not None and hasattr(regressor_step, "regressor") and hasattr(regressor_step.regressor, "random_state"):
+            if (
+                regressor_step is not None
+                and hasattr(regressor_step, "regressor")
+                and hasattr(regressor_step.regressor, "random_state")
+            ):
                 regressor_step.regressor.random_state = random_state
             effective_param_grid = _resolve_param_grid_aliases(pipe_seeded, param_grid)
             gs = GridSearchCV(
@@ -887,10 +902,12 @@ def _fit_within_subject_fold(
             )
             try:
                 gs = grid_search_with_warning_logging(
-                    gs, X_train, y_train,
+                    gs,
+                    X_train,
+                    y_train,
                     fold_info=f"within-subject fold {fold} (subject {subject_id})",
                     log=logger,
-                    groups=blocks_train
+                    groups=blocks_train,
                 )
                 return gs.best_estimator_
             except Exception as exc:
@@ -903,7 +920,7 @@ def _fit_within_subject_fold(
                 raise RuntimeError(
                     f"Within-subject fold {int(fold)} ({subject_id}): inner CV failed."
                 ) from exc
-    
+
     return _fit_default_pipeline(pipe, X_train, y_train, fold, random_state)
 
 
@@ -927,9 +944,7 @@ def _maybe_generate_mode_plots(
         elif isinstance(formats_raw, str):
             formats = [p for p in formats_raw.replace(",", " ").split() if p]
         else:
-            raise TypeError(
-                "machine_learning.plotting.formats must be list/tuple/string."
-            )
+            raise TypeError("machine_learning.plotting.formats must be list/tuple/string.")
         dpi_val = int(require_config_value(config, "machine_learning.plotting.dpi"))
         top_n = int(require_config_value(config, "machine_learning.plotting.top_n_features"))
         include_diagnostics = bool(
@@ -1016,8 +1031,17 @@ def run_regression_ml(
     null_dir = results_dir / "null"
     reports_dir = results_dir / "reports"
     importance_dir = results_dir / "importance"
-    
-    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+
+    for d in [
+        results_dir,
+        plots_dir,
+        data_dir,
+        metrics_dir,
+        models_dir,
+        null_dir,
+        reports_dir,
+        importance_dir,
+    ]:
         ensure_dir(d)
     subject_selection = export_subject_selection_report(
         results_dir,
@@ -1028,21 +1052,33 @@ def run_regression_ml(
     )
 
     if model == "ridge":
-        pipe = create_ridge_pipeline(seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0)
-        param_grid = build_ridge_param_grid(config, n_covariates=len(covariates) if covariates else 0)
+        pipe = create_ridge_pipeline(
+            seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0
+        )
+        param_grid = build_ridge_param_grid(
+            config, n_covariates=len(covariates) if covariates else 0
+        )
         model_name = "ridge"
     elif model == "rf":
-        pipe = create_rf_pipeline(seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0)
+        pipe = create_rf_pipeline(
+            seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0
+        )
         param_grid = build_rf_param_grid(config, n_covariates=len(covariates) if covariates else 0)
         model_name = "rf"
     else:
-        pipe = create_elasticnet_pipeline(seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0)
-        param_grid = build_elasticnet_param_grid(config, n_covariates=len(covariates) if covariates else 0)
+        pipe = create_elasticnet_pipeline(
+            seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0
+        )
+        param_grid = build_elasticnet_param_grid(
+            config, n_covariates=len(covariates) if covariates else 0
+        )
         model_name = "elasticnet"
-    
+
     param_grid = _resolve_param_grid_aliases(pipe, param_grid)
-    
-    best_params_path = prepare_best_params_path(models_dir / f"best_params_{model_name}.jsonl", mode="truncate")
+
+    best_params_path = prepare_best_params_path(
+        models_dir / f"best_params_{model_name}.jsonl", mode="truncate"
+    )
     null_path = null_dir / f"loso_null_{model_name}.npz" if n_perm > 0 else None
 
     if n_perm > 0 and n_perm < 1000:
@@ -1055,7 +1091,11 @@ def run_regression_ml(
     n_subjects = len(np.unique(groups))
     logger.info(
         "Regression: model=%s, %d features \u00d7 %d trials, %d subjects, target='%s'",
-        model_name, X.shape[1], X.shape[0], n_subjects, target,
+        model_name,
+        X.shape[1],
+        X.shape[0],
+        n_subjects,
+        target,
     )
 
     y_true, y_pred, groups_ordered, test_indices, fold_ids = nested_loso_predictions_matrix(
@@ -1075,7 +1115,9 @@ def run_regression_ml(
         null_output_path=null_path,
         config=config,
         harmonization_mode=feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
+        or str(
+            get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
+        ),
         n_covariates=len(covariates) if covariates else 0,
     )
 
@@ -1102,7 +1144,9 @@ def run_regression_ml(
     _copy_if_exists(data_dir / "loso_indices.tsv", results_dir / "loso_indices.tsv")
 
     ci_method = str(get_config_value(config, "machine_learning.evaluation.ci_method", "bootstrap"))
-    r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config, ci_method=ci_method)
+    r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(
+        pred_df, config, ci_method=ci_method
+    )
     if _per_subj_r:
         pd.DataFrame(_per_subj_r, columns=["subject_id", "pearson_r"]).to_csv(
             metrics_dir / "per_subject_correlations.tsv", sep="\t", index=False
@@ -1116,14 +1160,15 @@ def run_regression_ml(
             finite = null_rs[np.isfinite(null_rs)]
             if finite.size > 0:
                 p_val = float(((np.abs(finite) >= abs(r_subj)).sum() + 1) / (finite.size + 1))
-        
+
         null_r2s = data.get("null_r2")
-        # Define default r2_subj for fallback below, but try to pre-compute if needed, 
+        # Define default r2_subj for fallback below, but try to pre-compute if needed,
         # or we can wait and use r2_val if we calculate it first.
         # It's better to postpone p_val_r2 calculation until after r2_val is computed!
 
     try:
         from sklearn.metrics import r2_score
+
         # Compute subject-level R2 to avoid pooled R2 fallacy
         r2_subj = []
         for subj in np.unique(groups_ordered):
@@ -1133,7 +1178,7 @@ def run_regression_ml(
         r2_val = float(np.mean(r2_subj)) if r2_subj else np.nan
     except Exception:
         r2_val = np.nan
-        
+
     p_val_r2 = np.nan
     if null_path and null_path.exists():
         try:
@@ -1147,7 +1192,9 @@ def run_regression_ml(
             logger.debug("Unable to compute R2 permutation p-value from %s: %s", null_path, exc)
 
     # Compute and export baseline predictions for sanity check
-    baseline_metrics = export_baseline_predictions(y_true, groups_ordered, results_dir, task="regression")
+    baseline_metrics = export_baseline_predictions(
+        y_true, groups_ordered, results_dir, task="regression"
+    )
 
     # Compute pooled (trial-level) metrics for secondary reporting
     pooled_r, _ = safe_pearsonr(y_true, y_pred)
@@ -1231,24 +1278,52 @@ def run_regression_ml(
     p_str = f", p={p_val:.4f}" if np.isfinite(p_val) else ""
     logger.info(
         "Regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
-        r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
+        r_subj,
+        ci_low,
+        ci_high,
+        p_str,
+        r2_val,
+        pooled_rmse,
     )
 
-    if bool(require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")):
+    if bool(
+        require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")
+    ):
         _run_permutation_importance_stage(
-            X, y, groups, feature_names, config, rng_seed,
-            int(require_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats")),
-            results_dir, logger,
-            model_name=model_name, covariates=covariates,
+            X,
+            y,
+            groups,
+            feature_names,
+            config,
+            rng_seed,
+            int(
+                require_config_value(
+                    config, "machine_learning.analysis.permutation_importance.n_repeats"
+                )
+            ),
+            results_dir,
+            logger,
+            model_name=model_name,
+            covariates=covariates,
         )
 
     if bool(require_config_value(config, "machine_learning.analysis.shap.enabled")):
         _run_shap_importance_stage(
-            X, y, groups, feature_names, config, rng_seed, results_dir, logger,
-            model_name=model_name, covariates=covariates,
+            X,
+            y,
+            groups,
+            feature_names,
+            config,
+            rng_seed,
+            results_dir,
+            logger,
+            model_name=model_name,
+            covariates=covariates,
         )
 
-    _maybe_generate_mode_plots(mode="regression", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="regression", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -1325,7 +1400,9 @@ def run_within_subject_regression_ml(
     finite_blocks = np.isfinite(blocks_all)
     if not np.all(finite_blocks):
         dropped = int((~finite_blocks).sum())
-        logger.warning(f"Dropping {dropped} trials with missing run labels for within-subject machine learning.")
+        logger.warning(
+            f"Dropping {dropped} trials with missing run labels for within-subject machine learning."
+        )
         X = X[finite_blocks]
         y = y[finite_blocks]
         groups = groups[finite_blocks]
@@ -1335,7 +1412,11 @@ def run_within_subject_regression_ml(
     n_subjects = len(np.unique(groups))
     logger.info(
         "Within-subject regression: model=%s, %d features \u00d7 %d trials, %d subjects, target='%s'",
-        model or "elasticnet", X.shape[1], X.shape[0], n_subjects, target,
+        model or "elasticnet",
+        X.shape[1],
+        X.shape[0],
+        n_subjects,
+        target,
     )
 
     results_dir = results_root / "within_subject_regression"
@@ -1346,14 +1427,22 @@ def run_within_subject_regression_ml(
     null_dir = results_dir / "null"
     reports_dir = results_dir / "reports"
     importance_dir = results_dir / "importance"
-    
-    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+
+    for d in [
+        results_dir,
+        plots_dir,
+        data_dir,
+        metrics_dir,
+        models_dir,
+        null_dir,
+        reports_dir,
+        importance_dir,
+    ]:
         ensure_dir(d)
-    
+
     model_name = model if model else "elasticnet"
-    harmonization_mode = (
-        feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    harmonization_mode = feature_harmonization or str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
     )
 
     outer_cv_splits = int(
@@ -1388,7 +1477,7 @@ def run_within_subject_regression_ml(
         groups_train = groups[train_idx]
 
         blocks_train = blocks_all[train_idx] if blocks_all is not None else None
-        
+
         n_covs = len(covariates) if covariates else 0
         X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
             X_train,
@@ -1399,15 +1488,27 @@ def run_within_subject_regression_ml(
         )
 
         if model == "ridge":
-            pipe = create_ridge_pipeline(seed=rng_seed + int(fold_counter), config=config, n_covariates=len(covariates) if covariates else 0)
+            pipe = create_ridge_pipeline(
+                seed=rng_seed + int(fold_counter),
+                config=config,
+                n_covariates=len(covariates) if covariates else 0,
+            )
             param_grid = build_ridge_param_grid(config)
         elif model == "rf":
-            pipe = create_rf_pipeline(seed=rng_seed + int(fold_counter), config=config, n_covariates=len(covariates) if covariates else 0)
+            pipe = create_rf_pipeline(
+                seed=rng_seed + int(fold_counter),
+                config=config,
+                n_covariates=len(covariates) if covariates else 0,
+            )
             param_grid = build_rf_param_grid(config)
         else:
-            pipe = create_elasticnet_pipeline(seed=rng_seed + int(fold_counter), config=config, n_covariates=len(covariates) if covariates else 0)
+            pipe = create_elasticnet_pipeline(
+                seed=rng_seed + int(fold_counter),
+                config=config,
+                n_covariates=len(covariates) if covariates else 0,
+            )
             param_grid = build_elasticnet_param_grid(config)
-        
+
         best_estimator = _fit_within_subject_fold(
             pipe=pipe,
             X_train=X_train,
@@ -1481,13 +1582,16 @@ def run_within_subject_regression_ml(
     _copy_if_exists(data_dir / "cv_indices.tsv", results_dir / "cv_indices.tsv")
 
     ci_method = str(get_config_value(config, "machine_learning.evaluation.ci_method", "bootstrap"))
-    r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config, ci_method=ci_method)
+    r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(
+        pred_df, config, ci_method=ci_method
+    )
     if _per_subj_r:
         pd.DataFrame(_per_subj_r, columns=["subject_id", "pearson_r"]).to_csv(
             metrics_dir / "per_subject_correlations.tsv", sep="\t", index=False
         )
     try:
         from sklearn.metrics import r2_score
+
         # Compute subject-level R2 to avoid pooled R2 fallacy
         r2_subj = []
         for subj in np.unique(groups_ordered):
@@ -1501,7 +1605,7 @@ def run_within_subject_regression_ml(
     p_value = np.nan
     null_rs: List[float] = []
     n_perm_completed = 0
-    
+
     if n_perm > 0:
         logger.info(f"Running {n_perm} run-aware permutations for within-subject inference...")
         rng = np.random.default_rng(rng_seed)
@@ -1513,7 +1617,7 @@ def run_within_subject_regression_ml(
         min_perm_fold_completion = float(
             require_config_value(config, "machine_learning.cv.min_valid_permutation_fold_fraction")
         )
-        
+
         for perm_idx in range(n_perm):
             y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
                 y,
@@ -1526,7 +1630,7 @@ def run_within_subject_regression_ml(
             if not effective:
                 continue
             n_effective += 1
-            
+
             perm_fold_records: List[Dict[str, Any]] = []
 
             for fold_counter, train_idx, test_idx, subject_id, _ in folds:
@@ -1546,14 +1650,32 @@ def run_within_subject_regression_ml(
                 )
 
                 if model == "ridge":
-                    pipe_p = create_ridge_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config, n_covariates=len(covariates) if covariates else 0)
-                    param_grid_p = build_ridge_param_grid(config, n_covariates=len(covariates) if covariates else 0)
+                    pipe_p = create_ridge_pipeline(
+                        seed=rng_seed + perm_idx + fold_counter,
+                        config=config,
+                        n_covariates=len(covariates) if covariates else 0,
+                    )
+                    param_grid_p = build_ridge_param_grid(
+                        config, n_covariates=len(covariates) if covariates else 0
+                    )
                 elif model == "rf":
-                    pipe_p = create_rf_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config, n_covariates=len(covariates) if covariates else 0)
-                    param_grid_p = build_rf_param_grid(config, n_covariates=len(covariates) if covariates else 0)
+                    pipe_p = create_rf_pipeline(
+                        seed=rng_seed + perm_idx + fold_counter,
+                        config=config,
+                        n_covariates=len(covariates) if covariates else 0,
+                    )
+                    param_grid_p = build_rf_param_grid(
+                        config, n_covariates=len(covariates) if covariates else 0
+                    )
                 else:
-                    pipe_p = create_elasticnet_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config, n_covariates=len(covariates) if covariates else 0)
-                    param_grid_p = build_elasticnet_param_grid(config, n_covariates=len(covariates) if covariates else 0)
+                    pipe_p = create_elasticnet_pipeline(
+                        seed=rng_seed + perm_idx + fold_counter,
+                        config=config,
+                        n_covariates=len(covariates) if covariates else 0,
+                    )
+                    param_grid_p = build_elasticnet_param_grid(
+                        config, n_covariates=len(covariates) if covariates else 0
+                    )
 
                 try:
                     best_estimator_p = _fit_within_subject_fold(
@@ -1587,14 +1709,16 @@ def run_within_subject_regression_ml(
             if perm_fold_records:
                 y_true_perm = np.concatenate([r["y_true"] for r in perm_fold_records])
                 y_pred_perm = np.concatenate([r["y_pred"] for r in perm_fold_records])
-                subject_perm = np.concatenate([np.asarray(r["subject_id"], dtype=object) for r in perm_fold_records])
+                subject_perm = np.concatenate(
+                    [np.asarray(r["subject_id"], dtype=object) for r in perm_fold_records]
+                )
                 perm_df = pd.DataFrame(
                     {"y_true": y_true_perm, "y_pred": y_pred_perm, "subject_id": subject_perm}
                 )
                 r_perm, _, _, _ = compute_subject_level_r(perm_df, config, ci_method=ci_method)
                 if np.isfinite(r_perm):
                     null_rs.append(float(r_perm))
-            
+
             if (perm_idx + 1) % 10 == 0:
                 logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
 
@@ -1604,7 +1728,7 @@ def run_within_subject_regression_ml(
                 "Try machine_learning.cv.permutation_scheme='within_subject' and/or lower "
                 "machine_learning.cv.min_label_shuffle_fraction."
             )
-        
+
         n_perm_completed = int(len(null_rs))
         completion_rate = (n_perm_completed / int(n_perm)) if int(n_perm) > 0 else 0.0
         min_completion = float(
@@ -1618,9 +1742,13 @@ def run_within_subject_regression_ml(
 
         if n_perm_completed > 0 and np.isfinite(r_subj):
             null_rs_arr = np.asarray(null_rs, dtype=float)
-            p_value = float(((np.abs(null_rs_arr) >= np.abs(r_subj)).sum() + 1) / (len(null_rs_arr) + 1))
+            p_value = float(
+                ((np.abs(null_rs_arr) >= np.abs(r_subj)).sum() + 1) / (len(null_rs_arr) + 1)
+            )
             np.savez(null_dir / "within_subject_null.npz", null_r=null_rs_arr, empirical_r=r_subj)
-            logger.info(f"Within-subject permutation p-value: {p_value:.4f} (n_perm={len(null_rs_arr)})")
+            logger.info(
+                f"Within-subject permutation p-value: {p_value:.4f} (n_perm={len(null_rs_arr)})"
+            )
 
     # Compute pooled r for secondary reporting
     pooled_r, _ = safe_pearsonr(y_true_all, y_pred_all)
@@ -1638,7 +1766,7 @@ def run_within_subject_regression_ml(
         pd.DataFrame(subj_errors["per_subject"]).to_csv(
             metrics_dir / "per_subject_errors.tsv", sep="\t", index=False
         )
-    
+
     # Structure metrics with subject-level as PRIMARY
     metrics = {
         "model": model_name,
@@ -1715,24 +1843,52 @@ def run_within_subject_regression_ml(
     p_str = f", p={p_value:.4f}" if np.isfinite(p_value) else ""
     logger.info(
         "Within-subject regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
-        r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
+        r_subj,
+        ci_low,
+        ci_high,
+        p_str,
+        r2_val,
+        pooled_rmse,
     )
 
-    if bool(require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")):
+    if bool(
+        require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")
+    ):
         _run_permutation_importance_stage(
-            X, y, groups, _feature_names, config, rng_seed, 
-            int(require_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats")),
-            results_dir, logger,
-            model_name=model_name, covariates=covariates,
+            X,
+            y,
+            groups,
+            _feature_names,
+            config,
+            rng_seed,
+            int(
+                require_config_value(
+                    config, "machine_learning.analysis.permutation_importance.n_repeats"
+                )
+            ),
+            results_dir,
+            logger,
+            model_name=model_name,
+            covariates=covariates,
         )
 
     if bool(require_config_value(config, "machine_learning.analysis.shap.enabled")):
         _run_shap_importance_stage(
-            X, y, groups, _feature_names, config, rng_seed, results_dir, logger,
-            model_name=model_name, covariates=covariates,
+            X,
+            y,
+            groups,
+            _feature_names,
+            config,
+            rng_seed,
+            results_dir,
+            logger,
+            model_name=model_name,
+            covariates=covariates,
         )
 
-    _maybe_generate_mode_plots(mode="regression", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="regression", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -1754,7 +1910,8 @@ def run_time_generalization(
 
     logger.info(
         "Time generalization: %d subjects, %d permutations",
-        len(subjects), n_perm,
+        len(subjects),
+        n_perm,
     )
 
     results_dir = results_root / "time_generalization"
@@ -1789,7 +1946,9 @@ def run_time_generalization(
         float(np.nanmax(tg_r)) if tg_r is not None and len(tg_r) > 0 else float("nan"),
         _time.perf_counter() - t0,
     )
-    _maybe_generate_mode_plots(mode="timegen", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="timegen", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -1823,7 +1982,7 @@ def run_classification_ml(
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
     """Run LOSO binary classification machine learning.
-    
+
     Uses nested CV with hyperparameter tuning in inner loop.
     Reports AUC, balanced accuracy, and calibrated metrics.
     """
@@ -1831,19 +1990,26 @@ def run_classification_ml(
         nested_loso_classification,
     )
     from eeg_pipeline.analysis.machine_learning.cnn import nested_loso_cnn_classification
-    
+
     if target is None:
-        target = str(get_config_value(config, "machine_learning.targets.classification", "binary_outcome"))
+        target = str(
+            get_config_value(config, "machine_learning.targets.classification", "binary_outcome")
+        )
     if binary_threshold is None:
-        binary_threshold = get_config_value(config, "machine_learning.targets.binary_threshold", None)
+        binary_threshold = get_config_value(
+            config, "machine_learning.targets.binary_threshold", None
+        )
 
     if classification_model is not None and str(classification_model).strip():
         model_type = str(classification_model).strip().lower()
     else:
-        model_type = str(get_config_value(config, "machine_learning.classification.model", "svm")).strip().lower()
-    harmonization_mode = (
-        feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+        model_type = (
+            str(get_config_value(config, "machine_learning.classification.model", "svm"))
+            .strip()
+            .lower()
+        )
+    harmonization_mode = feature_harmonization or str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
     )
 
     if model_type == "cnn":
@@ -1881,13 +2047,17 @@ def run_classification_ml(
 
     n_subjects = len(np.unique(groups))
     n_features_desc = (
-        f"{X.shape[1]}ch \u00d7 {X.shape[2]}t" if X.ndim == 3
-        else f"{X.shape[1]} features"
+        f"{X.shape[1]}ch \u00d7 {X.shape[2]}t" if X.ndim == 3 else f"{X.shape[1]} features"
     )
     class_balance = float(np.mean(y_binary)) if len(y_binary) else float("nan")
     logger.info(
         "Classification: model=%s, %s, %d trials, %d subjects, target='%s', balance=%.2f",
-        model_type, n_features_desc, len(y_binary), n_subjects, target, class_balance,
+        model_type,
+        n_features_desc,
+        len(y_binary),
+        n_subjects,
+        target,
+        class_balance,
     )
 
     results_dir = results_root / "classification"
@@ -1898,8 +2068,17 @@ def run_classification_ml(
     null_dir = results_dir / "null"
     reports_dir = results_dir / "reports"
     importance_dir = results_dir / "importance"
-    
-    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+
+    for d in [
+        results_dir,
+        plots_dir,
+        data_dir,
+        metrics_dir,
+        models_dir,
+        null_dir,
+        reports_dir,
+        importance_dir,
+    ]:
         ensure_dir(d)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
 
@@ -1926,7 +2105,9 @@ def run_classification_ml(
             n_covariates=len(covariates) if covariates and model_type != "cnn" else 0,
         )
     failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
-    n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
+    n_folds_total = int(
+        getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups))
+    )
     failed_fold_fraction = float(failed_fold_count / max(n_folds_total, 1))
     max_failed_fold_fraction = float(
         get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
@@ -2008,17 +2189,25 @@ def run_classification_ml(
             row.update(rec)
             rows.append(row)
         if rows:
-            pd.DataFrame(rows).to_csv(metrics_dir / "per_subject_metrics.tsv", sep="\t", index=False)
+            pd.DataFrame(rows).to_csv(
+                metrics_dir / "per_subject_metrics.tsv", sep="\t", index=False
+            )
     auc_subject_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
-    balanced_accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
+    balanced_accuracy_subject_mean = _subject_mean_metric(
+        result.per_subject_metrics, "balanced_accuracy"
+    )
     accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "accuracy")
     precision_subject_mean = _subject_mean_metric(result.per_subject_metrics, "precision")
     recall_subject_mean = _subject_mean_metric(result.per_subject_metrics, "recall")
     f1_subject_mean = _subject_mean_metric(result.per_subject_metrics, "f1")
     specificity_subject_mean = _subject_mean_metric(result.per_subject_metrics, "specificity")
-    average_precision_subject_mean = _subject_mean_metric(result.per_subject_metrics, "average_precision")
+    average_precision_subject_mean = _subject_mean_metric(
+        result.per_subject_metrics, "average_precision"
+    )
     min_subjects_auc = int(
-        get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
+        get_config_value(
+            config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2
+        )
     )
     n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
     n_subjects_total = int(len(np.unique(groups_for_predictions)))
@@ -2050,7 +2239,9 @@ def run_classification_ml(
     )
     bal_ci_low, bal_ci_high = _bootstrap_mean_ci(bal_vals, rng=ci_rng, n_boot=n_boot)
     acc_ci_low, acc_ci_high = _bootstrap_mean_ci(acc_vals, rng=ci_rng, n_boot=n_boot)
-    precision_ci_low, precision_ci_high = _bootstrap_mean_ci(precision_vals, rng=ci_rng, n_boot=n_boot)
+    precision_ci_low, precision_ci_high = _bootstrap_mean_ci(
+        precision_vals, rng=ci_rng, n_boot=n_boot
+    )
     recall_ci_low, recall_ci_high = _bootstrap_mean_ci(recall_vals, rng=ci_rng, n_boot=n_boot)
     f1_ci_low, f1_ci_high = _bootstrap_mean_ci(f1_vals, rng=ci_rng, n_boot=n_boot)
     specificity_ci_low, specificity_ci_high = _bootstrap_mean_ci(
@@ -2067,6 +2258,7 @@ def run_classification_ml(
     if result.y_prob is not None:
         from sklearn.metrics import brier_score_loss
         from sklearn.calibration import calibration_curve
+
         probs = np.asarray(result.y_prob, dtype=float)
         y_true = np.asarray(result.y_true, dtype=float)
         finite_prob_mask = np.isfinite(probs) & np.isfinite(y_true)
@@ -2108,9 +2300,9 @@ def run_classification_ml(
             except Exception:
                 calibration_data = {}
                 ece = np.nan
-    
+
     p_value_auc = np.nan
-    
+
     if n_perm > 0:
         logger.info(f"Running {n_perm} permutations for classification inference...")
         null_path = null_dir / f"classification_null_{model_type}.npz"
@@ -2131,7 +2323,9 @@ def run_classification_ml(
         if null_aucs is not None and np.isfinite(auc_for_inference):
             finite_null = null_aucs[np.isfinite(null_aucs)]
             if len(finite_null) > 0:
-                p_value_auc = float(((finite_null >= auc_for_inference).sum() + 1) / (len(finite_null) + 1))
+                p_value_auc = float(
+                    ((finite_null >= auc_for_inference).sum() + 1) / (len(finite_null) + 1)
+                )
                 np.savez(
                     null_path,
                     null_auc=finite_null,
@@ -2163,9 +2357,7 @@ def run_classification_ml(
             else np.nan
         ),
         "accuracy": (
-            float(accuracy_subject_mean)
-            if np.isfinite(accuracy_subject_mean)
-            else np.nan
+            float(accuracy_subject_mean) if np.isfinite(accuracy_subject_mean) else np.nan
         ),
         "average_precision": (
             float(average_precision_subject_mean)
@@ -2173,20 +2365,12 @@ def run_classification_ml(
             else np.nan
         ),
         "precision": (
-            float(precision_subject_mean)
-            if np.isfinite(precision_subject_mean)
-            else np.nan
+            float(precision_subject_mean) if np.isfinite(precision_subject_mean) else np.nan
         ),
-        "recall": (
-            float(recall_subject_mean)
-            if np.isfinite(recall_subject_mean)
-            else np.nan
-        ),
+        "recall": (float(recall_subject_mean) if np.isfinite(recall_subject_mean) else np.nan),
         "f1": float(f1_subject_mean) if np.isfinite(f1_subject_mean) else np.nan,
         "specificity": (
-            float(specificity_subject_mean)
-            if np.isfinite(specificity_subject_mean)
-            else np.nan
+            float(specificity_subject_mean) if np.isfinite(specificity_subject_mean) else np.nan
         ),
         "brier_score": brier,
         "expected_calibration_error": ece,
@@ -2212,7 +2396,9 @@ def run_classification_ml(
             ),
             "balanced_accuracy_ci_low": bal_ci_low,
             "balanced_accuracy_ci_high": bal_ci_high,
-            "accuracy_mean": float(accuracy_subject_mean) if np.isfinite(accuracy_subject_mean) else np.nan,
+            "accuracy_mean": (
+                float(accuracy_subject_mean) if np.isfinite(accuracy_subject_mean) else np.nan
+            ),
             "accuracy_ci_low": acc_ci_low,
             "accuracy_ci_high": acc_ci_high,
             "average_precision_mean": (
@@ -2222,19 +2408,21 @@ def run_classification_ml(
             ),
             "average_precision_ci_low": average_precision_ci_low,
             "average_precision_ci_high": average_precision_ci_high,
-            "precision_mean": float(precision_subject_mean) if np.isfinite(precision_subject_mean) else np.nan,
+            "precision_mean": (
+                float(precision_subject_mean) if np.isfinite(precision_subject_mean) else np.nan
+            ),
             "precision_ci_low": precision_ci_low,
             "precision_ci_high": precision_ci_high,
-            "recall_mean": float(recall_subject_mean) if np.isfinite(recall_subject_mean) else np.nan,
+            "recall_mean": (
+                float(recall_subject_mean) if np.isfinite(recall_subject_mean) else np.nan
+            ),
             "recall_ci_low": recall_ci_low,
             "recall_ci_high": recall_ci_high,
             "f1_mean": float(f1_subject_mean) if np.isfinite(f1_subject_mean) else np.nan,
             "f1_ci_low": f1_ci_low,
             "f1_ci_high": f1_ci_high,
             "specificity_mean": (
-                float(specificity_subject_mean)
-                if np.isfinite(specificity_subject_mean)
-                else np.nan
+                float(specificity_subject_mean) if np.isfinite(specificity_subject_mean) else np.nan
             ),
             "specificity_ci_low": specificity_ci_low,
             "specificity_ci_high": specificity_ci_high,
@@ -2245,13 +2433,13 @@ def run_classification_ml(
         },
         "pooled_trials": {
             "auc": float(result.auc) if np.isfinite(result.auc) else np.nan,
-            "balanced_accuracy": float(result.balanced_accuracy)
-            if np.isfinite(result.balanced_accuracy)
-            else np.nan,
+            "balanced_accuracy": (
+                float(result.balanced_accuracy) if np.isfinite(result.balanced_accuracy) else np.nan
+            ),
             "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
-            "average_precision": float(result.average_precision)
-            if np.isfinite(result.average_precision)
-            else np.nan,
+            "average_precision": (
+                float(result.average_precision) if np.isfinite(result.average_precision) else np.nan
+            ),
             "precision": float(result.precision) if np.isfinite(result.precision) else np.nan,
             "recall": float(result.recall) if np.isfinite(result.recall) else np.nan,
             "f1": float(result.f1) if np.isfinite(result.f1) else np.nan,
@@ -2262,7 +2450,7 @@ def run_classification_ml(
         metrics["auc_reporting_note"] = (
             "Subject-level AUC inference is invalid for this run; pooled-trial AUC is reported for diagnostics only."
         )
-    
+
     # Save calibration data separately
     if calibration_data:
         _write_json(calibration_data, metrics_dir / "calibration_data.json")
@@ -2282,7 +2470,11 @@ def run_classification_ml(
             config=config,
             logger=logger,
             harmonization_mode=feature_harmonization
-            or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
+            or str(
+                get_config_value(
+                    config, "machine_learning.data.feature_harmonization", "intersection"
+                )
+            ),
             covariates=covariates,
         )
         if null_aucs is not None and len(null_aucs) > 0 and np.isfinite(auc_for_inference):
@@ -2323,10 +2515,18 @@ def run_classification_ml(
     logger.info(
         "Classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f, Brier=%.3f%s",
         float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
-        float(balanced_accuracy_subject_mean) if np.isfinite(balanced_accuracy_subject_mean) else result.balanced_accuracy,
-        float(f1_subject_mean) if np.isfinite(f1_subject_mean) else result.f1, brier, p_info,
+        (
+            float(balanced_accuracy_subject_mean)
+            if np.isfinite(balanced_accuracy_subject_mean)
+            else result.balanced_accuracy
+        ),
+        float(f1_subject_mean) if np.isfinite(f1_subject_mean) else result.f1,
+        brier,
+        p_info,
     )
-    _maybe_generate_mode_plots(mode="classify", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="classify", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -2371,17 +2571,24 @@ def run_within_subject_classification_ml(
     from sklearn.model_selection import StratifiedGroupKFold
 
     if target is None:
-        target = str(get_config_value(config, "machine_learning.targets.classification", "binary_outcome"))
+        target = str(
+            get_config_value(config, "machine_learning.targets.classification", "binary_outcome")
+        )
     if binary_threshold is None:
-        binary_threshold = get_config_value(config, "machine_learning.targets.binary_threshold", None)
+        binary_threshold = get_config_value(
+            config, "machine_learning.targets.binary_threshold", None
+        )
 
     if classification_model is not None and str(classification_model).strip():
         model_type = str(classification_model).strip().lower()
     else:
-        model_type = str(get_config_value(config, "machine_learning.classification.model", "svm")).strip().lower()
-    harmonization_mode = (
-        feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+        model_type = (
+            str(get_config_value(config, "machine_learning.classification.model", "svm"))
+            .strip()
+            .lower()
+        )
+    harmonization_mode = feature_harmonization or str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
     )
 
     if model_type == "cnn":
@@ -2436,13 +2643,17 @@ def run_within_subject_classification_ml(
 
     n_subjects = len(np.unique(groups))
     n_features_desc = (
-        f"{X.shape[1]}ch \u00d7 {X.shape[2]}t" if X.ndim == 3
-        else f"{X.shape[1]} features"
+        f"{X.shape[1]}ch \u00d7 {X.shape[2]}t" if X.ndim == 3 else f"{X.shape[1]} features"
     )
     class_balance = float(np.mean(y)) if len(y) else float("nan")
     logger.info(
         "Within-subject classification: model=%s, %s, %d trials, %d subjects, target='%s', balance=%.2f",
-        model_type, n_features_desc, len(y), n_subjects, target, class_balance,
+        model_type,
+        n_features_desc,
+        len(y),
+        n_subjects,
+        target,
+        class_balance,
     )
 
     if model_type == "cnn":
@@ -2507,9 +2718,7 @@ def run_within_subject_classification_ml(
 
             unique_train = np.unique(y_train)
             if len(unique_train) < 2:
-                raise RuntimeError(
-                    f"{fold_label}: only one class in training."
-                )
+                raise RuntimeError(f"{fold_label}: only one class in training.")
 
             # Inner CV: stratified and run-aware (within subject).
             n_unique_blocks = len(np.unique(blocks_train))
@@ -2614,8 +2823,17 @@ def run_within_subject_classification_ml(
     null_dir = results_dir / "null"
     reports_dir = results_dir / "reports"
     importance_dir = results_dir / "importance"
-    
-    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+
+    for d in [
+        results_dir,
+        plots_dir,
+        data_dir,
+        metrics_dir,
+        models_dir,
+        null_dir,
+        reports_dir,
+        importance_dir,
+    ]:
         ensure_dir(d)
     subject_selection = export_subject_selection_report(
         results_dir,
@@ -2679,7 +2897,9 @@ def run_within_subject_classification_ml(
             row.update(rec)
             rows.append(row)
         if rows:
-            pd.DataFrame(rows).to_csv(metrics_dir / "per_subject_metrics.tsv", sep="\t", index=False)
+            pd.DataFrame(rows).to_csv(
+                metrics_dir / "per_subject_metrics.tsv", sep="\t", index=False
+            )
 
     auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
     bal_acc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
@@ -2690,7 +2910,9 @@ def run_within_subject_classification_ml(
     specificity_subj_mean = _subject_mean_metric(result.per_subject_metrics, "specificity")
     avg_precision_subj_mean = _subject_mean_metric(result.per_subject_metrics, "average_precision")
     min_subjects_auc = int(
-        get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
+        get_config_value(
+            config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2
+        )
     )
     n_subjects_total = int(len(np.unique(groups_ordered)))
     n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
@@ -2702,7 +2924,9 @@ def run_within_subject_classification_ml(
             int(n_subjects_total),
             int(min_subjects_auc),
         )
-    auc_for_inference = auc_subj_mean if (np.isfinite(auc_subj_mean) and auc_inference_valid) else np.nan
+    auc_for_inference = (
+        auc_subj_mean if (np.isfinite(auc_subj_mean) and auc_inference_valid) else np.nan
+    )
     n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
     ci_rng = np.random.default_rng(int(rng_seed) + 401)
     auc_vals = _subject_metric_values(result.per_subject_metrics, "auc")
@@ -2720,7 +2944,9 @@ def run_within_subject_classification_ml(
     )
     bal_ci_low, bal_ci_high = _bootstrap_mean_ci(bal_vals, rng=ci_rng, n_boot=n_boot)
     acc_ci_low, acc_ci_high = _bootstrap_mean_ci(acc_vals, rng=ci_rng, n_boot=n_boot)
-    precision_ci_low, precision_ci_high = _bootstrap_mean_ci(precision_vals, rng=ci_rng, n_boot=n_boot)
+    precision_ci_low, precision_ci_high = _bootstrap_mean_ci(
+        precision_vals, rng=ci_rng, n_boot=n_boot
+    )
     recall_ci_low, recall_ci_high = _bootstrap_mean_ci(recall_vals, rng=ci_rng, n_boot=n_boot)
     f1_ci_low, f1_ci_high = _bootstrap_mean_ci(f1_vals, rng=ci_rng, n_boot=n_boot)
     specificity_ci_low, specificity_ci_high = _bootstrap_mean_ci(
@@ -2773,9 +2999,9 @@ def run_within_subject_classification_ml(
             "auc_mean": float(auc_subj_mean) if np.isfinite(auc_subj_mean) else np.nan,
             "auc_ci_low": auc_ci_low,
             "auc_ci_high": auc_ci_high,
-            "balanced_accuracy_mean": float(bal_acc_subj_mean)
-            if np.isfinite(bal_acc_subj_mean)
-            else np.nan,
+            "balanced_accuracy_mean": (
+                float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else np.nan
+            ),
             "balanced_accuracy_ci_low": bal_ci_low,
             "balanced_accuracy_ci_high": bal_ci_high,
             "accuracy_mean": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else np.nan,
@@ -2786,7 +3012,9 @@ def run_within_subject_classification_ml(
             ),
             "average_precision_ci_low": avg_precision_ci_low,
             "average_precision_ci_high": avg_precision_ci_high,
-            "precision_mean": float(precision_subj_mean) if np.isfinite(precision_subj_mean) else np.nan,
+            "precision_mean": (
+                float(precision_subj_mean) if np.isfinite(precision_subj_mean) else np.nan
+            ),
             "precision_ci_low": precision_ci_low,
             "precision_ci_high": precision_ci_high,
             "recall_mean": float(recall_subj_mean) if np.isfinite(recall_subj_mean) else np.nan,
@@ -2807,13 +3035,13 @@ def run_within_subject_classification_ml(
         },
         "pooled_trials": {
             "auc": float(result.auc) if np.isfinite(result.auc) else np.nan,
-            "balanced_accuracy": float(result.balanced_accuracy)
-            if np.isfinite(result.balanced_accuracy)
-            else np.nan,
+            "balanced_accuracy": (
+                float(result.balanced_accuracy) if np.isfinite(result.balanced_accuracy) else np.nan
+            ),
             "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
-            "average_precision": float(result.average_precision)
-            if np.isfinite(result.average_precision)
-            else np.nan,
+            "average_precision": (
+                float(result.average_precision) if np.isfinite(result.average_precision) else np.nan
+            ),
             "precision": float(result.precision) if np.isfinite(result.precision) else np.nan,
             "recall": float(result.recall) if np.isfinite(result.recall) else np.nan,
             "f1": float(result.f1) if np.isfinite(result.f1) else np.nan,
@@ -2838,7 +3066,9 @@ def run_within_subject_classification_ml(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
         )
         max_failed_perm_fraction = float(
-            get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
+            get_config_value(
+                config, "machine_learning.classification.max_failed_fold_fraction", 0.25
+            )
         )
         for i in range(int(n_perm)):
             y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
@@ -2867,7 +3097,9 @@ def run_within_subject_classification_ml(
             perm_records = sorted(perm_records, key=lambda r: r["fold"])
             y_true_p = np.concatenate([np.asarray(r["y_true"]) for r in perm_records]).astype(int)
             try:
-                y_pred_p = np.concatenate([np.asarray(r["y_pred"]) for r in perm_records]).astype(int)
+                y_pred_p = np.concatenate([np.asarray(r["y_pred"]) for r in perm_records]).astype(
+                    int
+                )
                 groups_p: List[str] = []
                 y_prob_parts = []
                 has_prob = True
@@ -2890,9 +3122,8 @@ def run_within_subject_classification_ml(
                     perm_result.per_subject_metrics,
                     "auc",
                 )
-                if (
-                    perm_n_subjects_with_auc >= int(min_subjects_auc)
-                    and np.isfinite(perm_auc_subj_mean)
+                if perm_n_subjects_with_auc >= int(min_subjects_auc) and np.isfinite(
+                    perm_auc_subj_mean
                 ):
                     null_auc.append(float(perm_auc_subj_mean))
             except Exception:
@@ -2920,7 +3151,9 @@ def run_within_subject_classification_ml(
             null_auc_arr = np.asarray(null_auc, dtype=float)
             metrics["n_perm_requested"] = int(n_perm)
             metrics["n_perm_completed"] = int(len(null_auc_arr))
-            p_val = float(((null_auc_arr >= float(auc_for_inference)).sum() + 1) / (len(null_auc_arr) + 1))
+            p_val = float(
+                ((null_auc_arr >= float(auc_for_inference)).sum() + 1) / (len(null_auc_arr) + 1)
+            )
             metrics["p_value_auc"] = p_val
             np.savez(
                 null_dir / f"cv_null_{model_type}.npz",
@@ -2954,9 +3187,12 @@ def run_within_subject_classification_ml(
         "Within-subject classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f%s",
         float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
         float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else result.balanced_accuracy,
-        float(f1_subj_mean) if np.isfinite(f1_subj_mean) else result.f1, p_info,
+        float(f1_subj_mean) if np.isfinite(f1_subj_mean) else result.f1,
+        p_info,
     )
-    _maybe_generate_mode_plots(mode="classify", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="classify", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -2978,7 +3214,7 @@ def _run_classification_permutations(
     """Run permutation test for classification."""
     from eeg_pipeline.analysis.machine_learning.classification import nested_loso_classification
     from eeg_pipeline.analysis.machine_learning.cnn import nested_loso_cnn_classification
-    
+
     rng = np.random.default_rng(seed)
     null_aucs = []
     n_effective = 0
@@ -2988,12 +3224,14 @@ def _run_classification_permutations(
 
     perm_scheme = _resolve_permutation_scheme(config)
     blocks_arr = _validate_permutation_runs(y, blocks, scheme=perm_scheme)
-    
+
     max_failed_perm_fraction = float(
         get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
     )
     min_subjects_auc = int(
-        get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
+        get_config_value(
+            config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2
+        )
     )
 
     for i in range(n_perm):
@@ -3008,7 +3246,7 @@ def _run_classification_permutations(
         if not effective:
             continue
         n_effective += 1
-        
+
         try:
             if str(model).strip().lower() == "cnn":
                 result, _ = nested_loso_cnn_classification(
@@ -3033,7 +3271,9 @@ def _run_classification_permutations(
                     n_covariates=len(covariates) if covariates else 0,
                 )
             perm_failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
-            perm_n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
+            perm_n_folds_total = int(
+                getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups))
+            )
             perm_failed_fraction = float(perm_failed_fold_count / max(perm_n_folds_total, 1))
             if perm_failed_fraction > max_failed_perm_fraction:
                 continue
@@ -3048,7 +3288,7 @@ def _run_classification_permutations(
                 exc,
             )
             continue
-        
+
         if (i + 1) % 10 == 0:
             logger.info(f"Permutation {i + 1}/{n_perm}")
 
@@ -3061,7 +3301,9 @@ def _run_classification_permutations(
 
     n_completed = len(null_aucs)
     completion_rate = (n_completed / n_perm) if n_perm > 0 else 0.0
-    min_completion = float(get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5))
+    min_completion = float(
+        get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5)
+    )
     if n_perm > 0 and completion_rate < min_completion:
         raise RuntimeError(
             f"Insufficient valid classification permutations ({n_completed}/{n_perm}, "
@@ -3196,14 +3438,14 @@ def write_reproducibility_info(
     input_hashes: Dict[str, Any],
 ) -> Path:
     """Write reproducibility information for ML results.
-    
+
     Includes: config snapshot, data signature, sklearn version, RNG seed.
     """
     import sklearn
-    
+
     subjects_str = ",".join(sorted(subjects))
     data_hash = hashlib.sha256(subjects_str.encode()).hexdigest()[:16]
-    
+
     repro_info = {
         "sklearn_version": sklearn.__version__,
         "numpy_version": np.__version__,
@@ -3217,14 +3459,14 @@ def write_reproducibility_info(
         "input_hashes": _json_safe(input_hashes),
         "config_snapshot": _json_safe(dict(config) if isinstance(config, dict) else config),
     }
-    
+
     reports_dir = results_dir / "reports"
     ensure_dir(reports_dir)
-    
+
     repro_path = reports_dir / "reproducibility_info.json"
     with open(repro_path, "w") as f:
         json.dump(repro_info, f, indent=2, default=str)
-    
+
     return repro_path
 
 
@@ -3234,19 +3476,19 @@ def compute_baseline_predictions(
     task: str = "regression",
 ) -> Tuple[np.ndarray, Dict[str, float]]:
     """Compute baseline (null) model predictions for sanity checks.
-    
+
     Regression: mean predictor (leave-one-subject-out mean)
     Classification: majority class predictor
-    
+
     Returns:
         y_pred_baseline: Baseline predictions
         baseline_metrics: Baseline model metrics
     """
     from sklearn.model_selection import LeaveOneGroupOut
-    
+
     y_pred = np.zeros_like(y, dtype=float)
     logo = LeaveOneGroupOut()
-    
+
     for train_idx, test_idx in logo.split(y, y, groups):
         if task == "regression":
             y_pred[test_idx] = np.nanmean(y[train_idx])
@@ -3254,18 +3496,20 @@ def compute_baseline_predictions(
             # Majority class
             classes, counts = np.unique(y[train_idx], return_counts=True)
             y_pred[test_idx] = classes[np.argmax(counts)]
-    
+
     if task == "regression":
         from sklearn.metrics import r2_score, mean_absolute_error
+
         r2 = r2_score(y, y_pred)
         mae = mean_absolute_error(y, y_pred)
         metrics = {"baseline_r2": r2, "baseline_mae": mae}
     else:
         from sklearn.metrics import balanced_accuracy_score, accuracy_score
+
         acc = accuracy_score(y, y_pred)
         bal_acc = balanced_accuracy_score(y, y_pred)
         metrics = {"baseline_accuracy": acc, "baseline_balanced_accuracy": bal_acc}
-    
+
     return y_pred, metrics
 
 
@@ -3277,18 +3521,20 @@ def export_baseline_predictions(
 ) -> Dict[str, float]:
     """Compute and export baseline model predictions."""
     y_pred_baseline, baseline_metrics = compute_baseline_predictions(y_true, groups, task)
-    
-    baseline_df = pd.DataFrame({
-        "subject_id": groups,
-        "y_true": y_true,
-        "y_pred_baseline": y_pred_baseline,
-    })
-    
+
+    baseline_df = pd.DataFrame(
+        {
+            "subject_id": groups,
+            "y_true": y_true,
+            "y_pred_baseline": y_pred_baseline,
+        }
+    )
+
     data_dir = results_dir / "data"
     ensure_dir(data_dir)
-    
+
     baseline_df.to_csv(data_dir / "baseline_predictions.tsv", sep="\t", index=False)
-    
+
     return baseline_metrics
 
 
@@ -3331,7 +3577,9 @@ def _fit_estimator_with_optional_groups(
     groups: np.ndarray,
 ) -> Any:
     fit_params: dict[str, Any] = {}
-    pipeline = estimator if isinstance(estimator, Pipeline) else getattr(estimator, "regressor", None)
+    pipeline = (
+        estimator if isinstance(estimator, Pipeline) else getattr(estimator, "regressor", None)
+    )
     if isinstance(pipeline, Pipeline):
         step_names = [name for name, _step in pipeline.steps]
         if "missingness" in step_names:
@@ -3443,6 +3691,7 @@ def model_comparison_cv_predictions(
             if residualization_strategy == "staged_residual_learning":
                 from sklearn.preprocessing import PowerTransformer
                 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+
                 cfg = get_ml_config(config)
                 pt = PowerTransformer(
                     method=cfg.get("power_transformer_method", "yeo-johnson"),
@@ -3456,9 +3705,7 @@ def model_comparison_cv_predictions(
                     test_idx=test_idx,
                     columns=target_residualization_columns,
                 )
-                y_train = pt.fit_transform(
-                    nuisance_fit.train_residual.reshape(-1, 1)
-                ).flatten()
+                y_train = pt.fit_transform(nuisance_fit.train_residual.reshape(-1, 1)).flatten()
                 y_test = nuisance_fit.test_target
                 nuisance_test_prediction = nuisance_fit.test_prediction
                 residualization_details = nuisance_fit.details
@@ -3466,6 +3713,7 @@ def model_comparison_cv_predictions(
                 from eeg_pipeline.analysis.machine_learning.target_residualization import (
                     _design_matrix,
                 )
+
                 design_train = _design_matrix(
                     meta.iloc[train_idx],
                     tuple(target_residualization_columns),
@@ -3481,6 +3729,7 @@ def model_comparison_cv_predictions(
                 X_test = X_test - design_test @ coeffs_X
 
                 from sklearn.compose import TransformedTargetRegressor
+
                 if isinstance(current_pipe, TransformedTargetRegressor):
                     current_pipe = clone(current_pipe.regressor)
                     new_param_grid = {}
@@ -3538,10 +3787,7 @@ def model_comparison_cv_predictions(
                 fold_residual_prediction = pt.inverse_transform(
                     np.asarray(fold_pred, dtype=float).reshape(-1, 1)
                 ).flatten()
-            fold_pred = (
-                np.asarray(nuisance_test_prediction, dtype=float)
-                + fold_residual_prediction
-            )
+            fold_pred = np.asarray(nuisance_test_prediction, dtype=float) + fold_residual_prediction
             nuisance_prediction[test_idx] = np.asarray(
                 nuisance_test_prediction,
                 dtype=float,
@@ -3570,11 +3816,7 @@ def model_comparison_cv_predictions(
         if nuisance_test_prediction is not None:
             nuisance_pred_raw = np.asarray(nuisance_test_prediction, dtype=float)
             nuisance_res = np.sum((y_test_raw - nuisance_pred_raw) ** 2)
-            nuisance_r2 = (
-                float(1.0 - (nuisance_res / ss_tot))
-                if ss_tot > 1e-12
-                else np.nan
-            )
+            nuisance_r2 = float(1.0 - (nuisance_res / ss_tot)) if ss_tot > 1e-12 else np.nan
             nuisance_mae = float(mean_absolute_error(y_test_raw, nuisance_pred_raw))
 
         records.append(
@@ -3706,7 +3948,9 @@ def _model_comparison_permutation_p_value(
                 break
     requested_scheme = _resolve_permutation_scheme(config)
     min_changed_fraction = float(
-        get_config_value(config, "machine_learning.cv.min_effective_permutation_changed_fraction", 0.01)
+        get_config_value(
+            config, "machine_learning.cv.min_effective_permutation_changed_fraction", 0.01
+        )
     )
     max_invalid_fraction = float(
         get_config_value(
@@ -3716,9 +3960,7 @@ def _model_comparison_permutation_p_value(
         )
     )
     if not 0.0 <= max_invalid_fraction < 1.0:
-        raise ValueError(
-            "machine_learning.cv.max_invalid_permutation_fraction must be in [0, 1)."
-        )
+        raise ValueError("machine_learning.cv.max_invalid_permutation_fraction must be in [0, 1).")
     max_attempts = int(np.ceil(int(n_perm) / (1.0 - max_invalid_fraction)))
     residualization_strategy = _resolve_target_residualization_strategy(config)
     use_staged_residual_permutation = (
@@ -3870,9 +4112,7 @@ def _within_subject_centered_prediction_metrics(
         subject_mask = group_array == subject_id
         centered_target[subject_mask] = target[subject_mask] - np.mean(target[subject_mask])
         centered_full[subject_mask] = full[subject_mask] - np.mean(full[subject_mask])
-        centered_nuisance[subject_mask] = nuisance[subject_mask] - np.mean(
-            nuisance[subject_mask]
-        )
+        centered_nuisance[subject_mask] = nuisance[subject_mask] - np.mean(nuisance[subject_mask])
 
     denominator = float(centered_target @ centered_target)
     if denominator <= 1.0e-12:
@@ -3916,10 +4156,10 @@ def run_model_comparison_ml(
     model_names: Optional[List[str]] = None,
 ) -> Path:
     """Compare multiple model families with identical outer folds.
-    
+
     Compares ElasticNet vs Random Forest vs Ridge/SVR using nested CV.
     All models share the same outer folds for valid comparison.
-    
+
     Outputs:
         model_comparison.tsv: Per-fold metrics for each model
         model_comparison_summary.json: Aggregated comparison statistics
@@ -3963,11 +4203,14 @@ def run_model_comparison_ml(
         config=config,
         logger=logger,
     )
-    
+
     n_subjects = len(np.unique(groups))
     logger.info(
         "Model comparison: %d features \u00d7 %d trials, %d subjects, target='%s'",
-        X.shape[1], X.shape[0], n_subjects, target,
+        X.shape[1],
+        X.shape[0],
+        n_subjects,
+        target,
     )
 
     results_dir = results_root / "model_comparison"
@@ -3975,7 +4218,7 @@ def run_model_comparison_ml(
     ensure_dir(results_dir)
     ensure_dir(metrics_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
-    
+
     # Define model pipelines (shared preprocessing + config)
     available_models = {
         "elasticnet": {
@@ -3998,20 +4241,20 @@ def run_model_comparison_ml(
     if unknown_models:
         raise ValueError(f"Unknown model comparison model(s): {unknown_models}")
     models = {name: available_models[name] for name in requested_models}
-    
+
     # Shared outer CV folds
     from sklearn.model_selection import LeaveOneGroupOut
+
     outer_cv = LeaveOneGroupOut()
-    harmonization_mode = (
-        feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    harmonization_mode = feature_harmonization or str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
     )
     outer_folds = list(outer_cv.split(X, y, groups))
-    
+
     comparison_records = []
     observed_overall_r2: Dict[str, float] = {}
     observed_predictions: Dict[str, ModelComparisonPredictions] = {}
-    
+
     import time as _time
 
     for model_name, model_spec in models.items():
@@ -4037,9 +4280,10 @@ def run_model_comparison_ml(
             collect_records=True,
         )
         comparison_records.extend(prediction_result.records)
-        
+
         # Overall metrics
         from sklearn.metrics import r2_score
+
         overall_r2 = r2_score(
             prediction_result.evaluation_target,
             prediction_result.full_prediction,
@@ -4048,14 +4292,16 @@ def run_model_comparison_ml(
         observed_predictions[model_name] = prediction_result
         logger.info(
             "  \u2713 %s: R\u00b2=%.4f (%.1fs)",
-            model_name, overall_r2, _time.perf_counter() - t_model,
+            model_name,
+            overall_r2,
+            _time.perf_counter() - t_model,
         )
-    
+
     # Save comparison results
     comparison_df = pd.DataFrame(comparison_records)
     comparison_df.to_csv(metrics_dir / "model_comparison.tsv", sep="\t", index=False)
     comparison_df.to_csv(results_dir / "model_comparison.tsv", sep="\t", index=False)
-    
+
     # Summary statistics (fold-level; outer unit = subject)
     summary: Dict[str, Any] = {
         "data": {
@@ -4114,21 +4360,15 @@ def run_model_comparison_ml(
                 errors="coerce",
             ).to_numpy(dtype=float)
             if np.any(np.isfinite(nuisance_r2_vals)):
-                summary[model_name]["mean_nuisance_r2"] = float(
-                    np.nanmean(nuisance_r2_vals)
-                )
-                summary[model_name]["std_nuisance_r2"] = float(
-                    np.nanstd(nuisance_r2_vals, ddof=1)
-                )
+                summary[model_name]["mean_nuisance_r2"] = float(np.nanmean(nuisance_r2_vals))
+                summary[model_name]["std_nuisance_r2"] = float(np.nanstd(nuisance_r2_vals, ddof=1))
         if "mae_nuisance" in model_rows.columns:
             nuisance_mae_vals = pd.to_numeric(
                 model_rows["mae_nuisance"],
                 errors="coerce",
             ).to_numpy(dtype=float)
             if np.any(np.isfinite(nuisance_mae_vals)):
-                summary[model_name]["mean_nuisance_mae"] = float(
-                    np.nanmean(nuisance_mae_vals)
-                )
+                summary[model_name]["mean_nuisance_mae"] = float(np.nanmean(nuisance_mae_vals))
         primary_score_column = "r2"
         if "delta_r2" in model_rows.columns:
             delta_r2_vals = pd.to_numeric(
@@ -4142,9 +4382,7 @@ def run_model_comparison_ml(
                     n_boot=n_boot,
                 )
                 summary[model_name]["mean_delta_r2"] = float(np.nanmean(delta_r2_vals))
-                summary[model_name]["std_delta_r2"] = float(
-                    np.nanstd(delta_r2_vals, ddof=1)
-                )
+                summary[model_name]["std_delta_r2"] = float(np.nanstd(delta_r2_vals, ddof=1))
                 summary[model_name]["ci_low_delta_r2"] = delta_ci_low
                 summary[model_name]["ci_high_delta_r2"] = delta_ci_high
                 primary_score_column = "delta_r2"
@@ -4182,9 +4420,9 @@ def run_model_comparison_ml(
             summary[model_name]["n_perm_completed"] = permutation.n_perm_completed
             summary[model_name]["n_perm_attempted"] = permutation.n_perm_attempted
             summary[model_name]["n_invalid_permutations"] = permutation.n_invalid_permutations
-            summary[model_name]["max_invalid_permutation_fraction"] = (
-                permutation.max_invalid_permutation_fraction
-            )
+            summary[model_name][
+                "max_invalid_permutation_fraction"
+            ] = permutation.max_invalid_permutation_fraction
 
     # Pairwise model-difference inference (subject-paired by held-out fold).
     pairwise: Dict[str, Any] = {}
@@ -4205,22 +4443,24 @@ def run_model_comparison_ml(
             if merged.empty:
                 continue
 
-            delta_r2 = (
-                pd.to_numeric(merged["r2_a"], errors="coerce").to_numpy(dtype=float)
-                - pd.to_numeric(merged["r2_b"], errors="coerce").to_numpy(dtype=float)
-            )
-            delta_mae = (
-                pd.to_numeric(merged["mae_a"], errors="coerce").to_numpy(dtype=float)
-                - pd.to_numeric(merged["mae_b"], errors="coerce").to_numpy(dtype=float)
-            )
+            delta_r2 = pd.to_numeric(merged["r2_a"], errors="coerce").to_numpy(
+                dtype=float
+            ) - pd.to_numeric(merged["r2_b"], errors="coerce").to_numpy(dtype=float)
+            delta_mae = pd.to_numeric(merged["mae_a"], errors="coerce").to_numpy(
+                dtype=float
+            ) - pd.to_numeric(merged["mae_b"], errors="coerce").to_numpy(dtype=float)
             r2_ci_low, r2_ci_high = _bootstrap_mean_ci(delta_r2, rng=pair_rng, n_boot=n_boot)
             mae_ci_low, mae_ci_high = _bootstrap_mean_ci(delta_mae, rng=pair_rng, n_boot=n_boot)
             pair_rec: Dict[str, Any] = {
                 "n_subjects": int(np.sum(np.isfinite(delta_r2))),
-                "mean_delta_r2": float(np.nanmean(delta_r2)) if np.any(np.isfinite(delta_r2)) else np.nan,
+                "mean_delta_r2": (
+                    float(np.nanmean(delta_r2)) if np.any(np.isfinite(delta_r2)) else np.nan
+                ),
                 "ci_low_delta_r2": r2_ci_low,
                 "ci_high_delta_r2": r2_ci_high,
-                "mean_delta_mae": float(np.nanmean(delta_mae)) if np.any(np.isfinite(delta_mae)) else np.nan,
+                "mean_delta_mae": (
+                    float(np.nanmean(delta_mae)) if np.any(np.isfinite(delta_mae)) else np.nan
+                ),
                 "ci_low_delta_mae": mae_ci_low,
                 "ci_high_delta_mae": mae_ci_high,
             }
@@ -4276,9 +4516,9 @@ def run_model_comparison_ml(
                 for pair_name, p_adj in zip(pair_names, p_adjusted):
                     pairwise[pair_name][adj_key] = float(p_adj)
     summary["pairwise_inference"] = pairwise
-    
+
     _write_json(summary, metrics_dir / "model_comparison_summary.json")
-    
+
     write_reproducibility_info(
         results_dir,
         subjects,
@@ -4295,11 +4535,14 @@ def run_model_comparison_ml(
     best_model = max(models.keys(), key=lambda m: summary[m]["mean_r2"])
     logger.info(
         "Model comparison complete: best=%s (mean R\u00b2=%.4f)",
-        best_model, summary[best_model]["mean_r2"],
+        best_model,
+        summary[best_model]["mean_r2"],
     )
-    _maybe_generate_mode_plots(mode="model_comparison", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="model_comparison", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
-    
+
     return results_dir
 
 
@@ -4335,7 +4578,7 @@ def run_incremental_validity_ml(
     - Full: predictor + EEG features
 
     All evaluations strictly out-of-fold to avoid leakage.
-    
+
     Outputs:
         incremental_validity.tsv: Per-fold performance for baseline vs full
         incremental_validity_summary.json: Aggregated Δ statistics
@@ -4368,11 +4611,14 @@ def run_incremental_validity_ml(
         config,
         context="Incremental validity",
     )
-    
+
     n_subjects = len(np.unique(groups))
     logger.info(
         "Incremental validity: %d features \u00d7 %d trials, %d subjects, target='%s'",
-        X.shape[1], X.shape[0], n_subjects, target,
+        X.shape[1],
+        X.shape[0],
+        n_subjects,
+        target,
     )
 
     results_dir = results_root / "incremental_validity"
@@ -4412,20 +4658,21 @@ def run_incremental_validity_ml(
         )
 
     require_baseline_predictors = bool(
-        get_config_value(config, "machine_learning.incremental_validity.require_baseline_predictors", True)
+        get_config_value(
+            config, "machine_learning.incremental_validity.require_baseline_predictors", True
+        )
     )
 
     # Extract baseline predictors from meta (meta uses standardized names: predictor, trial_index, run, etc.)
     missing = [c for c in baseline_predictors if c not in meta.columns]
     if missing:
-        msg = (
-            "Missing baseline predictors in meta: %s. Available meta columns=%s."
-            % (",".join(missing), ",".join(list(meta.columns)))
+        msg = "Missing baseline predictors in meta: %s. Available meta columns=%s." % (
+            ",".join(missing),
+            ",".join(list(meta.columns)),
         )
         if require_baseline_predictors:
             raise ValueError(
-                msg
-                + " Baseline fallback is disabled by "
+                msg + " Baseline fallback is disabled by "
                 "machine_learning.incremental_validity.require_baseline_predictors=true."
             )
         logger.warning("%s Falling back to intercept-only baseline.", msg)
@@ -4433,28 +4680,29 @@ def run_incremental_validity_ml(
         baseline_predictors = ["intercept_only"]
     else:
         X_baseline = meta[baseline_predictors].apply(pd.to_numeric, errors="coerce").to_numpy()
-    
+
     # Full model includes EEG features + baseline predictors (appended at end for covariate protection)
     X_full = np.concatenate([X, X_baseline], axis=1)
     n_baseline_features = int(X_baseline.shape[1])
-    
+
     from sklearn.model_selection import LeaveOneGroupOut
     from sklearn.metrics import r2_score, mean_absolute_error
-    
+
     outer_cv = LeaveOneGroupOut()
-    harmonization_mode = (
-        feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    harmonization_mode = feature_harmonization or str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
     )
     # Use the same model family/hyperparameter space for baseline and full models
     # so ΔR² isolates information gain from EEG predictors (not algorithm changes).
-    shared_pipe = create_elasticnet_pipeline(seed=rng_seed, config=config, n_covariates=n_baseline_features)
+    shared_pipe = create_elasticnet_pipeline(
+        seed=rng_seed, config=config, n_covariates=n_baseline_features
+    )
     shared_param_grid = build_elasticnet_param_grid(config)
-    
+
     records = []
     y_pred_baseline = np.zeros(len(y))
     y_pred_full = np.zeros(len(y))
-    
+
     for fold_idx, (train_idx, test_idx) in enumerate(outer_cv.split(X, y, groups)):
         test_subj = groups[test_idx[0]]
         groups_train = groups[train_idx]
@@ -4475,7 +4723,7 @@ def run_incremental_validity_ml(
             )
         X_baseline_train = X_baseline[train_idx][:, baseline_keep_mask]
         X_baseline_test = X_baseline[test_idx][:, baseline_keep_mask]
-        
+
         # Baseline model (out-of-fold; tuned under the same group-aware inner CV logic).
         base_pipe = clone(shared_pipe)
         n_train_subjects = len(np.unique(groups_train))
@@ -4498,7 +4746,7 @@ def run_incremental_validity_ml(
             base_pipe.fit(X_baseline_train, y[train_idx])
             y_pred_baseline[test_idx] = base_pipe.predict(X_baseline_test)
         r2_base = r2_score(y[test_idx], y_pred_baseline[test_idx])
-        
+
         # Full model (same family as baseline; adds EEG predictors to baseline columns).
         pipe_full = clone(shared_pipe)
         if n_train_subjects >= 2:
@@ -4520,27 +4768,29 @@ def run_incremental_validity_ml(
             pipe_full.fit(X_full_train, y[train_idx])
             y_pred_full[test_idx] = pipe_full.predict(X_full_test)
         r2_full = r2_score(y[test_idx], y_pred_full[test_idx])
-        
-        records.append({
-            "fold": fold_idx,
-            "test_subject": test_subj,
-            "r2_baseline": r2_base,
-            "r2_full": r2_full,
-            "delta_r2": r2_full - r2_base,
-            "mae_baseline": mean_absolute_error(y[test_idx], y_pred_baseline[test_idx]),
-            "mae_full": mean_absolute_error(y[test_idx], y_pred_full[test_idx]),
-        })
-    
+
+        records.append(
+            {
+                "fold": fold_idx,
+                "test_subject": test_subj,
+                "r2_baseline": r2_base,
+                "r2_full": r2_full,
+                "delta_r2": r2_full - r2_base,
+                "mae_baseline": mean_absolute_error(y[test_idx], y_pred_baseline[test_idx]),
+                "mae_full": mean_absolute_error(y[test_idx], y_pred_full[test_idx]),
+            }
+        )
+
     records_df = pd.DataFrame(records)
     records_df.to_csv(metrics_dir / "incremental_validity.tsv", sep="\t", index=False)
     records_df.to_csv(results_dir / "incremental_validity.tsv", sep="\t", index=False)
-    
+
     # Overall summary
     r2_baseline_overall = r2_score(y, y_pred_baseline)
     r2_full_overall = r2_score(y, y_pred_full)
     pooled_delta_r2 = float(r2_full_overall - r2_baseline_overall)
     mean_fold_delta_r2 = float(records_df["delta_r2"].mean())
-    
+
     summary = {
         "data": {
             "target": target,
@@ -4577,7 +4827,9 @@ def run_incremental_validity_ml(
     inf_rng = np.random.default_rng(int(rng_seed) + 201)
     ci_low, ci_high = _bootstrap_mean_ci(delta_vals, rng=inf_rng, n_boot=n_boot)
     delta_inference: Dict[str, Any] = {
-        "mean_delta_r2": float(np.nanmean(delta_vals)) if np.any(np.isfinite(delta_vals)) else np.nan,
+        "mean_delta_r2": (
+            float(np.nanmean(delta_vals)) if np.any(np.isfinite(delta_vals)) else np.nan
+        ),
         "ci_low": ci_low,
         "ci_high": ci_high,
         "n_subjects": int(np.sum(np.isfinite(delta_vals))),
@@ -4590,9 +4842,9 @@ def run_incremental_validity_ml(
             n_perm=int(n_perm),
         )
     summary["delta_r2_inference"] = delta_inference
-    
+
     _write_json(summary, metrics_dir / "incremental_validity_summary.json")
-    
+
     write_reproducibility_info(
         results_dir,
         subjects,
@@ -4608,15 +4860,17 @@ def run_incremental_validity_ml(
     )
     logger.info(
         "Incremental validity: subject-level \u0394R\u00b2=%.4f (pooled-trials \u0394R\u00b2=%.4f; %d/%d folds positive)",
-        summary["delta_r2"], summary["pooled_trials"]["delta_r2"],
-        summary["n_folds_positive_delta"], summary["n_folds_total"],
+        summary["delta_r2"],
+        summary["pooled_trials"]["delta_r2"],
+        summary["n_folds_positive_delta"],
+        summary["n_folds_total"],
     )
-    _maybe_generate_mode_plots(mode="incremental_validity", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="incremental_validity", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info("Saved results to %s", results_dir)
-    
+
     return results_dir
-
-
 
 
 def _run_permutation_importance_stage(
@@ -4639,27 +4893,29 @@ def _run_permutation_importance_stage(
         aggregate_importance,
         build_feature_metadata,
     )
-    
+
     _resolved_model, base_pipe, param_grid = _build_regression_model_spec(
         model_name,
         seed=seed,
         config=config,
         n_covariates=len(covariates) if covariates else 0,
     )
-    harmonization_mode = str(
-        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
-    ).strip().lower()
+    harmonization_mode = (
+        str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+        .strip()
+        .lower()
+    )
     inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     logo = LeaveOneGroupOut()
     fold_splits = list(logo.split(X, y, groups))
-    
+
     all_importances = []
-    
+
     for fold_idx, (train_idx, test_idx) in enumerate(fold_splits):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
-        
+
         n_covs = len(covariates) if covariates else 0
         X_train, X_test, keep_mask = _apply_fold_feature_harmonization_foldwise(
             X_train,
@@ -4683,7 +4939,9 @@ def _run_permutation_importance_stage(
                 fold_info=f"perm-importance fold {fold_idx}",
             )
             result = permutation_importance(
-                pipe_fold, X_test, y_test,
+                pipe_fold,
+                X_test,
+                y_test,
                 n_repeats=n_repeats,
                 random_state=seed + fold_idx,
                 scoring="r2",
@@ -4695,7 +4953,7 @@ def _run_permutation_importance_stage(
         except Exception as e:
             logger.warning(f"Fold {fold_idx} permutation importance failed: {e}")
             continue
-    
+
     if not all_importances:
         logger.warning("No permutation importance results")
         return None
@@ -4713,29 +4971,35 @@ def _run_permutation_importance_stage(
             f"completed={n_folds_completed}/{n_folds_requested} "
             f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
         )
-    
+
     mean_importance = np.mean(np.stack(all_importances), axis=0)
     std_importance = np.std(np.stack(all_importances), axis=0)
-    
-    importance_df = pd.DataFrame({
-        "feature": feature_names,
-        "importance_mean": mean_importance,
-        "importance_std": std_importance,
-        "n_folds": len(all_importances),
-    })
-    importance_df = importance_df.loc[np.isfinite(importance_df["importance_mean"].to_numpy(dtype=float))]
+
+    importance_df = pd.DataFrame(
+        {
+            "feature": feature_names,
+            "importance_mean": mean_importance,
+            "importance_std": std_importance,
+            "n_folds": len(all_importances),
+        }
+    )
+    importance_df = importance_df.loc[
+        np.isfinite(importance_df["importance_mean"].to_numpy(dtype=float))
+    ]
     importance_df = importance_df.sort_values("importance_mean", ascending=False)
-    
+
     importance_dir = results_dir / "importance"
     ensure_dir(importance_dir)
-    
+
     output_path = importance_dir / "permutation_importance.tsv"
     importance_df.to_csv(output_path, sep="\t", index=False)
     logger.info(f"Saved permutation importance to {output_path}")
 
     # Optional grouped summaries for interpretability.
     try:
-        if bool(get_config_value(config, "machine_learning.interpretability.grouped_outputs", True)):
+        if bool(
+            get_config_value(config, "machine_learning.interpretability.grouped_outputs", True)
+        ):
             meta_df = build_feature_metadata(feature_names, config=config)
             merged = meta_df.merge(importance_df, on="feature", how="right")
 
@@ -4743,20 +5007,28 @@ def _run_permutation_importance_stage(
                 merged, value_col="importance_mean", group_cols=["group", "band"]
             )
             if not by_group_band.empty:
-                by_group_band.to_csv(importance_dir / "permutation_importance_by_group_band.tsv", sep="\t", index=False)
+                by_group_band.to_csv(
+                    importance_dir / "permutation_importance_by_group_band.tsv",
+                    sep="\t",
+                    index=False,
+                )
 
             by_group_band_roi = aggregate_importance(
                 merged, value_col="importance_mean", group_cols=["group", "band", "roi"]
             )
             if not by_group_band_roi.empty:
                 by_group_band_roi.to_csv(
-                    importance_dir / "permutation_importance_by_group_band_roi.tsv", sep="\t", index=False
+                    importance_dir / "permutation_importance_by_group_band_roi.tsv",
+                    sep="\t",
+                    index=False,
                 )
     except Exception as exc:
         logger.debug("Grouped permutation-importance export failed: %s", exc)
 
-    _maybe_generate_mode_plots(mode="permutation", results_dir=results_dir, logger=logger, config=config)
-    
+    _maybe_generate_mode_plots(
+        mode="permutation", results_dir=results_dir, logger=logger, config=config
+    )
+
     return output_path
 
 
@@ -4782,18 +5054,20 @@ def _run_shap_importance_stage(
         aggregate_importance,
         build_feature_metadata,
     )
-    
+
     from sklearn.model_selection import LeaveOneGroupOut
-    
+
     if len(np.unique(groups)) < 2:
         logger.info("SHAP importance skipped: requires at least 2 unique groups for LOSO folds.")
         return None
 
     logo = LeaveOneGroupOut()
     cv_splits = list(logo.split(X, y, groups))
-    harmonization_mode = str(
-        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
-    ).strip().lower()
+    harmonization_mode = (
+        str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+        .strip()
+        .lower()
+    )
     inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     _resolved_model, base_pipe, param_grid = _build_regression_model_spec(
         model_name,
@@ -4804,7 +5078,7 @@ def _run_shap_importance_stage(
 
     def model_factory():
         return clone(base_pipe)
-    
+
     try:
         importance_df = compute_shap_for_cv_folds(
             model_factory,
@@ -4819,7 +5093,7 @@ def _run_shap_importance_stage(
             inner_cv_splits=inner_splits,
             covariates=covariates,
         )
-        
+
         if importance_df.empty:
             logger.warning("SHAP importance computation returned empty results")
             return None
@@ -4843,37 +5117,49 @@ def _run_shap_importance_stage(
                 f"completed={n_folds_used}/{n_folds_attempted} "
                 f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
             )
-        
+
         importance_dir = results_dir / "importance"
         ensure_dir(importance_dir)
-        
+
         output_path = importance_dir / "shap_importance.tsv"
         importance_df.to_csv(output_path, sep="\t", index=False)
         logger.info(f"Saved SHAP importance to {output_path}")
 
         # Optional grouped summaries for interpretability.
         try:
-            if bool(get_config_value(config, "machine_learning.interpretability.grouped_outputs", True)):
+            if bool(
+                get_config_value(config, "machine_learning.interpretability.grouped_outputs", True)
+            ):
                 # SHAP importance may operate in transformed space (e.g., after feature selection/PCA).
-                meta_df = build_feature_metadata(importance_df["feature"].astype(str).tolist(), config=config)
+                meta_df = build_feature_metadata(
+                    importance_df["feature"].astype(str).tolist(), config=config
+                )
                 merged = meta_df.merge(importance_df, on="feature", how="right")
 
                 by_group_band = aggregate_importance(
                     merged, value_col="shap_importance", group_cols=["group", "band"]
                 )
                 if not by_group_band.empty:
-                    by_group_band.to_csv(importance_dir / "shap_importance_by_group_band.tsv", sep="\t", index=False)
+                    by_group_band.to_csv(
+                        importance_dir / "shap_importance_by_group_band.tsv", sep="\t", index=False
+                    )
 
                 by_group_band_roi = aggregate_importance(
                     merged, value_col="shap_importance", group_cols=["group", "band", "roi"]
                 )
                 if not by_group_band_roi.empty:
-                    by_group_band_roi.to_csv(importance_dir / "shap_importance_by_group_band_roi.tsv", sep="\t", index=False)
+                    by_group_band_roi.to_csv(
+                        importance_dir / "shap_importance_by_group_band_roi.tsv",
+                        sep="\t",
+                        index=False,
+                    )
         except Exception as exc:
             logger.debug("Grouped SHAP-importance export failed: %s", exc)
 
-        _maybe_generate_mode_plots(mode="shap", results_dir=results_dir, logger=logger, config=config)
-        
+        _maybe_generate_mode_plots(
+            mode="shap", results_dir=results_dir, logger=logger, config=config
+        )
+
         return output_path
     except RuntimeError:
         raise
@@ -4899,26 +5185,28 @@ def _run_uncertainty_stage(
         compute_prediction_intervals,
     )
     from sklearn.model_selection import LeaveOneGroupOut
-    
+
     _resolved_model, base_pipe, param_grid = _build_regression_model_spec(
         model_name,
         seed=seed,
         config=config,
     )
-    harmonization_mode = str(
-        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
-    ).strip().lower()
+    harmonization_mode = (
+        str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+        .strip()
+        .lower()
+    )
     inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     logo = LeaveOneGroupOut()
     fold_splits = list(logo.split(X, y, groups))
-    
+
     all_intervals = []
-    
+
     for fold_idx, (train_idx, test_idx) in enumerate(fold_splits):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
-        
+
         n_covs = len(covariates) if covariates else 0
         X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
             X_train,
@@ -4951,22 +5239,24 @@ def _run_uncertainty_stage(
                 seed=seed + fold_idx,
             )
             result.compute_coverage(y_test)
-            
-            all_intervals.append({
-                "fold": fold_idx,
-                "y_test": y_test,
-                "y_pred": result.y_pred,
-                "lower": result.lower,
-                "upper": result.upper,
-                "coverage": result.coverage,
-                "mean_width": result.mean_width,
-                "subject_id": np.asarray(groups[test_idx], dtype=object),
-                "test_idx": np.asarray(test_idx, dtype=int),
-            })
+
+            all_intervals.append(
+                {
+                    "fold": fold_idx,
+                    "y_test": y_test,
+                    "y_pred": result.y_pred,
+                    "lower": result.lower,
+                    "upper": result.upper,
+                    "coverage": result.coverage,
+                    "mean_width": result.mean_width,
+                    "subject_id": np.asarray(groups[test_idx], dtype=object),
+                    "test_idx": np.asarray(test_idx, dtype=int),
+                }
+            )
         except Exception as e:
             logger.warning(f"Fold {fold_idx} uncertainty failed: {e}")
             continue
-    
+
     if not all_intervals:
         logger.warning("No uncertainty results")
         return None
@@ -4974,7 +5264,9 @@ def _run_uncertainty_stage(
     n_folds_completed = int(len(all_intervals))
     completion_rate = float(n_folds_completed / max(n_folds_requested, 1))
     min_completion = float(
-        require_config_value(config, "machine_learning.analysis.uncertainty.min_valid_fold_fraction")
+        require_config_value(
+            config, "machine_learning.analysis.uncertainty.min_valid_fold_fraction"
+        )
     )
     if completion_rate < min_completion:
         raise RuntimeError(
@@ -4982,7 +5274,7 @@ def _run_uncertainty_stage(
             f"completed={n_folds_completed}/{n_folds_requested} "
             f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
         )
-    
+
     y_pred_all = np.concatenate([r["y_pred"] for r in all_intervals])
     lower_all = np.concatenate([r["lower"] for r in all_intervals])
     upper_all = np.concatenate([r["upper"] for r in all_intervals])
@@ -4990,25 +5282,24 @@ def _run_uncertainty_stage(
     subject_all = np.concatenate([np.asarray(r["subject_id"], dtype=object) for r in all_intervals])
     test_idx_all = np.concatenate([np.asarray(r["test_idx"], dtype=int) for r in all_intervals])
     fold_all = np.concatenate(
-        [
-            np.full(len(np.asarray(r["y_pred"])), int(r["fold"]), dtype=int)
-            for r in all_intervals
-        ]
+        [np.full(len(np.asarray(r["y_pred"])), int(r["fold"]), dtype=int) for r in all_intervals]
     )
 
     coverage = np.mean((y_test_all >= lower_all) & (y_test_all <= upper_all))
     mean_width = np.mean(upper_all - lower_all)
 
-    intervals_df = pd.DataFrame({
-        "fold": fold_all,
-        "subject_id": subject_all,
-        "test_index": test_idx_all,
-        "y_pred": y_pred_all,
-        "lower": lower_all,
-        "upper": upper_all,
-        "y_true": y_test_all,
-        "in_interval": (y_test_all >= lower_all) & (y_test_all <= upper_all),
-    })
+    intervals_df = pd.DataFrame(
+        {
+            "fold": fold_all,
+            "subject_id": subject_all,
+            "test_index": test_idx_all,
+            "y_pred": y_pred_all,
+            "lower": lower_all,
+            "upper": upper_all,
+            "y_true": y_test_all,
+            "in_interval": (y_test_all >= lower_all) & (y_test_all <= upper_all),
+        }
+    )
     intervals_df["width"] = intervals_df["upper"] - intervals_df["lower"]
     per_subject_df = (
         intervals_df.groupby("subject_id", as_index=False)
@@ -5042,16 +5333,24 @@ def _run_uncertainty_stage(
         "valid_fold_fraction": completion_rate,
         "min_valid_fold_fraction": min_completion,
         "subject_level": {
-            "mean_coverage": float(per_subject_df["coverage"].mean()) if len(per_subject_df) else np.nan,
-            "std_coverage": float(per_subject_df["coverage"].std()) if len(per_subject_df) > 1 else np.nan,
-            "mean_width": float(per_subject_df["mean_width"].mean()) if len(per_subject_df) else np.nan,
+            "mean_coverage": (
+                float(per_subject_df["coverage"].mean()) if len(per_subject_df) else np.nan
+            ),
+            "std_coverage": (
+                float(per_subject_df["coverage"].std()) if len(per_subject_df) > 1 else np.nan
+            ),
+            "mean_width": (
+                float(per_subject_df["mean_width"].mean()) if len(per_subject_df) else np.nan
+            ),
             "n_subjects": int(len(per_subject_df)),
         },
     }
     _write_json(metrics, metrics_dir / "uncertainty_metrics.json")
-    
+
     logger.info(f"Uncertainty: coverage={coverage:.1%}, mean_width={mean_width:.3f}")
-    _maybe_generate_mode_plots(mode="uncertainty", results_dir=results_dir, logger=logger, config=config)
+    _maybe_generate_mode_plots(
+        mode="uncertainty", results_dir=results_dir, logger=logger, config=config
+    )
     logger.info(f"Saved uncertainty to {output_path}")
-    
+
     return output_path

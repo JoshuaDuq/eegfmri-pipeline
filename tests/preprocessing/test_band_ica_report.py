@@ -87,8 +87,12 @@ def test_fieldtrip_tfr_uses_requested_band_parameters(
 ) -> None:
     from eeg_pipeline.preprocessing.band_ica_report import _fieldtrip_tfr
 
+    from eeg_pipeline.preprocessing.band_ica_report import _tfr_parameter_groups
+
     band = BAND_ICA_DEFINITIONS[band_index]
-    frequencies = np.arange(band.fmin, band.fmax + 0.5)
+    # The display grid is tied to the smoothing, so the expected frequencies come from
+    # the same source of truth rather than from a hardcoded 1 Hz arange.
+    ((_, frequencies),) = _tfr_parameter_groups(band, BandIcaReportSettings())
     power = np.ones((2, len(frequencies), 221))
     with patch(
         "eeg_pipeline.preprocessing.band_ica_report.mne.time_frequency.tfr_array_multitaper",
@@ -283,7 +287,8 @@ def test_source_diagnostics_include_misc_typed_ica_sources() -> None:
     )
     sources = SimpleNamespace(
         info={"sfreq": 100.0},
-        times=np.linspace(-1.0, 1.0, 20),
+        # Spans the default baseline, which must clear the DPSS half-window before 0.
+        times=np.linspace(-6.0, 1.0, 20),
         compute_psd=Mock(return_value=spectrum),
         get_data=Mock(return_value=np.ones((2, 2, 20))),
     )
@@ -353,13 +358,25 @@ def test_component_figures_pair_topomap_spectrum_tfr_and_icalabel() -> None:
 def test_condition_groups_share_scale_but_difference_has_own_scale() -> None:
     from eeg_pipeline.preprocessing.band_ica_report import _comparison_color_limits
 
-    group_a = np.array([[-2.0, 3.0]])
-    group_b = np.array([[-7.0, 1.0]])
+    group_a = np.full((1, 100), 2.0)
+    group_b = np.full((1, 100), -3.0)
 
     condition_limit, difference_limit = _comparison_color_limits(group_a, group_b)
 
-    assert condition_limit == 7.0
-    assert difference_limit == 5.0
+    assert condition_limit == pytest.approx(3.0)
+    assert difference_limit == pytest.approx(5.0)
+
+
+def test_color_limits_are_not_dominated_by_a_single_extreme_component() -> None:
+    """A single outlying component must not flatten every other component's TFR."""
+    from eeg_pipeline.preprocessing.band_ica_report import _comparison_color_limits
+
+    group_a = np.concatenate([np.full(999, 2.0), np.full(1, 500.0)]).reshape(1, -1)
+    group_b = np.zeros((1, 1000))
+
+    condition_limit, _ = _comparison_color_limits(group_a, group_b)
+
+    assert condition_limit == pytest.approx(2.0)
 
 
 def test_standard_component_dossier_keeps_all_evidence_on_one_slide() -> None:
@@ -546,6 +563,9 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
         ),
         patch("eeg_pipeline.preprocessing.band_ica_report._organize_component_review"),
         patch("eeg_pipeline.preprocessing.band_ica_report._remove_legacy_condition_tfr_entries"),
+        patch("eeg_pipeline.preprocessing.band_ica_report.remove_tagged_content") as clear,
+        patch("eeg_pipeline.preprocessing.band_ica_report._add_decomposition_summary"),
+        patch("eeg_pipeline.preprocessing.band_ica_report._add_component_properties"),
     ):
         _add_standard_component_review(
             report=report,
@@ -557,6 +577,7 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
             analysis_status="Pending provisional task epochs",
         )
 
+    clear.assert_called_once_with(report, tag="ica-component-review")
     assert build_review.call_count == len(BAND_ICA_DEFINITIONS)
     assert all(call.kwargs["ica"] is ica for call in build_review.call_args_list)
     assert report.add_figure.call_count == len(BAND_ICA_DEFINITIONS)
@@ -564,7 +585,8 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
         f"ICA component review: {band.title}" for band in BAND_ICA_DEFINITIONS
     ]
     for call in report.add_figure.call_args_list:
-        assert call.kwargs["title"] == "Component dossiers"
+        assert call.kwargs["title"].startswith("Component dossiers")
+        assert "use the slider" in call.kwargs["title"]
         assert call.kwargs["replace"] is True
         assert call.kwargs["caption"] == [
             "ICA000 · brain (0.900) · RETAINED",
@@ -813,3 +835,212 @@ def test_generate_band_report_persists_real_mne_html_sections(tmp_path) -> None:
     assert "ICA component review guide" in html
     for band in BAND_ICA_DEFINITIONS:
         assert f"Band-specific ICA: {band.title}" in html
+
+
+def test_resting_state_settings_disable_event_locked_time_frequency() -> None:
+    """Fixed-length rest epochs have no baseline, so the TFR must be switchable off."""
+    settings = BandIcaReportSettings.from_mapping({"tfr": {"enabled": False}})
+
+    assert settings.tfr_enabled is False
+
+
+def test_condition_comparisons_are_rejected_without_event_locked_time_frequency() -> None:
+    with pytest.raises(ValueError, match="Resting-state recordings have no events"):
+        BandIcaReportSettings.from_mapping(
+            {
+                "tfr": {"enabled": False},
+                "comparisons": [
+                    {
+                        "name": "high_vs_low",
+                        "column": "stimulus_temp",
+                        "group_a": {"label": "High", "values": [48.3]},
+                        "group_b": {"label": "Low", "values": [44.3]},
+                    }
+                ],
+            }
+        )
+
+
+def test_disabled_time_frequency_skips_the_multitaper_computation() -> None:
+    """Rest dossiers must not compute a baseline-relative TFR at all."""
+    import mne
+
+    from eeg_pipeline.preprocessing.band_ica_report import _source_diagnostics_from_sources
+
+    info = mne.create_info(["C1", "C2"], 200.0, "eeg")
+    sources = mne.EpochsArray(
+        np.random.default_rng(0).normal(0, 1e-5, (4, 2, 2000)),
+        info,
+        tmin=0.0,
+        verbose="ERROR",
+    )
+
+    with patch("eeg_pipeline.preprocessing.band_ica_report._fieldtrip_tfr") as tfr:
+        diagnostics = _source_diagnostics_from_sources(
+            sources=sources,
+            band=BAND_ICA_DEFINITIONS[1],
+            settings=BandIcaReportSettings.from_mapping({"tfr": {"enabled": False}}),
+        )
+
+    tfr.assert_not_called()
+    assert diagnostics.has_tfr is False
+    assert diagnostics.tfr is None
+
+
+def test_disabled_time_frequency_renders_topography_and_spectrum_only() -> None:
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        ComponentLabel,
+        _build_component_figures,
+    )
+
+    ica = SimpleNamespace(n_components_=2, plot_components=Mock())
+    diagnostics = (np.array([8.0, 10.0, 13.0]), np.ones((2, 3)), None, None, None)
+
+    with patch(
+        "eeg_pipeline.preprocessing.band_ica_report._source_diagnostics",
+        return_value=diagnostics,
+    ):
+        figures = _build_component_figures(
+            ica=ica,
+            epochs=SimpleNamespace(),
+            band=BAND_ICA_DEFINITIONS[1],
+            labels=[ComponentLabel("brain", 0.91), ComponentLabel("other", 0.5)],
+            settings=BandIcaReportSettings.from_mapping({"tfr": {"enabled": False}}),
+        )
+
+    assert [axis.get_title() for axis in figures[0].axes] == [
+        "ICA000 topomap",
+        "Source spectrum",
+    ]
+
+
+def test_iclabel_keeps_the_full_class_distribution_not_only_the_winner() -> None:
+    from eeg_pipeline.preprocessing.band_ica_report import _ICLABEL_CLASSES, _label_components
+
+    probabilities = np.array([[0.45, 0.42, 0.05, 0.03, 0.02, 0.02, 0.01]])
+    ica = SimpleNamespace(n_components_=1)
+
+    with patch(
+        "mne_icalabel.iclabel.iclabel_label_components",
+        return_value=probabilities,
+        create=True,
+    ):
+        labels = _label_components(epochs=SimpleNamespace(), ica=ica)
+
+    assert labels[0].label == "brain"
+    assert labels[0].probability == pytest.approx(0.45)
+    assert labels[0].has_distribution
+    assert len(labels[0].probabilities) == len(_ICLABEL_CLASSES)
+    assert labels[0].probabilities[1] == pytest.approx(0.42)
+
+
+def test_component_table_records_every_iclabel_class_probability() -> None:
+    import csv as csv_module
+    import tempfile
+    from pathlib import Path
+
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        ComponentLabel,
+        _ICLABEL_CLASSES,
+        _write_component_table,
+    )
+
+    path = Path(tempfile.mkdtemp()) / "components.tsv"
+    _write_component_table(
+        path=path,
+        labels=[ComponentLabel("brain", 0.45, (0.45, 0.42, 0.05, 0.03, 0.02, 0.02, 0.01))],
+    )
+
+    with path.open(encoding="utf-8") as file:
+        rows = list(csv_module.DictReader(file, delimiter="\t"))
+
+    assert rows[0]["iclabel"] == "brain"
+    assert float(rows[0]["probability_muscle_artifact"]) == pytest.approx(0.42)
+    for name in _ICLABEL_CLASSES:
+        assert f"probability_{name.replace(' ', '_')}" in rows[0]
+
+
+def test_unlabelled_components_render_without_an_iclabel_distribution() -> None:
+    """Band-specific ICAs may skip ICLabel; the dossier must still render."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import ComponentLabel, _add_iclabel_panel
+
+    figure, axis = plt.subplots()
+    _add_iclabel_panel(axis, ComponentLabel("unlabeled", 0.0))
+    assert axis.child_axes == []
+
+    _add_iclabel_panel(
+        axis, ComponentLabel("brain", 0.9, (0.9, 0.04, 0.02, 0.02, 0.01, 0.005, 0.005))
+    )
+    assert len(axis.child_axes) == 1
+    assert len(axis.child_axes[0].patches) == 7
+    plt.close(figure)
+
+
+def test_dossier_format_follows_figure_content() -> None:
+    """Dense time-frequency meshes stay raster; spectrum-only dossiers go vector."""
+    from eeg_pipeline.preprocessing.report.style import report_image_format
+
+    assert report_image_format(has_dense_image=True) != "svg"
+    assert report_image_format(has_dense_image=False) == "svg"
+
+
+def test_baseline_must_clear_the_dpss_half_window() -> None:
+    """A baseline ending near the event draws post-stimulus data into the baseline."""
+    with pytest.raises(ValueError, match="baseline_tmax_s must be at most"):
+        BandIcaReportSettings.from_mapping({"tfr": {"baseline_tmax_s": -0.01}})
+
+    settings = BandIcaReportSettings.from_mapping({"tfr": {"baseline_tmax_s": -1.5}})
+    assert settings.baseline_tmax_s == -1.5
+
+
+def test_baseline_margin_is_not_required_without_the_time_frequency_transform() -> None:
+    settings = BandIcaReportSettings.from_mapping(
+        {"tfr": {"enabled": False, "baseline_tmax_s": -0.01}}
+    )
+
+    assert settings.tfr_enabled is False
+
+
+def test_display_frequencies_never_exceed_the_smoothing_resolution() -> None:
+    """Sampling far finer than the smoothing buys no resolution, only compute."""
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        DISPLAY_SAMPLES_PER_SMOOTHING_HALF_WIDTH,
+        _tfr_parameter_groups,
+    )
+
+    settings = BandIcaReportSettings()
+    for band in BAND_ICA_DEFINITIONS:
+        for parameters, frequencies in _tfr_parameter_groups(band, settings):
+            assert frequencies.size > 1
+            step = float(frequencies[1] - frequencies[0])
+            expected = max(
+                settings.frequency_step_hz,
+                parameters.smoothing_hz / DISPLAY_SAMPLES_PER_SMOOTHING_HALF_WIDTH,
+            )
+            assert step <= expected + 1e-6
+
+
+def test_every_band_is_covered_exactly_once_end_to_end() -> None:
+    """Gaps let the next parameter set smooth a lone bin by its much wider kernel."""
+    from eeg_pipeline.preprocessing.band_ica_report import _tfr_parameter_groups
+
+    for band in BAND_ICA_DEFINITIONS:
+        groups = _tfr_parameter_groups(band, BandIcaReportSettings())
+        combined = np.concatenate([frequencies for _, frequencies in groups])
+        assert np.all(np.diff(combined) > 0)
+        assert combined[0] == pytest.approx(band.fmin)
+        assert combined[-1] == pytest.approx(band.fmax)
+
+
+def test_a_band_ending_on_a_parameter_boundary_keeps_the_narrower_smoothing() -> None:
+    """Broadband ends at 30 Hz; that bin must not be smoothed by the gamma kernel."""
+    from eeg_pipeline.preprocessing.band_ica_report import _tfr_parameter_groups
+
+    band = next(b for b in BAND_ICA_DEFINITIONS if b.slug == "broadband1to30")
+    groups = _tfr_parameter_groups(band, BandIcaReportSettings())
+
+    smoothings = [parameters.smoothing_hz for parameters, _ in groups]
+    assert 5.0 not in smoothings
+    assert groups[-1][1][-1] == pytest.approx(30.0)

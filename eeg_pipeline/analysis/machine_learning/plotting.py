@@ -151,7 +151,9 @@ def _plot_regression(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     ax.scatter(y_true, y_pred, s=18, color="#1f77b4", alpha=0.8, edgecolors="white", linewidths=0.4)
     vmin = float(np.nanmin([y_true.min(), y_pred.min()]))
     vmax = float(np.nanmax([y_true.max(), y_pred.max()]))
-    ax.plot([vmin, vmax], [vmin, vmax], linestyle="--", color="#444444", linewidth=1.0, label="Identity")
+    ax.plot(
+        [vmin, vmax], [vmin, vmax], linestyle="--", color="#444444", linewidth=1.0, label="Identity"
+    )
     if len(y_true) >= 2:
         try:
             m, b = np.polyfit(y_true, y_pred, 1)
@@ -178,7 +180,9 @@ def _plot_regression(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     if opts.include_diagnostics:
         ax2 = axes[1]
         ax2.axhline(0, color="#555555", linewidth=1.0, linestyle="--")
-        ax2.scatter(y_pred, resid, s=16, color="#2ca02c", alpha=0.8, edgecolors="white", linewidths=0.3)
+        ax2.scatter(
+            y_pred, resid, s=16, color="#2ca02c", alpha=0.8, edgecolors="white", linewidths=0.3
+        )
         ax2.set_xlabel("Predicted target")
         ax2.set_ylabel("Residual (observed - predicted)")
         ax2.set_title("Residual Diagnostics")
@@ -258,7 +262,9 @@ def _plot_classification(results_dir: Path, opts: MLPlottingOptions) -> List[Pat
             out.extend(_save(fig_curve, results_dir / "plots" / "classification_roc_pr", opts=opts))
             plt.close(fig_curve)
 
-            prob_true, prob_pred = calibration_curve(y_tp, y_pp, n_bins=min(10, max(3, len(y_tp) // 5)))
+            prob_true, prob_pred = calibration_curve(
+                y_tp, y_pp, n_bins=min(10, max(3, len(y_tp) // 5))
+            )
             fig_cal, ax_cal = plt.subplots(1, 1, figsize=(4.0, 3.6))
             ax_cal.plot([0, 1], [0, 1], "--", color="#666666", linewidth=1.0, label="Ideal")
             ax_cal.plot(prob_pred, prob_true, marker="o", color="#2ca02c", label="Model")
@@ -267,7 +273,9 @@ def _plot_classification(results_dir: Path, opts: MLPlottingOptions) -> List[Pat
             ax_cal.set_title("Calibration")
             ax_cal.legend(frameon=False, loc="best")
             ax_cal.grid(True)
-            out.extend(_save(fig_cal, results_dir / "plots" / "classification_calibration", opts=opts))
+            out.extend(
+                _save(fig_cal, results_dir / "plots" / "classification_calibration", opts=opts)
+            )
             plt.close(fig_cal)
 
     return out
@@ -358,7 +366,9 @@ def _plot_model_comparison(results_dir: Path, opts: MLPlottingOptions) -> List[P
 
     for ax, metric in zip(axes, metrics):
         series_by_model = [
-            pd.to_numeric(df.loc[df["model"].astype(str) == m, metric], errors="coerce").dropna().to_numpy()
+            pd.to_numeric(df.loc[df["model"].astype(str) == m, metric], errors="coerce")
+            .dropna()
+            .to_numpy()
             for m in models
         ]
         ax.boxplot(
@@ -416,8 +426,16 @@ def _plot_incremental_validity(results_dir: Path, opts: MLPlottingOptions) -> Li
     axes[0].set_title("Per-fold paired performance")
     axes[0].grid(True, axis="y")
 
-    axes[1].hist(delta, bins=min(12, max(4, len(delta))), color="#2ca02c", alpha=0.85, edgecolor="white")
-    axes[1].axvline(np.mean(delta), color="#111111", linestyle="--", linewidth=1.1, label=f"mean={np.mean(delta):.3f}")
+    axes[1].hist(
+        delta, bins=min(12, max(4, len(delta))), color="#2ca02c", alpha=0.85, edgecolor="white"
+    )
+    axes[1].axvline(
+        np.mean(delta),
+        color="#111111",
+        linestyle="--",
+        linewidth=1.1,
+        label=f"mean={np.mean(delta):.3f}",
+    )
     axes[1].set_xlabel("Delta R2 (full - baseline)")
     axes[1].set_ylabel("Fold count")
     axes[1].set_title("Incremental validity distribution")
@@ -472,7 +490,9 @@ def _plot_uncertainty(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     return out
 
 
-def _plot_feature_importance(results_dir: Path, opts: MLPlottingOptions, *, mode: str) -> List[Path]:
+def _plot_feature_importance(
+    results_dir: Path, opts: MLPlottingOptions, *, mode: str
+) -> List[Path]:
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
     if mode == "shap":
@@ -483,7 +503,11 @@ def _plot_feature_importance(results_dir: Path, opts: MLPlottingOptions, *, mode
             )
         )
         value_col = "shap_importance"
-        err_col = "shap_std_across_folds" if df is not None and "shap_std_across_folds" in df.columns else "shap_std"
+        err_col = (
+            "shap_std_across_folds"
+            if df is not None and "shap_std_across_folds" in df.columns
+            else "shap_std"
+        )
         out_name = "shap_importance_top_features"
     else:
         df = _safe_read_tsv_first(

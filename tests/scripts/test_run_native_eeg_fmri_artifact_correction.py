@@ -45,6 +45,7 @@ def _input_root(tmp_path: Path) -> Path:
     row = {
         "subject": "sub-0001",
         "run": "1",
+        "source_layout": "original_5khz",
         "staged_vhdr": str(header),
         "source_vhdr_sha256": "a" * 64,
         "source_vmrk_sha256": "b" * 64,
@@ -307,7 +308,7 @@ def test_read_input_recordings_rejects_empty_manifest(tmp_path: Path) -> None:
     input_root.mkdir()
     manifest = input_root / "marker_sanitization_manifest.tsv"
     manifest.write_text(
-        "subject\trun\tstaged_vhdr\tsource_vhdr_sha256\t"
+        "subject\trun\tsource_layout\tstaged_vhdr\tsource_vhdr_sha256\t"
         "source_vmrk_sha256\tsource_eeg_size\tsource_eeg_mtime_ns\tverified\n",
         encoding="utf-8",
     )

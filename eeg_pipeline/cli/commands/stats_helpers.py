@@ -31,7 +31,6 @@ TIMELINE_DISPLAY_LIMIT = 20
 METADATA_COLUMNS = {"subject", "epoch", "condition", "task"}
 
 
-
 def _resolve_features_dir(deriv_root: Path, subject: str) -> Optional[Path]:
     """Return the first existing features directory for the subject.
 
@@ -44,6 +43,7 @@ def _resolve_features_dir(deriv_root: Path, subject: str) -> Optional[Path]:
     if preproc.exists():
         return preproc
     return None
+
 
 def get_dir_size(path: Path) -> int:
     """Calculate total size in bytes of all files under the given directory."""
@@ -59,7 +59,7 @@ def format_size(size_bytes: int) -> str:
     """Format byte size into human-readable string."""
     if size_bytes == 0:
         return "0.0 B"
-    
+
     size = float(size_bytes)
     for unit in ["B", "KB", "MB", "GB"]:
         if size < BYTES_PER_KB:
@@ -76,9 +76,11 @@ def _resolve_fmriprep_output_dir(deriv_root: Path, config: Any) -> Path:
     return deriv_root / "preprocessed" / "fmri"
 
 
-def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
+def _collect_all_subjects(
+    deriv_root: Path, task: str, config: Any
+) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     """Collect subjects from BIDS, epochs, features, and preprocessing directories.
-    
+
     Returns:
         Tuple of (bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects)
     """
@@ -91,9 +93,7 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
     except (OSError, ValueError, TypeError):
         bids_subjects = set()
 
-    epochs_subjects = set(
-        _collect_subjects_from_derivatives_epochs(deriv_root, task, config)
-    )
+    epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
     features_subjects = set(_collect_subjects_from_features(deriv_root))
 
     # Collect EEG preprocessing subjects (preprocessed directory)
@@ -148,23 +148,33 @@ def _collect_fmri_analysis_subjects(deriv_root: Path) -> tuple[set[str], set[str
         fmri_dir = subj_dir / "fmri"
 
         fl_dir = fmri_dir / "first_level"
-        if fl_dir.exists() and any(fl_dir.rglob("*")) and any(f.is_file() for f in fl_dir.rglob("*")):
+        if (
+            fl_dir.exists()
+            and any(fl_dir.rglob("*"))
+            and any(f.is_file() for f in fl_dir.rglob("*"))
+        ):
             first_level_subjects.add(subj_id)
 
         bs_dir = fmri_dir / "beta_series"
-        if bs_dir.exists() and any(bs_dir.rglob("*")) and any(f.is_file() for f in bs_dir.rglob("*")):
+        if (
+            bs_dir.exists()
+            and any(bs_dir.rglob("*"))
+            and any(f.is_file() for f in bs_dir.rglob("*"))
+        ):
             beta_series_subjects.add(subj_id)
 
         lss_dir = fmri_dir / "lss"
-        if lss_dir.exists() and any(lss_dir.rglob("*")) and any(f.is_file() for f in lss_dir.rglob("*")):
+        if (
+            lss_dir.exists()
+            and any(lss_dir.rglob("*"))
+            and any(f.is_file() for f in lss_dir.rglob("*"))
+        ):
             lss_subjects.add(subj_id)
 
     return first_level_subjects, beta_series_subjects, lss_subjects
 
 
-def _count_feature_categories(
-    features_subjects: set[str], deriv_root: Path
-) -> dict[str, int]:
+def _count_feature_categories(features_subjects: set[str], deriv_root: Path) -> dict[str, int]:
     """Count how many subjects have each feature category.
 
     Looks for features_{category}* under sub-XXX/eeg/features (and subdirs)
@@ -275,9 +285,14 @@ def _handle_summary_mode(
     n_fmri_beta_series = len(fmri_beta_series_subjects)
     n_fmri_lss = len(fmri_lss_subjects)
     all_subjects = (
-        bids_subjects | epochs_subjects | features_subjects
-        | eeg_prep_subjects | fmri_prep_subjects
-        | fmri_first_level_subjects | fmri_beta_series_subjects | fmri_lss_subjects
+        bids_subjects
+        | epochs_subjects
+        | features_subjects
+        | eeg_prep_subjects
+        | fmri_prep_subjects
+        | fmri_first_level_subjects
+        | fmri_beta_series_subjects
+        | fmri_lss_subjects
     )
     n_total = len(all_subjects)
 
@@ -373,9 +388,7 @@ def _extract_category_from_filename(filename: str) -> str:
 
 def _count_feature_columns(dataframe: pd.DataFrame) -> int:
     """Count feature columns excluding metadata columns."""
-    feature_columns = [
-        column for column in dataframe.columns if column not in METADATA_COLUMNS
-    ]
+    feature_columns = [column for column in dataframe.columns if column not in METADATA_COLUMNS]
     return len(feature_columns)
 
 
@@ -464,29 +477,20 @@ def _handle_storage_mode(
     storage_stats["features"] = features_total
 
     epochs_dir = deriv_root / "epochs"
-    storage_stats["epochs"] = (
-        get_dir_size(epochs_dir) if epochs_dir.exists() else 0
-    )
+    storage_stats["epochs"] = get_dir_size(epochs_dir) if epochs_dir.exists() else 0
 
     plots_dir = deriv_root / "plots"
-    storage_stats["plots"] = (
-        get_dir_size(plots_dir) if plots_dir.exists() else 0
-    )
+    storage_stats["plots"] = get_dir_size(plots_dir) if plots_dir.exists() else 0
 
     behavior_dir = deriv_root / "behavior"
-    storage_stats["behavior"] = (
-        get_dir_size(behavior_dir) if behavior_dir.exists() else 0
-    )
+    storage_stats["behavior"] = get_dir_size(behavior_dir) if behavior_dir.exists() else 0
 
     total_storage = sum(storage_stats.values())
 
     if args.output_json:
         output = {
             "storage_bytes": storage_stats,
-            "storage_formatted": {
-                key: format_size(value)
-                for key, value in storage_stats.items()
-            },
+            "storage_formatted": {key: format_size(value) for key, value in storage_stats.items()},
             "total_bytes": total_storage,
             "total_formatted": format_size(total_storage),
         }
@@ -494,13 +498,9 @@ def _handle_storage_mode(
     else:
         print("STORAGE USAGE")
         print("=" * 40)
-        sorted_items = sorted(
-            storage_stats.items(), key=lambda item: -item[1]
-        )
+        sorted_items = sorted(storage_stats.items(), key=lambda item: -item[1])
         for category, size in sorted_items:
-            percentage = (
-                (size / total_storage * 100) if total_storage > 0 else 0
-            )
+            percentage = (size / total_storage * 100) if total_storage > 0 else 0
             bar_length = int(percentage / STORAGE_BAR_SCALE)
             bar = "█" * bar_length
             print(f"  {category:12} {format_size(size):>10}  {bar}")
@@ -520,9 +520,7 @@ def _handle_timeline_mode(
         if features_dir is None:
             continue
 
-        tsv_files = list(features_dir.rglob("*.tsv")) + list(
-            features_dir.rglob("*.parquet")
-        )
+        tsv_files = list(features_dir.rglob("*.tsv")) + list(features_dir.rglob("*.parquet"))
         tsv_files = [f for f in tsv_files if f.is_file()]
         if not tsv_files:
             continue
@@ -531,9 +529,7 @@ def _handle_timeline_mode(
         feature_times.append(
             {
                 "subject": subject,
-                "last_modified": datetime.fromtimestamp(
-                    latest_mtime
-                ).isoformat(),
+                "last_modified": datetime.fromtimestamp(latest_mtime).isoformat(),
                 "n_files": len(tsv_files),
             }
         )
@@ -549,12 +545,7 @@ def _handle_timeline_mode(
         displayed_entries = feature_times[:TIMELINE_DISPLAY_LIMIT]
         for entry in displayed_entries:
             timestamp = entry["last_modified"][:19]
-            print(
-                f"  sub-{entry['subject']:11}  "
-                f"{timestamp}  "
-                f"({entry['n_files']} files)"
-            )
+            print(f"  sub-{entry['subject']:11}  " f"{timestamp}  " f"({entry['n_files']} files)")
         remaining_count = len(feature_times) - TIMELINE_DISPLAY_LIMIT
         if remaining_count > 0:
             print(f"  ... and {remaining_count} more")
-

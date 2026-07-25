@@ -16,7 +16,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-
 ###################################################################
 # Data Transformation
 ###################################################################
@@ -24,14 +23,14 @@ import pandas as pd
 
 def zscore_array(arr: np.ndarray) -> np.ndarray:
     """Z-score normalize numpy array.
-    
+
     Standardizes array to zero mean and unit variance.
-    
+
     Parameters
     ----------
     arr : np.ndarray
         Input array
-        
+
     Returns
     -------
     np.ndarray
@@ -49,14 +48,14 @@ def prepare_data_for_plotting(
     y_data: pd.Series,
 ) -> Tuple[pd.Series, pd.Series, int]:
     """Prepare data for plotting by removing NaN values.
-    
+
     Parameters
     ----------
     x_data : pd.Series
         First input series
     y_data : pd.Series
         Second input series
-        
+
     Returns
     -------
     Tuple[pd.Series, pd.Series, int]
@@ -78,7 +77,7 @@ def fit_linear_regression(
     min_samples: int = 3,
 ) -> np.ndarray:
     """Fit linear regression and return predictions over specified range.
-    
+
     Parameters
     ----------
     x : np.ndarray
@@ -89,7 +88,7 @@ def fit_linear_regression(
         Range of x values for prediction
     min_samples : int
         Minimum samples required for fitting
-        
+
     Returns
     -------
     np.ndarray
@@ -109,7 +108,7 @@ def _create_bin_mask(
     is_last_bin: bool,
 ) -> np.ndarray:
     """Create boolean mask for values in specified bin.
-    
+
     Parameters
     ----------
     y_pred : np.ndarray
@@ -120,7 +119,7 @@ def _create_bin_mask(
         Index of current bin
     is_last_bin : bool
         Whether this is the last bin (inclusive upper bound)
-        
+
     Returns
     -------
     np.ndarray
@@ -128,7 +127,7 @@ def _create_bin_mask(
     """
     lower_bound = bin_edges[bin_index]
     upper_bound = bin_edges[bin_index + 1]
-    
+
     if is_last_bin:
         return (y_pred >= lower_bound) & (y_pred <= upper_bound)
     return (y_pred >= lower_bound) & (y_pred < upper_bound)
@@ -140,7 +139,7 @@ def compute_binned_statistics(
     n_bins: int,
 ) -> Tuple[List[float], List[float], List[float]]:
     """Compute binned means and standard errors for calibration plots.
-    
+
     Parameters
     ----------
     y_pred : np.ndarray
@@ -149,7 +148,7 @@ def compute_binned_statistics(
         True values (used for statistics)
     n_bins : int
         Number of bins
-        
+
     Returns
     -------
     Tuple[List[float], List[float], List[float]]
@@ -158,24 +157,24 @@ def compute_binned_statistics(
     y_min = y_pred.min()
     y_max = y_pred.max()
     bin_edges = np.linspace(y_min, y_max, n_bins + 1)
-    
+
     bin_centers, bin_means, bin_stds = [], [], []
-    
+
     for bin_idx in range(n_bins):
         is_last_bin = bin_idx == n_bins - 1
         bin_mask = _create_bin_mask(y_pred, bin_edges, bin_idx, is_last_bin)
         n_samples_in_bin = bin_mask.sum()
-        
+
         if n_samples_in_bin > 0:
             bin_center = (bin_edges[bin_idx] + bin_edges[bin_idx + 1]) / 2
             y_true_in_bin = y_true[bin_mask]
             bin_mean = np.mean(y_true_in_bin)
             bin_std = np.std(y_true_in_bin) / np.sqrt(n_samples_in_bin)
-            
+
             bin_centers.append(bin_center)
             bin_means.append(bin_mean)
             bin_stds.append(bin_std)
-    
+
     return bin_centers, bin_means, bin_stds
 
 
@@ -190,7 +189,7 @@ def compute_residuals(
     Supports vector (freq,) inputs as well as epoch/channel grids such as
     (epochs, channels, freqs) by broadcasting the offsets/slopes over the
     frequency axis.
-    
+
     Parameters
     ----------
     log_freqs : np.ndarray
@@ -201,7 +200,7 @@ def compute_residuals(
         Aperiodic offset values
     slopes : np.ndarray
         Aperiodic slope values
-        
+
     Returns
     -------
     np.ndarray
@@ -214,7 +213,7 @@ def compute_residuals(
 
     n_frequencies_psd = log_psd_array.shape[-1]
     n_frequencies_freqs = log_freqs_array.shape[-1]
-    
+
     if n_frequencies_psd != n_frequencies_freqs:
         raise ValueError(
             f"log_psd last dimension ({n_frequencies_psd}) does not match "
@@ -238,7 +237,7 @@ def compute_change_features(
     config: Optional[Any] = None,
 ) -> pd.DataFrame:
     """Compute change scores between matching feature pairs across time windows.
-    
+
     Parameters
     ----------
     features_df : pd.DataFrame
@@ -251,7 +250,7 @@ def compute_change_features(
         or "log_ratio" (log10(target / ref)).
     config : Optional[Any]
         Config object to read window_pairs and transform from if not provided.
-        
+
     Returns
     -------
     pd.DataFrame
@@ -265,16 +264,20 @@ def compute_change_features(
         cfg_transform = config.get("feature_engineering.change_scores.transform", None)
         if cfg_transform:
             transform = str(cfg_transform).strip().lower()
-    
+
     transform = transform.lower()
     if transform == "ratio":
         transform = "percent"
     if transform not in {"difference", "percent", "log_ratio"}:
         transform = "difference"
-    
+
     from eeg_pipeline.domain.features.naming import NamingSchema
 
-    suffix = "change" if transform == "difference" else "pct_change" if transform == "percent" else "log_ratio"
+    suffix = (
+        "change"
+        if transform == "difference"
+        else "pct_change" if transform == "percent" else "log_ratio"
+    )
 
     # Build a lookup of parsed feature columns so pairing never relies on substring replacement.
     # Key ignores segment so we can match reference/target windows cleanly.
@@ -317,7 +320,9 @@ def compute_change_features(
                 continue
 
             ref_vals = pd.to_numeric(features_df[ref_col], errors="coerce").to_numpy(dtype=float)
-            target_vals = pd.to_numeric(features_df[target_col], errors="coerce").to_numpy(dtype=float)
+            target_vals = pd.to_numeric(features_df[target_col], errors="coerce").to_numpy(
+                dtype=float
+            )
 
             if transform == "difference":
                 change_vals = target_vals - ref_vals
@@ -344,10 +349,10 @@ def compute_change_features(
 
             change_col = NamingSchema.build(group, suffix, band, scope, stat, **build_kwargs)
             change_data[change_col] = change_vals
-    
+
     if not change_data:
         return pd.DataFrame(index=features_df.index)
-    
+
     return pd.DataFrame(change_data, index=features_df.index)
 
 

@@ -63,12 +63,12 @@ def _bootstrap_corr_ci_impl(
     rng: np.random.Generator,
 ) -> Tuple[float, float]:
     """Internal implementation of bootstrap CI for correlation.
-    
+
     Returns (ci_low, ci_high).
     """
     # Local import to avoid circular dependency
     from .correlation import compute_correlation
-    
+
     n_valid = len(x_valid)
     if n_valid < MIN_SAMPLES_BOOTSTRAP_CORR:
         return np.nan, np.nan
@@ -76,9 +76,7 @@ def _bootstrap_corr_ci_impl(
     bootstrap_correlations = []
     for _ in range(n_boot):
         indices = rng.integers(0, n_valid, size=n_valid)
-        correlation, _ = compute_correlation(
-            x_valid[indices], y_valid[indices], method
-        )
+        correlation, _ = compute_correlation(x_valid[indices], y_valid[indices], method)
         if np.isfinite(correlation):
             bootstrap_correlations.append(correlation)
 
@@ -103,7 +101,7 @@ def bootstrap_corr_ci(
 ) -> Tuple[float, float]:
     """
     Bootstrap CI for correlation using percentile method.
-    
+
     Returns (ci_low, ci_high).
     """
     n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
@@ -122,9 +120,9 @@ def compute_bootstrap_ci(
     config: Optional[Any] = None,
 ) -> Tuple[float, float]:
     """Compute bootstrap confidence interval for correlation.
-    
+
     Convenience wrapper that uses explicit parameters instead of config object.
-    
+
     Parameters
     ----------
     x, y : np.ndarray
@@ -139,7 +137,7 @@ def compute_bootstrap_ci(
         Random number generator
     config : Optional[Any]
         Configuration object (overridden by explicit parameters)
-        
+
     Returns
     -------
     Tuple[float, float]

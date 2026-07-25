@@ -1,6 +1,5 @@
 from tests import REPO_ROOT
 
-
 WORKFLOW_ROOT = REPO_ROOT / "local_workflows" / "alliance_canada"
 STUDY1_ROOT = WORKFLOW_ROOT / "study1"
 
@@ -22,10 +21,10 @@ def test_study1_common_args_use_complete_cohort_and_confirmatory_settings() -> N
     common = (STUDY1_ROOT / "common_args.sh").read_text()
     submit = (STUDY1_ROOT / "submit.sh").read_text()
 
-    assert 'study1.cohort.min_subjects=13' in common
-    assert 'study1.feature_benchmark.n_perm=${STUDY1_N_PERM}' in common
+    assert "study1.cohort.min_subjects=13" in common
+    assert "study1.feature_benchmark.n_perm=${STUDY1_N_PERM}" in common
     assert 'STUDY1_N_PERM="5000"' in submit
-    assert 'study1_subjects.txt' in common
+    assert "study1_subjects.txt" in common
 
 
 def test_study1_submission_defines_prepare_dispatch_cell_report_chain() -> None:
@@ -52,4 +51,4 @@ def test_local_study1_submitter_uses_selected_alliance_connection() -> None:
 
     assert "require_alliance_connection" in submit
     assert '"${ALLIANCE_HOST}"' in submit
-    assert 'ALLIANCE_CLUSTER=${ALLIANCE_CLUSTER}' in submit
+    assert "ALLIANCE_CLUSTER=${ALLIANCE_CLUSTER}" in submit

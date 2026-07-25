@@ -21,13 +21,13 @@ except ImportError:  # pragma: no cover - exercised on Windows
     resource = None
 
 
-_BYTES_PER_GB = 1024 ** 3
-_KB_PER_GB = 1024 ** 2
+_BYTES_PER_GB = 1024**3
+_KB_PER_GB = 1024**2
 
 
 class ProgressEvent(str, Enum):
     """Progress event types for CLI-TUI communication."""
-    
+
     START = "start"
     SUBJECT_START = "subject_start"
     PROGRESS = "progress"
@@ -49,21 +49,25 @@ class ProgressReporter:
     def start(self, operation: str, subjects: List[str]) -> None:
         if not self.enabled:
             return
-        self._emit({
-            "event": ProgressEvent.START.value,
-            "operation": operation,
-            "subjects": subjects,
-            "total_subjects": len(subjects),
-        })
+        self._emit(
+            {
+                "event": ProgressEvent.START.value,
+                "operation": operation,
+                "subjects": subjects,
+                "total_subjects": len(subjects),
+            }
+        )
 
     def subject_start(self, subject: str) -> None:
         if not self.enabled:
             return
         self.current_subject = subject
-        self._emit({
-            "event": ProgressEvent.SUBJECT_START.value,
-            "subject": subject,
-        })
+        self._emit(
+            {
+                "event": ProgressEvent.SUBJECT_START.value,
+                "subject": subject,
+            }
+        )
 
     def step(self, step_name: str, current: int = None, total: int = None) -> None:
         if not self.enabled:
@@ -82,31 +86,37 @@ class ProgressReporter:
     def log(self, level: str, message: str) -> None:
         if not self.enabled:
             return
-        self._emit({
-            "event": ProgressEvent.LOG.value,
-            "level": level,
-            "message": message,
-            "subject": self.current_subject,
-        })
+        self._emit(
+            {
+                "event": ProgressEvent.LOG.value,
+                "level": level,
+                "message": message,
+                "subject": self.current_subject,
+            }
+        )
 
     def subject_done(self, subject: str, success: bool = True) -> None:
         if not self.enabled:
             return
-        self._emit({
-            "event": ProgressEvent.SUBJECT_DONE.value,
-            "subject": subject,
-            "success": success,
-        })
+        self._emit(
+            {
+                "event": ProgressEvent.SUBJECT_DONE.value,
+                "subject": subject,
+                "success": success,
+            }
+        )
 
     def complete(self, success: bool, duration: float = None, outputs: List[str] = None) -> None:
         if not self.enabled:
             return
-        self._emit({
-            "event": ProgressEvent.COMPLETE.value,
-            "success": success,
-            "duration": duration,
-            "outputs": outputs or [],
-        })
+        self._emit(
+            {
+                "event": ProgressEvent.COMPLETE.value,
+                "success": success,
+                "duration": duration,
+                "outputs": outputs or [],
+            }
+        )
 
     def error(self, code: str, message: str, suggestion: str = None) -> None:
         if not self.enabled:
@@ -130,10 +140,7 @@ class ProgressReporter:
         try:
             memory_gb = self._get_memory_usage_gb()
             cpu_percent = self._get_cpu_usage_percent()
-            return {
-                "cpu": round(cpu_percent, 1),
-                "memory": round(memory_gb, 2)
-            }
+            return {"cpu": round(cpu_percent, 1), "memory": round(memory_gb, 2)}
         except (OSError, ValueError):
             return {"cpu": 0.0, "memory": 0.0}
 
@@ -159,15 +166,15 @@ class ProgressReporter:
             self._start_wall_time = time.time()
             self._start_cpu_time = self._get_current_cpu_time()
             return 0.0
-        
+
         elapsed_wall_time = time.time() - self._start_wall_time
         if elapsed_wall_time <= 0:
             return 0.0
-        
+
         current_cpu_time = self._get_current_cpu_time()
         cpu_time_delta = current_cpu_time - self._start_cpu_time
         cpu_percent = (cpu_time_delta / elapsed_wall_time) * 100.0
-        
+
         cpu_count = os.cpu_count() or 1
         max_cpu_percent = 100.0 * cpu_count
         cpu_percent = min(max(cpu_percent, 0.0), max_cpu_percent)

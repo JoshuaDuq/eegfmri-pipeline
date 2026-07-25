@@ -6,7 +6,7 @@ Single entry point for all pipeline commands.
 
 Usage:
     python -m eeg_pipeline.cli.main <command> [options]
-    
+
     Or via console script (if installed):
     eeg-pipeline <command> [options]
 """
@@ -27,13 +27,9 @@ from eeg_pipeline.utils.data.subjects import parse_subject_args
 from eeg_pipeline.cli.common import get_deriv_root
 from eeg_pipeline.cli.commands import get_commands, get_command, Command
 
-
 os.environ["NUMPY_SKIP_MACOS_CHECK"] = "1"
 warnings.filterwarnings(
-    "ignore",
-    message=".*found in sys.modules.*",
-    category=RuntimeWarning,
-    module="runpy"
+    "ignore", message=".*found in sys.modules.*", category=RuntimeWarning, module="runpy"
 )
 
 
@@ -69,14 +65,14 @@ Examples:
 
 For detailed help on each subcommand:
   python -m eeg_pipeline.cli.main <subcommand> --help
-        """
+        """,
     )
-    
+
     subparsers = parser.add_subparsers(dest="command", help="Analysis type")
-    
+
     for command in get_commands():
         command.setup(subparsers)
-    
+
     return parser
 
 
@@ -97,24 +93,14 @@ def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) ->
 
 
 def get_subjects_for_command(
-    args: argparse.Namespace,
-    config: dict[str, Any],
-    deriv_root: Path
+    args: argparse.Namespace, config: dict[str, Any], deriv_root: Path
 ) -> list[str]:
     """Parse and validate subject arguments for commands that require them."""
-    return parse_subject_args(
-        args,
-        config,
-        task=getattr(args, "task", None),
-        deriv_root=deriv_root
-    )
+    return parse_subject_args(args, config, task=getattr(args, "task", None), deriv_root=deriv_root)
 
 
 def execute_command(
-    command: Command,
-    args: argparse.Namespace,
-    subjects: list[str],
-    config: dict[str, Any]
+    command: Command, args: argparse.Namespace, subjects: list[str], config: dict[str, Any]
 ) -> int:
     """Execute a command with error handling. Returns exit code."""
     try:
@@ -128,26 +114,26 @@ def execute_command(
 def main() -> int:
     """Main entry point for the CLI application."""
     setup_logging()
-    
+
     parser = create_argument_parser()
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         return EXIT_ERROR
-    
+
     config = load_config()
     update_config_from_args(config, args)
     deriv_root = get_deriv_root(config, command=args.command)
-    
+
     command = get_command(args.command)
     if not command:
         logging.error("Unknown command: %s", args.command)
         return EXIT_ERROR
-    
+
     if not command.requires_subjects:
         return execute_command(command, args, [], config)
-    
+
     subjects = get_subjects_for_command(args, config, deriv_root)
     if not subjects:
         logging.error(
@@ -155,7 +141,7 @@ def main() -> int:
             "or --subject (repeatable), or --all-subjects."
         )
         return EXIT_NO_SUBJECTS
-    
+
     return execute_command(command, args, subjects, config)
 
 

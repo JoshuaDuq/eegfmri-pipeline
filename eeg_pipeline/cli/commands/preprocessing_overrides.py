@@ -134,8 +134,8 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
         alignment_cfg["allow_misaligned_trim"] = True
     if args.min_alignment_samples is not None:
         alignment_cfg["min_alignment_samples"] = int(args.min_alignment_samples)
-    if args.trim_to_first_volume:
-        alignment_cfg["trim_to_first_volume"] = True
+    if args.trim_to_volume_bounds:
+        alignment_cfg["trim_to_volume_bounds"] = True
     if args.fmri_onset_reference:
         mapping = {
             "first_volume": "first_iti_start",

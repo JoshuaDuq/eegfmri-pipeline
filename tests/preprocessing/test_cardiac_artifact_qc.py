@@ -193,7 +193,7 @@ def test_cardiac_review_guide_has_no_custom_classification_language() -> None:
 def test_pulse_marker_events_use_preserved_analyzer_annotations() -> None:
     raw = _pulse_locked_raw(artifact_scale=1.0)
 
-    events = pulse_marker_events(raw)
+    events, is_fallback = pulse_marker_events(raw)
 
     assert events.shape == (27, 3)
     assert events[0].tolist() == [200, 0, 999]
@@ -203,7 +203,7 @@ def test_pulse_marker_events_preserve_sample_positions_after_crop() -> None:
     raw = _pulse_locked_raw(artifact_scale=1.0)
     raw.crop(tmin=1.0, tmax=29.0)
 
-    events = pulse_marker_events(raw)
+    events, is_fallback = pulse_marker_events(raw)
 
     assert raw.first_samp == 100
     assert events[0].tolist() == [200, 0, 999]
@@ -275,7 +275,7 @@ def test_compute_marker_ctps_scores_uses_marker_locked_epochs() -> None:
             assert kwargs["threshold"] == 0.1
             return [1], np.array([0.04, 0.2])
 
-    scores = compute_marker_ctps_scores(
+    scores, any_fallback = compute_marker_ctps_scores(
         [_pulse_locked_raw(artifact_scale=1.0), _pulse_locked_raw(artifact_scale=0.5)],
         FakeIca(),
         threshold=0.1,
@@ -328,7 +328,7 @@ def test_run_marker_ctps_qc_updates_native_table_without_excluding(monkeypatch, 
     monkeypatch.setattr(mne.io, "read_raw_fif", lambda *_args, **_kwargs: fake_raw)
     monkeypatch.setattr(
         "eeg_pipeline.preprocessing.cardiac_artifact_qc.compute_marker_ctps_scores",
-        lambda *_args, **_kwargs: np.array([0.2, 0.04]),
+        lambda *_args, **_kwargs: (np.array([0.2, 0.04]), False),
     )
 
     output_path = run_marker_ctps_qc(
@@ -373,3 +373,23 @@ def test_run_cardiac_attenuation_qc_pairs_filtered_and_clean_raws(
     table = pd.read_csv(output_path, sep="\t")
     assert table["recording_id"].tolist() == ["sub-0001_task-pain_run-1"]
     assert table["attenuation_percent"].iloc[0] == pytest.approx(75.0)
+
+
+def test_attenuation_is_reported_in_decibels_as_well_as_percent() -> None:
+    """dB is the pipeline's convention for attenuation; percent is kept for continuity."""
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.cardiac_artifact_qc import CardiacAttenuationMetrics
+
+    metrics = CardiacAttenuationMetrics(
+        recording_id="sub-0001_run-1",
+        marker_count=100,
+        before_rms_uv=10.0,
+        after_rms_uv=5.0,
+        attenuation_percent=50.0,
+        attenuation_db=float(20.0 * np.log10(10.0 / 5.0)),
+    )
+
+    # Halving amplitude is 6.02 dB, which 50% describes far less transparently.
+    assert metrics.attenuation_db == pytest.approx(6.0206, abs=1e-3)
+    assert metrics.attenuation_percent == pytest.approx(50.0)

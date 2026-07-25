@@ -40,4 +40,3 @@ def test_resolve_subjects_falls_back_to_config_subjects(tmp_path) -> None:
     args = argparse.Namespace(group=None, all_subjects=False, subject=None, subjects=None)
     resolved = resolve_subjects(args, tmp_path, _Config(subjects=["0001"]))
     assert resolved == ["0001"]
-

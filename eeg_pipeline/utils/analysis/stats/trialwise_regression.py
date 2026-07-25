@@ -35,7 +35,6 @@ from eeg_pipeline.utils.analysis.stats._regression_utils import (
     _build_predictor_covariates as _build_temp_cov_shared,
 )
 
-
 # Constants
 _MIN_VARIANCE_THRESHOLD = 1e-12
 _MIN_DENOMINATOR_THRESHOLD = 1e-12
@@ -152,12 +151,12 @@ def _prepare_base_dataframe(
     base_cols = list(dict.fromkeys([outcome, *covariates]))
     base_present = [c for c in base_cols if c in trial_df.columns]
     base = trial_df[base_present].copy()
-    
+
     if temp_design_df is not None:
         for c in covariates:
             if c not in base.columns and c in temp_design_df.columns:
                 base[c] = temp_design_df[c]
-    
+
     return base
 
 
@@ -166,9 +165,17 @@ def _fit_reduced_model(
     outcome: str,
     covariates: List[str],
     min_samples: int,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[float], Optional[np.ndarray], Optional[List[str]]]:
+) -> Tuple[
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[float],
+    Optional[np.ndarray],
+    Optional[List[str]],
+]:
     """Fit reduced model (covariates only) and return fitted values.
-    
+
     Returns
     -------
     Tuple containing:
@@ -181,32 +188,38 @@ def _fit_reduced_model(
         - Xz_names: column names for design matrix
     """
     Xz, Xz_names, _ = _build_covariate_design(
-        base, covariates, add_intercept=True, max_dummies=_MAX_DUMMY_VARIABLES, return_design_df=True
+        base,
+        covariates,
+        add_intercept=True,
+        max_dummies=_MAX_DUMMY_VARIABLES,
+        return_design_df=True,
     )
     y = pd.to_numeric(base[outcome], errors="coerce").to_numpy(dtype=float)
-    
+
     valid_mask = np.isfinite(y) & np.all(np.isfinite(Xz), axis=1)
     if valid_mask.sum() < min_samples:
         return None, None, None, None, None, None, None
-    
+
     y_valid = y[valid_mask]
     Xz_valid = Xz[valid_mask]
     beta_z = _ols_fit(Xz_valid, y_valid)
     if beta_z is None:
         return None, None, None, None, None, None, None
-    
+
     y_hat = Xz_valid @ beta_z
     resid = y_valid - y_hat
     r2_reduced = _r2(y_valid, y_hat)
-    
+
     return y_valid, Xz_valid, y_hat, resid, r2_reduced, valid_mask, Xz_names
 
 
 def _is_run_level_primary_unit(config: Any) -> bool:
     """Return whether regression is configured to operate at the run level."""
-    primary_unit = str(
-        _get(config, "behavior_analysis.regression.primary_unit", "trial") or "trial"
-    ).strip().lower()
+    primary_unit = (
+        str(_get(config, "behavior_analysis.regression.primary_unit", "trial") or "trial")
+        .strip()
+        .lower()
+    )
     return primary_unit in {"run", "run_mean", "runmean", "run_level"}
 
 
@@ -289,9 +302,9 @@ class TrialwiseRegressionConfig:
         standardize = bool(_get(config, f"{base_path}.standardize", True))
         min_samples = int(_get(config, f"{base_path}.min_samples", 15))
         n_permutations = int(_get(config, f"{base_path}.n_permutations", 0))
-        permutation_scheme = str(
-            _get(config, "behavior_analysis.permutation.scheme", "shuffle")
-        ).strip().lower()
+        permutation_scheme = (
+            str(_get(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+        )
         if permutation_scheme not in {"shuffle", "circular_shift"}:
             raise ValueError(
                 "Invalid behavior_analysis.permutation.scheme value: "
@@ -299,7 +312,7 @@ class TrialwiseRegressionConfig:
             )
         max_features = _get(config, f"{base_path}.max_features", None)
         n_jobs = int(_get(config, "behavior_analysis.n_jobs", 1))
-        
+
         return cls(
             outcome=outcome,
             include_predictor=include_predictor,
@@ -334,7 +347,7 @@ def _compute_permutation_pvalues(
     scheme: str,
 ) -> Tuple[float, float]:
     """Compute permutation p-values for feature and interaction terms.
-    
+
     Returns
     -------
     Tuple[float, float]
@@ -411,7 +424,7 @@ def _prepare_feature_and_interaction(
     predictor_column: Optional[str],
 ) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
     """Extract and prepare feature values and optional interaction term.
-    
+
     Returns
     -------
     Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]
@@ -419,7 +432,7 @@ def _prepare_feature_and_interaction(
     """
     x_raw = pd.to_numeric(trial_df[col], errors="coerce").to_numpy(dtype=float)[valid_mask]
     x = _zscore(x_raw) if cfg.standardize else x_raw
-    
+
     x_int = None
     if (
         cfg.include_interaction
@@ -430,14 +443,16 @@ def _prepare_feature_and_interaction(
         predictor = pd.to_numeric(
             trial_df[predictor_column],
             errors="coerce",
-        ).to_numpy(dtype=float)[valid_mask]
+        ).to_numpy(
+            dtype=float
+        )[valid_mask]
         predictor_standardized = _zscore(predictor) if cfg.standardize else predictor
         x_int = x * predictor_standardized
-    
+
     valid_feat = np.isfinite(x)
     if x_int is not None:
         valid_feat = valid_feat & np.isfinite(x_int)
-    
+
     return x, x_int, valid_feat
 
 
@@ -450,11 +465,11 @@ def _build_full_design_matrix(
     """Build full design matrix including feature and optional interaction."""
     X_parts = [Xz_f, x_f[:, None]]
     names = [*Xz_names, "feature"]
-    
+
     if x_int is not None:
         X_parts.append(x_int[:, None])
         names.append("feature_x_predictor")
-    
+
     X = np.column_stack(X_parts)
     return X, names
 
@@ -467,7 +482,7 @@ def _extract_coefficient_results(
     names: List[str],
 ) -> Tuple[float, float, float, float, float]:
     """Extract feature and interaction coefficient statistics.
-    
+
     Returns
     -------
     Tuple[float, float, float, float, float]
@@ -477,14 +492,14 @@ def _extract_coefficient_results(
     beta_feature = float(beta[idx_feature])
     se_feature = float(se[idx_feature]) if np.isfinite(se[idx_feature]) else np.nan
     p_feature = float(p_vals[idx_feature]) if np.isfinite(p_vals[idx_feature]) else np.nan
-    
+
     beta_int = np.nan
     p_int = np.nan
     if "feature_x_predictor" in names:
         idx_int = names.index("feature_x_predictor")
         beta_int = float(beta[idx_int])
         p_int = float(p_vals[idx_int]) if np.isfinite(p_vals[idx_int]) else np.nan
-    
+
     return beta_feature, p_feature, beta_int, p_int, se_feature
 
 
@@ -513,7 +528,7 @@ def _process_single_regression_feature(
         cfg,
         predictor_column,
     )
-    
+
     if int(valid_feat.sum()) < cfg.min_samples:
         return None
 
@@ -521,7 +536,7 @@ def _process_single_regression_feature(
     Xz_f = Xz_v[valid_feat]
     x_f = x[valid_feat]
     x_int_f = x_int[valid_feat] if x_int is not None else None
-    
+
     X, names = _build_full_design_matrix(Xz_f, x_f, x_int_f, Xz_names)
 
     beta = _ols_fit(X, y_f)
@@ -541,7 +556,7 @@ def _process_single_regression_feature(
     beta_feature, p_feature, beta_int, p_int, se_feature = _extract_coefficient_results(
         beta, se, t_stats, p_vals, names
     )
-    
+
     idx_feature = names.index("feature")
     p_perm_feature, p_perm_int = _compute_permutation_pvalues(
         X,
@@ -561,7 +576,9 @@ def _process_single_regression_feature(
     )
     if strict_permutation_primary:
         p_primary = p_perm_feature if np.isfinite(p_perm_feature) else np.nan
-        p_kind_primary = "p_perm_feature" if np.isfinite(p_perm_feature) else "perm_missing_required"
+        p_kind_primary = (
+            "p_perm_feature" if np.isfinite(p_perm_feature) else "perm_missing_required"
+        )
         p_primary_source = "permutation" if np.isfinite(p_perm_feature) else "perm_missing_required"
     else:
         p_primary = p_perm_feature if np.isfinite(p_perm_feature) else p_feature
@@ -574,7 +591,9 @@ def _process_single_regression_feature(
         "n": int(len(y_f)),
         "beta_feature": beta_feature,
         "se_feature_hc3": se_feature,
-        "t_feature_hc3": float(t_stats[idx_feature]) if np.isfinite(t_stats[idx_feature]) else np.nan,
+        "t_feature_hc3": (
+            float(t_stats[idx_feature]) if np.isfinite(t_stats[idx_feature]) else np.nan
+        ),
         "p_feature": p_feature,
         "beta_interaction": beta_int,
         "p_interaction": p_int,
@@ -695,7 +714,11 @@ def run_trialwise_feature_regressions(
 
     y_all = pd.to_numeric(trial_df[out_col], errors="coerce")
     if y_all.notna().sum() < cfg.min_samples:
-        return pd.DataFrame(), {"status": "insufficient_samples", "n_valid": int(y_all.notna().sum()), **meta}
+        return pd.DataFrame(), {
+            "status": "insufficient_samples",
+            "n_valid": int(y_all.notna().sum()),
+            **meta,
+        }
 
     predictor_col = _require_regression_predictor_column(trial_df, config, cfg)
     meta["predictor_column"] = predictor_col
@@ -704,7 +727,9 @@ def run_trialwise_feature_regressions(
         raise ValueError(
             "Run-level regression cannot include run/block covariates because run is the analysis unit."
         )
-    run_col = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_col = str(
+        _get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+    ).strip()
     if use_run_level and run_col not in trial_df.columns:
         raise ValueError(
             f"Run-level regression requires run column '{run_col}' in the trial table."
@@ -742,8 +767,14 @@ def run_trialwise_feature_regressions(
                 max_features = int(cfg.max_features)
             except (ValueError, TypeError):
                 max_features = None
-            if max_features is not None and max_features > 0 and len(candidate_features) > max_features:
-                outcome_valid_mask = pd.to_numeric(trial_df[out_col], errors="coerce").notna().to_numpy()
+            if (
+                max_features is not None
+                and max_features > 0
+                and len(candidate_features) > max_features
+            ):
+                outcome_valid_mask = (
+                    pd.to_numeric(trial_df[out_col], errors="coerce").notna().to_numpy()
+                )
                 candidate_features = _select_top_variance_features(
                     trial_df,
                     candidate_features,
@@ -790,13 +821,15 @@ def run_trialwise_feature_regressions(
         return out, meta
 
     base = _prepare_base_dataframe(trial_df, out_col, covariates, temp_design_df)
-    
+
     y_v, Xz_v, y_hat_z, resid_z, r2_reduced, valid_mask, Xz_names = _fit_reduced_model(
         base, out_col, covariates, cfg.min_samples
     )
-    
+
     if y_v is None:
-        status = "insufficient_samples_after_covariates" if valid_mask is None else "failed_reduced_fit"
+        status = (
+            "insufficient_samples_after_covariates" if valid_mask is None else "failed_reduced_fit"
+        )
         n_valid = int(valid_mask.sum()) if valid_mask is not None else 0
         return pd.DataFrame(), {"status": status, "n_valid": n_valid, **meta}
 
@@ -813,18 +846,20 @@ def run_trialwise_feature_regressions(
                 )
 
     candidates = _screen_feature_candidates(trial_df, feature_cols, valid_mask, cfg)
-    
+
     if cfg.max_features is not None:
         try:
             max_features = int(cfg.max_features)
         except (ValueError, TypeError):
             max_features = None
         if max_features is not None and max_features > 0 and len(candidates) > max_features:
-            candidates = _select_top_variance_features(trial_df, candidates, valid_mask, max_features)
+            candidates = _select_top_variance_features(
+                trial_df, candidates, valid_mask, max_features
+            )
             meta["max_features_applied"] = max_features
 
     n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
-    
+
     feature_args = [
         (
             col,
@@ -845,7 +880,7 @@ def run_trialwise_feature_regressions(
         )
         for i, col in enumerate(candidates)
     ]
-    
+
     records = parallel_regression_features(
         feature_args,
         _process_single_regression_feature,

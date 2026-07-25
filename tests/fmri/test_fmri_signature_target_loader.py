@@ -42,13 +42,7 @@ def test_public_signature_target_loader_supports_study1_config_root() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         sig_dir = (
-            root
-            / "sub-0001"
-            / "fmri"
-            / "lss"
-            / "task-task"
-            / "contrast-contrast"
-            / "signatures"
+            root / "sub-0001" / "fmri" / "lss" / "task-task" / "contrast-contrast" / "signatures"
         )
         sig_dir.mkdir(parents=True, exist_ok=True)
 

@@ -23,13 +23,17 @@ class FoldNuisanceFit:
 
 
 def configured_target_residualization_columns(config: Any) -> tuple[str, ...]:
-    enabled = bool(get_config_value(config, "machine_learning.target_residualization.enabled", False))
+    enabled = bool(
+        get_config_value(config, "machine_learning.target_residualization.enabled", False)
+    )
     if not enabled:
         return tuple()
 
     raw_columns = get_config_value(config, "machine_learning.target_residualization.columns", [])
     if not isinstance(raw_columns, (list, tuple)):
-        raise ValueError("machine_learning.target_residualization.columns must be a list of column names.")
+        raise ValueError(
+            "machine_learning.target_residualization.columns must be a list of column names."
+        )
     columns = tuple(str(column).strip() for column in raw_columns if str(column).strip())
     if not columns:
         raise ValueError(
@@ -148,7 +152,9 @@ def _design_matrix(
     for column in columns:
         values = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
         if not np.all(np.isfinite(values)):
-            raise ValueError(f"Target residualization column '{column}' contains non-finite values.")
+            raise ValueError(
+                f"Target residualization column '{column}' contains non-finite values."
+            )
         design_columns.append(values)
 
     design = np.column_stack(design_columns)

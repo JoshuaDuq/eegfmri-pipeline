@@ -21,16 +21,16 @@ import numpy as np
 def compute_gfp(data: np.ndarray) -> np.ndarray:
     """
     Compute Global Field Power (GFP) of multichannel data.
-    
-    GFP is defined as the spatial standard deviation across all channels 
-    at each time point. It represents the global activity level of the 
+
+    GFP is defined as the spatial standard deviation across all channels
+    at each time point. It represents the global activity level of the
     brain at that instant.
-    
+
     Parameters
     ----------
     data : np.ndarray
         Multichannel data of shape (..., n_channels, n_times)
-    
+
     Returns
     -------
     np.ndarray
@@ -45,12 +45,13 @@ def compute_gfp(data: np.ndarray) -> np.ndarray:
 # Complexity Metrics
 # =============================================================================
 
+
 def _embed_time_series(x: np.ndarray, order: int, delay: int) -> np.ndarray:
     """Create time-delay embedding of a signal using vectorized operations."""
     n = len(x)
     if n < (order - 1) * delay + 1:
         return np.array([])
-    
+
     n_vectors = n - (order - 1) * delay
     indices = np.arange(order) * delay + np.arange(n_vectors)[:, np.newaxis]
     return x[indices]
@@ -64,7 +65,7 @@ def compute_permutation_entropy(
 ) -> float:
     """
     Compute permutation entropy of a signal.
-    
+
     Parameters
     ----------
     x : np.ndarray
@@ -75,7 +76,7 @@ def compute_permutation_entropy(
         Time delay for embedding
     normalize : bool
         If True, normalize by maximum entropy
-    
+
     Returns
     -------
     float
@@ -83,28 +84,28 @@ def compute_permutation_entropy(
     """
     if len(x) < (order - 1) * delay + 1:
         return np.nan
-    
+
     embedded = _embed_time_series(x, order, delay)
     if embedded.size == 0:
         return np.nan
-    
+
     n_vectors = embedded.shape[0]
     permutation_counts: Dict[tuple, int] = {}
-    
+
     for i in range(n_vectors):
         sorted_indices = np.argsort(embedded[i])
         pattern = tuple(sorted_indices)
         permutation_counts[pattern] = permutation_counts.get(pattern, 0) + 1
-    
+
     probabilities = np.array(list(permutation_counts.values())) / n_vectors
     probabilities = probabilities[probabilities > 0]
     entropy = -np.sum(probabilities * np.log2(probabilities))
-    
+
     if normalize:
         max_entropy = np.log2(factorial(order))
         if max_entropy > 0:
             entropy = entropy / max_entropy
-    
+
     return float(entropy)
 
 
@@ -185,16 +186,16 @@ def compute_multiscale_entropy(
 def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = None) -> float:
     """
     Compute Lempel-Ziv complexity of a binarized signal.
-    
+
     Uses an optimized incremental LZ76 algorithm.
-    
+
     Parameters
     ----------
     x : np.ndarray
         Input signal
     threshold : float, optional
         Binarization threshold. If None, uses median.
-    
+
     Returns
     -------
     float
@@ -202,10 +203,10 @@ def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = No
     """
     if len(x) < 2:
         return np.nan
-    
+
     if threshold is None:
         threshold = np.median(x)
-    
+
     binary = "".join("1" if value else "0" for value in (x > threshold))
     n = len(binary)
     if n < 2:

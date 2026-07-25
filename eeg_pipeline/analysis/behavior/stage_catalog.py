@@ -211,9 +211,7 @@ def apply_computation_flags_impl(
     """Apply normalized --computations flags onto BehaviorPipelineConfig."""
     unknown = sorted(set(computation_flags) - set(COMPUTATION_TO_PIPELINE_ATTR))
     if unknown:
-        raise KeyError(
-            f"Unknown computation flags without pipeline mapping: {', '.join(unknown)}"
-        )
+        raise KeyError(f"Unknown computation flags without pipeline mapping: {', '.join(unknown)}")
 
     for computation_name, attr_name in COMPUTATION_TO_PIPELINE_ATTR.items():
         if computation_name in computation_flags:

@@ -6,7 +6,6 @@ from importlib.metadata import EntryPoint
 
 import eeg_pipeline.cli.commands as commands_module
 
-
 CLI_COMMAND_GROUP = "eeg_pipeline.cli_commands"
 
 

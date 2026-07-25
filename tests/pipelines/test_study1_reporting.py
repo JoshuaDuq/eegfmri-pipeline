@@ -11,7 +11,6 @@ from studies.pain_study.study1.reporting import FEATURE_MODELS, write_study1_rep
 from studies.pain_study.study1.targets import PRIMARY_SIGNATURES
 from studies.tests.test_support import validity_figure_test_config
 
-
 TRIAL_TEMPERATURES = (
     44.0,
     44.0,

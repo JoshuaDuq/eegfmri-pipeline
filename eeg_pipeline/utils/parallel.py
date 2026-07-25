@@ -104,17 +104,19 @@ def parallel_condition_effects(
             scheme=scheme,
             logger=logger,
         )
-    
+
     # Fall back to per-feature computation for small feature sets
     if logger:
         logger.info(f"Computing condition effects for {n_features} features (per-feature mode)")
-    
+
     if not _should_use_parallel(n_jobs, n_features, _MIN_FEATURES_FOR_PARALLEL_CONDITION):
         results = []
         log_interval = max(1, n_features // 20)
         for i, col in enumerate(feature_columns):
             if logger and i > 0 and i % log_interval == 0:
-                logger.info(f"  Condition effects progress: {i}/{n_features} ({100*i//n_features}%)")
+                logger.info(
+                    f"  Condition effects progress: {i}/{n_features} ({100*i//n_features}%)"
+                )
             result = _compute_single_condition_effect(
                 col,
                 features_df,
@@ -328,7 +330,7 @@ def _compute_single_condition_effect(
     # Suppress numpy RuntimeWarnings (empty slices, invalid divides in variance)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        
+
         values = pd.to_numeric(features_df[col], errors="coerce").values
 
         cond_a_values = values[cond_a_mask]
@@ -395,7 +397,9 @@ def _compute_single_condition_effect(
 
             hedges_g_value = hedges_g(cond_a_valid, cond_b_valid)
 
-            has_zero_variance = std_condition_a < _NUMERIC_TOLERANCE and std_condition_b < _NUMERIC_TOLERANCE
+            has_zero_variance = (
+                std_condition_a < _NUMERIC_TOLERANCE and std_condition_b < _NUMERIC_TOLERANCE
+            )
             has_zero_mean_difference = abs(mean_condition_a - mean_condition_b) < _NUMERIC_TOLERANCE
 
             if has_zero_variance and has_zero_mean_difference:
@@ -422,6 +426,7 @@ def _compute_single_condition_effect(
                 valid_groups = _extract_valid_groups(groups, values, finite_mask)
 
                 from eeg_pipeline.utils.analysis.stats.permutation import perm_pval_mean_difference
+
                 p_permutation = perm_pval_mean_difference(
                     finite_values,
                     finite_labels,
@@ -431,7 +436,9 @@ def _compute_single_condition_effect(
                     scheme=str(scheme or "shuffle").strip().lower(),
                 )
 
-        effect_interpretation = interpret_effect_size(hedges_g_value) if np.isfinite(hedges_g_value) else "unknown"
+        effect_interpretation = (
+            interpret_effect_size(hedges_g_value) if np.isfinite(hedges_g_value) else "unknown"
+        )
 
     return {
         "feature": col,

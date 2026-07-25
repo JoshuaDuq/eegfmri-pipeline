@@ -63,7 +63,6 @@ from eeg_pipeline.analysis.features.preparation import (
     precompute_data,
 )
 
-
 ###################################################################
 # Connectivity Configuration
 ###################################################################
@@ -75,6 +74,7 @@ class ConnectivityConfig:
 
     Single-pass config validation eliminates redundant conn_cfg.get() calls.
     """
+
     measures: List[str]
     granularity: str
     condition_column: Optional[str]
@@ -245,14 +245,10 @@ class ConnectivityConfig:
             )
         dynamic_autocorr_lag = int(conn_cfg.get("dynamic_autocorr_lag", 1))
         if dynamic_autocorr_lag < 1:
-            raise ValueError(
-                "feature_engineering.connectivity.dynamic_autocorr_lag must be >= 1."
-            )
+            raise ValueError("feature_engineering.connectivity.dynamic_autocorr_lag must be >= 1.")
         dynamic_min_windows = int(conn_cfg.get("dynamic_min_windows", 3))
         if dynamic_min_windows < 2:
-            raise ValueError(
-                "feature_engineering.connectivity.dynamic_min_windows must be >= 2."
-            )
+            raise ValueError("feature_engineering.connectivity.dynamic_min_windows must be >= 2.")
         dynamic_include_roi_pairs = bool(conn_cfg.get("dynamic_include_roi_pairs", True))
         dynamic_state_enabled = bool(conn_cfg.get("dynamic_state_enabled", True))
         dynamic_state_n_states = int(conn_cfg.get("dynamic_state_n_states", 3))
@@ -393,11 +389,7 @@ def _resolve_connectivity_segment_masks(
     masks = get_segment_masks(times, windows, config)
     if task_is_rest:
         return _valid_analysis_segment_masks(masks)
-    return {
-        name: np.asarray(mask, dtype=bool)
-        for name, mask in masks.items()
-        if mask is not None
-    }
+    return {name: np.asarray(mask, dtype=bool) for name, mask in masks.items() if mask is not None}
 
 
 def _resolve_requested_segment_names(
@@ -411,11 +403,7 @@ def _resolve_requested_segment_names(
         return sorted(segment_masks.keys()) if segment_masks else ["full"]
 
     requested = [str(name) for name in segments]
-    missing = [
-        name
-        for name in requested
-        if name != "full" and name not in segment_masks
-    ]
+    missing = [name for name in requested if name != "full" and name not in segment_masks]
     if missing:
         missing_text = ", ".join(missing)
         available_text = ", ".join(sorted(segment_masks)) if segment_masks else "none"
@@ -477,29 +465,29 @@ def _warn_if_phase_connectivity_without_spatial_transform(
 ) -> None:
     """
     Warn if phase-based connectivity measures are used without CSD/Laplacian transform.
-    
+
     Phase-based measures (wPLI, PLI, ImCoh, PLV) are sensitive to volume conduction.
     Using CSD or Laplacian transform reduces spurious connectivity from field spread.
     """
     phase_measures = {"wpli", "imcoh", "plv", "pli"}
     uses_phase = bool(set(m.lower() for m in measures) & phase_measures)
-    
+
     if not uses_phase:
         return
-    
+
     conn_cfg = config.get("feature_engineering.connectivity", {}) if hasattr(config, "get") else {}
     if not isinstance(conn_cfg, dict):
         conn_cfg = {}
     warn_enabled = bool(conn_cfg.get("warn_if_no_spatial_transform", True))
     if not warn_enabled:
         return
-    
+
     from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
 
     spatial_transform = _get_spatial_transform_type(config, feature_family="connectivity")
     if spatial_transform in {"csd", "laplacian"}:
         return
-    
+
     measures_text = ", ".join(sorted(set(m.lower() for m in measures) & phase_measures))
     if warn_enabled:
         raise ValueError(
@@ -540,7 +528,9 @@ def _is_connectivity_precomputed_compatible(
     if family not in valid_families:
         return False, f"feature_family='{family}'"
 
-    current_transform = str(getattr(precomputed, "spatial_transform", "none") or "none").strip().lower()
+    current_transform = (
+        str(getattr(precomputed, "spatial_transform", "none") or "none").strip().lower()
+    )
     expected = str(expected_transform or "none").strip().lower()
     if expected not in {"none", "csd", "laplacian"}:
         expected = "none"
@@ -564,12 +554,12 @@ def _validate_segment_duration_for_connectivity(
 ) -> bool:
     """
     Validate that segment duration is sufficient for reliable connectivity estimation.
-    
+
     For phase-based connectivity, we need enough oscillatory cycles to estimate
     phase relationships reliably. Rule of thumb: min_cycles / fmin seconds.
     """
     min_duration_sec = min_cycles / fmin if fmin > 0 else np.inf
-    
+
     if segment_duration_sec < min_duration_sec:
         if logger is not None:
             logger.warning(
@@ -611,7 +601,9 @@ def _safe_n_cycles_for_segment(
     try:
         sfreq = float(sfreq_hz)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.") from exc
+        raise ValueError(
+            "Connectivity n_cycles validation requires a positive finite sfreq."
+        ) from exc
     if not np.isfinite(sfreq) or sfreq <= 0:
         raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.")
 
@@ -637,10 +629,7 @@ def _safe_n_cycles_for_segment(
 
     safety_factor = 0.95
     max_cycles_by_wavelet = (
-        safety_factor
-        * float(half_len_max)
-        * (2.0 * np.pi * freqs_hz)
-        / (n_sigma * sfreq)
+        safety_factor * float(half_len_max) * (2.0 * np.pi * freqs_hz) / (n_sigma * sfreq)
     )
     if not np.all(np.isfinite(max_cycles_by_wavelet)):
         raise ValueError("Connectivity n_cycles validation produced non-finite wavelet limits.")
@@ -675,7 +664,9 @@ def _reduce_epochs_connectivity_to_pairs(
     """Reduce SpectroTemporalConnectivity output to one scalar per channel-pair."""
     arr = np.asarray(con_data, dtype=float)
     if arr.ndim == 0:
-        raise ValueError("Connectivity: unexpected scalar output from spectral_connectivity_epochs.")
+        raise ValueError(
+            "Connectivity: unexpected scalar output from spectral_connectivity_epochs."
+        )
     if arr.shape[0] != expected_pairs:
         raise ValueError(
             "Connectivity: unexpected imcoh shape from spectral_connectivity_epochs "
@@ -848,7 +839,14 @@ def _apply_across_epochs_phase_estimates_inplace(
     freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(config)
     masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
 
-    def _run(method: str, seg_data: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float, use_n_cycles: Any):
+    def _run(
+        method: str,
+        seg_data: np.ndarray,
+        freqs: np.ndarray,
+        fmin: float,
+        fmax: float,
+        use_n_cycles: Any,
+    ):
         return spectral_connectivity_time(
             seg_data,
             freqs=freqs,
@@ -889,7 +887,9 @@ def _apply_across_epochs_phase_estimates_inplace(
                     f"across-epochs estimation ({seg_sec:.3f}s < {min_segment_sec:.3f}s)."
                 )
 
-            req_cycles = max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
+            req_cycles = (
+                max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
+            )
             min_viable_freq = (req_cycles / seg_sec) if seg_sec > 0 else np.inf
 
             seg_data = precomputed.data[epoch_idx][:, :, seg_mask]
@@ -904,7 +904,10 @@ def _apply_across_epochs_phase_estimates_inplace(
                     raise ValueError(
                         f"Connectivity: requested band '{band}' has no frequency definition."
                     )
-                if band in precomputed.band_data and getattr(precomputed.band_data[band], "fmin", None) is not None:
+                if (
+                    band in precomputed.band_data
+                    and getattr(precomputed.band_data[band], "fmin", None) is not None
+                ):
                     fmin = float(precomputed.band_data[band].fmin)
                     fmax = float(precomputed.band_data[band].fmax)
                 else:
@@ -913,7 +916,9 @@ def _apply_across_epochs_phase_estimates_inplace(
                     fmin = float(fmin)
                     fmax = float(fmax)
                 except (TypeError, ValueError) as exc:
-                    raise ValueError(f"Invalid frequency band range for '{band}': ({fmin}, {fmax})") from exc
+                    raise ValueError(
+                        f"Invalid frequency band range for '{band}': ({fmin}, {fmax})"
+                    ) from exc
                 if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                     raise ValueError(f"Invalid frequency band range for '{band}': ({fmin}, {fmax})")
                 if fmax < min_viable_freq:
@@ -1097,7 +1102,9 @@ def _graph_metrics(
     return {
         NamingSchema.build("conn", segment_name, band, "global", f"{measure}_geff"): geff,
         NamingSchema.build("conn", segment_name, band, "global", f"{measure}_clust"): clust,
-        NamingSchema.build("conn", segment_name, band, "global", f"{measure}_smallworld"): smallworld,
+        NamingSchema.build(
+            "conn", segment_name, band, "global", f"{measure}_smallworld"
+        ): smallworld,
     }
 
 
@@ -1117,6 +1124,7 @@ def _compute_graph_metrics_for_epochs(
 
     Common implementation for both phase-based and envelope-based connectivity.
     """
+
     def _graph_row(ep_idx: int) -> Dict[str, float]:
         adj = np.zeros((n_channels, n_channels), dtype=float)
         adj[pair_i, pair_j] = con_vals[ep_idx]
@@ -1183,15 +1191,30 @@ def _dense_from_envelope_output(
     if ec_data.ndim >= 1 and ec_data.shape[-1] == 1:
         ec_data = np.squeeze(ec_data, axis=-1)
 
-    if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+    if (
+        ec_data.ndim == 4
+        and ec_data.shape[0] == n_epochs
+        and ec_data.shape[1] == n_channels
+        and ec_data.shape[2] == n_channels
+    ):
         dense = _mean_finite_connectivity_values(
             ec_data,
             axis=-1,
             context="aec dense frequency collapse",
         )
-    elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+    elif (
+        ec_data.ndim == 3
+        and ec_data.shape[0] == n_epochs
+        and ec_data.shape[1] == n_channels
+        and ec_data.shape[2] == n_channels
+    ):
         dense = ec_data
-    elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
+    elif (
+        ec_data.ndim == 3
+        and ec_data.shape[0] == n_channels
+        and ec_data.shape[1] == n_channels
+        and ec_data.shape[2] == n_epochs
+    ):
         dense = np.moveaxis(ec_data, -1, 0)
     elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
         packed = _mean_finite_connectivity_values(
@@ -1302,7 +1325,7 @@ def _series_autocorr_lag(
     x_center = x - x_mean
     y_center = y - y_mean
     num = np.nansum(x_center * y_center, axis=-1)
-    den = np.sqrt(np.nansum(x_center ** 2, axis=-1) * np.nansum(y_center ** 2, axis=-1))
+    den = np.sqrt(np.nansum(x_center**2, axis=-1) * np.nansum(y_center**2, axis=-1))
     with np.errstate(invalid="ignore", divide="ignore"):
         ac = np.where(den > 0, num / den, np.nan)
     ac = np.where(valid_count >= 3, ac, np.nan)
@@ -1442,11 +1465,17 @@ def _build_roi_pair_index_map(
             roi_b, ch_b = roi_items[b_idx]
             set_b = set(ch_b.tolist())
             if a_idx == b_idx:
-                mask = np.array([(int(i) in set_a and int(j) in set_a) for i, j in zip(pair_i, pair_j)], dtype=bool)
+                mask = np.array(
+                    [(int(i) in set_a and int(j) in set_a) for i, j in zip(pair_i, pair_j)],
+                    dtype=bool,
+                )
             else:
                 mask = np.array(
                     [
-                        ((int(i) in set_a and int(j) in set_b) or (int(i) in set_b and int(j) in set_a))
+                        (
+                            (int(i) in set_a and int(j) in set_b)
+                            or (int(i) in set_b and int(j) in set_a)
+                        )
                         for i, j in zip(pair_i, pair_j)
                     ],
                     dtype=bool,
@@ -1579,7 +1608,11 @@ def extract_connectivity_features(
             groups_map["__all__"] = np.arange(n_epochs, dtype=int)
         if granularity == "condition":
             events = getattr(ctx, "aligned_events", None)
-            if events is not None and not getattr(events, "empty", True) and len(events) == n_epochs:
+            if (
+                events is not None
+                and not getattr(events, "empty", True)
+                and len(events) == n_epochs
+            ):
                 cond_col = _resolve_connectivity_condition_column(
                     events=events,
                     config=ctx.config,
@@ -1600,8 +1633,14 @@ def extract_connectivity_features(
                 # Otherwise, excluded trials would retain the global across-epochs broadcast estimate.
                 if not np.all(included_mask):
                     exclude_idx = np.where(~included_mask)[0]
-                    conn_cfg_dict = ctx.config.get("feature_engineering.connectivity", {}) if hasattr(ctx.config, "get") else {}
-                    phase_methods = _resolve_phase_measures(conn_cfg_dict if isinstance(conn_cfg_dict, dict) else {})
+                    conn_cfg_dict = (
+                        ctx.config.get("feature_engineering.connectivity", {})
+                        if hasattr(ctx.config, "get")
+                        else {}
+                    )
+                    phase_methods = _resolve_phase_measures(
+                        conn_cfg_dict if isinstance(conn_cfg_dict, dict) else {}
+                    )
                     if phase_methods:
                         phase_cols = [
                             c
@@ -1699,7 +1738,7 @@ def extract_connectivity_features(
         out.loc[~included_mask, :] = np.nan
 
     for lab in included_labels:
-        mask = ((labels == lab).to_numpy() & included_mask)
+        mask = (labels == lab).to_numpy() & included_mask
         grp_mean = numeric.loc[mask].mean(axis=0)
         out.loc[mask] = [grp_mean.values] * int(np.sum(mask))
 
@@ -1719,7 +1758,7 @@ def extract_connectivity_features(
 
 
 def extract_connectivity_from_precomputed(
-    precomputed: Any, # PrecomputedData
+    precomputed: Any,  # PrecomputedData
     *,
     bands: Optional[List[str]] = None,
     segments: Optional[List[str]] = None,
@@ -1734,15 +1773,24 @@ def extract_connectivity_from_precomputed(
     config = config or getattr(precomputed, "config", None) or {}
     logger = logger or getattr(precomputed, "logger", None)
 
-    bands_use = list(precomputed.band_data.keys()) if bands is None else [b for b in bands if b in precomputed.band_data]
+    bands_use = (
+        list(precomputed.band_data.keys())
+        if bands is None
+        else [b for b in bands if b in precomputed.band_data]
+    )
     if not bands_use:
         return pd.DataFrame(), []
 
     conn_cfg = ConnectivityConfig.from_dict(config)
-    analysis_mode = str(
-        get_nested_value(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats"
-    ).strip().lower()
-    disable_dynamic_state_metrics = (analysis_mode == "trial_ml_safe")
+    analysis_mode = (
+        str(
+            get_nested_value(config, "feature_engineering.analysis_mode", "group_stats")
+            or "group_stats"
+        )
+        .strip()
+        .lower()
+    )
+    disable_dynamic_state_metrics = analysis_mode == "trial_ml_safe"
     dynamic_state_skip_warned = False
 
     # Resolve phase measures from config
@@ -1751,9 +1799,7 @@ def extract_connectivity_from_precomputed(
     measures = {str(m).strip().lower() for m in measures_cfg}
     unknown = measures - supported_measures
     if unknown:
-        raise ValueError(
-            "Connectivity: unsupported measures: " + ", ".join(sorted(unknown))
-        )
+        raise ValueError("Connectivity: unsupported measures: " + ", ".join(sorted(unknown)))
     measures = measures & supported_measures
     enable_wpli = "wpli" in measures
     enable_imcoh = "imcoh" in measures
@@ -1847,11 +1893,16 @@ def extract_connectivity_from_precomputed(
             "Connectivity extraction requires a valid precomputed.sfreq (sampling frequency)."
         ) from exc
     if not np.isfinite(sfreq) or sfreq <= 0:
-        raise ValueError("Connectivity extraction requires a valid precomputed.sfreq (sampling frequency).")
+        raise ValueError(
+            "Connectivity extraction requires a valid precomputed.sfreq (sampling frequency)."
+        )
 
     def _is_wavelet_longer_than_signal_error(exc: BaseException) -> bool:
         msg = str(exc).strip().lower()
-        return "wavelets is longer than the signal" in msg or "wavelet is longer than the signal" in msg
+        return (
+            "wavelets is longer than the signal" in msg
+            or "wavelet is longer than the signal" in msg
+        )
 
     def _safe_n_cycles_for_segment(
         base_n_cycles: Optional[float],
@@ -1864,11 +1915,15 @@ def extract_connectivity_from_precomputed(
         if n_times <= 0:
             raise ValueError("Connectivity n_cycles validation requires a non-empty segment.")
         if freqs_hz.size == 0 or not np.all(np.isfinite(freqs_hz)) or np.any(freqs_hz <= 0):
-            raise ValueError("Connectivity n_cycles validation requires positive finite frequencies.")
+            raise ValueError(
+                "Connectivity n_cycles validation requires positive finite frequencies."
+            )
         try:
             sfreq = float(sfreq_hz)
         except (TypeError, ValueError) as exc:
-            raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.") from exc
+            raise ValueError(
+                "Connectivity n_cycles validation requires a positive finite sfreq."
+            ) from exc
         if not np.isfinite(sfreq) or sfreq <= 0:
             raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.")
 
@@ -1902,10 +1957,7 @@ def extract_connectivity_from_precomputed(
 
         safety_factor = 0.95
         max_cycles_by_wavelet = (
-            safety_factor
-            * float(half_len_max)
-            * (2.0 * np.pi * freqs_hz)
-            / (n_sigma * sfreq)
+            safety_factor * float(half_len_max) * (2.0 * np.pi * freqs_hz) / (n_sigma * sfreq)
         )
         if not np.all(np.isfinite(max_cycles_by_wavelet)):
             raise ValueError("Connectivity n_cycles validation produced non-finite wavelet limits.")
@@ -2005,8 +2057,8 @@ def extract_connectivity_from_precomputed(
             )
 
         # Determine whether to use across_epochs (average=True) or within_epoch (average=False)
-        use_across_epochs = (phase_estimator == "across_epochs")
-        
+        use_across_epochs = phase_estimator == "across_epochs"
+
         try:
             if method == "imcoh":
                 con_data = _compute_imcoh_via_epochs_api(
@@ -2104,14 +2156,29 @@ def extract_connectivity_from_precomputed(
 
         if conn_cfg.enable_graph_metrics:
             graph_df = _compute_graph_metrics_for_epochs(
-                con_vals, pair_i, pair_j, n_channels, method_label, band, seg_name,
-                conn_cfg, graph_n_jobs, logger
+                con_vals,
+                pair_i,
+                pair_j,
+                n_channels,
+                method_label,
+                band,
+                seg_name,
+                conn_cfg,
+                graph_n_jobs,
+                logger,
             )
             parts.append(graph_df)
 
         df_out = pd.concat(parts, axis=1) if parts else pd.DataFrame()
         if logger is not None:
-            logger.debug("Connectivity task phase/%s/%s/%s finished in %.2fs (cols=%d)", seg_name, band, method, time.perf_counter() - t0, int(df_out.shape[1]))
+            logger.debug(
+                "Connectivity task phase/%s/%s/%s finished in %.2fs (cols=%d)",
+                seg_name,
+                band,
+                method,
+                time.perf_counter() - t0,
+                int(df_out.shape[1]),
+            )
         return df_out
 
     def _aec_task(seg_name: str, band: str, analytic_seg: np.ndarray) -> pd.DataFrame:
@@ -2135,17 +2202,36 @@ def extract_connectivity_from_precomputed(
         expected_packed = int(n_channels * (n_channels + 1) // 2)
         dense: Optional[np.ndarray] = None
 
-        if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+        if (
+            ec_data.ndim == 4
+            and ec_data.shape[0] == n_epochs
+            and ec_data.shape[1] == n_channels
+            and ec_data.shape[2] == n_channels
+        ):
             dense = _mean_finite_connectivity_values(
                 ec_data,
                 axis=-1,
                 context=f"aec/{seg_name}/{band} frequency collapse",
             )
-        elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+        elif (
+            ec_data.ndim == 3
+            and ec_data.shape[0] == n_epochs
+            and ec_data.shape[1] == n_channels
+            and ec_data.shape[2] == n_channels
+        ):
             dense = ec_data
-        elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
+        elif (
+            ec_data.ndim == 3
+            and ec_data.shape[0] == n_channels
+            and ec_data.shape[1] == n_channels
+            and ec_data.shape[2] == n_epochs
+        ):
             dense = np.moveaxis(ec_data, -1, 0)
-        elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
+        elif (
+            ec_data.ndim == 3
+            and ec_data.shape[0] == n_epochs
+            and ec_data.shape[1] == expected_packed
+        ):
             packed = _mean_finite_connectivity_values(
                 ec_data,
                 axis=-1,
@@ -2155,7 +2241,11 @@ def extract_connectivity_from_precomputed(
             dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
             dense[:, tril[0], tril[1]] = packed
             dense[:, tril[1], tril[0]] = packed
-        elif ec_data.ndim == 2 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
+        elif (
+            ec_data.ndim == 2
+            and ec_data.shape[0] == n_epochs
+            and ec_data.shape[1] == expected_packed
+        ):
             tril = np.tril_indices(n_channels, k=0)
             dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
             dense[:, tril[0], tril[1]] = ec_data
@@ -2174,7 +2264,7 @@ def extract_connectivity_from_precomputed(
             dense[:, pair_i, pair_j],
             context=f"aec/{seg_name}/{band} edge matrix",
         )
-        
+
         # Compute Fisher-z transform: z = atanh(r)
         # This is scientifically correct for averaging correlations across trials/subjects
         # Note: clip to avoid infinity at +/-1
@@ -2186,13 +2276,13 @@ def extract_connectivity_from_precomputed(
         parts: List[pd.DataFrame] = []
         if output_level == "full":
             prefix = f"conn_{seg_name}_{band}_chpair_"
-            
+
             # Raw AEC (r values)
             if enable_aec_raw:
                 suffix = "_aec"
                 cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
                 parts.append(pd.DataFrame(aec_vals, columns=cols))
-            
+
             # Fisher-z AEC (z values)
             if enable_aec_z and aec_vals_z is not None:
                 suffix_z = "_aec_z"
@@ -2203,15 +2293,23 @@ def extract_connectivity_from_precomputed(
         if enable_aec_raw:
             glob_col = f"conn_{seg_name}_{band}_global_aec_mean"
             parts.append(pd.DataFrame({glob_col: np.mean(aec_vals, axis=1)}))
-        
+
         if enable_aec_z and aec_vals_z is not None:
             glob_col_z = f"conn_{seg_name}_{band}_global_aec_z_mean"
             parts.append(pd.DataFrame({glob_col_z: np.mean(aec_vals_z, axis=1)}))
 
         if conn_cfg.enable_graph_metrics:
             graph_df = _compute_graph_metrics_for_epochs(
-                aec_vals, pair_i, pair_j, n_channels, "aec", band, seg_name,
-                conn_cfg, graph_n_jobs, logger
+                aec_vals,
+                pair_i,
+                pair_j,
+                n_channels,
+                "aec",
+                band,
+                seg_name,
+                conn_cfg,
+                graph_n_jobs,
+                logger,
             )
             parts.append(graph_df)
 
@@ -2225,9 +2323,7 @@ def extract_connectivity_from_precomputed(
         else:
             seg_data = _slice_epochs(precomputed.data, seg_mask)
         if seg_data is None:
-            raise ValueError(
-                f"Connectivity: requested segment '{seg_name}' has no valid samples."
-            )
+            raise ValueError(f"Connectivity: requested segment '{seg_name}' has no valid samples.")
 
         seg_n_times = int(seg_data.shape[-1])
         if seg_n_times < min_segment_samples:
@@ -2241,11 +2337,16 @@ def extract_connectivity_from_precomputed(
                 f"Connectivity: requested segment '{seg_name}' is too short "
                 f"({seg_duration:.3f}s < {min_segment_sec:.3f}s)."
             )
-        req_cycles = max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
+        req_cycles = (
+            max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
+        )
         min_viable_freq = (req_cycles / seg_duration) if seg_duration > 0 else np.inf
 
         for band in bands_use:
-            if band in precomputed.band_data and getattr(precomputed.band_data[band], "fmin", None) is not None:
+            if (
+                band in precomputed.band_data
+                and getattr(precomputed.band_data[band], "fmin", None) is not None
+            ):
                 fmin = float(precomputed.band_data[band].fmin)
                 fmax = float(precomputed.band_data[band].fmax)
             elif band in freq_bands:
@@ -2262,9 +2363,7 @@ def extract_connectivity_from_precomputed(
                     f"Connectivity: invalid frequency definition for band '{band}'."
                 ) from exc
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
-                raise ValueError(
-                    f"Connectivity: invalid frequency definition for band '{band}'."
-                )
+                raise ValueError(f"Connectivity: invalid frequency definition for band '{band}'.")
 
             if fmax < min_viable_freq:
                 raise ValueError(
@@ -2272,8 +2371,10 @@ def extract_connectivity_from_precomputed(
                     f"band '{band}' (fmax {fmax:.2f}Hz < minimum viable "
                     f"{min_viable_freq:.2f}Hz)."
                 )
-            
-            if not _validate_segment_duration_for_connectivity(seg_duration, fmin, min_cycles_per_band, band, logger):
+
+            if not _validate_segment_duration_for_connectivity(
+                seg_duration, fmin, min_cycles_per_band, band, logger
+            ):
                 required_sec = min_cycles_per_band / fmin if fmin > 0 else np.inf
                 raise ValueError(
                     f"Connectivity: requested segment '{seg_name}' is too short for "
@@ -2281,7 +2382,7 @@ def extract_connectivity_from_precomputed(
                 )
 
             freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
-            
+
             # Filter freqs to those that actually fit
             freqs = freqs[np.asarray(freqs) >= min_viable_freq]
             if freqs.size < 2:
@@ -2293,7 +2394,9 @@ def extract_connectivity_from_precomputed(
             use_n_cycles = n_cycles
             if conn_mode == "cwt_morlet" and phase_measures:
                 # Apply strict pre-flight check to filter frequencies that would crash MNE
-                valid_freqs, valid_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, seg_n_times)
+                valid_freqs, valid_cycles = _safe_n_cycles_for_segment(
+                    n_cycles, freqs, sfreq, seg_n_times
+                )
                 if valid_freqs.size < 2:
                     raise ValueError(
                         f"Connectivity: requested segment '{seg_name}' leaves fewer than "
@@ -2301,9 +2404,11 @@ def extract_connectivity_from_precomputed(
                     )
                 freqs = valid_freqs
                 use_n_cycles = valid_cycles
-            
+
             for method in phase_measures:
-                tasks.append(("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles)))
+                tasks.append(
+                    ("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles))
+                )
 
             if enable_aec and band in precomputed.band_data:
                 analytic_full = precomputed.band_data[band].analytic
@@ -2322,6 +2427,7 @@ def extract_connectivity_from_precomputed(
         if kind == "phase":
             return _phase_task(*args)
         return _aec_task(*args)
+
     roi_pair_map: Dict[str, np.ndarray] = {}
     if conn_cfg.dynamic_enabled and conn_cfg.dynamic_include_roi_pairs and output_level == "full":
         roi_pair_map = _build_roi_pair_index_map(
@@ -2403,16 +2509,18 @@ def extract_connectivity_from_precomputed(
                         continue
                     roi_series = np.nanmean(window_vals[:, :, idxs], axis=2)
                     roi_data[
-                        NamingSchema.build("conn", seg_name, band, "roi", mean_stat, channel=roi_pair)
+                        NamingSchema.build(
+                            "conn", seg_name, band, "roi", mean_stat, channel=roi_pair
+                        )
                     ] = np.nanmean(roi_series, axis=1)
                     roi_data[
-                        NamingSchema.build("conn", seg_name, band, "roi", std_stat, channel=roi_pair)
+                        NamingSchema.build(
+                            "conn", seg_name, band, "roi", std_stat, channel=roi_pair
+                        )
                     ] = np.nanstd(roi_series, axis=1)
                     roi_data[
                         NamingSchema.build("conn", seg_name, band, "roi", ac_stat, channel=roi_pair)
-                    ] = _series_autocorr_lag(
-                        roi_series, lag=int(conn_cfg.dynamic_autocorr_lag)
-                    )
+                    ] = _series_autocorr_lag(roi_series, lag=int(conn_cfg.dynamic_autocorr_lag))
                 if roi_data:
                     parts.append(pd.DataFrame(roi_data))
 
@@ -2498,7 +2606,11 @@ def extract_connectivity_from_precomputed(
 
     dynamic_tasks: List[Tuple[str, Tuple[Any, ...]]] = []
     if conn_cfg.dynamic_enabled:
-        if conn_cfg.dynamic_state_enabled and (KMeans is None or StandardScaler is None) and logger is not None:
+        if (
+            conn_cfg.dynamic_state_enabled
+            and (KMeans is None or StandardScaler is None)
+            and logger is not None
+        ):
             logger.warning(
                 "Connectivity dynamic states requested, but scikit-learn is unavailable; "
                 "state-transition metrics will be skipped."
@@ -2653,7 +2765,7 @@ def _compute_cross_spectrum(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute cross-spectral density matrix using Welch's method.
-    
+
     Parameters
     ----------
     data : np.ndarray
@@ -2666,7 +2778,7 @@ def _compute_cross_spectrum(
         Maximum frequency of interest
     n_fft : int, optional
         FFT length. If None, uses n_times.
-        
+
     Returns
     -------
     csd : np.ndarray
@@ -2675,25 +2787,25 @@ def _compute_cross_spectrum(
         Frequency vector
     """
     from scipy.signal import csd as scipy_csd
-    
+
     n_epochs, n_channels, n_times = data.shape
-    
+
     if n_fft is None:
         n_fft = min(n_times, int(sfreq * 2))
     n_fft = max(n_fft, 64)
-    
+
     n_overlap = n_fft // 2
-    
+
     freqs = np.fft.rfftfreq(n_fft, 1.0 / sfreq)
     freq_mask = (freqs >= fmin) & (freqs <= fmax)
     freqs_band = freqs[freq_mask]
     n_freqs = len(freqs_band)
-    
+
     if n_freqs < 2:
         return np.array([]), freqs_band
-    
+
     csd_matrix = np.zeros((n_epochs, n_channels, n_channels, n_freqs), dtype=complex)
-    
+
     for ep_idx in range(n_epochs):
         for i in range(n_channels):
             for j in range(n_channels):
@@ -2706,7 +2818,7 @@ def _compute_cross_spectrum(
                     return_onesided=True,
                 )
                 csd_matrix[ep_idx, i, j, :] = csd_ij[freq_mask]
-    
+
     return csd_matrix, freqs_band
 
 
@@ -2715,46 +2827,44 @@ def _compute_psi_imaginary(
 ) -> np.ndarray:
     """
     Compute Phase Slope Index using imaginary part of coherency.
-    
+
     This is a more robust version that uses the imaginary part of coherency
     to reduce sensitivity to volume conduction (zero-lag effects).
-    
+
     Parameters
     ----------
     csd : np.ndarray
         Cross-spectral density of shape (n_epochs, n_channels, n_channels, n_freqs)
-        
+
     Returns
     -------
     psi : np.ndarray
         Phase slope index of shape (n_epochs, n_channels, n_channels)
     """
     n_epochs, n_channels, _, n_freqs = csd.shape
-    
+
     if n_freqs < 2:
         return np.full((n_epochs, n_channels, n_channels), np.nan)
-    
+
     psi = np.zeros((n_epochs, n_channels, n_channels))
-    
+
     for ep_idx in range(n_epochs):
         for i in range(n_channels):
             for j in range(n_channels):
                 if i == j:
                     continue
-                
+
                 csd_ij = csd[ep_idx, i, j, :]
-                
-                norm = np.sqrt(
-                    np.abs(csd[ep_idx, i, i, :]) * np.abs(csd[ep_idx, j, j, :]) + 1e-12
-                )
+
+                norm = np.sqrt(np.abs(csd[ep_idx, i, i, :]) * np.abs(csd[ep_idx, j, j, :]) + 1e-12)
                 coherency = csd_ij / norm
-                
+
                 # Standard PSI definition uses adjacent-frequency coherency products:
                 #   PSI = Im( sum_f conj(C(f)) * C(f+1) )
                 # Constant phase-lag across frequency should produce ~0 PSI.
                 psi_sum = np.sum(np.conj(coherency[:-1]) * coherency[1:])
                 psi[ep_idx, i, j] = np.imag(psi_sum)
-    
+
     return psi
 
 
@@ -2764,14 +2874,14 @@ def _fit_mvar_model(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Fit Multivariate Autoregressive (MVAR) model using Yule-Walker equations.
-    
+
     Parameters
     ----------
     data : np.ndarray
         EEG data of shape (n_channels, n_times)
     order : int
         Model order (number of lags)
-        
+
     Returns
     -------
     A : np.ndarray
@@ -2780,35 +2890,39 @@ def _fit_mvar_model(
         Residual covariance of shape (n_channels, n_channels)
     """
     n_channels, n_times = data.shape
-    
+
     # Scientific validity: MVAR fits are unstable with too few samples relative
     # to model dimensionality. This guard is intentionally conservative.
     min_required = int(max(order * n_channels + 1, 3 * order * n_channels))
     if n_times < min_required:
         return np.array([]), np.array([])
-    
+
     data_centered = data - data.mean(axis=1, keepdims=True)
-    
+
     R = np.zeros((order + 1, n_channels, n_channels))
     for lag in range(order + 1):
         if lag == 0:
             R[0] = np.dot(data_centered, data_centered.T) / n_times
         else:
             R[lag] = np.dot(data_centered[:, lag:], data_centered[:, :-lag].T) / (n_times - lag)
-    
+
     block_size = n_channels
     R_matrix = np.zeros((order * block_size, order * block_size))
     r_vector = np.zeros((order * block_size, block_size))
-    
+
     for i in range(order):
         for j in range(order):
             lag = abs(i - j)
             if i >= j:
-                R_matrix[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size] = R[lag]
+                R_matrix[
+                    i * block_size : (i + 1) * block_size, j * block_size : (j + 1) * block_size
+                ] = R[lag]
             else:
-                R_matrix[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size] = R[lag].T
-        r_vector[i*block_size:(i+1)*block_size, :] = R[i + 1]
-    
+                R_matrix[
+                    i * block_size : (i + 1) * block_size, j * block_size : (j + 1) * block_size
+                ] = R[lag].T
+        r_vector[i * block_size : (i + 1) * block_size, :] = R[i + 1]
+
     try:
         A_flat = np.linalg.solve(R_matrix, r_vector)
     except np.linalg.LinAlgError:
@@ -2821,15 +2935,15 @@ def _fit_mvar_model(
             return np.array([]), np.array([])
     except Exception:
         return np.array([]), np.array([])
-    
+
     A = np.zeros((order, n_channels, n_channels))
     for i in range(order):
-        A[i] = A_flat[i*block_size:(i+1)*block_size, :].T
-    
+        A[i] = A_flat[i * block_size : (i + 1) * block_size, :].T
+
     sigma = R[0].copy()
     for i in range(order):
         sigma -= np.dot(A[i], R[i + 1].T)
-    
+
     return A, sigma
 
 
@@ -2841,12 +2955,12 @@ def _compute_dtf_from_mvar(
 ) -> np.ndarray:
     """
     Compute Directed Transfer Function from MVAR coefficients.
-    
+
     DTF measures the causal influence from channel j to channel i at each frequency.
-    
-    Reference: Kaminski & Blinowska (1991) "A new method of the description of the 
+
+    Reference: Kaminski & Blinowska (1991) "A new method of the description of the
     information flow in the brain structures"
-    
+
     Parameters
     ----------
     A : np.ndarray
@@ -2857,7 +2971,7 @@ def _compute_dtf_from_mvar(
         Frequency vector
     sfreq : float
         Sampling frequency
-        
+
     Returns
     -------
     dtf : np.ndarray
@@ -2866,32 +2980,32 @@ def _compute_dtf_from_mvar(
     """
     if A.size == 0:
         return np.array([])
-    
+
     order, n_channels, _ = A.shape
     n_freqs = len(freqs)
-    
+
     H = np.zeros((n_channels, n_channels, n_freqs), dtype=complex)
-    
+
     for f_idx, freq in enumerate(freqs):
         A_f = np.eye(n_channels, dtype=complex)
         for k in range(order):
             A_f -= A[k] * np.exp(-2j * np.pi * freq * (k + 1) / sfreq)
-        
+
         try:
             H[:, :, f_idx] = np.linalg.inv(A_f)
         except np.linalg.LinAlgError:
             H[:, :, f_idx] = np.nan
-    
+
     dtf = np.zeros((n_channels, n_channels, n_freqs))
-    
+
     for f_idx in range(n_freqs):
         H_f = H[:, :, f_idx]
-        
+
         for i in range(n_channels):
             norm = np.sqrt(np.sum(np.abs(H_f[i, :]) ** 2) + 1e-12)
             for j in range(n_channels):
                 dtf[i, j, f_idx] = np.abs(H_f[i, j]) / norm
-    
+
     return dtf
 
 
@@ -2903,13 +3017,13 @@ def _compute_pdc_from_mvar(
 ) -> np.ndarray:
     """
     Compute Partial Directed Coherence from MVAR coefficients.
-    
+
     PDC measures the direct causal influence from channel j to channel i,
     partialling out indirect effects through other channels.
-    
-    Reference: Baccala & Sameshima (2001) "Partial directed coherence: a new 
+
+    Reference: Baccala & Sameshima (2001) "Partial directed coherence: a new
     concept in neural structure determination"
-    
+
     Parameters
     ----------
     A : np.ndarray
@@ -2920,7 +3034,7 @@ def _compute_pdc_from_mvar(
         Frequency vector
     sfreq : float
         Sampling frequency
-        
+
     Returns
     -------
     pdc : np.ndarray
@@ -2929,22 +3043,22 @@ def _compute_pdc_from_mvar(
     """
     if A.size == 0:
         return np.array([])
-    
+
     order, n_channels, _ = A.shape
     n_freqs = len(freqs)
-    
+
     pdc = np.zeros((n_channels, n_channels, n_freqs))
-    
+
     for f_idx, freq in enumerate(freqs):
         A_f = np.eye(n_channels, dtype=complex)
         for k in range(order):
             A_f -= A[k] * np.exp(-2j * np.pi * freq * (k + 1) / sfreq)
-        
+
         for j in range(n_channels):
             norm = np.sqrt(np.sum(np.abs(A_f[:, j]) ** 2) + 1e-12)
             for i in range(n_channels):
                 pdc[i, j, f_idx] = np.abs(A_f[i, j]) / norm
-    
+
     return pdc
 
 
@@ -2960,7 +3074,7 @@ def _compute_directed_connectivity_epoch(
 ) -> Dict[str, np.ndarray]:
     """
     Compute directed connectivity for a single epoch.
-    
+
     Parameters
     ----------
     ep_idx : int
@@ -2979,7 +3093,7 @@ def _compute_directed_connectivity_epoch(
         MVAR model order
     methods : List[str]
         List of methods to compute ('psi', 'dtf', 'pdc')
-        
+
     Returns
     -------
     results : Dict[str, np.ndarray]
@@ -2988,19 +3102,17 @@ def _compute_directed_connectivity_epoch(
     results = {}
     n_channels = data.shape[0]
     n_times = int(data.shape[1])
-    
+
     freqs = np.linspace(fmin, fmax, n_freqs)
-    
+
     if "psi" in methods:
-        csd, _freqs_csd = _compute_cross_spectrum(
-            data[np.newaxis, :, :], sfreq, fmin, fmax
-        )
+        csd, _freqs_csd = _compute_cross_spectrum(data[np.newaxis, :, :], sfreq, fmin, fmax)
         if csd.size > 0:
             psi = _compute_psi_imaginary(csd)
             results["psi"] = psi[0]
         else:
             results["psi"] = np.full((n_channels, n_channels), np.nan)
-    
+
     if "dtf" in methods or "pdc" in methods:
         # Additional adequacy guard: DTF/PDC via MVAR needs substantially more data
         # than PSI and is highly sensitive to short segments.
@@ -3013,7 +3125,7 @@ def _compute_directed_connectivity_epoch(
             return results
 
         A, sigma = _fit_mvar_model(data, mvar_order)
-        
+
         if A.size > 0:
             if "dtf" in methods:
                 dtf = _compute_dtf_from_mvar(A, sigma, freqs, sfreq)
@@ -3021,7 +3133,7 @@ def _compute_directed_connectivity_epoch(
                     results["dtf"] = np.nanmean(dtf, axis=2)
                 else:
                     results["dtf"] = np.full((n_channels, n_channels), np.nan)
-            
+
             if "pdc" in methods:
                 pdc = _compute_pdc_from_mvar(A, sigma, freqs, sfreq)
                 if pdc.size > 0:
@@ -3033,7 +3145,7 @@ def _compute_directed_connectivity_epoch(
                 results["dtf"] = np.full((n_channels, n_channels), np.nan)
             if "pdc" in methods:
                 results["pdc"] = np.full((n_channels, n_channels), np.nan)
-    
+
     return results
 
 
@@ -3047,7 +3159,7 @@ def extract_directed_connectivity_from_precomputed(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Extract directed connectivity features from precomputed data.
-    
+
     Parameters
     ----------
     precomputed : PrecomputedData
@@ -3060,7 +3172,7 @@ def extract_directed_connectivity_from_precomputed(
         Configuration object
     logger : Any
         Logger instance
-        
+
     Returns
     -------
     df : pd.DataFrame
@@ -3070,15 +3182,11 @@ def extract_directed_connectivity_from_precomputed(
     """
     if not precomputed.band_data:
         return pd.DataFrame(), []
-    
+
     config = config or getattr(precomputed, "config", None) or {}
     logger = logger or getattr(precomputed, "logger", None)
-    
-    bands_use = (
-        list(precomputed.band_data.keys()) 
-        if bands is None 
-        else list(bands)
-    )
+
+    bands_use = list(precomputed.band_data.keys()) if bands is None else list(bands)
     if not bands_use:
         return pd.DataFrame(), []
     if bands is not None:
@@ -3088,41 +3196,47 @@ def extract_directed_connectivity_from_precomputed(
                 "Directed connectivity: requested band(s) are missing precomputed data: "
                 f"{', '.join(missing_band_data)}."
             )
-    
+
     if config is None:
         directed_cfg = {}
     elif hasattr(config, "get") and not isinstance(config, dict):
         directed_cfg = config.get("feature_engineering.directedconnectivity", {}) or {}
     else:
-        directed_cfg = get_nested_value(config, "feature_engineering.directedconnectivity", {}) or {}
-    
+        directed_cfg = (
+            get_nested_value(config, "feature_engineering.directedconnectivity", {}) or {}
+        )
+
     enable_psi = bool(directed_cfg.get("enable_psi", True))
     enable_dtf = bool(directed_cfg.get("enable_dtf", False))
     enable_pdc = bool(directed_cfg.get("enable_pdc", False))
-    
-    methods = [m for m, enabled in (("psi", enable_psi), ("dtf", enable_dtf), ("pdc", enable_pdc)) if enabled]
-    
+
+    methods = [
+        m
+        for m, enabled in (("psi", enable_psi), ("dtf", enable_dtf), ("pdc", enable_pdc))
+        if enabled
+    ]
+
     if not methods:
         if logger is not None:
             logger.info("Directed connectivity: no methods enabled; skipping extraction.")
         return pd.DataFrame(), []
-    
+
     output_level = str(directed_cfg.get("output_level", "full")).strip().lower()
     if output_level not in {"full", "global_only"}:
         raise ValueError(
             "Directed connectivity output_level must be one of {'full', 'global_only'} "
             f"(got {output_level!r})."
         )
-    
+
     try:
         mvar_order = int(directed_cfg.get("mvar_order", 10))
         n_freqs = int(directed_cfg.get("n_freqs", 16))
         min_segment_samples = int(directed_cfg.get("min_segment_samples", 100))
-        min_samples_per_mvar_parameter = int(
-            directed_cfg.get("min_samples_per_mvar_parameter", 10)
-        )
+        min_samples_per_mvar_parameter = int(directed_cfg.get("min_samples_per_mvar_parameter", 10))
     except (TypeError, ValueError) as exc:
-        raise ValueError("Directed connectivity numeric configuration must be integer-valued.") from exc
+        raise ValueError(
+            "Directed connectivity numeric configuration must be integer-valued."
+        ) from exc
     if mvar_order < 1:
         raise ValueError(f"Directed connectivity mvar_order must be >= 1 (got {mvar_order}).")
     if n_freqs < 2:
@@ -3136,22 +3250,24 @@ def extract_directed_connectivity_from_precomputed(
             "Directed connectivity min_samples_per_mvar_parameter must be >= 1 "
             f"(got {min_samples_per_mvar_parameter})."
         )
-    
+
     sfreq = float(getattr(precomputed, "sfreq", None))
-    
+
     if not np.isfinite(sfreq) or sfreq <= 0:
-        raise ValueError("Directed connectivity extraction requires a valid precomputed.sfreq (sampling frequency).")
-    
+        raise ValueError(
+            "Directed connectivity extraction requires a valid precomputed.sfreq (sampling frequency)."
+        )
+
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
     if n_channels < 2:
         raise ValueError("Directed connectivity requires at least 2 channels.")
-    
+
     pair_i, pair_j = np.triu_indices(n_channels, k=1)
     pair_names = [f"{ch_names[i]}-{ch_names[j]}" for i, j in zip(pair_i, pair_j)]
-    
+
     freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(config)
-    
+
     seg_mask_map = _resolve_connectivity_segment_masks(
         precomputed.times,
         precomputed.windows,
@@ -3164,19 +3280,23 @@ def extract_directed_connectivity_from_precomputed(
         segments,
         feature_name="Directed connectivity",
     )
-    
+
     n_epochs = int(precomputed.data.shape[0])
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
-    
+
     if logger is not None:
         logger.info(
             "Directed connectivity extraction: epochs=%d, channels=%d, bands=%d, "
             "segments=%d, methods=%s",
-            n_epochs, n_channels, len(bands_use), len(segments_use), methods
+            n_epochs,
+            n_channels,
+            len(bands_use),
+            len(segments_use),
+            methods,
         )
-    
+
     t0 = time.perf_counter()
-    
+
     for seg_name in segments_use:
         seg_mask = seg_mask_map.get(seg_name)
         if seg_mask is None and seg_name == "full":
@@ -3187,19 +3307,19 @@ def extract_directed_connectivity_from_precomputed(
             raise ValueError(
                 f"Directed connectivity: requested segment '{seg_name}' has no samples."
             )
-        
+
         if seg_data.shape[-1] < min_segment_samples:
             raise ValueError(
                 f"Directed connectivity: requested segment '{seg_name}' is too short "
                 f"({seg_data.shape[-1]} samples < {min_segment_samples})."
             )
-        
+
         for band in bands_use:
             if band not in freq_bands:
                 raise ValueError(
                     f"Directed connectivity: requested band '{band}' has no frequency definition."
                 )
-            
+
             fmin, fmax = freq_bands[band]
             try:
                 fmin = float(fmin)
@@ -3208,7 +3328,7 @@ def extract_directed_connectivity_from_precomputed(
                 raise ValueError(
                     f"Directed connectivity: invalid frequency definition for band '{band}'."
                 ) from exc
-            
+
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                 raise ValueError(
                     f"Directed connectivity: invalid frequency definition for band '{band}'."
@@ -3226,10 +3346,10 @@ def extract_directed_connectivity_from_precomputed(
                     f"n_times={n_times_seg}, n_channels={n_channels}, "
                     f"min_samples_per_mvar_parameter={min_samples_per_mvar_parameter})."
                 )
-            
+
             for ep_idx in range(n_epochs):
                 epoch_data = seg_data[ep_idx]
-                
+
                 results = _compute_directed_connectivity_epoch(
                     ep_idx,
                     epoch_data,
@@ -3240,7 +3360,7 @@ def extract_directed_connectivity_from_precomputed(
                     mvar_order,
                     methods,
                 )
-                
+
                 for method, conn_matrix in results.items():
                     if conn_matrix is None or not np.isfinite(conn_matrix).any():
                         continue
@@ -3252,20 +3372,28 @@ def extract_directed_connectivity_from_precomputed(
                     else:
                         fwd_vals = conn_matrix[pair_i, pair_j]
                         bwd_vals = conn_matrix[pair_j, pair_i]
-                    
+
                     if output_level == "full":
                         for idx in range(len(pair_i)):
                             col_fwd = NamingSchema.build(
-                                "dconn", seg_name, band, "chpair",
-                                f"{method}_fwd", channel_pair=pair_names[idx]
+                                "dconn",
+                                seg_name,
+                                band,
+                                "chpair",
+                                f"{method}_fwd",
+                                channel_pair=pair_names[idx],
                             )
                             col_bwd = NamingSchema.build(
-                                "dconn", seg_name, band, "chpair",
-                                f"{method}_bwd", channel_pair=pair_names[idx]
+                                "dconn",
+                                seg_name,
+                                band,
+                                "chpair",
+                                f"{method}_bwd",
+                                channel_pair=pair_names[idx],
                             )
                             records[ep_idx][col_fwd] = float(fwd_vals[idx])
                             records[ep_idx][col_bwd] = float(bwd_vals[idx])
-                    
+
                     col_mean_fwd = NamingSchema.build(
                         "dconn", seg_name, band, "global", f"{method}_fwd_mean"
                     )
@@ -3275,22 +3403,19 @@ def extract_directed_connectivity_from_precomputed(
                     col_asymmetry = NamingSchema.build(
                         "dconn", seg_name, band, "global", f"{method}_asymmetry"
                     )
-                    
+
                     records[ep_idx][col_mean_fwd] = float(np.nanmean(fwd_vals))
                     records[ep_idx][col_mean_bwd] = float(np.nanmean(bwd_vals))
-                    
+
                     asymmetry = np.nanmean(fwd_vals - bwd_vals)
                     records[ep_idx][col_asymmetry] = float(asymmetry)
-    
+
     if logger is not None:
-        logger.info(
-            "Directed connectivity extraction completed in %.2fs",
-            time.perf_counter() - t0
-        )
-    
+        logger.info("Directed connectivity extraction completed in %.2fs", time.perf_counter() - t0)
+
     if not records or all(len(r) == 0 for r in records):
         return pd.DataFrame(), []
-    
+
     df = pd.DataFrame(records)
     return df, list(df.columns)
 
@@ -3301,16 +3426,16 @@ def extract_directed_connectivity_features(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Extract directed connectivity features from FeatureContext.
-    
+
     This is the main entry point for the features pipeline.
-    
+
     Parameters
     ----------
     ctx : FeatureContext
         Feature extraction context
     bands : List[str]
         Frequency bands to process
-        
+
     Returns
     -------
     df : pd.DataFrame
@@ -3323,7 +3448,7 @@ def extract_directed_connectivity_features(
     expected_transform = _get_spatial_transform_type(
         ctx.config, feature_family="directedconnectivity"
     )
-    
+
     precomputed = None
     getter = getattr(ctx, "get_precomputed_for_family", None)
     if callable(getter):
@@ -3349,11 +3474,11 @@ def extract_directed_connectivity_features(
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:
             return pd.DataFrame(), []
-        
+
         if not getattr(ctx.epochs, "preload", False):
             ctx.logger.info("Preloading epochs data...")
             ctx.epochs.load_data()
-        
+
         precomputed = precompute_data(
             ctx.epochs,
             bands,
@@ -3370,7 +3495,7 @@ def extract_directed_connectivity_features(
             setter("connectivity", precomputed)
         else:
             ctx.set_precomputed(precomputed)
-    
+
     ctx_name = getattr(ctx, "name", None)
     segments: List[str] = []
     if ctx_name:
@@ -3384,7 +3509,7 @@ def extract_directed_connectivity_features(
                 break
     if not segments:
         segments = ["full"]
-    
+
     df, cols = extract_directed_connectivity_from_precomputed(
         precomputed,
         bands=bands,
@@ -3392,7 +3517,7 @@ def extract_directed_connectivity_features(
         config=ctx.config,
         logger=ctx.logger,
     )
-    
+
     return df, cols
 
 

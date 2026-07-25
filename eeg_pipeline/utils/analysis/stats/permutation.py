@@ -26,13 +26,19 @@ _RESIDUAL_VARIANCE_TOLERANCE_FACTOR = 1e-12
 def _get_predictor_control_mode(config: Optional[Any]) -> str:
     if config is None:
         return "spline"
-    mode = str(
-        get_config_value(
-            config,
-            "behavior_analysis.statistics.predictor_control",
-            get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
+    mode = (
+        str(
+            get_config_value(
+                config,
+                "behavior_analysis.statistics.predictor_control",
+                get_config_value(
+                    config, "behavior_analysis.regression.predictor_control", "spline"
+                ),
+            )
         )
-    ).strip().lower()
+        .strip()
+        .lower()
+    )
     if mode in {"none", "spline", "linear"}:
         return mode
     raise ValueError(
@@ -81,7 +87,11 @@ def _get_permutation_scheme(config: Optional[Any]) -> str:
     """Extract permutation scheme from config."""
     if config is None:
         return "shuffle"
-    scheme = str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+    scheme = (
+        str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle"))
+        .strip()
+        .lower()
+    )
     if scheme in {"shuffle", "circular_shift"}:
         return scheme
     raise ValueError(
@@ -100,7 +110,7 @@ def permute_within_groups(
     strict: bool = True,
 ) -> np.ndarray:
     """Generate permutation indices, optionally within groups.
-    
+
     By default, grouped permutations are strict: if any group has fewer than
     ``min_group_size`` samples, this function raises. Set ``strict=False`` to
     permit fallback to ungrouped permutation.
@@ -169,17 +179,17 @@ def _align_groups_to_dataframe(
     """Convert groups array to Series aligned with x's index."""
     if groups is None:
         return None
-    
+
     if isinstance(groups, pd.Series):
         return groups
-    
+
     groups_array = np.asarray(groups)
     if len(groups_array) != len(x_index):
         raise ValueError(
             f"groups length ({len(groups_array)}) must match x length "
             f"({len(x_index)}) before dropna subsetting"
         )
-    
+
     return pd.Series(groups_array, index=x_index)
 
 
@@ -192,19 +202,16 @@ def _prepare_ranked_data(
     if method == "spearman":
         x_values = stats.rankdata(df["x"].to_numpy())
         y_values = stats.rankdata(df["y"].to_numpy())
-        z_values = np.column_stack([
-            stats.rankdata(df[col].to_numpy())
-            for col in z_columns
-        ]) if len(z_columns) > 0 else np.empty((len(df), 0))
-    else:
-        x_values = df["x"].to_numpy()
-        y_values = df["y"].to_numpy()
         z_values = (
-            df[z_columns].to_numpy()
+            np.column_stack([stats.rankdata(df[col].to_numpy()) for col in z_columns])
             if len(z_columns) > 0
             else np.empty((len(df), 0))
         )
-    
+    else:
+        x_values = df["x"].to_numpy()
+        y_values = df["y"].to_numpy()
+        z_values = df[z_columns].to_numpy() if len(z_columns) > 0 else np.empty((len(df), 0))
+
     return x_values, y_values, z_values
 
 
@@ -213,10 +220,10 @@ def _validate_design_matrix(design: np.ndarray) -> bool:
     condition_number = np.linalg.cond(design)
     is_finite = np.isfinite(condition_number)
     is_well_conditioned = condition_number <= _DESIGN_MATRIX_CONDITION_TOLERANCE
-    
+
     matrix_rank = np.linalg.matrix_rank(design, tol=_DESIGN_MATRIX_RANK_TOLERANCE)
     is_full_rank = matrix_rank >= design.shape[1]
-    
+
     return is_finite and is_well_conditioned and is_full_rank
 
 
@@ -228,11 +235,11 @@ def _compute_residuals(
     """Compute residuals and fitted values for x and y."""
     x_coefficients = np.linalg.lstsq(design, x_values, rcond=None)[0]
     y_coefficients = np.linalg.lstsq(design, y_values, rcond=None)[0]
-    
+
     x_residuals = x_values - design @ x_coefficients
     y_residuals = y_values - design @ y_coefficients
     y_fitted = design @ y_coefficients
-    
+
     return x_residuals, y_residuals, y_fitted
 
 
@@ -245,15 +252,14 @@ def _validate_residual_variance(
     """Validate that residuals have sufficient variance."""
     max_variance = max(np.var(x_values), np.var(y_values), 1.0)
     variance_tolerance = _RESIDUAL_VARIANCE_TOLERANCE_FACTOR * max_variance
-    
+
     x_residual_variance = np.var(x_residuals, ddof=1)
     y_residual_variance = np.var(y_residuals, ddof=1)
-    
+
     has_sufficient_variance = (
-        x_residual_variance >= variance_tolerance
-        and y_residual_variance >= variance_tolerance
+        x_residual_variance >= variance_tolerance and y_residual_variance >= variance_tolerance
     )
-    
+
     return has_sufficient_variance
 
 
@@ -270,7 +276,7 @@ def perm_pval_simple(
 ) -> float:
     """
     Simple permutation p-value for correlation.
-    
+
     Returns two-sided p-value.
     """
     if n_perm is None:
@@ -286,11 +292,11 @@ def perm_pval_simple(
     valid = np.isfinite(x_array) & np.isfinite(y_array)
     if groups is not None:
         valid = valid & pd.notna(groups)
-        
+
     x_valid = x_array[valid]
     y_valid = y_array[valid]
     groups_valid = groups[valid] if groups is not None else None
-    
+
     n_valid = len(x_valid)
     MIN_SAMPLES_PERMUTATION = 3
     if n_valid < MIN_SAMPLES_PERMUTATION:
@@ -317,9 +323,7 @@ def perm_pval_simple(
                 "Simple permutation test failed before a valid null draw "
                 f"could be generated at draw {perm_idx + 1}."
             ) from exc
-        perm_correlation, _ = compute_correlation(
-            x_valid[perm_indices], y_valid, method
-        )
+        perm_correlation, _ = compute_correlation(x_valid[perm_indices], y_valid, method)
         if not np.isfinite(perm_correlation):
             raise ValueError(
                 "invalid simple permutation draw: non-finite permuted "
@@ -352,53 +356,49 @@ def perm_pval_partial_freedman_lane(
     scheme: str = "shuffle",
 ) -> float:
     """Freedman-Lane permutation test for partial correlation.
-    
+
     Note: groups can be np.ndarray or pd.Series. If np.ndarray, it must be
     aligned to the original x/y indices. After dropna, groups will be subset
     to match the kept rows.
     """
     groups_series = _align_groups_to_dataframe(groups, x.index)
-    
+
     concat_list = [x.rename("x"), y.rename("y"), Z]
     if groups_series is not None:
         concat_list.append(groups_series.rename("__group__"))
-        
+
     df = pd.concat(concat_list, axis=1).dropna()
     constants = get_statistics_constants(config)
     min_samples = constants.get("min_samples_for_correlation", 5)
-    
+
     has_sufficient_samples = len(df) >= min_samples
     has_valid_permutations = n_perm is not None and n_perm > 0
-    
+
     if not has_sufficient_samples or not has_valid_permutations:
         return np.nan
-    
+
     groups_array = df["__group__"].to_numpy() if groups_series is not None else None
-    
+
     intercept = np.ones(len(df))
     x_values, y_values, z_values = _prepare_ranked_data(df, Z.columns, method)
-    
+
     design = np.column_stack([intercept, z_values])
     if not _validate_design_matrix(design):
         return np.nan
-    
-    x_residuals, y_residuals, y_fitted = _compute_residuals(
-        design, x_values, y_values
-    )
-    
-    if not _validate_residual_variance(
-        x_residuals, y_residuals, x_values, y_values
-    ):
+
+    x_residuals, y_residuals, y_fitted = _compute_residuals(design, x_values, y_values)
+
+    if not _validate_residual_variance(x_residuals, y_residuals, x_values, y_values):
         return np.nan
-    
+
     observed_correlation, _ = stats.pearsonr(x_residuals, y_residuals)
     exceed_count = 1
     valid_permutations = 0
     invalid_permutations = 0
-    
+
     max_variance = max(np.var(x_values), np.var(y_values), 1.0)
     variance_tolerance = _RESIDUAL_VARIANCE_TOLERANCE_FACTOR * max_variance
-    
+
     for _ in range(n_perm):
         try:
             permuted_indices = permute_within_groups(
@@ -411,30 +411,26 @@ def perm_pval_partial_freedman_lane(
         except ValueError:
             return np.nan
         y_permuted = y_fitted + y_residuals[permuted_indices]
-        
+
         try:
-            y_permuted_coefficients = np.linalg.lstsq(
-                design, y_permuted, rcond=None
-            )[0]
+            y_permuted_coefficients = np.linalg.lstsq(design, y_permuted, rcond=None)[0]
         except np.linalg.LinAlgError:
             invalid_permutations += 1
             continue
-        
+
         y_permuted_residuals = y_permuted - design @ y_permuted_coefficients
         y_permuted_variance = np.var(y_permuted_residuals, ddof=1)
-        
+
         if y_permuted_variance < variance_tolerance:
             invalid_permutations += 1
             continue
-        
-        permuted_correlation, _ = stats.pearsonr(
-            x_residuals, y_permuted_residuals
-        )
+
+        permuted_correlation, _ = stats.pearsonr(x_residuals, y_permuted_residuals)
         if not np.isfinite(permuted_correlation):
             invalid_permutations += 1
             continue
         valid_permutations += 1
-        
+
         if np.abs(permuted_correlation) >= np.abs(observed_correlation):
             exceed_count += 1
 
@@ -468,11 +464,11 @@ def compute_permutation_pvalues(
 ) -> Tuple[float, float, float]:
     """Compute all permutation p-values for ROI analysis."""
     p_perm = p_partial_perm = p_temp_perm = np.nan
-    
+
     if min_samples is None:
         constants = get_statistics_constants(config)
         min_samples = constants.get("min_samples_for_correlation", 5)
-    
+
     if n_perm is None or n_perm <= 0 or n_eff < min_samples:
         return p_perm, p_partial_perm, p_temp_perm
 
@@ -553,10 +549,10 @@ def _compute_combined_covariates_predictor_pvalue(
         combined_covariates = combined_covariates.drop(columns=overlap, errors="ignore")
     combined_covariates = pd.concat([combined_covariates, predictor_cov], axis=1)
     combined_covariates = combined_covariates.dropna()
-    
+
     if combined_covariates.empty:
         return np.nan
-    
+
     x_subset = x_aligned.reindex(combined_covariates.index)
     y_subset = y_aligned.reindex(combined_covariates.index)
 
@@ -600,14 +596,16 @@ def perm_pval_mean_difference(
     finite = np.isfinite(values)
     if groups is not None:
         finite = finite & pd.notna(groups)
-        
+
     values = values[finite]
     labels = labels[finite]
     groups_use = groups[finite] if groups is not None else None
 
     if values.size < 4:
         return np.nan
-    if int(labels.sum()) < int(min_samples_per_condition) or int((~labels).sum()) < int(min_samples_per_condition):
+    if int(labels.sum()) < int(min_samples_per_condition) or int((~labels).sum()) < int(
+        min_samples_per_condition
+    ):
         return np.nan
 
     observed = float(np.abs(np.nanmean(values[labels]) - np.nanmean(values[~labels])))
@@ -627,7 +625,9 @@ def perm_pval_mean_difference(
         except ValueError:
             return np.nan
         perm_labels = labels[idx]
-        perm_stat = float(np.abs(np.nanmean(values[perm_labels]) - np.nanmean(values[~perm_labels])))
+        perm_stat = float(
+            np.abs(np.nanmean(values[perm_labels]) - np.nanmean(values[~perm_labels]))
+        )
         if np.isfinite(perm_stat) and perm_stat >= observed:
             exceed += 1
     return float(exceed / (int(n_perm) + 1))

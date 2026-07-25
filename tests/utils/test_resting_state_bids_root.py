@@ -90,7 +90,9 @@ def test_get_available_subjects_uses_rest_root_in_rest_mode(tmp_path: Path) -> N
     assert subjects == ["0002"]
 
 
-def test_get_available_subjects_uses_rest_deriv_root_by_default_in_rest_mode(tmp_path: Path) -> None:
+def test_get_available_subjects_uses_rest_deriv_root_by_default_in_rest_mode(
+    tmp_path: Path,
+) -> None:
     deriv_task_root = tmp_path / "derivatives-task"
     deriv_rest_root = tmp_path / "derivatives-rest"
     features_dir = deriv_rest_root / "sub-0002" / "eeg" / "features"

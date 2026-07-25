@@ -20,16 +20,12 @@ def pick_eeg_channels(epochs: mne.Epochs) -> Tuple[np.ndarray, List[str]]:
     Returns:
         Tuple of (channel indices array, channel names list).
     """
-    picks = mne.pick_types(
-        epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
-    )
+    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
     channel_names = [epochs.info["ch_names"][idx] for idx in picks]
     return picks, channel_names
 
 
-def match_channels_to_pattern(
-    channel_names: List[str], patterns: List[str]
-) -> List[int]:
+def match_channels_to_pattern(channel_names: List[str], patterns: List[str]) -> List[int]:
     """Match channel names against a list of glob-like patterns.
 
     Args:

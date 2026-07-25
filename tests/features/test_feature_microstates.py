@@ -36,10 +36,10 @@ class TestMicrostateFeatures(unittest.TestCase):
 
         templates = np.array(
             [
-                [1.0, -1.0, 0.5, -0.5, 0.0, 0.0],    # A
-                [0.0, 0.0, 1.0, -1.0, 0.6, -0.6],    # B
-                [1.0, 1.0, 0.0, 0.0, -1.0, -1.0],    # C
-                [1.0, 0.8, 0.6, 0.6, 0.2, 0.2],      # D
+                [1.0, -1.0, 0.5, -0.5, 0.0, 0.0],  # A
+                [0.0, 0.0, 1.0, -1.0, 0.6, -0.6],  # B
+                [1.0, 1.0, 0.0, 0.0, -1.0, -1.0],  # C
+                [1.0, 0.8, 0.6, 0.6, 0.2, 0.2],  # D
             ],
             dtype=float,
         )
@@ -144,7 +144,7 @@ class TestMicrostateFeatures(unittest.TestCase):
                             "min_duration_ms": 0.0,
                             "min_peak_distance_ms": 5.0,
                             "max_gfp_peaks_per_epoch": 200,
-                        }
+                        },
                     }
                 }
             ),
@@ -154,7 +154,9 @@ class TestMicrostateFeatures(unittest.TestCase):
             fixed_template_labels=["a", "b", "c", "d"],
         )
 
-        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+        with self.assertRaisesRegex(
+            ValueError, "target window 'active' does not contain valid samples"
+        ):
             extract_microstate_features(ctx)
 
     def test_microstates_category_registered(self):
@@ -318,8 +320,9 @@ class TestMicrostateFeatures(unittest.TestCase):
             fixed_template_ch_names=ch_names,
         )
 
-        with patch.object(mod, "_extract_peak_topographies", side_effect=_fake_peak_maps), patch.object(
-            mod, "_fit_templates_kmeans", side_effect=_fake_fit
+        with (
+            patch.object(mod, "_extract_peak_topographies", side_effect=_fake_peak_maps),
+            patch.object(mod, "_fit_templates_kmeans", side_effect=_fake_fit),
         ):
             mod.extract_microstate_features(ctx)
 
@@ -456,8 +459,9 @@ class TestMicrostateFeatures(unittest.TestCase):
             fixed_template_ch_names=None,
         )
 
-        with patch.object(mod, "_extract_peak_topographies", side_effect=_fake_peak_maps), patch.object(
-            mod, "_fit_templates_kmeans", side_effect=_fake_fit
+        with (
+            patch.object(mod, "_extract_peak_topographies", side_effect=_fake_peak_maps),
+            patch.object(mod, "_fit_templates_kmeans", side_effect=_fake_fit),
         ):
             mod.extract_microstate_features(ctx_early)
             mod.extract_microstate_features(ctx_late)
@@ -493,7 +497,9 @@ class TestMicrostateFeatures(unittest.TestCase):
             fixed_template_ch_names=None,
         )
 
-        with patch.object(mod, "_fit_templates_kmeans", return_value=np.array([[1.0] * 6, [0.0] * 6])):
+        with patch.object(
+            mod, "_fit_templates_kmeans", return_value=np.array([[1.0] * 6, [0.0] * 6])
+        ):
             df, _ = mod.extract_microstate_features(ctx)
 
         self.assertIn("microstates_active_broadband_global_coverage_state1", df.columns)

@@ -25,7 +25,6 @@ from .base import (
 )
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
-
 # Constants
 _VALID_CORR_METHODS = {"spearman", "pearson"}
 _VALID_ROBUST_METHODS = {"percentage_bend", "winsorized", "shepherd"}
@@ -76,7 +75,9 @@ def normalize_robust_correlation_method(
     return default
 
 
-def format_correlation_method_label(method: Optional[str], robust_method: Optional[str] = None) -> str:
+def format_correlation_method_label(
+    method: Optional[str], robust_method: Optional[str] = None
+) -> str:
     """Format the exact correlation method label for outputs."""
     base = normalize_correlation_method(method, default="spearman")
     label = f"{base}_{robust_method}" if robust_method else base
@@ -90,7 +91,7 @@ def compute_correlation(
 ) -> Tuple[float, float]:
     """
     Compute correlation coefficient and p-value.
-    
+
     Returns (r, p).
     """
     x = np.asarray(x).ravel()
@@ -118,6 +119,7 @@ def compute_correlation(
 @dataclass
 class CorrelationRecord:
     """Standard record for a single correlation result."""
+
     identifier: str
     band: str
     correlation: float
@@ -141,25 +143,38 @@ class CorrelationRecord:
     extra_fields: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_stats(cls, identifier: str, band: str, stats: Any, n_valid: int,
-                   method: str, identifier_type: str = "channel",
-                   analysis_type: str = "power", **extra) -> "CorrelationRecord":
+    def from_stats(
+        cls,
+        identifier: str,
+        band: str,
+        stats: Any,
+        n_valid: int,
+        method: str,
+        identifier_type: str = "channel",
+        analysis_type: str = "power",
+        **extra,
+    ) -> "CorrelationRecord":
         """Create from stats object with correlation attributes."""
         return cls(
-            identifier=identifier, band=band,
+            identifier=identifier,
+            band=band,
             correlation=_safe_float(stats.correlation),
-            p_value=_safe_float(stats.p_value), n_valid=n_valid, method=method,
-            ci_low=_safe_float(stats.ci_low), ci_high=_safe_float(stats.ci_high),
+            p_value=_safe_float(stats.p_value),
+            n_valid=n_valid,
+            method=method,
+            ci_low=_safe_float(stats.ci_low),
+            ci_high=_safe_float(stats.ci_high),
             p_perm=_safe_float(stats.p_perm),
             r_partial=_safe_float(stats.r_partial),
             p_partial=_safe_float(stats.p_partial),
-            n_partial=int(getattr(stats, 'n_partial', 0)),
+            n_partial=int(getattr(stats, "n_partial", 0)),
             p_partial_perm=_safe_float(stats.p_partial_perm),
             r_partial_predictor=_safe_float(stats.r_partial_predictor),
             p_partial_predictor=_safe_float(stats.p_partial_predictor),
-            n_partial_predictor=int(getattr(stats, 'n_partial_predictor', 0)),
+            n_partial_predictor=int(getattr(stats, "n_partial_predictor", 0)),
             p_partial_predictor_perm=_safe_float(stats.p_partial_predictor_perm),
-            identifier_type=identifier_type, analysis_type=analysis_type,
+            identifier_type=identifier_type,
+            analysis_type=analysis_type,
             extra_fields=extra,
         )
 
@@ -180,7 +195,7 @@ class CorrelationRecord:
             "analysis": self.analysis_type,
             "effect_size": effect_size,
         }
-        
+
         if np.isfinite(self.r_partial):
             d["r_partial"] = self.r_partial
         if np.isfinite(self.p_partial):
@@ -191,7 +206,7 @@ class CorrelationRecord:
             d["r_partial_predictor"] = self.r_partial_predictor
         if np.isfinite(self.p_partial_predictor):
             d["p_partial_predictor"] = self.p_partial_predictor
-        
+
         d.update(self.extra_fields)
         return d
 
@@ -214,14 +229,14 @@ def safe_correlation(
 ) -> Tuple[float, float, int]:
     """
     Compute correlation with validation. Returns (r, p, n_valid).
-    
+
     If robust_method is specified, uses robust correlation.
     Options: "percentage_bend", "winsorized", "shepherd"
     """
     if min_samples is None:
         config = ensure_config(config)
         min_samples = get_min_samples_for_correlation(config)
-    
+
     method = normalize_correlation_method(method, default="spearman")
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
@@ -231,12 +246,12 @@ def safe_correlation(
 
     mask = np.isfinite(x) & np.isfinite(y)
     n_valid = int(mask.sum())
-    
+
     if n_valid < min_samples:
         return np.nan, np.nan, n_valid
 
     x_clean, y_clean = x[mask], y[mask]
-    
+
     if np.std(x_clean) < _EPSILON_STD or np.std(y_clean) < _EPSILON_STD:
         return np.nan, np.nan, n_valid
 
@@ -247,7 +262,7 @@ def safe_correlation(
             r, p = stats.spearmanr(x_clean, y_clean, nan_policy="omit")
         else:
             r, p = stats.pearsonr(x_clean, y_clean)
-            
+
         r_float = float(r) if np.isfinite(r) else np.nan
         p_float = float(p) if np.isfinite(p) else np.nan
         return r_float, p_float, n_valid
@@ -303,14 +318,12 @@ def align_features_and_targets(
 
 
 def fisher_z(
-    r: Union[float, np.ndarray], 
-    config: Optional[Any] = None, 
-    logger: Optional[Any] = None
+    r: Union[float, np.ndarray], config: Optional[Any] = None, logger: Optional[Any] = None
 ) -> Union[float, np.ndarray]:
     """Fisher z-transform of correlation coefficient(s).
-    
+
     Supports both scalar and array inputs.
-    
+
     Args:
         r: Correlation coefficient(s) to transform (scalar or array)
         config: Optional config object for clipping bounds (defaults to config values)
@@ -320,21 +333,21 @@ def fisher_z(
     r_array = np.asarray(r)
     r_orig = r_array.copy()
     r_clipped = np.clip(r_array, clip_min, clip_max)
-    
+
     if logger is not None:
         if np.any(r_clipped != r_orig):
             logger.debug(
                 f"Fisher z: clipped r values from range [{r_orig.min():.6f}, {r_orig.max():.6f}] "
                 f"to [{r_clipped.min():.6f}, {r_clipped.max():.6f}]"
             )
-    
+
     result = np.arctanh(r_clipped)
     return result.item() if np.isscalar(r) else result
 
 
 def inverse_fisher_z(z: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
     """Inverse Fisher z-transform.
-    
+
     Supports both scalar and array inputs.
     """
     z_array = np.asarray(z)
@@ -349,7 +362,7 @@ def fisher_ci(
     ci_level: Optional[float] = None,
 ) -> Tuple[float, float]:
     """Compute Fisher-based CI for correlation.
-    
+
     Parameters
     ----------
     r : float
@@ -359,9 +372,9 @@ def fisher_ci(
     config : Optional[Any]
         Configuration object (used if ci_level is None)
     ci_level : Optional[float]
-        Explicit confidence level (e.g., 0.95 for 95% CI). 
+        Explicit confidence level (e.g., 0.95 for 95% CI).
         If None, uses config or defaults to 0.95.
-        
+
     Returns
     -------
     Tuple[float, float]
@@ -376,7 +389,7 @@ def fisher_ci(
         return np.nan, np.nan
 
     from .base import get_z_critical_value
-    
+
     z = fisher_z(r, config)
     se = 1.0 / np.sqrt(n - 3)
     z_crit = get_z_critical_value(ci_level)
@@ -406,9 +419,9 @@ def compute_bayes_factor_correlation(
 ) -> Tuple[float, str]:
     """
     Compute Bayes Factor for H1: r≠0 vs H0: r=0.
-    
+
     Uses the Jeffreys-Zellner-Siow (JZS) prior approximation.
-    
+
     Parameters
     ----------
     x, y : array-like
@@ -417,14 +430,14 @@ def compute_bayes_factor_correlation(
         Width of the Cauchy prior on r (default: sqrt(2)/2 ≈ 0.707)
     method : str
         Correlation method ("spearman" or "pearson")
-    
+
     Returns
     -------
     Tuple[float, str]
         (BF10, interpretation)
         BF10 > 1: evidence for H1 (correlation exists)
         BF10 < 1: evidence for H0 (no correlation)
-        
+
     Interpretation thresholds (Jeffreys):
         BF < 1: Evidence for H0
         1-3: Anecdotal
@@ -435,26 +448,26 @@ def compute_bayes_factor_correlation(
     """
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
-    
+
     valid = np.isfinite(x) & np.isfinite(y)
     n = int(np.sum(valid))
-    
+
     if n < _MIN_SAMPLES_BAYES:
         return np.nan, "insufficient_data"
-    
+
     x_valid, y_valid = x[valid], y[valid]
-    
+
     method = normalize_correlation_method(method, default="spearman")
     if method == "spearman":
         r, _ = stats.spearmanr(x_valid, y_valid)
     else:
         r, _ = stats.pearsonr(x_valid, y_valid)
-    
+
     if not np.isfinite(r) or np.abs(r) >= 1:
         return np.nan, "invalid_r"
-    
-    r_squared = r ** 2
-    
+
+    r_squared = r**2
+
     try:
         log_bf = (
             np.log(np.sqrt(2) / prior_width)
@@ -466,14 +479,14 @@ def compute_bayes_factor_correlation(
     except (ValueError, OverflowError, RuntimeWarning):
         t_stat = r * np.sqrt((n - 2) / (1 - r_squared))
         bf10 = np.sqrt((n + 1) / (2 * np.pi)) * (1 + t_stat**2 / n) ** (-(n + 1) / 2)
-    
-    if bf10 < 1/100:
+
+    if bf10 < 1 / 100:
         interpretation = "extreme_H0"
-    elif bf10 < 1/30:
+    elif bf10 < 1 / 30:
         interpretation = "very_strong_H0"
-    elif bf10 < 1/10:
+    elif bf10 < 1 / 10:
         interpretation = "strong_H0"
-    elif bf10 < 1/3:
+    elif bf10 < 1 / 3:
         interpretation = "moderate_H0"
     elif bf10 < 1:
         interpretation = "anecdotal_H0"
@@ -487,7 +500,7 @@ def compute_bayes_factor_correlation(
         interpretation = "very_strong_H1"
     else:
         interpretation = "extreme_H1"
-    
+
     return float(bf10), interpretation
 
 
@@ -497,7 +510,7 @@ def compute_robust_correlation(
     method: str = "percentage_bend",
 ) -> Tuple[float, float]:
     """Compute robust correlation resistant to outliers.
-    
+
     Parameters
     ----------
     x, y : array-like
@@ -507,7 +520,7 @@ def compute_robust_correlation(
         - "percentage_bend": Percentage bend correlation (default)
         - "winsorized": Winsorized correlation (20% trimming)
         - "shepherd": Shepherd's pi correlation (removes bivariate outliers)
-    
+
     Returns
     -------
     Tuple[float, float]
@@ -515,15 +528,15 @@ def compute_robust_correlation(
     """
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
-    
+
     valid = np.isfinite(x) & np.isfinite(y)
     n = int(np.sum(valid))
-    
+
     if n < 4:
         return np.nan, np.nan
-    
+
     x_v, y_v = x[valid], y[valid]
-    
+
     robust_method = normalize_robust_correlation_method(method, strict=True)
 
     if robust_method == "percentage_bend":
@@ -545,35 +558,35 @@ def _percentage_bend_correlation(
 ) -> Tuple[float, float]:
     """
     Percentage bend correlation (Wilcox, 1994).
-    
+
     Downweights observations far from the median.
     """
     n = len(x)
-    
+
     median_x, median_y = np.median(x), np.median(y)
     mad_x = np.median(np.abs(x - median_x))
     mad_y = np.median(np.abs(y - median_y))
-    
+
     if mad_x < _EPSILON_STD or mad_y < _EPSILON_STD:
         return stats.spearmanr(x, y)
-    
+
     (beta * (n - 1) + 0.5) / n
     (beta * (n - 1) + 0.5) / n
-    
+
     crit_x = np.percentile(np.abs(x - median_x) / mad_x, 100 * (1 - beta))
     crit_y = np.percentile(np.abs(y - median_y) / mad_y, 100 * (1 - beta))
-    
+
     x_bent = np.clip((x - median_x) / mad_x, -crit_x, crit_x)
     y_bent = np.clip((y - median_y) / mad_y, -crit_y, crit_y)
-    
+
     if np.std(x_bent) < _EPSILON_STD or np.std(y_bent) < _EPSILON_STD:
         return np.nan, np.nan
-    
+
     r, _ = stats.pearsonr(x_bent, y_bent)
-    
+
     t_stat = r * np.sqrt((n - 2) / (1 - r**2 + _EPSILON_CORRELATION))
     p = 2 * (1 - stats.t.cdf(np.abs(t_stat), df=n - 2))
-    
+
     return float(r), float(p)
 
 
@@ -587,32 +600,32 @@ def _winsorized_correlation(
     """
     n = len(x)
     k = int(trim * n)
-    
+
     if k < 1:
         if np.std(x) < _EPSILON_STD or np.std(y) < _EPSILON_STD:
             return np.nan, np.nan
         return stats.pearsonr(x, y)
-    
+
     def winsorize(arr):
         sorted_arr = np.sort(arr)
-        lower, upper = sorted_arr[k], sorted_arr[-(k+1)]
+        lower, upper = sorted_arr[k], sorted_arr[-(k + 1)]
         return np.clip(arr, lower, upper)
-    
+
     x_winsorized = winsorize(x)
     y_winsorized = winsorize(y)
-    
+
     if np.std(x_winsorized) < _EPSILON_STD or np.std(y_winsorized) < _EPSILON_STD:
         return np.nan, np.nan
-    
+
     r, _ = stats.pearsonr(x_winsorized, y_winsorized)
-    
+
     n_effective = n - 2 * k
     if n_effective < _MIN_SAMPLES_CORRELATION:
         return float(r), np.nan
-    
+
     t_stat = r * np.sqrt((n_effective - 2) / (1 - r**2 + _EPSILON_CORRELATION))
     p = 2 * (1 - stats.t.cdf(np.abs(t_stat), df=n_effective - 2))
-    
+
     return float(r), float(p)
 
 
@@ -625,26 +638,26 @@ def _shepherd_correlation(
     Shepherd's pi correlation (removes bivariate outliers via bootstrap MAD).
     """
     len(x)
-    
+
     median_x, median_y = np.median(x), np.median(y)
     mad_scale = 1.4826
     mad_x = np.median(np.abs(x - median_x)) * mad_scale
     mad_y = np.median(np.abs(y - median_y)) * mad_scale
-    
+
     if mad_x < _EPSILON_STD or mad_y < _EPSILON_STD:
         return stats.spearmanr(x, y)
-    
+
     x_standardized = (x - median_x) / mad_x
     y_standardized = (y - median_y) / mad_y
-    
+
     distance = np.sqrt(x_standardized**2 + y_standardized**2)
-    
+
     threshold = np.percentile(distance, 100 * (1 - alpha))
     inliers = distance <= threshold
-    
+
     if np.sum(inliers) < _MIN_SAMPLES_BAYES:
         return stats.spearmanr(x, y)
-    
+
     r, p = stats.spearmanr(x[inliers], y[inliers])
     return float(r), float(p)
 
@@ -657,10 +670,10 @@ def compute_loso_correlation_stability(
 ) -> Tuple[float, float, float, List[float]]:
     """
     Compute leave-one-subject-out correlation stability.
-    
+
     Checks if the correlation holds when each subject is left out.
     Low std = stable finding across subjects.
-    
+
     Parameters
     ----------
     feature_values : array-like
@@ -671,7 +684,7 @@ def compute_loso_correlation_stability(
         Subject ID for each trial
     method : str
         Correlation method
-    
+
     Returns
     -------
     Tuple[float, float, float, List[float]]
@@ -681,34 +694,34 @@ def compute_loso_correlation_stability(
     feature_values = np.asarray(feature_values)
     target_values = np.asarray(target_values)
     subject_ids = np.asarray(subject_ids)
-    
+
     unique_subjects = np.unique(subject_ids)
-    
+
     if len(unique_subjects) < 3:
         return np.nan, np.nan, np.nan, []
-    
+
     r_values = []
-    
+
     for subj in unique_subjects:
         mask = subject_ids != subj
         x_loo = feature_values[mask]
         y_loo = target_values[mask]
-        
+
         r, _ = compute_correlation(x_loo, y_loo, method)
         if np.isfinite(r):
             r_values.append(r)
-    
+
     if len(r_values) < 2:
         return np.nan, np.nan, np.nan, r_values
-    
+
     r_mean = float(np.mean(r_values))
     r_std = float(np.std(r_values, ddof=1))
-    
+
     if abs(r_mean) > 1e-6:
         stability = max(0.0, 1.0 - (r_std / abs(r_mean)))
     else:
         stability = 0.0 if r_std > 0.1 else 1.0
-    
+
     return r_mean, r_std, float(stability), r_values
 
 
@@ -721,10 +734,10 @@ def save_correlation_results(
     """Save correlation results to file."""
     if df.empty:
         return
-    
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     df.to_csv(path, sep=sep, index=index, float_format="%.6f")
 
 
@@ -770,10 +783,10 @@ def compute_correlation_stats(
     min_samples: int = 3,
 ) -> Tuple[float, float, int, Tuple[float, float]]:
     """Compute correlation with optional bootstrap CI.
-    
+
     This is a convenience function that computes correlation statistics
     including optional bootstrap confidence intervals.
-    
+
     Parameters
     ----------
     x, y : pd.Series
@@ -786,33 +799,29 @@ def compute_correlation_stats(
         Random number generator
     min_samples : int
         Minimum number of samples required
-        
+
     Returns
     -------
     Tuple[float, float, int, Tuple[float, float]]
         (correlation, p_value, n_effective, (ci_low, ci_high))
     """
     from .bootstrap import bootstrap_corr_ci
-    
+
     valid_mask = np.isfinite(x) & np.isfinite(y)
     n_effective = int(valid_mask.sum())
-    
+
     if n_effective < min_samples:
         return np.nan, np.nan, n_effective, (np.nan, np.nan)
-    
+
     x_valid = x[valid_mask]
     y_valid = y[valid_mask]
     correlation, p_value = compute_correlation(x_valid, y_valid, method_code)
-    
+
     if bootstrap_ci > 0:
         confidence_interval = bootstrap_corr_ci(
-            x_valid,
-            y_valid,
-            method_code,
-            n_boot=bootstrap_ci,
-            rng=rng
+            x_valid, y_valid, method_code, n_boot=bootstrap_ci, rng=rng
         )
     else:
         confidence_interval = (np.nan, np.nan)
-    
+
     return float(correlation), float(p_value), n_effective, confidence_interval

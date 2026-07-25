@@ -21,7 +21,6 @@ from eeg_pipeline.analysis.machine_learning.preprocessing import (
 )
 
 
-
 def create_elasticnet_pipeline(
     seed: int = 42,
     config: Any = None,
@@ -38,15 +37,17 @@ def create_elasticnet_pipeline(
         score_func=f_regression,
     )
 
-    steps.append((
-        "regressor",
-        ElasticNet(
-            random_state=seed,
-            max_iter=cfg["elasticnet_max_iter"],
-            tol=cfg["elasticnet_tol"],
-            selection=cfg["elasticnet_selection"],
-        ),
-    ))
+    steps.append(
+        (
+            "regressor",
+            ElasticNet(
+                random_state=seed,
+                max_iter=cfg["elasticnet_max_iter"],
+                tol=cfg["elasticnet_tol"],
+                selection=cfg["elasticnet_selection"],
+            ),
+        )
+    )
     pipeline = Pipeline(steps)
 
     return TransformedTargetRegressor(
@@ -133,7 +134,7 @@ def build_elasticnet_param_grid(config: Any = None, n_covariates: int = 0) -> Di
     cfg = get_ml_config(config)
 
     var_prefix = "regressor__preprocessing__eeg__var" if n_covariates > 0 else "regressor__var"
-    
+
     return {
         "regressor__regressor__alpha": cfg["elasticnet_alpha_grid"],
         "regressor__regressor__l1_ratio": cfg["elasticnet_l1_ratio_grid"],
@@ -144,22 +145,22 @@ def build_elasticnet_param_grid(config: Any = None, n_covariates: int = 0) -> Di
 def build_ridge_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, Any]:
     """Build hyperparameter grid for Ridge regression."""
     cfg = get_ml_config(config)
-    
+
     var_prefix = "regressor__preprocessing__eeg__var" if n_covariates > 0 else "regressor__var"
-    
+
     grid = {"regressor__regressor__alpha": cfg["ridge_alpha_grid"]}
     if "variance_threshold_grid" in cfg:
         grid[f"{var_prefix}__threshold"] = cfg["variance_threshold_grid"]
-        
+
     return grid
 
 
 def build_rf_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, Any]:
     """Build hyperparameter grid for Random Forest."""
     cfg = get_ml_config(config)
-    
+
     var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
-    
+
     grid = {
         # Keep legacy key names for external callers/tests; orchestration resolves
         # them to nested TransformedTargetRegressor params before GridSearchCV.
@@ -167,8 +168,8 @@ def build_rf_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, 
         "rf__min_samples_split": cfg["rf_min_samples_split_grid"],
         "rf__min_samples_leaf": cfg["rf_min_samples_leaf_grid"],
     }
-    
+
     if "variance_threshold_grid" in cfg:
         grid[f"{var_prefix}__threshold"] = cfg["variance_threshold_grid"]
-        
+
     return grid

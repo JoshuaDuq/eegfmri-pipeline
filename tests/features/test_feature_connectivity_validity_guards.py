@@ -207,12 +207,15 @@ class TestConnectivityValidityGuards(unittest.TestCase):
             n_pairs = int(len(indices[0]))
             return _ConnObj(np.ones((n_pairs, 1, 2), dtype=float))
 
-        with patch(
-            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_epochs",
-            side_effect=_fake_spectral_connectivity_epochs,
-        ), patch(
-            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
-            side_effect=AssertionError("imcoh should not use spectral_connectivity_time"),
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_epochs",
+                side_effect=_fake_spectral_connectivity_epochs,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
+                side_effect=AssertionError("imcoh should not use spectral_connectivity_time"),
+            ),
         ):
             df, cols = extract_connectivity_from_precomputed(
                 precomputed,
@@ -238,7 +241,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                         "output_level": "global_only",
                         "enable_graph_metrics": False,
                         "min_segment_sec": 0.0,
-                    }
+                    },
                 }
             }
         )
@@ -268,7 +271,9 @@ class TestConnectivityValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_epochs",
             side_effect=_fake_spectral_connectivity_epochs,
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_connectivity_from_precomputed(
                     precomputed,
                     bands=["alpha"],
@@ -359,7 +364,9 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertIn("broadcast_warning", df.attrs)
         self.assertEqual(df.attrs.get("phase_estimator"), "across_epochs")
 
-    def test_condition_granularity_requires_explicit_across_epoch_estimator_without_train_mask(self):
+    def test_condition_granularity_requires_explicit_across_epoch_estimator_without_train_mask(
+        self,
+    ):
         config = DotConfig(
             {
                 "feature_engineering": {
@@ -501,12 +508,24 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                 logger=None,
             )
 
-        col_ab_fwd = NamingSchema.build("dconn", "full", "alpha", "chpair", "dtf_fwd", channel_pair="A-B")
-        col_ab_bwd = NamingSchema.build("dconn", "full", "alpha", "chpair", "dtf_bwd", channel_pair="A-B")
-        col_ac_fwd = NamingSchema.build("dconn", "full", "alpha", "chpair", "dtf_fwd", channel_pair="A-C")
-        col_ac_bwd = NamingSchema.build("dconn", "full", "alpha", "chpair", "dtf_bwd", channel_pair="A-C")
-        col_bc_fwd = NamingSchema.build("dconn", "full", "alpha", "chpair", "dtf_fwd", channel_pair="B-C")
-        col_bc_bwd = NamingSchema.build("dconn", "full", "alpha", "chpair", "dtf_bwd", channel_pair="B-C")
+        col_ab_fwd = NamingSchema.build(
+            "dconn", "full", "alpha", "chpair", "dtf_fwd", channel_pair="A-B"
+        )
+        col_ab_bwd = NamingSchema.build(
+            "dconn", "full", "alpha", "chpair", "dtf_bwd", channel_pair="A-B"
+        )
+        col_ac_fwd = NamingSchema.build(
+            "dconn", "full", "alpha", "chpair", "dtf_fwd", channel_pair="A-C"
+        )
+        col_ac_bwd = NamingSchema.build(
+            "dconn", "full", "alpha", "chpair", "dtf_bwd", channel_pair="A-C"
+        )
+        col_bc_fwd = NamingSchema.build(
+            "dconn", "full", "alpha", "chpair", "dtf_fwd", channel_pair="B-C"
+        )
+        col_bc_bwd = NamingSchema.build(
+            "dconn", "full", "alpha", "chpair", "dtf_bwd", channel_pair="B-C"
+        )
         col_fwd_mean = NamingSchema.build("dconn", "full", "alpha", "global", "dtf_fwd_mean")
         col_bwd_mean = NamingSchema.build("dconn", "full", "alpha", "global", "dtf_bwd_mean")
         col_asym = NamingSchema.build("dconn", "full", "alpha", "global", "dtf_asymmetry")
@@ -567,7 +586,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                         "min_segment_samples": 10,
                         "mvar_order": 2,
                         "n_freqs": 8,
-                    }
+                    },
                 }
             }
         )
@@ -585,7 +604,9 @@ class TestConnectivityValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.connectivity._compute_directed_connectivity_epoch",
             return_value={"dtf": dtf_matrix},
         ):
-            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            with self.assertRaisesRegex(
+                ValueError, "target window 'active' does not contain valid samples"
+            ):
                 extract_directed_connectivity_from_precomputed(
                     precomputed,
                     bands=["alpha"],

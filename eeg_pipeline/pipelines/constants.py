@@ -21,7 +21,6 @@ __all__ = [
 ]
 
 
-
 FREQUENCY_BANDS: List[str] = [
     "delta",
     "theta",

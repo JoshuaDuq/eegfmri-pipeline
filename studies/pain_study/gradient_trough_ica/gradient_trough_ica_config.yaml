@@ -1,0 +1,45 @@
+participants: [sub-0014, sub-0015]
+expected_runs: [1, 2, 3, 4, 5, 6]
+sampling_frequency_hz: 1000.0
+
+selection:
+  volume_marker: "Volume/V  1"
+  volume_epoch_s: 0.9
+  ecg_channel: ECG
+  highpass_hz: 40.0
+  highpass_transition_hz: 10.0
+  trough_refinement_radius_ms: 5.0
+  plateau_depth_fraction: 0.2
+  plateau_minimum_duration_ms: 10.0
+  plateau_maximum_duration_ms: 20.0
+  trough_reference_ms:
+    sub-0014: [23, 72, 128, 170, 226, 267, 316, 372, 414, 463, 512, 561, 617, 659, 707, 756, 805, 854]
+    sub-0015: [23, 72, 128, 170, 219, 274, 316, 365, 414, 463, 512, 561, 610, 658, 707, 756, 805, 854]
+
+trials:
+  thermal_marker: "Trig_therm/T  1"
+  tmin_s: -7.0
+  tmax_s: 15.0
+  low_temperatures_c: [44.3, 45.3]
+  high_temperatures_c: [48.3, 49.3]
+
+ica:
+  seed: 42
+  algorithm: extended_infomax
+
+tfr:
+  frequency_hz: [10.0, 100.0, 1.0]
+  time_s: [-5.0, 14.4, 0.1]
+  window_s: 0.8
+  smoothing_hz: 5.0
+  baseline_s: [-5.0, -0.01]
+  padding_s: 32.0
+
+paths:
+  corrected_data_roots:
+    sub-0014: data/source_data/sub-0014/eeg/brainvision_processed_1khz
+    sub-0015: data/source_data/sub-0015/eeg/brainvision_processed_1khz
+  events_roots:
+    sub-0014: data/bids_output/eeg_brainvision_analyzer_sub-0014/sub-0014/eeg
+    sub-0015: data/bids_output/eeg/sub-0015/eeg
+  output_root: outputs/gradient_trough_ica

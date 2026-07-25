@@ -41,7 +41,7 @@ def compute_roi_percentage_change(
     log_base = constants.get("log_base", 10)
     percentage_multiplier = constants.get("percentage_multiplier", 100)
 
-    return (log_base ** roi_mean - 1.0) * percentage_multiplier
+    return (log_base**roi_mean - 1.0) * percentage_multiplier
 
 
 def compute_roi_pvalue(
@@ -81,13 +81,9 @@ def compute_roi_pvalue(
         is_paired_test = paired and len(roi_group_a) == len(roi_group_b)
         if is_paired_test:
             valid_both = valid_group_a & valid_group_b
-            test_result = stats.ttest_rel(
-                roi_group_a[valid_both], roi_group_b[valid_both]
-            )
+            test_result = stats.ttest_rel(roi_group_a[valid_both], roi_group_b[valid_both])
         else:
-            test_result = stats.ttest_ind(
-                roi_group_a[valid_group_a], roi_group_b[valid_group_b]
-            )
+            test_result = stats.ttest_ind(roi_group_a[valid_group_a], roi_group_b[valid_group_b])
 
         pvalue = test_result.pvalue
         if np.isfinite(pvalue):

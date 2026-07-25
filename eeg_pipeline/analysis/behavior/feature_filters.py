@@ -75,9 +75,7 @@ def filter_feature_cols_for_computation_impl(
         return feature_cols
 
     invalid_features = [
-        str(category)
-        for category in selected_features
-        if category not in category_prefix_map
+        str(category) for category in selected_features if category not in category_prefix_map
     ]
     if invalid_features:
         raise ValueError(
@@ -87,7 +85,6 @@ def filter_feature_cols_for_computation_impl(
         )
 
     allowed_prefixes = tuple(category_prefix_map[cat] for cat in selected_features)
-
 
     filtered = [c for c in feature_cols if str(c).startswith(allowed_prefixes)]
     if len(filtered) < len(feature_cols):

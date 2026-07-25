@@ -58,9 +58,7 @@ class PipelineBase(ABC):
         """Resolve the derivatives root used by this pipeline."""
         return resolve_deriv_root(config=self.config)
 
-    def _validate_batch_inputs(
-        self, subjects: List[str], task: Optional[str]
-    ) -> str:
+    def _validate_batch_inputs(self, subjects: List[str], task: Optional[str]) -> str:
         """Validate batch processing inputs and return resolved task."""
         if not subjects:
             raise ValueError("No subjects specified")
@@ -77,9 +75,7 @@ class PipelineBase(ABC):
         traceback_path.write_text(traceback.format_exc())
         return traceback_path
 
-    def _write_ledger(
-        self, entries: List[Dict[str, Any]], ledger_path: Path
-    ) -> None:
+    def _write_ledger(self, entries: List[Dict[str, Any]], ledger_path: Path) -> None:
         """Write batch processing ledger to TSV file."""
         header = "subject\tstatus\tduration_s\terror\ttraceback_path"
         rows = [header]
@@ -91,10 +87,7 @@ class PipelineBase(ABC):
             status = entry.get("status", "")
             duration = entry.get("duration_s", "")
 
-            row = (
-                f"{subject_id}\t{status}\t{duration}\t"
-                f"{error_text}\t{traceback_path}"
-            )
+            row = f"{subject_id}\t{status}\t{duration}\t" f"{error_text}\t{traceback_path}"
             rows.append(row)
 
         ledger_path.write_text("\n".join(rows))
@@ -122,10 +115,7 @@ class PipelineBase(ABC):
                 return repr(value)
 
         if isinstance(value, dict):
-            return {
-                str(k): self._sanitize_metadata_value(v, depth + 1)
-                for k, v in value.items()
-            }
+            return {str(k): self._sanitize_metadata_value(v, depth + 1) for k, v in value.items()}
 
         if isinstance(value, (list, tuple, set)):
             return [self._sanitize_metadata_value(v, depth + 1) for v in value]
@@ -159,11 +149,7 @@ class PipelineBase(ABC):
         started_at = datetime.now(timezone.utc)
         run_id = f"{started_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:8]}"
 
-        safe_specs = {
-            key: value
-            for key, value in kwargs.items()
-            if key != "progress"
-        }
+        safe_specs = {key: value for key, value in kwargs.items() if key != "progress"}
 
         return {
             "run_id": run_id,
@@ -197,12 +183,7 @@ class PipelineBase(ABC):
             3,
         )
 
-        metadata_dir = (
-            Path(deriv_root)
-            / "logs"
-            / "run_metadata"
-            / pipeline_name
-        )
+        metadata_dir = Path(deriv_root) / "logs" / "run_metadata" / pipeline_name
         metadata_dir.mkdir(parents=True, exist_ok=True)
 
         raw_config: Any = getattr(self, "config", {})
@@ -263,9 +244,7 @@ class PipelineBase(ABC):
             )
         except Exception as exc:
             traceback_path = self._write_traceback(subject, ledger_dir)
-            self.logger.error(
-                f"Failed sub-{subject}: {exc} (traceback -> {traceback_path})"
-            )
+            self.logger.error(f"Failed sub-{subject}: {exc} (traceback -> {traceback_path})")
             duration = round(time.time() - start_time, 3)
             ledger.append(
                 {
@@ -286,11 +265,7 @@ class PipelineBase(ABC):
         progress: Any,
     ) -> List[str]:
         """Handle failed subjects and return list of failed subject IDs."""
-        failed_subjects = [
-            entry["subject"]
-            for entry in ledger
-            if entry.get("status") == "failed"
-        ]
+        failed_subjects = [entry["subject"] for entry in ledger if entry.get("status") == "failed"]
 
         if not failed_subjects:
             return failed_subjects
@@ -340,9 +315,7 @@ class PipelineBase(ABC):
             progress.start(self.name, subjects)
 
         ledger: List[Dict[str, Any]] = []
-        default_ledger_path = (
-            self.deriv_root / "logs" / f"{self.name}_batch_ledger.tsv"
-        )
+        default_ledger_path = self.deriv_root / "logs" / f"{self.name}_batch_ledger.tsv"
         resolved_ledger_path = ledger_path or default_ledger_path
         ledger_dir = resolved_ledger_path.parent
         ledger_dir.mkdir(parents=True, exist_ok=True)
@@ -395,12 +368,8 @@ class PipelineBase(ABC):
 
         summary = {
             "n_subjects": len(subjects),
-            "n_success": sum(
-                1 for item in ledger if item.get("status") == "success"
-            ),
-            "n_failed": sum(
-                1 for item in ledger if item.get("status") == "failed"
-            ),
+            "n_success": sum(1 for item in ledger if item.get("status") == "success"),
+            "n_failed": sum(1 for item in ledger if item.get("status") == "failed"),
         }
         outputs = {"ledger_path": str(resolved_ledger_path)}
 

@@ -46,8 +46,16 @@ def _feature_io_import_stubs() -> dict[str, types.ModuleType]:
         ),
         "eeg_pipeline.infra.paths": _make_module(
             "eeg_pipeline.infra.paths",
-            deriv_features_path=lambda deriv_root, subject: Path(deriv_root) / f"sub-{subject}" / "eeg" / "features",
-            find_connectivity_features_path=lambda deriv_root, subject: Path(deriv_root) / f"sub-{subject}" / "eeg" / "features" / "connectivity" / "features_connectivity.parquet",
+            deriv_features_path=lambda deriv_root, subject: Path(deriv_root)
+            / f"sub-{subject}"
+            / "eeg"
+            / "features",
+            find_connectivity_features_path=lambda deriv_root, subject: Path(deriv_root)
+            / f"sub-{subject}"
+            / "eeg"
+            / "features"
+            / "connectivity"
+            / "features_connectivity.parquet",
         ),
         "eeg_pipeline.infra.tsv": _make_module(
             "eeg_pipeline.infra.tsv",
@@ -231,9 +239,10 @@ class TestFeatureIoFailFast(unittest.TestCase):
             "channel_names": ["Cz"],
         }
 
-        with patch.object(self.feature_io, "write_tsv") as mock_write_tsv, patch.object(
-            self.feature_io, "write_parquet"
-        ) as mock_write_parquet:
+        with (
+            patch.object(self.feature_io, "write_tsv") as mock_write_tsv,
+            patch.object(self.feature_io, "write_parquet") as mock_write_parquet,
+        ):
             self.feature_io._save_aperiodic_qc(qc_payload, features_dir, logger)
 
         mock_write_tsv.assert_called_once()
@@ -250,25 +259,29 @@ class TestFeatureIoFailFast(unittest.TestCase):
             captured["deriv_root"] = kwargs["deriv_root"]
             return pd.DataFrame({"trial_id": [1], "rating": [1.0]})
 
-        with patch.object(
-            self.feature_io,
-            "read_table",
-            side_effect=[
-                pd.DataFrame({"trial_id": [1], "power_alpha": [1.0]}),
-                pd.DataFrame({"trial_id": [1], "power_alpha": [1.0]}),
-            ],
-        ), patch.object(
-            self.feature_io,
-            "pick_target_column",
-            return_value="rating",
-        ), patch.dict(
-            sys.modules,
-            {
-                "eeg_pipeline.utils.data.alignment": _make_module(
-                    "eeg_pipeline.utils.data.alignment",
-                    get_aligned_events=_get_aligned_events,
-                )
-            },
+        with (
+            patch.object(
+                self.feature_io,
+                "read_table",
+                side_effect=[
+                    pd.DataFrame({"trial_id": [1], "power_alpha": [1.0]}),
+                    pd.DataFrame({"trial_id": [1], "power_alpha": [1.0]}),
+                ],
+            ),
+            patch.object(
+                self.feature_io,
+                "pick_target_column",
+                return_value="rating",
+            ),
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.utils.data.alignment": _make_module(
+                        "eeg_pipeline.utils.data.alignment",
+                        get_aligned_events=_get_aligned_events,
+                    )
+                },
+            ),
         ):
             self.feature_io._load_features_and_targets(
                 subject="0001",
@@ -299,22 +312,26 @@ class TestFeatureIoFailFast(unittest.TestCase):
             }
         )
 
-        with patch.object(
-            self.feature_io,
-            "read_table",
-            side_effect=[active_df, active_df],
-        ), patch.object(
-            self.feature_io,
-            "pick_target_column",
-            return_value="rating",
-        ), patch.dict(
-            sys.modules,
-            {
-                "eeg_pipeline.utils.data.alignment": _make_module(
-                    "eeg_pipeline.utils.data.alignment",
-                    get_aligned_events=lambda *_args, **_kwargs: aligned_events,
-                )
-            },
+        with (
+            patch.object(
+                self.feature_io,
+                "read_table",
+                side_effect=[active_df, active_df],
+            ),
+            patch.object(
+                self.feature_io,
+                "pick_target_column",
+                return_value="rating",
+            ),
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.utils.data.alignment": _make_module(
+                        "eeg_pipeline.utils.data.alignment",
+                        get_aligned_events=lambda *_args, **_kwargs: aligned_events,
+                    )
+                },
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "trial_id"):
                 self.feature_io._load_features_and_targets(

@@ -278,7 +278,9 @@ def _resolve_target_series(
 
     if target_key.lower() in {"outcome"}:
         outcome_columns = config.get("event_columns.outcome", [])
-        tgt_col = pick_target_column(events_df, target_columns=list(outcome_columns) if outcome_columns else [])
+        tgt_col = pick_target_column(
+            events_df, target_columns=list(outcome_columns) if outcome_columns else []
+        )
         if tgt_col is None:
             raise ValueError(
                 "No outcome column found in events.tsv. "
@@ -344,7 +346,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
         event_alias_map = {
             "outcome": _as_list(get_config_value(config, "event_columns.outcome", [])) or [],
             "predictor": _as_list(get_config_value(config, "event_columns.predictor", [])) or [],
-            "binary_outcome": _as_list(get_config_value(config, "event_columns.binary_outcome", [])) or [],
+            "binary_outcome": _as_list(get_config_value(config, "event_columns.binary_outcome", []))
+            or [],
         }
         for canonical, column_aliases in event_alias_map.items():
             normalized = {str(c).strip().lower() for c in column_aliases if str(c).strip()}
@@ -437,7 +440,9 @@ def _load_subject_feature_table(
         if not meta_dir.exists():
             return None
         primary = meta_dir / "extraction_config.json"
-        candidates = [primary] if primary.exists() else sorted(meta_dir.glob("extraction_config*.json"))
+        candidates = (
+            [primary] if primary.exists() else sorted(meta_dir.glob("extraction_config*.json"))
+        )
         for p in candidates:
             try:
                 with open(p, "r", encoding="utf-8") as f:
@@ -457,7 +462,9 @@ def _load_subject_feature_table(
         return str(m.group(1)).strip()
 
     def _warn_or_raise_if_feature_tables_not_ml_safe(feature_path: Path, family: str) -> None:
-        require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", True))
+        require_safe = bool(
+            get_config_value(config, "machine_learning.data.require_trial_ml_safe", True)
+        )
         meta = _load_extraction_config(feature_path)
         if not meta:
             if require_safe:
@@ -538,8 +545,7 @@ def _load_subject_feature_table(
         path = _resolve_feature_path(features_dir, fam, filename, config)
         if not path.exists():
             raise FileNotFoundError(
-                f"Missing requested feature table for {subject_bids} "
-                f"(family '{fam}'): {path}"
+                f"Missing requested feature table for {subject_bids} " f"(family '{fam}'): {path}"
             )
 
         _warn_or_raise_if_feature_tables_not_ml_safe(path, family=fam)
@@ -547,15 +553,13 @@ def _load_subject_feature_table(
         df = read_table(path)
         if df is None or df.empty:
             raise ValueError(
-                f"Requested feature table is empty for {subject_bids} "
-                f"(family '{fam}'): {path}"
+                f"Requested feature table is empty for {subject_bids} " f"(family '{fam}'): {path}"
             )
         trial_ids = _coerce_trial_id_series(
             require_trial_id_column(
                 df,
                 context=(
-                    f"Requested feature table for {subject_bids}, task-{task}, "
-                    f"family '{fam}'"
+                    f"Requested feature table for {subject_bids}, task-{task}, " f"family '{fam}'"
                 ),
             )
         ).reset_index(drop=True)
@@ -621,7 +625,9 @@ def _standardize_meta_columns(
         meta_cols["binary_outcome"] = pd.to_numeric(events_df[binary_outcome_col], errors="coerce")
 
     outcome_columns = config.get("event_columns.outcome", [])
-    outcome_col = pick_target_column(events_df, target_columns=list(outcome_columns) if outcome_columns else [])
+    outcome_col = pick_target_column(
+        events_df, target_columns=list(outcome_columns) if outcome_columns else []
+    )
     if outcome_col is not None:
         meta_cols["outcome"] = pd.to_numeric(events_df[outcome_col], errors="coerce")
 
@@ -746,12 +752,12 @@ def _load_subject_ml_from_features(
     if target_kind == "binary":
         unique = set(np.unique(y).tolist())
         if not unique.issubset({0.0, 1.0}):
-            raise ValueError(f"Binary target contains values outside {{0,1}} for {subject_bids}: {sorted(unique)}")
+            raise ValueError(
+                f"Binary target contains values outside {{0,1}} for {subject_bids}: {sorted(unique)}"
+            )
         y = y.astype(int)
 
     return X_df, y, y_col, meta
-
-
 
 
 def load_epochs_with_targets(
@@ -791,7 +797,6 @@ def load_epochs_with_targets(
             logger=logger,
         )
 
-
     out: List[Tuple[str, mne.Epochs, pd.Series]] = []
     ch_sets: List[set] = []
     for s in subjects:
@@ -812,14 +817,14 @@ def load_epochs_with_targets(
         bad_channels = epochs.info.get("bads", [])
         if bad_channels:
             epochs.interpolate_bads(reset_bads=True)
-        
+
         if len(epochs) != len(aligned):
             raise ValueError(
                 f"Epoch/events count mismatch for subject {sub}, task {task}: "
                 f"epochs have {len(epochs)} trials but clean events.tsv has {len(aligned)} rows. "
                 "Re-run preprocessing to regenerate clean events with the current epochs."
             )
-        
+
         if len(aligned) == 0:
             _raise_subject_loading_error(sub, "Clean events.tsv is empty")
 
@@ -850,9 +855,7 @@ def load_epochs_with_targets(
         epochs.metadata = aligned
         out.append((sub, epochs, y))
         eeg_channels = [
-            ch
-            for ch in epochs.info["ch_names"]
-            if epochs.get_channel_types(picks=[ch])[0] == "eeg"
+            ch for ch in epochs.info["ch_names"] if epochs.get_channel_types(picks=[ch])[0] == "eeg"
         ]
         ch_sets.append(set(eeg_channels))
 
@@ -903,9 +906,11 @@ def load_active_matrix(
     if log is None:
         log = logging.getLogger(__name__)
 
-    feature_set_cfg = str(
-        get_config_value(config, "machine_learning.data.feature_set", "combined")
-    ).strip().lower()
+    feature_set_cfg = (
+        str(get_config_value(config, "machine_learning.data.feature_set", "combined"))
+        .strip()
+        .lower()
+    )
     if feature_set_cfg == "channels_mean" and feature_families is not None:
         raise ValueError(
             "machine_learning.data.feature_set='channels_mean' is incompatible with "
@@ -932,7 +937,11 @@ def load_active_matrix(
 
     harmonization = (
         feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")).strip().lower()
+        or str(
+            get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
+        )
+        .strip()
+        .lower()
     )
     if harmonization not in {"intersection", "union_impute"}:
         raise ValueError(
@@ -987,8 +996,10 @@ def load_active_matrix(
         col_sets.append(set(X_df.columns))
 
         subject_raw, subject_bids = _normalize_subject(sub)
-        
-        if get_config_value(config, "machine_learning.preprocessing.subject_standardize_features", False):
+
+        if get_config_value(
+            config, "machine_learning.preprocessing.subject_standardize_features", False
+        ):
             mean = X_df.mean(numeric_only=True)
             std = X_df.std(numeric_only=True).replace(0.0, 1.0)
             X_df = (X_df - mean) / std
@@ -1026,16 +1037,24 @@ def load_active_matrix(
         return out or None
 
     bands = _sanitize_list(
-        feature_bands if feature_bands is not None else _as_list(get_config_value(config, "machine_learning.data.feature_bands", None))
+        feature_bands
+        if feature_bands is not None
+        else _as_list(get_config_value(config, "machine_learning.data.feature_bands", None))
     )
     segments = _sanitize_list(
-        feature_segments if feature_segments is not None else _as_list(get_config_value(config, "machine_learning.data.feature_segments", None))
+        feature_segments
+        if feature_segments is not None
+        else _as_list(get_config_value(config, "machine_learning.data.feature_segments", None))
     )
     scopes = _sanitize_list(
-        feature_scopes if feature_scopes is not None else _as_list(get_config_value(config, "machine_learning.data.feature_scopes", None))
+        feature_scopes
+        if feature_scopes is not None
+        else _as_list(get_config_value(config, "machine_learning.data.feature_scopes", None))
     )
     stats = _sanitize_list(
-        feature_stats if feature_stats is not None else _as_list(get_config_value(config, "machine_learning.data.feature_stats", None))
+        feature_stats
+        if feature_stats is not None
+        else _as_list(get_config_value(config, "machine_learning.data.feature_stats", None))
     )
     excluded_channels = _sanitize_list(
         _as_list(get_config_value(config, "machine_learning.data.excluded_channels", None))
@@ -1073,7 +1092,11 @@ def load_active_matrix(
     y_all = y_all.astype(float)
 
     # Optional covariates appended to X (from standardized meta column names).
-    cov_cfg = covariates if covariates is not None else _as_list(get_config_value(config, "machine_learning.data.covariates", []))
+    cov_cfg = (
+        covariates
+        if covariates is not None
+        else _as_list(get_config_value(config, "machine_learning.data.covariates", []))
+    )
     if cov_cfg:
         forbidden_covariates = {v.lower() for v in _target_covariate_aliases(target, config=config)}
         leaking = [c for c in cov_cfg if str(c).strip().lower() in forbidden_covariates]
@@ -1102,7 +1125,9 @@ def load_active_matrix(
     if target_kind == "binary":
         unique = set(np.unique(y_all).tolist())
         if not unique.issubset({0.0, 1.0}):
-            raise ValueError(f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}")
+            raise ValueError(
+                f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}"
+            )
         y_all = y_all.astype(int)
 
     included_subject_ids = sorted(set(groups_arr.astype(str).tolist()))
@@ -1211,8 +1236,12 @@ def load_channels_mean_matrix(
         data = epochs.get_data(picks=picks)
         times = np.asarray(epochs.times, dtype=float)
 
-        baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-        active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+        baseline_window = get_config_value(
+            config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]
+        )
+        active_window = get_config_value(
+            config, "time_frequency_analysis.active_window", [3.0, 10.5]
+        )
         b0, b1 = _parse_time_window_bounds(
             baseline_window,
             config_path="time_frequency_analysis.baseline_window",
@@ -1275,7 +1304,9 @@ def load_channels_mean_matrix(
     if target_kind == "binary":
         unique = set(np.unique(y_all).tolist())
         if not unique.issubset({0.0, 1.0}):
-            raise ValueError(f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}")
+            raise ValueError(
+                f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}"
+            )
         y_all = y_all.astype(int)
 
     return X, y_all, groups_arr, feature_cols or [], meta
@@ -1382,7 +1413,9 @@ def load_epoch_tensor_matrix(
     if target_kind == "binary":
         unique = set(np.unique(y_all).tolist())
         if not unique.issubset({0.0, 1.0}):
-            raise ValueError(f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}")
+            raise ValueError(
+                f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}"
+            )
         y_all = y_all.astype(int)
 
     return X, y_all, groups_arr, common_channels, meta

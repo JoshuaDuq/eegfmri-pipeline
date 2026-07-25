@@ -16,12 +16,17 @@ from studies.pain_study.scripts.sanitize_brainvision_vas_markers import (
 )
 
 
-def _write_raw_brainvision_recording(raw_dir: Path, basename: str) -> Path:
+def _write_raw_brainvision_recording(
+    raw_dir: Path,
+    basename: str,
+    *,
+    sampling_frequency: float = 5_000.0,
+) -> Path:
     ch_names = [f"EEG{index:02d}" for index in range(1, 64)] + ["ECG"]
     data = np.arange(64 * 20, dtype=float).reshape(64, 20) * 1e-9
     pybv.write_brainvision(
         data=data,
-        sfreq=5_000,
+        sfreq=sampling_frequency,
         ch_names=ch_names,
         fname_base=basename,
         folder_out=raw_dir,
@@ -50,8 +55,31 @@ def test_discover_cohort_recordings_uses_all_original_5khz_recordings(tmp_path: 
     assert recordings[0].source_vhdr == source_vhdr
 
 
+def test_discover_cohort_recordings_includes_original_and_processed_layouts(
+    tmp_path: Path,
+) -> None:
+    basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
+    original_dir = tmp_path / "sub-0001" / "eeg" / "original_5khz"
+    processed_dir = tmp_path / "sub-0001" / "eeg" / "brainvision_processed_1khz"
+    original_dir.mkdir(parents=True)
+    processed_dir.mkdir(parents=True)
+    _write_raw_brainvision_recording(original_dir, basename)
+    _write_raw_brainvision_recording(
+        processed_dir,
+        f"{basename}_scannerpulse_corrected",
+        sampling_frequency=1_000.0,
+    )
+
+    recordings = discover_cohort_recordings(tmp_path)
+
+    assert [(recording.source_layout, recording.run) for recording in recordings] == [
+        ("brainvision_processed_1khz", 1),
+        ("original_5khz", 1),
+    ]
+
+
 def test_discover_cohort_recordings_rejects_empty_inventory(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="No original 5 kHz.*recordings"):
+    with pytest.raises(FileNotFoundError, match="No supported thermal EEG-fMRI recordings"):
         discover_cohort_recordings(tmp_path)
 
 
@@ -86,7 +114,7 @@ def test_discover_cohort_recordings_requires_selection_for_duplicate_run(tmp_pat
             f"ThermalPainEEGFMRI_run1_sub0003_2026-03-23_{timestamp}",
         )
 
-    with pytest.raises(ValueError, match="Ambiguous original recordings.*sub-0003 run-1"):
+    with pytest.raises(ValueError, match="Ambiguous original_5khz.*sub-0003 run-1"):
         discover_cohort_recordings(tmp_path)
 
 
@@ -141,7 +169,7 @@ def test_stage_recording_reuses_signal_and_changes_only_vas_annotation(tmp_path:
     source_vhdr = _write_raw_brainvision_recording(raw_dir, basename)
     recording = discover_cohort_recordings(source_data_root)[0]
 
-    manifest_row = stage_recording(recording, tmp_path / "staged")
+    manifest_row = stage_recording(recording, source_data_root, tmp_path / "staged")
 
     staged_vhdr = Path(manifest_row["staged_vhdr"])
     staged_vmrk = staged_vhdr.with_suffix(".vmrk")
@@ -166,6 +194,26 @@ def test_stage_recording_reuses_signal_and_changes_only_vas_annotation(tmp_path:
     np.testing.assert_array_equal(staged_raw[:, :][0], source_raw[:, :][0])
     assert manifest_row["volume_count"] == 2
     assert manifest_row["vas_count"] == 1
+
+
+def test_stage_recording_preserves_processed_layout_and_accepts_1khz(tmp_path: Path) -> None:
+    basename = "ThermalPainEEGFMRI_run1_sub0015_2026-07-13_10h50.22.477" "_scannerpulse_corrected"
+    source_data_root = tmp_path / "source_data"
+    raw_dir = source_data_root / "sub-0015" / "eeg" / "brainvision_processed_1khz"
+    raw_dir.mkdir(parents=True)
+    source_vhdr = _write_raw_brainvision_recording(
+        raw_dir,
+        basename,
+        sampling_frequency=1_000.0,
+    )
+    recording = discover_cohort_recordings(source_data_root)[0]
+
+    manifest_row = stage_recording(recording, source_data_root, tmp_path / "staged")
+
+    staged_vhdr = Path(manifest_row["staged_vhdr"])
+    assert staged_vhdr.relative_to(tmp_path / "staged") == source_vhdr.relative_to(source_data_root)
+    assert manifest_row["source_layout"] == "brainvision_processed_1khz"
+    assert manifest_row["sampling_frequency_hz"] == 1_000.0
 
 
 def test_run_sanitization_publishes_final_manifest_paths(tmp_path: Path) -> None:

@@ -18,9 +18,7 @@ def format_baseline_window_string(baseline_used: Tuple[float, float]) -> str:
     return f"bl{abs(b_start):.1f}to{abs(b_end):.2f}"
 
 
-def format_channel_list_for_display(
-    channels: List[str], max_channels: Optional[int] = None
-) -> str:
+def format_channel_list_for_display(channels: List[str], max_channels: Optional[int] = None) -> str:
     """Format channel list for display, limiting to max_channels."""
     if max_channels is None:
         max_channels = DEFAULT_MAX_CHANNELS_DISPLAY

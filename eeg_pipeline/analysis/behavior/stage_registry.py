@@ -9,6 +9,7 @@ from eeg_pipeline.analysis.behavior.stage_catalog import (
 )
 from eeg_pipeline.utils.config.loader import get_config_value
 
+
 @dataclass(frozen=True)
 class StageSpec:
     """Specification for a pipeline stage."""
@@ -145,7 +146,11 @@ class _ResultsFromOutputs:
         n_sig_raw = 0
         n_sig_fdr = 0
 
-        if self.correlations is not None and hasattr(self.correlations, "empty") and not self.correlations.empty:
+        if (
+            self.correlations is not None
+            and hasattr(self.correlations, "empty")
+            and not self.correlations.empty
+        ):
             n_total = len(self.correlations)
             if "p_raw" in self.correlations.columns:
                 n_sig_raw = int((self.correlations["p_raw"] < 0.05).sum())

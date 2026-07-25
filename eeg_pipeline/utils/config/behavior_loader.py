@@ -39,13 +39,9 @@ def load_behavior_config(
         with open(resolved_path, "r", encoding="utf-8") as handle:
             parsed = yaml.safe_load(handle)
     except yaml.YAMLError as exc:
-        raise ConfigError(
-            f"Failed to parse behavior config at {resolved_path}: {exc}"
-        ) from exc
+        raise ConfigError(f"Failed to parse behavior config at {resolved_path}: {exc}") from exc
     except OSError as exc:
-        raise ConfigError(
-            f"Failed to load behavior config at {resolved_path}: {exc}"
-        ) from exc
+        raise ConfigError(f"Failed to load behavior config at {resolved_path}: {exc}") from exc
 
     if not isinstance(parsed, dict):
         raise ConfigError(

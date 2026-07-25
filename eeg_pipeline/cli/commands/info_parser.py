@@ -24,6 +24,7 @@ from eeg_pipeline.cli.commands.info_helpers import (
     SOURCE_SOURCE_DATA,
 )
 
+
 def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the info command parser."""
     parser = subparsers.add_parser(
@@ -34,7 +35,18 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS, MODE_MULTIGROUP_STATS, MODE_ML_FEATURE_SPACE],
+        choices=[
+            MODE_SUBJECTS,
+            MODE_FEATURES,
+            MODE_CONFIG,
+            MODE_VERSION,
+            MODE_DISCOVER,
+            MODE_ROIS,
+            MODE_FMRI_CONDITIONS,
+            MODE_FMRI_COLUMNS,
+            MODE_MULTIGROUP_STATS,
+            MODE_ML_FEATURE_SPACE,
+        ],
         help="What to show: subjects, features, config, version, discover columns, rois, fmri-conditions, fmri-columns, or multigroup-stats",
     )
     parser.add_argument(
@@ -64,7 +76,14 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "--source",
-        choices=[SOURCE_BIDS, SOURCE_BIDS_FMRI, SOURCE_EPOCHS, SOURCE_FEATURES, SOURCE_SOURCE_DATA, SOURCE_ALL],
+        choices=[
+            SOURCE_BIDS,
+            SOURCE_BIDS_FMRI,
+            SOURCE_EPOCHS,
+            SOURCE_FEATURES,
+            SOURCE_SOURCE_DATA,
+            SOURCE_ALL,
+        ],
         default=SOURCE_ALL,
         help="Discovery source for subjects (default: all)",
     )
@@ -99,7 +118,9 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Get values for a specific column only",
     )
 
-    fmri_group = parser.add_argument_group("fMRI discovery options (modes: fmri-conditions, fmri-columns)")
+    fmri_group = parser.add_argument_group(
+        "fMRI discovery options (modes: fmri-conditions, fmri-columns)"
+    )
     fmri_group.add_argument(
         "--condition-column",
         default=None,

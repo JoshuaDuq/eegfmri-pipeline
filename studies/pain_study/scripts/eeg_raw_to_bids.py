@@ -20,7 +20,7 @@ from eeg_pipeline.utils.data.preprocessing import (
     parse_subject_id,
     set_channel_types,
     set_montage,
-    trim_to_first_volume,
+    trim_to_volume_bounds,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,7 @@ def run_raw_to_bids(
     line_freq: float = 60.0,
     overwrite: bool = False,
     zero_base_onsets: bool = False,
-    do_trim_to_first_volume: bool = False,
+    do_trim_to_volume_bounds: bool = False,
     event_prefixes: Optional[List[str]] = None,
     keep_all_annotations: bool = False,
     *,
@@ -176,22 +176,22 @@ def run_raw_to_bids(
         raw.info["line_freq"] = line_freq
 
         has_vol = _has_volume_triggers(raw)
-        if do_trim_to_first_volume and not has_vol:
+        if do_trim_to_volume_bounds and not has_vol:
             log.warning(
-                "trim_to_first_volume requested but no volume triggers detected in %s. "
+                "trim_to_volume_bounds requested but no volume triggers detected in %s. "
                 "EEG↔fMRI temporal anchoring will be limited.",
                 source_file.name,
             )
-        if (not do_trim_to_first_volume) and has_vol:
+        if (not do_trim_to_volume_bounds) and has_vol:
             log.info(
                 "Volume triggers detected in %s. For EEG↔fMRI alignment, consider enabling "
-                "--trim-to-first-volume and --zero-base-onsets.",
+                "--trim-to-volume-bounds and --zero-base-onsets.",
                 source_file.name,
             )
 
         was_trimmed = False
-        if do_trim_to_first_volume:
-            was_trimmed = trim_to_first_volume(raw)
+        if do_trim_to_volume_bounds:
+            was_trimmed = trim_to_volume_bounds(raw)
 
         if was_trimmed and not raw.preload:
             raw.load_data()

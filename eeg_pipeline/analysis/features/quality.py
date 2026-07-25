@@ -29,7 +29,6 @@ from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_STD
 
-
 MIN_SAMPLES_FOR_SPECTRAL = 10
 DEFAULT_N_FFT = 256
 DEFAULT_FMIN = 1.0
@@ -119,7 +118,9 @@ def _get_psd_method(config: Dict[str, Any]) -> str:
     """Get PSD computation method, defaulting to welch."""
     method = str(config.get("psd_method", "welch")).strip().lower()
     if method not in {"welch", "multitaper"}:
-        raise ValueError(f"feature_engineering.quality.psd_method must be 'welch' or 'multitaper' (got '{method}').")
+        raise ValueError(
+            f"feature_engineering.quality.psd_method must be 'welch' or 'multitaper' (got '{method}')."
+        )
     return method
 
 
@@ -128,7 +129,9 @@ def _get_frequency_range(config: Dict[str, Any], sfreq: float) -> Tuple[float, f
     fmin = float(config.get("fmin", DEFAULT_FMIN))
     fmax = float(config.get("fmax", min(DEFAULT_FMAX, float(sfreq) / 2.0 - 0.5)))
     if not (np.isfinite(fmin) and np.isfinite(fmax) and fmax > fmin and fmin >= 0):
-        raise ValueError(f"Invalid feature_engineering.quality fmin/fmax: fmin={fmin}, fmax={fmax}.")
+        raise ValueError(
+            f"Invalid feature_engineering.quality fmin/fmax: fmin={fmin}, fmax={fmax}."
+        )
     return fmin, fmax
 
 
@@ -148,14 +151,18 @@ def _get_line_noise_parameters(config: Dict[str, Any]) -> Tuple[List[float], flo
             "feature_engineering.quality.line_noise_freqs must contain only "
             f"positive finite numbers (got {line_freqs_raw!r})."
         )
-    
+
     width = float(config.get("line_noise_width_hz", DEFAULT_LINE_NOISE_WIDTH))
     n_harmonics = int(config.get("line_noise_harmonics", DEFAULT_LINE_NOISE_HARMONICS))
     if not (np.isfinite(width) and width > 0):
-        raise ValueError(f"feature_engineering.quality.line_noise_width_hz must be > 0 (got {width}).")
+        raise ValueError(
+            f"feature_engineering.quality.line_noise_width_hz must be > 0 (got {width})."
+        )
     if n_harmonics <= 0:
-        raise ValueError(f"feature_engineering.quality.line_noise_harmonics must be > 0 (got {n_harmonics}).")
-    
+        raise ValueError(
+            f"feature_engineering.quality.line_noise_harmonics must be > 0 (got {n_harmonics})."
+        )
+
     return line_freqs, width, n_harmonics
 
 
@@ -169,9 +176,9 @@ def _exclude_line_noise_frequencies(
     """Exclude line noise frequencies and their harmonics from PSD."""
     if not line_freqs or width <= 0 or n_harmonics <= 0:
         return freqs, psds
-    
+
     keep_mask = np.ones_like(freqs, dtype=bool)
-    
+
     for base_freq in line_freqs:
         if not np.isfinite(base_freq) or base_freq <= 0:
             continue
@@ -180,10 +187,10 @@ def _exclude_line_noise_frequencies(
             lower_bound = harmonic_freq - width
             upper_bound = harmonic_freq + width
             keep_mask &= ~((freqs >= lower_bound) & (freqs <= upper_bound))
-    
+
     if np.any(~keep_mask):
         return freqs[keep_mask], psds[:, keep_mask]
-    
+
     return freqs, psds
 
 
@@ -198,7 +205,7 @@ def _compute_psd(
     method = _get_psd_method(config)
     fmin, fmax = _get_frequency_range(config, sfreq)
     n_times = int(data.shape[1])
-    
+
     if method == "multitaper":
         multitaper_adaptive = bool(config.get("multitaper_adaptive", False))
         psds, freqs = mne.time_frequency.psd_array_multitaper(
@@ -259,17 +266,15 @@ def _compute_psd(
             n_overlap=n_overlap,
             verbose=False,
         )
-    
+
     freqs = np.asarray(freqs, dtype=float)
     psds = np.asarray(psds, dtype=float)
-    
+
     exclude_line_noise = bool(config.get("exclude_line_noise", True))
     if exclude_line_noise:
         line_freqs, width, n_harmonics = _get_line_noise_parameters(config)
-        freqs, psds = _exclude_line_noise_frequencies(
-            freqs, psds, line_freqs, width, n_harmonics
-        )
-    
+        freqs, psds = _exclude_line_noise_frequencies(freqs, psds, line_freqs, width, n_harmonics)
+
     return psds, freqs
 
 
@@ -281,7 +286,7 @@ def _compute_snr_from_psd(
     """Compute SNR as ratio of signal band to noise band power."""
     signal_band = config.get("snr_signal_band", DEFAULT_SNR_SIGNAL_BAND)
     noise_band = config.get("snr_noise_band", DEFAULT_SNR_NOISE_BAND)
-    
+
     try:
         signal_low, signal_high = float(signal_band[0]), float(signal_band[1])
         noise_low, noise_high = float(noise_band[0]), float(noise_band[1])
@@ -289,22 +294,38 @@ def _compute_snr_from_psd(
         raise ValueError(
             f"Invalid snr_signal_band/snr_noise_band: {signal_band!r} / {noise_band!r}"
         ) from exc
-    
+
     signal_mask = (freqs >= signal_low) & (freqs <= signal_high)
     noise_mask = (freqs >= noise_low) & (freqs <= noise_high)
     df = np.gradient(freqs) if freqs.size > 1 else np.ones_like(freqs, dtype=float)
 
     signal_bandwidth = float(np.sum(df[signal_mask])) if np.any(signal_mask) else np.nan
     noise_bandwidth = float(np.sum(df[noise_mask])) if np.any(noise_mask) else np.nan
-    signal_power = np.sum(psds[:, signal_mask] * df[signal_mask], axis=1) if np.any(signal_mask) else np.full(psds.shape[0], np.nan)
-    noise_power = np.sum(psds[:, noise_mask] * df[noise_mask], axis=1) if np.any(noise_mask) else np.full(psds.shape[0], np.nan)
+    signal_power = (
+        np.sum(psds[:, signal_mask] * df[signal_mask], axis=1)
+        if np.any(signal_mask)
+        else np.full(psds.shape[0], np.nan)
+    )
+    noise_power = (
+        np.sum(psds[:, noise_mask] * df[noise_mask], axis=1)
+        if np.any(noise_mask)
+        else np.full(psds.shape[0], np.nan)
+    )
 
-    signal_density = signal_power / max(signal_bandwidth, EPSILON_STD) if np.isfinite(signal_bandwidth) else np.full(psds.shape[0], np.nan)
-    noise_density = noise_power / max(noise_bandwidth, EPSILON_STD) if np.isfinite(noise_bandwidth) else np.full(psds.shape[0], np.nan)
+    signal_density = (
+        signal_power / max(signal_bandwidth, EPSILON_STD)
+        if np.isfinite(signal_bandwidth)
+        else np.full(psds.shape[0], np.nan)
+    )
+    noise_density = (
+        noise_power / max(noise_bandwidth, EPSILON_STD)
+        if np.isfinite(noise_bandwidth)
+        else np.full(psds.shape[0], np.nan)
+    )
 
     snr_linear = signal_density / (noise_density + EPSILON_STD)
     snr_db = SNR_DB_MULTIPLIER * np.log10(snr_linear)
-    
+
     return snr_db
 
 
@@ -315,17 +336,21 @@ def _compute_muscle_ratio_from_psd(
 ) -> np.ndarray:
     """Compute muscle artifact ratio as high-frequency power fraction."""
     muscle_band = config.get("muscle_band", DEFAULT_MUSCLE_BAND)
-    
+
     try:
         muscle_low, muscle_high = float(muscle_band[0]), float(muscle_band[1])
     except (ValueError, TypeError, IndexError) as exc:
         raise ValueError(f"Invalid muscle_band: {muscle_band!r}") from exc
-    
+
     muscle_mask = (freqs >= muscle_low) & (freqs <= muscle_high)
     df = np.gradient(freqs) if freqs.size > 1 else np.ones_like(freqs, dtype=float)
-    muscle_power = np.sum(psds[:, muscle_mask] * df[muscle_mask], axis=1) if np.any(muscle_mask) else np.full(psds.shape[0], np.nan)
+    muscle_power = (
+        np.sum(psds[:, muscle_mask] * df[muscle_mask], axis=1)
+        if np.any(muscle_mask)
+        else np.full(psds.shape[0], np.nan)
+    )
     total_power = np.sum(psds * df[None, :], axis=1)
-    
+
     muscle_ratio = muscle_power / (total_power + EPSILON_STD)
     return muscle_ratio
 
@@ -335,7 +360,7 @@ def _compute_basic_metrics(data: np.ndarray) -> Dict[str, np.ndarray]:
     variance = np.var(data, axis=1)
     peak_to_peak = np.ptp(data, axis=1)
     finite_fraction = np.mean(np.isfinite(data), axis=1)
-    
+
     return {
         "variance": variance,
         "ptp": peak_to_peak,
@@ -365,28 +390,28 @@ def _compute_signal_metrics(
     logger: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Compute all quality metrics for signal data.
-    
+
     Args:
         data: Channel data array of shape (n_channels, n_times)
         sfreq: Sampling frequency in Hz
         config: Configuration object
-        
+
     Returns:
         Dictionary with metric names as keys and per-channel arrays as values
     """
     metrics = _compute_basic_metrics(data)
-    
+
     n_times = data.shape[1]
     if n_times < MIN_SAMPLES_FOR_SPECTRAL:
         n_channels = data.shape[0]
         metrics["snr"] = np.full(n_channels, np.nan)
         metrics["muscle"] = np.full(n_channels, np.nan)
         return metrics
-    
+
     quality_config = _extract_quality_config(config)
     spectral_metrics = _compute_spectral_metrics(data, sfreq, quality_config, logger=logger)
     metrics.update(spectral_metrics)
-    
+
     return metrics
 
 
@@ -407,13 +432,11 @@ def _store_metric_values(
             if column_name not in results:
                 results[column_name] = [np.nan] * n_epochs
             results[column_name][epoch_idx] = channel_values[channel_idx]
-        
+
         global_value = np.nan
         if np.isfinite(channel_values).any():
             global_value = float(np.nanmean(channel_values))
-        global_column = NamingSchema.build(
-            "quality", segment, "broadband", "global", metric_name
-        )
+        global_column = NamingSchema.build("quality", segment, "broadband", "global", metric_name)
         if global_column not in results:
             results[global_column] = [np.nan] * n_epochs
         results[global_column][epoch_idx] = global_value
@@ -423,10 +446,10 @@ def extract_quality_features(
     ctx: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract quality features from epochs for baseline and active segments.
-    
+
     Args:
         ctx: FeatureContext with epochs, windows, and optional config
-        
+
     Returns:
         Tuple of (DataFrame with quality metrics, list of column names)
     """
@@ -434,12 +457,12 @@ def extract_quality_features(
     picks, channel_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         raise ValueError("Quality: no EEG channels available.")
-    
+
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
     n_epochs = len(full_data)
     config = getattr(ctx, "config", None)
-    
+
     results = {}
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
@@ -452,7 +475,7 @@ def extract_quality_features(
         config,
         logger,
     )
-    
+
     if not masks:
         if logger:
             logger.error("Quality: no valid time window masks available; skipping.")
@@ -461,21 +484,19 @@ def extract_quality_features(
     for segment, mask in masks.items():
         if not np.any(mask):
             continue
-        
+
         segment_data = full_data[..., mask]
-        
+
         for epoch_idx in range(n_epochs):
             epoch_data = segment_data[epoch_idx]
             metrics = _compute_signal_metrics(epoch_data, sfreq, config, logger=logger)
-            _store_metric_values(
-                results, metrics, segment, channel_names, epoch_idx, n_epochs
-            )
+            _store_metric_values(results, metrics, segment, channel_names, epoch_idx, n_epochs)
 
     if not results:
         if logger:
             logger.error("Quality: no metrics were produced; skipping.")
         return pd.DataFrame(), []
-    
+
     df = pd.DataFrame(results)
     return df, list(df.columns)
 
@@ -485,17 +506,17 @@ def compute_trial_quality_metrics(
     config: Any = None,
 ) -> pd.DataFrame:
     """Compute trial-level quality metrics from epochs.
-    
+
     This is a standalone wrapper for use in pipelines that don't have
     a full FeatureContext. For full feature extraction, use extract_quality_features.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
         Preprocessed epochs
     config : Any
         Configuration object
-        
+
     Returns
     -------
     pd.DataFrame
@@ -504,25 +525,25 @@ def compute_trial_quality_metrics(
     picks, _ = pick_eeg_channels(epochs)
     if len(picks) == 0:
         raise ValueError("Quality: no EEG channels available.")
-    
+
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
     n_epochs = len(full_data)
-    
+
     results = {}
-    
+
     for epoch_idx in range(n_epochs):
         epoch_data = full_data[epoch_idx]
         metrics = _compute_signal_metrics(epoch_data, sfreq, config)
-        
+
         for metric_name, channel_values in metrics.items():
             global_value = np.nanmean(channel_values)
             column_name = f"quality_global_{metric_name}"
             if column_name not in results:
                 results[column_name] = [np.nan] * n_epochs
             results[column_name][epoch_idx] = global_value
-    
+
     if not results:
         raise ValueError("Quality: no metrics were produced.")
-    
+
     return pd.DataFrame(results)

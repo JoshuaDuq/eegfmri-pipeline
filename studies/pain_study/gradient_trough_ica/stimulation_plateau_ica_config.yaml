@@ -1,0 +1,5 @@
+base_config: gradient_trough_ica_config.yaml
+stimulation_plateau_s: [3.0, 10.5]
+source_export_root: outputs/gradient_trough_ica
+output_root: outputs/gradient_trough_ica_stimulation_plateau
+

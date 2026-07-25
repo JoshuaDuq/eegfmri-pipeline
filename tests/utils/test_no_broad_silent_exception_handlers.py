@@ -20,7 +20,8 @@ def test_no_broad_silent_exception_handlers() -> None:
             if pattern.search(text):
                 violations.append(str(path.relative_to(repo_root)))
 
-    assert not violations, (
-        "Found broad silent exception handlers (except ... Exception ...: pass) in:\n"
-        + "\n".join(sorted(violations))
+    assert (
+        not violations
+    ), "Found broad silent exception handlers (except ... Exception ...: pass) in:\n" + "\n".join(
+        sorted(violations)
     )

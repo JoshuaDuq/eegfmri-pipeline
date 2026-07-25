@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fit alpha, beta, and gamma FieldTrip ICA models for `sub-0015` and compute the existing pain-study TFR result set for each model.
+**Goal:** Fit alpha, beta, and gamma FieldTrip ICA models to pre-ICA `sub-0015` signals restricted to the final 59-trial rejection set, then compute the existing pain-study TFR result set for each model.
 
-**Architecture:** Add band definitions to the existing sub-0015 configuration. New MATLAB batch functions filter the concatenated export for each band, fit runica, apply its weights to broadband epochs, and pass each decomposition through the existing condition/TFR calculations without changing the restored broadband functions.
+**Architecture:** Load signal values from the 66-trial `_epo.fif`, apply only the retained-trial indices recorded by `proc-clean_epo.fif`, and map those indices to the original BIDS condition table. New MATLAB batch functions filter that 59-trial pre-ICA export for each band, fit runica, apply its weights to broadband epochs, and pass each decomposition through the existing condition/TFR calculations without changing the restored broadband functions.
 
 **Tech Stack:** MATLAB R2026a, FieldTrip, runica, MNE-Python export bridge, YAML/JSON configuration.
 
@@ -14,6 +14,7 @@
 
 **Files:**
 - Modify: `studies/pain_study/fieldtrip_tfr/config/fieldtrip_tfr_brainvision_analyzer_sub0015.yaml`
+- Create: `studies/pain_study/fieldtrip_tfr/export_clean_epochs_fieldtrip.py`
 
 - [ ] Add named bands under `ica`:
 
@@ -24,7 +25,7 @@
     gamma: [30.0, 100.0]
 ```
 
-- [ ] Regenerate the runtime JSON with the existing exporter and confirm the source provenance lists all six `proc-filt_raw.fif` files under `brainvision_analyzer_mne_preprocessing_sub-0015`.
+- [ ] Add explicit pre-ICA and trial-rejection-mask inputs to the exporter. Confirm provenance identifies both FIF files and the 59 retained BIDS trial rows.
 
 ### Task 2: Fit band-specific ICA
 

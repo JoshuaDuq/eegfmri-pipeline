@@ -102,8 +102,6 @@ def sanitize_vas_marker_text(marker_text: str, *, n_samples: int) -> MarkerSanit
         vas_count += vas_increment
         output_lines.append(f"{marker_id}={','.join(fields)}{newline}")
 
-    if volume_count == 0:
-        raise ValueError("Marker file contains no Volume,V  1 markers")
     if vas_count == 0:
         raise ValueError("Marker file contains no Vas_on,V  1 markers")
 

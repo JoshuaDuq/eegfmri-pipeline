@@ -20,7 +20,6 @@ from typing import Any, List, Tuple, Dict, Optional
 
 from eeg_pipeline.types import TimeWindows
 
-
 # Numerical tolerances for floating-point comparisons
 TIME_TOLERANCE = 1e-9
 WINDOW_EDGE_TOLERANCE = 1e-6
@@ -35,6 +34,7 @@ CLAMP_TOLERANCE = 1e-12
 @dataclass
 class WindowMetadata:
     """Metadata for a single time window."""
+
     start: float
     end: float
     clamped: bool
@@ -134,7 +134,7 @@ def build_time_windows_fixed_size_clamped(
         tmin=time_min,
         tmax=time_max,
     )
-    
+
     if windows:
         last_window_end = float(windows[-1][1])
     else:
@@ -165,12 +165,8 @@ def build_time_windows_fixed_count(
 
     if num_windows <= 0:
         return np.array([]), np.array([])
-    
-    is_valid_range = (
-        np.isfinite(time_min)
-        and np.isfinite(time_max)
-        and time_max > time_min
-    )
+
+    is_valid_range = np.isfinite(time_min) and np.isfinite(time_max) and time_max > time_min
     if not is_valid_range:
         return np.array([]), np.array([])
 
@@ -189,11 +185,11 @@ def build_time_windows_fixed_count(
 class TimeWindowSpec:
     """
     Builder for all temporal masks used in feature extraction.
-    
+
     Provides a more flexible interface than compute_time_windows for
     complex windowing scenarios with custom bins and sliding windows.
     """
-    
+
     def __init__(
         self,
         times: np.ndarray,
@@ -209,7 +205,7 @@ class TimeWindowSpec:
             raise ValueError("times must be a non-empty array")
         if not isinstance(times, np.ndarray):
             raise TypeError("times must be a numpy array")
-        
+
         self.times = times
         self.sfreq = sampling_rate
         self.config = config
@@ -218,23 +214,23 @@ class TimeWindowSpec:
         self.explicit_windows = explicit_windows
         self.tmin = tmin
         self.tmax = tmax
-        
+
         self.masks: Dict[str, np.ndarray] = {}
         self.metadata: Dict[str, WindowMetadata] = {}
         self.errors: List[str] = []
-        
+
         self._build_all_windows()
-        
+
     def _build_all_windows(self):
         """Construct windows from explicit user input or tmin/tmax fallback.
-        
+
         Priority:
         1. Explicit windows from TUI (Step 5)
         2. Auto-generated window from tmin/tmax CLI arguments
         3. Full epoch window if nothing else is specified
         """
         explicit_by_name = {k.lower(): v for k, v in self._parse_explicit_windows().items()}
-        
+
         if explicit_by_name:
             self._build_from_explicit_windows(explicit_by_name)
         elif self.tmin is not None or self.tmax is not None:
@@ -266,52 +262,52 @@ class TimeWindowSpec:
                 start,
                 end,
             )
-    
+
     def _build_from_tmin_tmax(self):
         """Auto-generate a window from CLI tmin/tmax when no explicit windows defined.
-        
+
         This prevents silent zero-masking when users specify tmin/tmax without
         explicit window definitions.
         """
         t_start = self.tmin if self.tmin is not None else float(self.times[0])
         t_end = self.tmax if self.tmax is not None else float(self.times[-1])
-        
+
         window_name = self.name if self.name else "analysis"
-        
+
         self.logger.info(
             f"Auto-generating window '{window_name}' from tmin/tmax: [{t_start:.3f}, {t_end:.3f}]"
         )
         self._add_window(window_name, t_start, t_end)
-        
+
         if t_start > 0:
             baseline_end = min(0.0, t_start)
             baseline_start = self.times[0]
             if baseline_start < baseline_end:
                 self._add_window("baseline", float(baseline_start), baseline_end)
-    
+
     def _parse_explicit_windows(self) -> Dict[str, Tuple[float, float]]:
         """Parse explicit windows from user input into name -> (start, end) mapping."""
         explicit_by_name: Dict[str, Tuple[float, float]] = {}
         explicit = self.explicit_windows or []
-        
+
         for win in explicit:
             try:
                 win_name = str(win.get("name") or "").strip()
                 win_tmin = win.get("tmin")
                 win_tmax = win.get("tmax")
-                
+
                 if not win_name or win_tmin is None or win_tmax is None:
                     continue
-                
+
                 explicit_by_name[win_name] = (float(win_tmin), float(win_tmax))
             except (ValueError, TypeError, AttributeError):
                 continue
-        
+
         return explicit_by_name
-    
+
     def _build_from_explicit_windows(self, explicit_by_name: Dict[str, Tuple[float, float]]):
         """Build windows from user-defined explicit windows only.
-        
+
         When self.name is set, ONLY build that specific window to ensure
         output files contain only data for their designated time window.
         However, always store baseline metadata for ERP baseline correction.
@@ -324,60 +320,58 @@ class TimeWindowSpec:
                 self._add_window(self.name, float(start), float(end))
             else:
                 self._add_empty_window(self.name, reason="window_not_in_user_input")
-            
+
             # Always store baseline range for ERP baseline correction
             if "baseline" in explicit_by_name and name_key != "baseline":
                 bl_start, bl_end = explicit_by_name["baseline"]
                 self._add_window("baseline", float(bl_start), float(bl_end))
-            
+
             return  # Don't build other windows when targeting a specific one
-        
+
         # Only build all windows when no specific target is set
         for win_name, (start, end) in explicit_by_name.items():
             if win_name in self.masks:
                 continue
             self._add_window(win_name, float(start), float(end))
-    
+
     def _add_window(self, name: str, start: float, end: float, prefix: str = ""):
         """Add a window with clamping and validation."""
         full_name = f"{prefix}_{name}" if prefix else name
-        
+
         time_min_available = self.times[0]
         time_max_available = self.times[-1]
         time_upper_bound = self._time_axis_upper_bound()
-        
+
         final_start, final_end, was_clamped = self._clamp_window_bounds(
             start, end, time_min_available, time_upper_bound
         )
-        
+
         mask = (self.times >= final_start) & (self.times < final_end)
         n_samples = int(np.sum(mask))
         is_valid = n_samples > 0
-        
+
         requested_duration = end - start
         observed_duration = final_end - final_start
         coverage = observed_duration / requested_duration if requested_duration > 0 else 0.0
-        
+
         if was_clamped and is_valid:
             self.logger.info(
                 f"Window '{full_name}' clamped: "
                 f"req=[{start:.2f}, {end:.2f}], "
                 f"obs=[{final_start:.2f}, {final_end:.2f}]"
             )
-        
+
         if not is_valid:
             is_targeted_window = self.name and full_name.lower() == self.name.lower()
             if is_targeted_window:
-                self.logger.warning(
-                    f"Window '{full_name}' is empty! req=[{start:.2f}, {end:.2f}]"
-                )
+                self.logger.warning(f"Window '{full_name}' is empty! req=[{start:.2f}, {end:.2f}]")
                 self.errors.append(full_name)
             else:
                 self.logger.debug(
                     f"Window '{full_name}' outside current range (expected): "
-                f"req=[{start:.2f}, {end:.2f}], available=[{time_min_available:.2f}, {time_max_available:.2f}]"
+                    f"req=[{start:.2f}, {end:.2f}], available=[{time_min_available:.2f}, {time_max_available:.2f}]"
                 )
-        
+
         self.masks[full_name] = mask
         self.metadata[full_name] = WindowMetadata(
             start=final_start,
@@ -401,7 +395,7 @@ class TimeWindowSpec:
         else:
             sample_period = float(np.median(positive_diffs))
         return float(self.times[-1]) + float(sample_period)
-    
+
     def _clamp_window_bounds(
         self,
         start: float,
@@ -413,15 +407,15 @@ class TimeWindowSpec:
         final_start = start
         final_end = end
         was_clamped = False
-        
+
         if final_start < time_min - TIME_TOLERANCE:
             final_start = time_min
             was_clamped = True
-        
+
         if final_end > time_max + TIME_TOLERANCE:
             final_end = time_max
             was_clamped = True
-        
+
         return final_start, final_end, was_clamped
 
     def _add_empty_window(self, name: str, reason: str = "empty_window") -> None:
@@ -441,7 +435,7 @@ class TimeWindowSpec:
             valid=False,
             coverage=0.0,
         )
-        
+
     def get_mask(self, name: str) -> np.ndarray:
         """Get mask by name, returns empty mask if not found."""
         mask = self.masks.get(name)
@@ -452,31 +446,31 @@ class TimeWindowSpec:
         if mask is not None:
             return mask
         return np.zeros_like(self.times, dtype=bool)
-        
+
     def get_sliding_windows(self, length: float, step: float) -> List[Tuple[str, np.ndarray]]:
         """Generate sliding windows within the active window."""
         active_meta = self.metadata.get("active")
         if active_meta is None or not active_meta.valid:
             return []
-        
+
         active_start = active_meta.start
         active_end = active_meta.end
-        
+
         windows = []
         current_start = active_start
         window_index = 0
-        
+
         while current_start + length <= active_end + TIME_TOLERANCE:
             window_end = current_start + length
             mask = (self.times >= current_start) & (self.times < window_end)
-            
+
             if np.sum(mask) > 0:
                 window_name = f"slide{window_index}"
                 windows.append((window_name, mask))
-            
+
             current_start += step
             window_index += 1
-        
+
         return windows
 
 
@@ -488,14 +482,14 @@ def time_windows_from_spec(
 ) -> TimeWindows:
     """Create a TimeWindows object from a specification."""
     errors = _validate_spec_windows(spec, logger, strict)
-    
+
     masks = dict(spec.masks)
     ranges = _build_ranges_dict(spec.metadata)
     active_key = _determine_active_key(spec.name, masks)
-    
+
     has_any_clamped = any(meta.clamped for meta in spec.metadata.values())
     empty_mask = np.zeros_like(spec.times, dtype=bool)
-    
+
     return TimeWindows(
         baseline_mask=spec.get_mask("baseline"),
         active_mask=spec.get_mask(active_key) if active_key else empty_mask,
@@ -519,43 +513,40 @@ def _validate_spec_windows(
     """Validate that spec has at least one valid window."""
     has_valid_window = any(meta.valid for meta in spec.metadata.values())
     errors: List[str] = []
-    
+
     if not has_valid_window:
         errors.append("No valid time windows defined or found in data")
-    
+
     if errors and logger:
         error_msg = "; ".join(errors)
         if strict:
             logger.error("Time window validation failed: %s", error_msg)
         else:
             logger.warning("Time window validation failed: %s", error_msg)
-    
+
     if errors and strict:
         raise ValueError("; ".join(errors))
-    
+
     return errors
 
 
 def _build_ranges_dict(metadata: Dict[str, WindowMetadata]) -> Dict[str, Tuple[float, float]]:
     """Build ranges dictionary from metadata."""
-    return {
-        name: (float(meta.start), float(meta.end))
-        for name, meta in metadata.items()
-    }
+    return {name: (float(meta.start), float(meta.end)) for name, meta in metadata.items()}
 
 
 def _determine_active_key(name: Optional[str], masks: Dict[str, np.ndarray]) -> Optional[str]:
     """Determine the active window key, honoring named iteration if present."""
     if name and name in masks:
         return name
-    
+
     if "active" in masks:
         return "active"
-    
+
     for key in masks:
         if key != "baseline":
             return key
-    
+
     return None
 
 
@@ -606,14 +597,14 @@ def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.nd
 def _get_window_range_from_spec(spec: Any, window_name: str) -> Optional[Tuple[float, float]]:
     """Extract window range from spec, strictly by name."""
     key = str(window_name).strip().lower()
-    
+
     ranges = getattr(spec, "ranges", None)
     if isinstance(ranges, dict):
         if window_name in ranges:
             return ranges[window_name]
         if key in ranges:
             return ranges[key]
-        
+
         # Internal field fallbacks (only if name matches exactly)
         if key == "baseline":
             return getattr(spec, "baseline_range", None)
@@ -627,5 +618,5 @@ def _get_window_range_from_spec(spec: Any, window_name: str) -> Optional[Tuple[f
         end = float(getattr(meta, "end", np.nan))
         if np.isfinite(start) and np.isfinite(end):
             return (start, end)
-    
+
     return None

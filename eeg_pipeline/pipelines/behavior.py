@@ -9,7 +9,7 @@ with statistical routines consolidated in eeg_pipeline.analysis.behavior.api.
 Usage:
     pipeline = BehaviorPipeline(config=config)
     pipeline.process_subject("0001", "task")
-    
+
     # Or batch processing
     pipeline.run_batch(["0001", "0002"])
 """
@@ -47,7 +47,6 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     get_behavior_output_dir,
 )
 
-
 SIGNIFICANCE_THRESHOLD = 0.05
 
 BEHAVIOR_COMPUTATION_FLAGS = list(COMPUTATION_TO_PIPELINE_ATTR)
@@ -69,15 +68,15 @@ def _resolve_behavior_computation_flags(
 ) -> Optional[Dict[str, bool]]:
     """
     Normalize requested behavior computations into stage flags.
-    
+
     If requested is None, returns None to indicate no override (use config).
     Bundled aliases are expanded through `BEHAVIOR_COMPUTATION_BUNDLES`.
     """
     if requested is None:
         return None
-    
+
     flags = {k: False for k in BEHAVIOR_COMPUTATION_FLAGS}
-    
+
     # Expand bundled aliases
     expanded = []
     for item in requested:
@@ -86,18 +85,16 @@ def _resolve_behavior_computation_flags(
             expanded.extend(BEHAVIOR_COMPUTATION_BUNDLES[key])
         else:
             expanded.append(key)
-    
+
     unknown = [k for k in expanded if k not in BEHAVIOR_COMPUTATION_FLAGS]
     if unknown:
         unknown_str = ", ".join(sorted(set(unknown)))
-        raise ValueError(
-            f"Unknown behavior computations: {unknown_str}"
-        )
-    
+        raise ValueError(f"Unknown behavior computations: {unknown_str}")
+
     for key in expanded:
         if key in flags:
             flags[key] = True
-    
+
     return flags
 
 
@@ -121,7 +118,7 @@ class BehaviorPipelineConfig:
     robust_method: Optional[str]
     method_label: str
     correlation_types: List[str]
-    
+
     # Computation flags
     run_trial_table: bool
     run_predictor_residual: bool
@@ -133,24 +130,24 @@ class BehaviorPipelineConfig:
     run_condition_comparison: bool
     run_temporal_correlations: bool
     run_cluster_tests: bool
-    
+
     # General stats
     fdr_alpha: float
     n_permutations: int
     n_jobs: int
-    
+
     # Condition-specific
     condition_effect_threshold: float
-    
+
     # Temporal-specific
     temporal_resolution_ms: int
     temporal_smooth_ms: int
-    
+
     # Cluster-specific
     cluster_threshold: float
     cluster_min_size: int
     cluster_tail: int
-    
+
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
         config = ensure_behavior_config(config)
@@ -175,57 +172,39 @@ class BehaviorPipelineConfig:
             )
         return cls(
             method=method,
-            min_samples=int(
-                require_config_value(config, "behavior_analysis.min_samples.default")
-            ),
+            min_samples=int(require_config_value(config, "behavior_analysis.min_samples.default")),
             control_predictor=bool(
-                require_config_value(
-                    config, "behavior_analysis.predictor_control_enabled"
-                )
+                require_config_value(config, "behavior_analysis.predictor_control_enabled")
             ),
             control_trial_order=bool(
                 require_config_value(config, "behavior_analysis.control_trial_order")
             ),
             compute_change_scores=bool(
-                require_config_value(
-                    config, "behavior_analysis.correlations.compute_change_scores"
-                )
+                require_config_value(config, "behavior_analysis.correlations.compute_change_scores")
             ),
             compute_reliability=bool(
-                require_config_value(
-                    config, "behavior_analysis.statistics.compute_reliability"
-                )
+                require_config_value(config, "behavior_analysis.statistics.compute_reliability")
             ),
             compute_bayes_factors=bool(
-                require_config_value(
-                    config, "behavior_analysis.correlations.compute_bayes_factors"
-                )
+                require_config_value(config, "behavior_analysis.correlations.compute_bayes_factors")
             ),
             compute_loso_stability=bool(
-                require_config_value(
-                    config, "behavior_analysis.correlations.loso_stability"
-                )
+                require_config_value(config, "behavior_analysis.correlations.loso_stability")
             ),
             bootstrap=int(bootstrap_value),
             robust_method=robust_method,
             method_label=method_label,
-            correlation_types=require_config_value(
-                config, "behavior_analysis.correlations.types"
-            ),
+            correlation_types=require_config_value(config, "behavior_analysis.correlations.types"),
             run_trial_table=bool(
                 require_config_value(config, "behavior_analysis.trial_table.enabled")
             ),
             run_predictor_residual=bool(
-                require_config_value(
-                    config, "behavior_analysis.predictor_residual.enabled"
-                )
+                require_config_value(config, "behavior_analysis.predictor_residual.enabled")
             ),
             run_regression=bool(
                 require_config_value(config, "behavior_analysis.regression.enabled")
             ),
-            run_icc=bool(
-                require_config_value(config, "behavior_analysis.icc.enabled")
-            ),
+            run_icc=bool(require_config_value(config, "behavior_analysis.icc.enabled")),
             run_validation=bool(
                 require_config_value(config, "behavior_analysis.validation.enabled")
             ),
@@ -246,44 +225,34 @@ class BehaviorPipelineConfig:
             run_cluster_tests=bool(
                 require_config_value(config, "behavior_analysis.cluster.enabled")
             ),
-            fdr_alpha=float(
-                require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
-            ),
+            fdr_alpha=float(require_config_value(config, "behavior_analysis.statistics.fdr_alpha")),
             n_permutations=int(n_permutations_value),
             n_jobs=int(require_config_value(config, "behavior_analysis.n_jobs")),
             # Condition-specific
             condition_effect_threshold=float(
-                require_config_value(
-                    config, "behavior_analysis.condition.effect_size_threshold"
-                )
+                require_config_value(config, "behavior_analysis.condition.effect_size_threshold")
             ),
             # Temporal-specific
             temporal_resolution_ms=int(
-                require_config_value(
-                    config, "behavior_analysis.temporal.time_resolution_ms"
-                )
+                require_config_value(config, "behavior_analysis.temporal.time_resolution_ms")
             ),
             temporal_smooth_ms=int(
-                require_config_value(
-                    config, "behavior_analysis.temporal.smooth_window_ms"
-                )
+                require_config_value(config, "behavior_analysis.temporal.smooth_window_ms")
             ),
             # Cluster-specific
             cluster_threshold=float(
-                require_config_value(
-                    config, "behavior_analysis.cluster.forming_threshold"
-                )
+                require_config_value(config, "behavior_analysis.cluster.forming_threshold")
             ),
             cluster_min_size=int(
-                require_config_value(
-                    config, "behavior_analysis.cluster.min_cluster_size"
-                )
+                require_config_value(config, "behavior_analysis.cluster.min_cluster_size")
             ),
             cluster_tail=int(require_config_value(config, "behavior_analysis.cluster.tail")),
         )
 
 
-def _extract_p_value_column(df: pd.DataFrame, primary_cols: List[str], fallback_cols: List[str]) -> Optional[pd.Series]:
+def _extract_p_value_column(
+    df: pd.DataFrame, primary_cols: List[str], fallback_cols: List[str]
+) -> Optional[pd.Series]:
     """Extract p-value column from dataframe using primary and fallback column names."""
     for col in primary_cols:
         if col in df.columns:
@@ -294,7 +263,9 @@ def _extract_p_value_column(df: pd.DataFrame, primary_cols: List[str], fallback_
     return None
 
 
-def _count_significant(p_values: Optional[pd.Series], threshold: float = SIGNIFICANCE_THRESHOLD) -> int:
+def _count_significant(
+    p_values: Optional[pd.Series], threshold: float = SIGNIFICANCE_THRESHOLD
+) -> int:
     """Count significant p-values below threshold."""
     if p_values is None:
         return 0
@@ -337,7 +308,7 @@ class BehaviorPipelineResults:
     temporal: Optional[Dict[str, Any]] = None
     tf: Optional[Dict[str, Any]] = None
     summary: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_summary(self) -> Dict[str, Any]:
         summary = {"subject": self.subject}
         if self.trial_table_path:
@@ -351,24 +322,24 @@ class BehaviorPipelineResults:
         if self.correlations is not None and not self.correlations.empty:
             df = self.correlations
             n_total += len(df)
-            
+
             p_raw = _extract_p_value_column(df, ["p_raw"], ["p_value", "p"])
             p_primary = _extract_p_value_column(df, ["p_primary"], [])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["q_value"])
-            
+
             n_sig_raw += _count_significant(p_raw)
             n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
-        
+
         if self.condition_effects is not None and not self.condition_effects.empty:
             df = self.condition_effects
             n_total += len(df)
             summary["n_condition_effects"] = len(df)
-            
+
             p_raw = _extract_p_value_column(df, ["p_raw", "p_value"], ["p"])
             p_primary = _extract_p_value_column(df, ["p_primary"], [])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["q_value"])
-            
+
             n_sig_raw += _count_significant(p_raw)
             n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
@@ -377,11 +348,11 @@ class BehaviorPipelineResults:
             df = self.regression
             n_total += len(df)
             summary["n_regression_features"] = len(df)
-            
+
             p_raw = _extract_p_value_column(df, ["p_raw", "p_feature"], [])
             p_primary = _extract_p_value_column(df, ["p_primary"], ["p_feature"])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["p_fdr"])
-            
+
             if p_raw is not None:
                 p_raw_numeric = pd.to_numeric(p_raw, errors="coerce")
                 n_sig_raw += _count_significant(p_raw_numeric)
@@ -391,7 +362,7 @@ class BehaviorPipelineResults:
             if p_fdr is not None:
                 p_fdr_numeric = pd.to_numeric(p_fdr, errors="coerce")
                 n_sig_fdr += _count_significant(p_fdr_numeric)
-                
+
             if "hedges_g" in df.columns:
                 summary["n_large_effects"] = int((df["hedges_g"].abs() >= 0.8).sum())
 
@@ -408,7 +379,9 @@ class BehaviorPipelineResults:
             summary["n_tf_tests"] = n_tests
 
         if self.temporal is not None:
-            n_tests, temporal_sig_raw, temporal_sig_fdr = _summarize_nested_result_counts(self.temporal)
+            n_tests, temporal_sig_raw, temporal_sig_fdr = _summarize_nested_result_counts(
+                self.temporal
+            )
             n_total += n_tests
             n_sig_raw += temporal_sig_raw
             n_sig_fdr += temporal_sig_fdr
@@ -425,7 +398,7 @@ class BehaviorPipelineResults:
                         p_value = record.get("q_global", record.get("p_value", 1.0))
                         if p_value < SIGNIFICANCE_THRESHOLD:
                             n_sig_clusters += 1
-            
+
             summary["n_clusters"] = n_clusters
             summary["n_sig_clusters"] = n_sig_clusters
             n_total += n_clusters
@@ -436,13 +409,13 @@ class BehaviorPipelineResults:
         summary["n_sig_raw"] = n_sig_raw
         summary["n_sig_controlled"] = n_sig_controlled
         summary["n_sig_fdr"] = n_sig_fdr
-        
+
         return summary
 
 
 class BehaviorPipeline(PipelineBase):
     """Pipeline for EEG-behavior correlation analysis."""
-    
+
     def __init__(
         self,
         config: Optional[Any] = None,
@@ -457,7 +430,7 @@ class BehaviorPipeline(PipelineBase):
         self.feature_categories = feature_categories
         self.feature_files = feature_files
         self.computation_features = computation_features or {}
-        
+
         comp_flags = _resolve_behavior_computation_flags(computations, logger=self.logger)
         if comp_flags is not None:
             any_requested = any(comp_flags.values())
@@ -465,45 +438,46 @@ class BehaviorPipeline(PipelineBase):
                 comp_flags[k] for k in comp_flags.keys() if k != "trial_table"
             )
             needs_trial_table = any_requested and other_computations_requested
-            
+
             if needs_trial_table and not comp_flags.get("trial_table", False):
                 self.logger.info("Auto-enabling `trial_table` (required by selected computations).")
                 comp_flags["trial_table"] = True
 
             _apply_computation_flags_impl(self.pipeline_config, comp_flags)
-            
+
             selected_computations = [k for k, v in comp_flags.items() if v]
             selected_text = ", ".join(selected_computations) if selected_computations else "none"
             self.logger.info("Behavior computations (override): %s", selected_text)
 
         if self.feature_categories:
             self.logger.info("Feature categories filter: %s", ", ".join(self.feature_categories))
-        
+
         if self.computation_features:
             for comp, feats in self.computation_features.items():
                 self.logger.info("  %s features: %s", comp, ", ".join(feats))
 
-    def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
+    def process_subject(
+        self, subject: str, task: Optional[str] = None, **kwargs
+    ) -> BehaviorPipelineResults:
         """Process a single subject using the DAG-based stage executor.
-        
+
         This is the canonical entry point. All stage execution is delegated to
         run_behavior_stages() which resolves dependencies and runs stages in order.
         """
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
         import time
-        
+
         task = task or str(require_config_value(self.config, "project.task")).strip()
         progress = ensure_progress_reporter(kwargs.get("progress"))
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
-        
+
         logger = get_subject_logger("behavior_analysis", subject)
-        
+
         logger.info("=== Behavior analysis: sub-%s, task-%s ===", subject, task)
-        method_label = (
-            getattr(self.pipeline_config, "method_label", None)
-            or getattr(self.pipeline_config, "method", "spearman")
+        method_label = getattr(self.pipeline_config, "method_label", None) or getattr(
+            self.pipeline_config, "method", "spearman"
         )
         controls = []
         if self.pipeline_config.control_predictor:
@@ -517,7 +491,7 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.bootstrap,
             self.pipeline_config.n_permutations,
         )
-        
+
         progress.subject_start(f"sub-{subject}")
 
         try:
@@ -528,7 +502,7 @@ class BehaviorPipeline(PipelineBase):
 
             stats_cfg = require_config_value(self.config, "behavior_analysis.statistics")
             partial_covars = stats_cfg.get("partial_covariates", None)
-            
+
             also_save_csv = bool(
                 require_config_value(self.config, "behavior_analysis.output.also_save_csv")
             )
@@ -563,9 +537,9 @@ class BehaviorPipeline(PipelineBase):
             )
             # Isolated runtime per subject prevents cross-subject cache leakage.
             setattr(ctx, "_behavior_runtime", create_behavior_runtime())
-            
+
             results = BehaviorPipelineResults(subject=subject)
-            
+
             # Run all stages, then persist subject outputs under one failure guard so progress
             # is always finalized consistently.
             start_time = time.perf_counter()
@@ -629,13 +603,13 @@ class BehaviorPipeline(PipelineBase):
             progress.error("pipeline_failed", str(exc))
             progress.subject_done(f"sub-{subject}", success=False)
             raise
-    
+
     def run_group_level(self, subjects: List[str], **kwargs) -> Any:
         """Run group-level behavior analysis across multiple subjects.
 
         Group-level computations are independent from subject-level ones.
         They run only when explicitly requested via pipeline config or kwargs.
-        
+
         Parameters
         ----------
         subjects : List[str]
@@ -645,7 +619,7 @@ class BehaviorPipeline(PipelineBase):
                 Run multilevel correlations with block-restricted permutations (opt-in)
             output_dir : Path, optional
                 Custom output directory (default: deriv_root/group/stats)
-        
+
         Returns
         -------
         GroupLevelResult
@@ -656,7 +630,7 @@ class BehaviorPipeline(PipelineBase):
         )
         from eeg_pipeline.analysis.behavior.trial_table_helpers import find_trial_table_path
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
-        
+
         run_multilevel_correlations = kwargs.get("run_multilevel_correlations")
         if run_multilevel_correlations is None:
             run_multilevel_correlations = bool(
@@ -700,13 +674,15 @@ class BehaviorPipeline(PipelineBase):
         output_dir = kwargs.get("output_dir")
         if output_dir is None:
             output_dir = self.deriv_root / "group" / "stats" / "behavior"
-        
+
         ensure_dir(output_dir)
-        
-        self.logger.info("="*60)
+
+        self.logger.info("=" * 60)
         self.logger.info("Group-Level Behavior Analysis")
-        self.logger.info("="*60)
-        self.logger.info("Subjects (%d): %s", len(available_subjects), ", ".join(available_subjects))
+        self.logger.info("=" * 60)
+        self.logger.info(
+            "Subjects (%d): %s", len(available_subjects), ", ".join(available_subjects)
+        )
 
         result = run_group_level_analysis(
             subjects=available_subjects,
@@ -717,18 +693,20 @@ class BehaviorPipeline(PipelineBase):
             output_dir=output_dir,
             feature_files=selected_feature_files,
         )
-        
+
         if result.multilevel_correlations is not None and not result.multilevel_correlations.empty:
             reject = result.multilevel_correlations.get("reject_within_family")
             if reject is not None:
                 n_sig = int(pd.Series(reject).fillna(False).astype(bool).sum())
             else:
                 q_values = result.multilevel_correlations.get("q_within_family", pd.Series([1.0]))
-                n_sig = int((pd.to_numeric(q_values, errors="coerce") < SIGNIFICANCE_THRESHOLD).sum())
+                n_sig = int(
+                    (pd.to_numeric(q_values, errors="coerce") < SIGNIFICANCE_THRESHOLD).sum()
+                )
             self.logger.info("Multilevel correlations: %d significant", n_sig)
-        
+
         self.logger.info("Group-level results saved to: %s", output_dir)
-        
+
         return result
 
 

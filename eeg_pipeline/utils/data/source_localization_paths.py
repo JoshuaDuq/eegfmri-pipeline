@@ -7,7 +7,6 @@ from typing import Any, Mapping, Optional
 
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 SOURCE_LOCALIZATION_METHODS: tuple[str, str] = ("lcmv", "eloreta")
 SOURCE_LOCALIZATION_MODES: tuple[str, str] = ("eeg_only", "fmri_informed")
 _DEFAULT_SOURCE_LOCALIZATION_METHOD = "lcmv"

@@ -17,7 +17,6 @@ from typing import Any, Sequence
 import numpy as np
 from scipy.signal import find_peaks, welch
 
-
 DEFAULT_QC_CHANNELS = (
     "Fp1",
     "F3",
@@ -88,9 +87,7 @@ def build_frequency_mask(
         excluded = (freq_array >= exclusion.low_hz) & (freq_array <= exclusion.high_hz)
         mask &= ~excluded
     if not np.any(mask):
-        raise ValueError(
-            f"No frequencies remain after applying exclusions to {include.label} Hz."
-        )
+        raise ValueError(f"No frequencies remain after applying exclusions to {include.label} Hz.")
     return mask
 
 
@@ -387,6 +384,24 @@ def _median_psd_db(psd: np.ndarray) -> np.ndarray:
 
 
 def _mean_db(values_db: np.ndarray, mask: np.ndarray) -> float:
+    """Average decibel values inside a mask.
+
+    Averaging in the decibel domain is the geometric mean of the underlying power, not
+    the arithmetic mean. Narrow, high-amplitude bins therefore contribute far less than
+    they do to true band power.
+
+    That matters for how ``gamma_masked_minus_full_db`` should be read. The comparison
+    exists to show how much the scanner-harmonic peaks inflate gamma-band power, and
+    this estimator is the one that most suppresses their influence. On a synthetic
+    1/f background carrying 20-30 dB harmonics at 41, 61, and 77.5 Hz, the reported
+    separation is about 2.4 dB here against about 13.3 dB when the mean is taken over
+    power and converted afterwards.
+
+    The estimator is kept as-is because these columns are already written into cohort QC
+    tables, and switching it would silently change the meaning of existing summaries.
+    Read the value as a robust level difference, not as the harmonics' share of band
+    power.
+    """
     return float(np.mean(values_db[mask]))
 
 

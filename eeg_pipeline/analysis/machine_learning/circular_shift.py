@@ -27,11 +27,7 @@ def admissible_circular_shifts(
         shift_distances.append((int(shift), int(np.min(circular_distance))))
 
     maximum_distance = max(distance for _shift, distance in shift_distances)
-    return tuple(
-        shift
-        for shift, distance in shift_distances
-        if distance == maximum_distance
-    )
+    return tuple(shift for shift, distance in shift_distances if distance == maximum_distance)
 
 
 __all__ = ["admissible_circular_shifts"]

@@ -65,12 +65,15 @@ def test_load_active_matrix_reads_features_from_override_root(tmp_path) -> None:
     feature_root = tmp_path / "study1_features"
     _write_feature_table(feature_root)
 
-    with patch(
-        "eeg_pipeline.utils.data.machine_learning.load_events_df",
-        return_value=_events_frame(),
-    ), patch(
-        "eeg_pipeline.utils.data.machine_learning._load_fmri_signature_target_for_subject",
-        return_value=_target_payload(),
+    with (
+        patch(
+            "eeg_pipeline.utils.data.machine_learning.load_events_df",
+            return_value=_events_frame(),
+        ),
+        patch(
+            "eeg_pipeline.utils.data.machine_learning._load_fmri_signature_target_for_subject",
+            return_value=_target_payload(),
+        ),
     ):
         X, y, groups, feature_names, meta = load_active_matrix(
             subjects=["0001"],
@@ -97,12 +100,15 @@ def test_load_active_matrix_defaults_to_deriv_root_when_override_absent(tmp_path
     deriv_root = tmp_path / "derivatives"
     _write_feature_table(deriv_root)
 
-    with patch(
-        "eeg_pipeline.utils.data.machine_learning.load_events_df",
-        return_value=_events_frame(),
-    ), patch(
-        "eeg_pipeline.utils.data.machine_learning._load_fmri_signature_target_for_subject",
-        return_value=_target_payload(),
+    with (
+        patch(
+            "eeg_pipeline.utils.data.machine_learning.load_events_df",
+            return_value=_events_frame(),
+        ),
+        patch(
+            "eeg_pipeline.utils.data.machine_learning._load_fmri_signature_target_for_subject",
+            return_value=_target_payload(),
+        ),
     ):
         X, y, groups, feature_names, _meta = load_active_matrix(
             subjects=["0001"],

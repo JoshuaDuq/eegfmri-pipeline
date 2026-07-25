@@ -265,19 +265,44 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("--imputer", choices=["median", "mean", "most_frequent"], default=None)
-    parser.add_argument("--power-transformer-method", choices=["yeo-johnson", "box-cox"], default=None)
-    parser.add_argument("--power-transformer-standardize", action="store_true", default=None, dest="power_transformer_standardize")
-    parser.add_argument("--no-power-transformer-standardize", action="store_false", dest="power_transformer_standardize")
+    parser.add_argument(
+        "--power-transformer-method", choices=["yeo-johnson", "box-cox"], default=None
+    )
+    parser.add_argument(
+        "--power-transformer-standardize",
+        action="store_true",
+        default=None,
+        dest="power_transformer_standardize",
+    )
+    parser.add_argument(
+        "--no-power-transformer-standardize",
+        action="store_false",
+        dest="power_transformer_standardize",
+    )
     parser.add_argument("--pca-enabled", action="store_true", default=None, dest="pca_enabled")
     parser.add_argument("--pca-n-components", type=float, default=None, dest="pca_n_components")
     parser.add_argument("--pca-whiten", action="store_true", default=None, dest="pca_whiten")
-    parser.add_argument("--pca-svd-solver", choices=["auto", "full", "randomized"], default=None, dest="pca_svd_solver")
+    parser.add_argument(
+        "--pca-svd-solver",
+        choices=["auto", "full", "randomized"],
+        default=None,
+        dest="pca_svd_solver",
+    )
     parser.add_argument("--pca-rng-seed", type=int, default=None, dest="pca_rng_seed")
     parser.add_argument("--deconfound", action="store_true", default=None, dest="deconfound")
-    parser.add_argument("--feature-selection-percentile", type=float, default=None, dest="feature_selection_percentile")
-    parser.add_argument("--ensemble-calibrate", action="store_true", default=None, dest="ensemble_calibrate")
+    parser.add_argument(
+        "--feature-selection-percentile",
+        type=float,
+        default=None,
+        dest="feature_selection_percentile",
+    )
+    parser.add_argument(
+        "--ensemble-calibrate", action="store_true", default=None, dest="ensemble_calibrate"
+    )
     parser.add_argument("--spatial-regions-allowed", nargs="+", type=str, default=None)
-    parser.add_argument("--classification-resampler", choices=["none", "undersample", "smote"], default=None)
+    parser.add_argument(
+        "--classification-resampler", choices=["none", "undersample", "smote"], default=None
+    )
     parser.add_argument("--classification-resampler-seed", type=int, default=None)
     parser.add_argument("--svm-kernel", choices=["rbf", "linear", "poly"], default=None)
     parser.add_argument("--svm-c-grid", nargs="+", type=str, default=None)
@@ -291,7 +316,9 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rf-min-samples-leaf-grid", nargs="+", type=str, default=None)
     parser.add_argument("--rf-bootstrap", action="store_true", default=None, dest="rf_bootstrap")
     parser.add_argument("--no-rf-bootstrap", action="store_false", dest="rf_bootstrap")
-    parser.add_argument("--rf-class-weight", choices=["balanced", "balanced_subsample", "none"], default=None)
+    parser.add_argument(
+        "--rf-class-weight", choices=["balanced", "balanced_subsample", "none"], default=None
+    )
     parser.add_argument("--cnn-filters1", type=int, default=None)
     parser.add_argument("--cnn-filters2", type=int, default=None)
     parser.add_argument("--cnn-kernel-size1", type=int, default=None)
@@ -305,7 +332,11 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cnn-random-seed", type=int, default=None)
     parser.add_argument("--cv-hygiene", action="store_true", default=None, dest="cv_hygiene")
     parser.add_argument("--no-cv-hygiene", action="store_false", dest="cv_hygiene")
-    parser.add_argument("--cv-permutation-scheme", choices=["within_subject", "within_subject_within_run"], default=None)
+    parser.add_argument(
+        "--cv-permutation-scheme",
+        choices=["within_subject", "within_subject_within_run"],
+        default=None,
+    )
     parser.add_argument("--cv-min-valid-perm-fraction", type=float, default=None)
     parser.add_argument("--cv-default-n-bins", type=int, default=None)
     parser.add_argument("--eval-ci-method", choices=["bootstrap", "fixed_effects"], default=None)
@@ -316,8 +347,12 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         help="Subject weighting scheme for group-level aggregation (equal or trial_count).",
     )
     parser.add_argument("--eval-bootstrap-iterations", type=int, default=None)
-    parser.add_argument("--data-covariates-strict", action="store_true", default=None, dest="data_covariates_strict")
-    parser.add_argument("--no-data-covariates-strict", action="store_false", dest="data_covariates_strict")
+    parser.add_argument(
+        "--data-covariates-strict", action="store_true", default=None, dest="data_covariates_strict"
+    )
+    parser.add_argument(
+        "--no-data-covariates-strict", action="store_false", dest="data_covariates_strict"
+    )
     parser.add_argument("--data-max-excluded-subject-fraction", type=float, default=None)
     parser.add_argument("--incremental-baseline-alpha", type=float, default=None)
     parser.add_argument(
@@ -333,14 +368,32 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         dest="incremental_require_baseline_predictors",
         help="Allow intercept-only fallback when baseline predictors are missing.",
     )
-    parser.add_argument("--interpretability-grouped-outputs", action="store_true", default=None, dest="interpretability_grouped_outputs")
-    parser.add_argument("--no-interpretability-grouped-outputs", action="store_false", dest="interpretability_grouped_outputs")
+    parser.add_argument(
+        "--interpretability-grouped-outputs",
+        action="store_true",
+        default=None,
+        dest="interpretability_grouped_outputs",
+    )
+    parser.add_argument(
+        "--no-interpretability-grouped-outputs",
+        action="store_false",
+        dest="interpretability_grouped_outputs",
+    )
     parser.add_argument("--timegen-min-subjects", type=int, default=None)
     parser.add_argument("--timegen-min-valid-perm-fraction", type=float, default=None)
     parser.add_argument("--class-min-subjects-for-auc", type=int, default=None)
     parser.add_argument("--class-max-failed-fold-fraction", type=float, default=None)
-    parser.add_argument("--strict-regression-continuous", action="store_true", default=None, dest="strict_regression_continuous")
-    parser.add_argument("--no-strict-regression-continuous", action="store_false", dest="strict_regression_continuous")
+    parser.add_argument(
+        "--strict-regression-continuous",
+        action="store_true",
+        default=None,
+        dest="strict_regression_continuous",
+    )
+    parser.add_argument(
+        "--no-strict-regression-continuous",
+        action="store_false",
+        dest="strict_regression_continuous",
+    )
 
     fmri_sig = parser.add_argument_group("fMRI signature target (when --target=fmri_signature)")
     fmri_sig.add_argument(

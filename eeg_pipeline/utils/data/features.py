@@ -9,7 +9,6 @@ import pandas as pd
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 
-
 ###################################################################
 # Constants
 ###################################################################
@@ -23,7 +22,9 @@ _FEATURE_GROUP_ITPC = "itpc"
 _FEATURE_GROUP_APERIODIC = "aperiodic"
 
 
-def _copy_attrs(target: Union[pd.DataFrame, pd.Series], source: Any) -> Union[pd.DataFrame, pd.Series]:
+def _copy_attrs(
+    target: Union[pd.DataFrame, pd.Series], source: Any
+) -> Union[pd.DataFrame, pd.Series]:
     attrs = dict(getattr(source, "attrs", {}) or {})
     if attrs:
         target.attrs.update(attrs)
@@ -78,17 +79,23 @@ def _get_columns_by_band_and_group(
     return columns_by_band
 
 
-def get_power_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = None) -> Dict[str, List[str]]:
+def get_power_columns_by_band(
+    df: pd.DataFrame, *, bands: Optional[List[str]] = None
+) -> Dict[str, List[str]]:
     """Get power feature columns grouped by frequency band."""
     return _get_columns_by_band_and_group(df, _FEATURE_GROUP_POWER, bands=bands)
 
 
-def get_connectivity_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = None) -> Dict[str, List[str]]:
+def get_connectivity_columns_by_band(
+    df: pd.DataFrame, *, bands: Optional[List[str]] = None
+) -> Dict[str, List[str]]:
     """Get connectivity feature columns grouped by frequency band."""
     return _get_columns_by_band_and_group(df, _FEATURE_GROUP_CONN, bands=bands)
 
 
-def get_itpc_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = None) -> Dict[str, List[str]]:
+def get_itpc_columns_by_band(
+    df: pd.DataFrame, *, bands: Optional[List[str]] = None
+) -> Dict[str, List[str]]:
     """Get ITPC feature columns grouped by frequency band."""
     return _get_columns_by_band_and_group(df, _FEATURE_GROUP_ITPC, bands=bands)
 
@@ -120,6 +127,7 @@ def get_aperiodic_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
 ###################################################################
 # Block Registration and Validation
 ###################################################################
+
 
 def register_feature_block(
     name: str,
@@ -207,6 +215,7 @@ def validate_feature_block_lengths(
 # Feature Alignment
 ###################################################################
 
+
 def _get_block_length(block: Optional[Union[pd.DataFrame, pd.Series]]) -> Optional[int]:
     """Get length of a feature block, returning None if empty or invalid."""
     if block is None or getattr(block, "empty", False):
@@ -224,7 +233,9 @@ def _validate_power_bands(
         config.get("feature_engineering.features.min_valid_band_fraction", 0.0)
     )
 
-    band_names = sorted({band for band in (infer_power_band(col) for col in pow_df.columns) if band})
+    band_names = sorted(
+        {band for band in (infer_power_band(col) for col in pow_df.columns) if band}
+    )
     band_drop_counts: Dict[str, int] = {}
 
     for band in band_names:
@@ -480,9 +491,7 @@ def align_feature_dataframes(
         if extra_blocks:
             masked_extra_blocks: Dict[str, Optional[pd.DataFrame]] = {}
             for block_name, block_df in extra_blocks.items():
-                masked_block = _apply_drop_mask(
-                    block_df, drop_mask, f"extra:{block_name}", logger
-                )
+                masked_block = _apply_drop_mask(block_df, drop_mask, f"extra:{block_name}", logger)
                 if isinstance(masked_block, pd.Series):
                     masked_block = masked_block.to_frame()
                 masked_extra_blocks[block_name] = masked_block
@@ -500,9 +509,12 @@ def align_feature_dataframes(
         return None, None, None, None, None, {}
 
     validate_feature_block_lengths(
-        before_lengths, logger, critical_features=critical_features, requested_categories=requested_categories
+        before_lengths,
+        logger,
+        critical_features=critical_features,
+        requested_categories=requested_categories,
     )
-    
+
     if aligned_events is not None and len(aligned_events) > 0:
         n_events = len(aligned_events)
         n_trials = next((length for length in block_lengths if length is not None), None)
@@ -522,8 +534,13 @@ def align_feature_dataframes(
     )
 
     after_lengths = _compute_after_lengths(
-        pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned, y_aligned,
-        extra_blocks, block_registry
+        pow_df_aligned,
+        baseline_df_aligned,
+        conn_df_aligned,
+        aper_df_aligned,
+        y_aligned,
+        extra_blocks,
+        block_registry,
     )
 
     extra_aligned: Dict[str, Optional[pd.DataFrame]] = {}

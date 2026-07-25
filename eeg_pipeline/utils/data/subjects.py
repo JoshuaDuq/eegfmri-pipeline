@@ -9,7 +9,6 @@ from ..parsing import parse_group_arg
 from eeg_pipeline.infra.paths import find_clean_epochs_path
 from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root, resolve_eeg_deriv_root
 
-
 EEGConfig = ConfigDict
 
 
@@ -79,7 +78,7 @@ def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
     """Collect all subjects from a BIDS directory."""
     if not bids_root.exists():
         return []
-    
+
     subjects = []
     for sub_dir in sorted(bids_root.glob("sub-*")):
         if sub_dir.is_dir():
@@ -93,12 +92,12 @@ def _collect_subjects_from_source_data(source_root: Path) -> List[str]:
     """Collect all subjects from a source data directory."""
     if not source_root.exists():
         return []
-    
+
     subjects = []
     for sub_dir in sorted(source_root.glob("*")):
         if not sub_dir.is_dir():
             continue
-        
+
         name = sub_dir.name
         subject_id = _normalize_subject_id(name)
         if subject_id is not None:
@@ -115,28 +114,28 @@ def _collect_subjects_from_derivatives_epochs(
     """Collect subjects that have clean epochs available."""
     if not deriv_root.exists():
         return []
-    
+
     subjects = set()
     search_locations = [
         deriv_root.glob("sub-*"),
     ]
-    
+
     preprocessed_eeg_dir = deriv_root / "preprocessed" / "eeg"
     if preprocessed_eeg_dir.exists():
         search_locations.append(preprocessed_eeg_dir.glob("sub-*"))
-    
+
     for location in search_locations:
         for sub_dir in sorted(location):
             if not sub_dir.is_dir():
                 continue
-            
+
             sub_id = sub_dir.name[4:]
             epo_path = find_clean_epochs_path(
                 sub_id, task, deriv_root=deriv_root, config=config, constants=constants
             )
             if epo_path is not None and epo_path.exists():
                 subjects.add(sub_id)
-    
+
     return sorted(subjects)
 
 
@@ -144,25 +143,25 @@ def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
     """Collect subjects that have extracted features."""
     if not deriv_root.exists():
         return []
-    
+
     subjects = set()
     search_locations = [
         deriv_root.glob("sub-*/eeg/features"),
     ]
-    
+
     preprocessed_eeg_dir = deriv_root / "preprocessed" / "eeg"
     if preprocessed_eeg_dir.exists():
         search_locations.append(preprocessed_eeg_dir.glob("sub-*/features"))
-    
+
     for location in search_locations:
         for features_dir in sorted(location):
             if not _has_feature_files(features_dir):
                 continue
-            
+
             sub_id = _extract_subject_id_from_features_path(features_dir)
             if sub_id:
                 subjects.add(sub_id)
-    
+
     return sorted(subjects)
 
 
@@ -170,10 +169,7 @@ def _has_feature_files(directory: Path) -> bool:
     """Check if directory contains feature files (including in subdirectories)."""
     if not directory.is_dir():
         return False
-    return any(
-        f.suffix in {".tsv", ".parquet"}
-        for f in directory.rglob("features_*")
-    )
+    return any(f.suffix in {".tsv", ".parquet"} for f in directory.rglob("features_*"))
 
 
 def _extract_subject_id_from_features_path(features_path: Path) -> Optional[str]:
@@ -197,10 +193,10 @@ def _resolve_source_root(config: EEGConfig, bids_root: Optional[Path]) -> Option
     source_data_path = config.get("paths.source_data")
     if source_data_path:
         return Path(source_data_path)
-    
+
     if bids_root:
         return bids_root.parent / "source_data"
-    
+
     return None
 
 
@@ -215,33 +211,33 @@ def _discover_subjects_from_sources(
 ) -> List[Tuple[str, List[str]]]:
     """Discover subjects from specified sources."""
     discovered_by_source = []
-    
+
     if "bids" in discovery_sources:
         if bids_root is None:
             raise ValueError("BIDS discovery requested but no EEG BIDS root was resolved.")
         bids_subjects = _collect_subjects_from_bids(bids_root)
         discovered_by_source.append(("bids", bids_subjects))
         logger.debug(f"Discovered {len(bids_subjects)} subjects from BIDS")
-    
+
     if "derivatives_epochs" in discovery_sources:
         epoch_subjects = _collect_subjects_from_derivatives_epochs(
             deriv_root, task, config=config, constants=constants
         )
         discovered_by_source.append(("derivatives_epochs", epoch_subjects))
         logger.debug(f"Discovered {len(epoch_subjects)} subjects from derivatives (clean epochs)")
-    
+
     if "features" in discovery_sources:
         feature_subjects = _collect_subjects_from_features(deriv_root)
         discovered_by_source.append(("features", feature_subjects))
         logger.debug(f"Discovered {len(feature_subjects)} subjects from derivatives (features)")
-    
+
     if "source_data" in discovery_sources:
         source_root = _resolve_source_root(config, bids_root)
         if source_root:
             source_subjects = _collect_subjects_from_source_data(source_root)
             discovered_by_source.append(("source_data", source_subjects))
             logger.debug(f"Discovered {len(source_subjects)} subjects from source data")
-    
+
     return discovered_by_source
 
 
@@ -276,9 +272,7 @@ def _apply_intersection_policy(
         config_keys = {_subject_match_key(s) for s in _normalize_subject_list(subjects_from_config)}
         final_keys = discovered_keys & config_keys
         final_subjects = sorted(
-            discovered_by_key[key]
-            for key in final_keys
-            if key in discovered_by_key
+            discovered_by_key[key] for key in final_keys if key in discovered_by_key
         )
         logger.info(
             f"Using intersection: {len(final_subjects)} subjects "
@@ -288,9 +282,7 @@ def _apply_intersection_policy(
 
     if len(discovered_by_source) > 1:
         final_subjects = sorted(
-            discovered_by_key[key]
-            for key in discovered_keys
-            if key in discovered_by_key
+            discovered_by_key[key] for key in discovered_keys if key in discovered_by_key
         )
         logger.info(
             f"Using intersection of discovery sources: {len(final_subjects)} subjects "
@@ -336,7 +328,7 @@ def _resolve_subjects_by_policy(
     if not discovered_by_source and policy != "config_only":
         logger.warning("No subjects discovered from any source")
         return []
-    
+
     if policy == "config_only":
         return _apply_config_only_policy(subjects_from_config, logger)
     elif policy == "intersection":
@@ -356,7 +348,9 @@ def get_available_subjects(
     bids_root: Optional[Path] = None,
     task: Optional[str] = None,
     task_is_rest: Optional[bool] = None,
-    discovery_sources: Optional[List[Literal["bids", "derivatives_epochs", "features", "source_data"]]] = None,
+    discovery_sources: Optional[
+        List[Literal["bids", "derivatives_epochs", "features", "source_data"]]
+    ] = None,
     subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
     logger: Optional[logging.Logger] = None,
 ) -> List[str]:
@@ -402,9 +396,9 @@ def _ml_discovery_sources(args: Any, config: Optional[EEGConfig] = None) -> List
         mode = str(getattr(args, "mode", "") or "").strip().lower()
         feature_set = ""
         if config is not None and hasattr(config, "get"):
-            feature_set = str(
-                config.get("machine_learning.data.feature_set", "") or ""
-            ).strip().lower()
+            feature_set = (
+                str(config.get("machine_learning.data.feature_set", "") or "").strip().lower()
+            )
         explicit_feature_families = getattr(args, "feature_families", None)
         if feature_set == "channels_mean" and explicit_feature_families:
             raise ValueError(
@@ -417,13 +411,15 @@ def _ml_discovery_sources(args: Any, config: Optional[EEGConfig] = None) -> List
         if feature_set == "channels_mean":
             return ["derivatives_epochs"]
         if mode == "classify":
-            classification_model = str(
-                getattr(args, "classification_model", "") or ""
-            ).strip().lower()
+            classification_model = (
+                str(getattr(args, "classification_model", "") or "").strip().lower()
+            )
             if not classification_model and config is not None and hasattr(config, "get"):
-                classification_model = str(
-                    config.get("machine_learning.classification.model", "") or ""
-                ).strip().lower()
+                classification_model = (
+                    str(config.get("machine_learning.classification.model", "") or "")
+                    .strip()
+                    .lower()
+                )
             if classification_model == "cnn":
                 return ["derivatives_epochs"]
         return ["features"]
@@ -447,9 +443,11 @@ def _determine_discovery_sources(args: Any, config: Optional[EEGConfig] = None) 
             if explicit_sources != valid_sources:
                 feature_set = ""
                 if config is not None and hasattr(config, "get"):
-                    feature_set = str(
-                        config.get("machine_learning.data.feature_set", "") or ""
-                    ).strip().lower()
+                    feature_set = (
+                        str(config.get("machine_learning.data.feature_set", "") or "")
+                        .strip()
+                        .lower()
+                    )
                 feature_set_note = (
                     f" machine_learning.data.feature_set='{feature_set}'." if feature_set else ""
                 )
@@ -471,7 +469,7 @@ def _determine_discovery_sources(args: Any, config: Optional[EEGConfig] = None) 
             return ["source_data"]
         elif args.mode in {"combine", "merge-psychopy", "visualize"}:
             return ["bids"]
-    
+
     return ["derivatives_epochs"]
 
 
@@ -480,16 +478,16 @@ def _extract_subjects_from_args(args: Any) -> Optional[List[str]]:
     if hasattr(args, "group") and args.group is not None:
         group_str = args.group.strip()
         return parse_group_arg(group_str)
-    
+
     if hasattr(args, "all_subjects") and args.all_subjects:
         return None
-    
+
     if hasattr(args, "subject") and args.subject:
         return list(dict.fromkeys(args.subject))
-    
+
     if hasattr(args, "subjects") and args.subjects:
         return list(dict.fromkeys(args.subjects))
-    
+
     return None
 
 
@@ -509,10 +507,10 @@ def parse_subject_args(
 
     if task is None:
         task = config.get("project.task")
-    
+
     discovery_sources = _determine_discovery_sources(args, config)
     subjects = _extract_subjects_from_args(args)
-    
+
     if subjects is None:
         subjects = get_available_subjects(
             config=config,
@@ -521,7 +519,7 @@ def parse_subject_args(
             discovery_sources=discovery_sources,
             logger=logger,
         )
-    
+
     if not subjects:
         subjects = config.get("project.subject_list") or []
         if not subjects:
@@ -532,7 +530,7 @@ def parse_subject_args(
                 discovery_sources=discovery_sources,
                 logger=logger,
             )
-    
+
     return subjects
 
 
@@ -545,13 +543,13 @@ def get_epoch_metadata(
 ) -> Dict[str, float]:
     """Get metadata (tmin, tmax) for subject's epochs."""
     import mne
-    
+
     epo_path = find_clean_epochs_path(
         subject, task, deriv_root=deriv_root, config=config, constants=constants
     )
     if epo_path is None or not epo_path.exists():
         return {}
-    
+
     try:
         epochs = mne.read_epochs(epo_path, preload=False, verbose=False)
         return {
@@ -559,9 +557,7 @@ def get_epoch_metadata(
             "tmax": float(epochs.tmax),
         }
     except (OSError, ValueError, RuntimeError) as e:
-        logging.getLogger(__name__).debug(
-            f"Failed to read epoch metadata from {epo_path}: {e}"
-        )
+        logging.getLogger(__name__).debug(f"Failed to read epoch metadata from {epo_path}: {e}")
         return {}
 
 

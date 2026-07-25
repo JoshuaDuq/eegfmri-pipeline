@@ -32,6 +32,7 @@ FEATURE_CATEGORY_CHOICES = [
     "asymmetry",
 ]
 
+
 def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the behavior command parser."""
     parser = subparsers.add_parser(
@@ -41,14 +42,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("mode", choices=["compute"], help="Pipeline mode")
-    
+
     # Discoverability options
     parser.add_argument(
         "--list-stages",
         action="store_true",
         help="List all available pipeline stages with descriptions",
     )
-    
+
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
@@ -60,7 +61,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         metavar="CATEGORY",
         help="Feature categories to process (e.g., power, connectivity, itpc)",
     )
-    
+
     compute_group = parser.add_argument_group("Compute mode options")
     compute_group.add_argument(
         "--predictor-type",
@@ -73,8 +74,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "'binary' or 'categorical' disables these analyses."
         ),
     )
-    compute_group.add_argument("--correlation-method", choices=["spearman", "pearson"], default=None)
-    compute_group.add_argument("--robust-correlation", choices=["none", "percentage_bend", "winsorized", "shepherd"], default=None)
+    compute_group.add_argument(
+        "--correlation-method", choices=["spearman", "pearson"], default=None
+    )
+    compute_group.add_argument(
+        "--robust-correlation",
+        choices=["none", "percentage_bend", "winsorized", "shepherd"],
+        default=None,
+    )
     compute_group.add_argument("--bootstrap", type=int, default=None)
     compute_group.add_argument("--n-perm", type=int, default=None)
     compute_group.add_argument("--perm-scheme", choices=["shuffle", "circular_shift"], default=None)
@@ -93,14 +100,27 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="Canonical outcome column for behavior analyses (e.g., vas_rating, arousal, confidence)",
     )
-    compute_group.add_argument("--predictor-control", action="store_true", default=None, dest="predictor_control")
-    compute_group.add_argument("--no-predictor-control", action="store_false", dest="predictor_control")
+    compute_group.add_argument(
+        "--predictor-control", action="store_true", default=None, dest="predictor_control"
+    )
+    compute_group.add_argument(
+        "--no-predictor-control", action="store_false", dest="predictor_control"
+    )
     compute_group.add_argument("--control-trial-order", action="store_true", default=None)
-    compute_group.add_argument("--no-control-trial-order", action="store_false", dest="control_trial_order")
+    compute_group.add_argument(
+        "--no-control-trial-order", action="store_false", dest="control_trial_order"
+    )
     # Run adjustment (subject-level; optional)
-    compute_group.add_argument("--run-adjustment", action="store_true", default=None, dest="run_adjustment")
+    compute_group.add_argument(
+        "--run-adjustment", action="store_true", default=None, dest="run_adjustment"
+    )
     compute_group.add_argument("--no-run-adjustment", action="store_false", dest="run_adjustment")
-    compute_group.add_argument("--run-adjustment-column", type=str, default=None, help="Run identifier column name (e.g., run_id)")
+    compute_group.add_argument(
+        "--run-adjustment-column",
+        type=str,
+        default=None,
+        help="Run identifier column name (e.g., run_id)",
+    )
     compute_group.add_argument(
         "--run-adjustment-include-in-correlations",
         action="store_true",
@@ -128,20 +148,55 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="stats_predictor_control",
     )
     compute_group.add_argument("--stats-allow-iid-trials", action="store_true", default=None)
-    compute_group.add_argument("--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials")
+    compute_group.add_argument(
+        "--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials"
+    )
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
-    compute_group.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores")
-    compute_group.add_argument("--loso-stability", action="store_true", default=None, dest="loso_stability")
+    compute_group.add_argument(
+        "--no-compute-change-scores", action="store_false", dest="compute_change_scores"
+    )
+    compute_group.add_argument(
+        "--loso-stability", action="store_true", default=None, dest="loso_stability"
+    )
     compute_group.add_argument("--no-loso-stability", action="store_false", dest="loso_stability")
     compute_group.add_argument("--compute-bayes-factors", action="store_true", default=None)
-    compute_group.add_argument("--no-compute-bayes-factors", action="store_false", dest="compute_bayes_factors")
-    compute_group.add_argument("--stats-hierarchical-fdr", action="store_true", default=None, dest="stats_hierarchical_fdr")
-    compute_group.add_argument("--no-stats-hierarchical-fdr", action="store_false", dest="stats_hierarchical_fdr")
-    compute_group.add_argument("--stats-compute-reliability", action="store_true", default=None, dest="stats_compute_reliability")
-    compute_group.add_argument("--no-stats-compute-reliability", action="store_false", dest="stats_compute_reliability")
-    compute_group.add_argument("--perm-group-column-preference", nargs="+", default=None, metavar="COL", dest="perm_group_column_preference", help="Preferred columns for permutation grouping (e.g. run_id block)")
-    compute_group.add_argument("--exclude-non-trialwise-features", action="store_true", default=None, dest="exclude_non_trialwise_features")
-    compute_group.add_argument("--no-exclude-non-trialwise-features", action="store_false", dest="exclude_non_trialwise_features")
+    compute_group.add_argument(
+        "--no-compute-bayes-factors", action="store_false", dest="compute_bayes_factors"
+    )
+    compute_group.add_argument(
+        "--stats-hierarchical-fdr", action="store_true", default=None, dest="stats_hierarchical_fdr"
+    )
+    compute_group.add_argument(
+        "--no-stats-hierarchical-fdr", action="store_false", dest="stats_hierarchical_fdr"
+    )
+    compute_group.add_argument(
+        "--stats-compute-reliability",
+        action="store_true",
+        default=None,
+        dest="stats_compute_reliability",
+    )
+    compute_group.add_argument(
+        "--no-stats-compute-reliability", action="store_false", dest="stats_compute_reliability"
+    )
+    compute_group.add_argument(
+        "--perm-group-column-preference",
+        nargs="+",
+        default=None,
+        metavar="COL",
+        dest="perm_group_column_preference",
+        help="Preferred columns for permutation grouping (e.g. run_id block)",
+    )
+    compute_group.add_argument(
+        "--exclude-non-trialwise-features",
+        action="store_true",
+        default=None,
+        dest="exclude_non_trialwise_features",
+    )
+    compute_group.add_argument(
+        "--no-exclude-non-trialwise-features",
+        action="store_false",
+        dest="exclude_non_trialwise_features",
+    )
     compute_group.add_argument(
         "--feature-registry-files-json",
         type=str,
@@ -173,7 +228,9 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="JSON array for behavior_analysis.feature_registry.feature_classifiers",
     )
-    compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
+    compute_group.add_argument(
+        "--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None
+    )
     compute_group.add_argument(
         "--icc-unit-columns",
         nargs="+",
@@ -185,22 +242,34 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "Supports aliases: predictor, condition, trial_type, trial_position."
         ),
     )
-    
+
     compute_group.add_argument(
-        "--correlations-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
-        help="Feature categories for correlations analysis"
+        "--correlations-features",
+        nargs="+",
+        choices=FEATURE_CATEGORY_CHOICES,
+        default=None,
+        help="Feature categories for correlations analysis",
     )
     compute_group.add_argument(
-        "--condition-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
-        help="Feature categories for condition comparison"
+        "--condition-features",
+        nargs="+",
+        choices=FEATURE_CATEGORY_CHOICES,
+        default=None,
+        help="Feature categories for condition comparison",
     )
     compute_group.add_argument(
-        "--temporal-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
-        help="Feature categories for temporal analysis"
+        "--temporal-features",
+        nargs="+",
+        choices=FEATURE_CATEGORY_CHOICES,
+        default=None,
+        help="Feature categories for temporal analysis",
     )
     compute_group.add_argument(
-        "--cluster-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
-        help="Feature categories for cluster permutation tests"
+        "--cluster-features",
+        nargs="+",
+        choices=FEATURE_CATEGORY_CHOICES,
+        default=None,
+        help="Feature categories for cluster permutation tests",
     )
     compute_group.add_argument(
         "--feature-files",
@@ -240,10 +309,24 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
 
     residual_group = parser.add_argument_group("Predictor residual diagnostics")
-    residual_group.add_argument("--predictor-residual", action="store_true", default=None, dest="predictor_residual_enabled")
-    residual_group.add_argument("--no-predictor-residual", action="store_false", dest="predictor_residual_enabled")
-    residual_group.add_argument("--predictor-residual-method", choices=["spline", "poly"], default=None, dest="predictor_residual_method")
-    residual_group.add_argument("--predictor-residual-min-samples", type=int, default=None, dest="predictor_residual_min_samples")
+    residual_group.add_argument(
+        "--predictor-residual", action="store_true", default=None, dest="predictor_residual_enabled"
+    )
+    residual_group.add_argument(
+        "--no-predictor-residual", action="store_false", dest="predictor_residual_enabled"
+    )
+    residual_group.add_argument(
+        "--predictor-residual-method",
+        choices=["spline", "poly"],
+        default=None,
+        dest="predictor_residual_method",
+    )
+    residual_group.add_argument(
+        "--predictor-residual-min-samples",
+        type=int,
+        default=None,
+        dest="predictor_residual_min_samples",
+    )
     residual_group.add_argument(
         "--predictor-residual-spline-df-candidates",
         nargs="+",
@@ -252,36 +335,134 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="predictor_residual_spline_df_candidates",
         help="Candidate spline degrees of freedom for predictor→outcome residual model (e.g., 3 4 5)",
     )
-    residual_group.add_argument("--predictor-residual-poly-degree", type=int, default=None, dest="predictor_residual_poly_degree")
+    residual_group.add_argument(
+        "--predictor-residual-poly-degree",
+        type=int,
+        default=None,
+        dest="predictor_residual_poly_degree",
+    )
     # Optional cross-fit residualization (out-of-run prediction)
-    residual_group.add_argument("--predictor-residual-crossfit", action="store_true", default=None, dest="predictor_residual_crossfit_enabled")
-    residual_group.add_argument("--no-predictor-residual-crossfit", action="store_false", dest="predictor_residual_crossfit_enabled")
-    residual_group.add_argument("--predictor-residual-crossfit-group-column", type=str, default=None, dest="predictor_residual_crossfit_group_column")
-    residual_group.add_argument("--predictor-residual-crossfit-n-splits", type=int, default=None, dest="predictor_residual_crossfit_n_splits")
-    residual_group.add_argument("--predictor-residual-crossfit-method", choices=["spline", "poly"], default=None, dest="predictor_residual_crossfit_method")
-    residual_group.add_argument("--predictor-residual-crossfit-spline-n-knots", type=int, default=None, dest="predictor_residual_crossfit_spline_n_knots")
+    residual_group.add_argument(
+        "--predictor-residual-crossfit",
+        action="store_true",
+        default=None,
+        dest="predictor_residual_crossfit_enabled",
+    )
+    residual_group.add_argument(
+        "--no-predictor-residual-crossfit",
+        action="store_false",
+        dest="predictor_residual_crossfit_enabled",
+    )
+    residual_group.add_argument(
+        "--predictor-residual-crossfit-group-column",
+        type=str,
+        default=None,
+        dest="predictor_residual_crossfit_group_column",
+    )
+    residual_group.add_argument(
+        "--predictor-residual-crossfit-n-splits",
+        type=int,
+        default=None,
+        dest="predictor_residual_crossfit_n_splits",
+    )
+    residual_group.add_argument(
+        "--predictor-residual-crossfit-method",
+        choices=["spline", "poly"],
+        default=None,
+        dest="predictor_residual_crossfit_method",
+    )
+    residual_group.add_argument(
+        "--predictor-residual-crossfit-spline-n-knots",
+        type=int,
+        default=None,
+        dest="predictor_residual_crossfit_spline_n_knots",
+    )
 
     regression_group = parser.add_argument_group("Trialwise regression options")
-    regression_group.add_argument("--regression-outcome", choices=["outcome", "predictor_residual", "predictor"], default=None)
-    regression_group.add_argument("--regression-include-predictor", action="store_true", default=None, dest="regression_include_predictor")
-    regression_group.add_argument("--no-regression-include-predictor", action="store_false", dest="regression_include_predictor")
-    regression_group.add_argument("--regression-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="regression_predictor_control")
-    regression_group.add_argument("--regression-predictor-spline-knots", type=int, default=None, dest="regression_predictor_spline_knots")
-    regression_group.add_argument("--regression-predictor-spline-quantile-low", type=float, default=None, dest="regression_predictor_spline_quantile_low")
-    regression_group.add_argument("--regression-predictor-spline-quantile-high", type=float, default=None, dest="regression_predictor_spline_quantile_high")
-    regression_group.add_argument("--regression-predictor-spline-min-samples", type=int, default=None, dest="regression_predictor_spline_min_samples")
-    regression_group.add_argument("--regression-include-trial-order", action="store_true", default=None)
-    regression_group.add_argument("--no-regression-include-trial-order", action="store_false", dest="regression_include_trial_order")
-    regression_group.add_argument("--regression-include-prev-terms", action="store_true", default=None)
-    regression_group.add_argument("--no-regression-include-prev-terms", action="store_false", dest="regression_include_prev_terms")
-    regression_group.add_argument("--regression-include-run-block", action="store_true", default=None)
-    regression_group.add_argument("--no-regression-include-run-block", action="store_false", dest="regression_include_run_block")
-    regression_group.add_argument("--regression-include-interaction", action="store_true", default=None)
-    regression_group.add_argument("--no-regression-include-interaction", action="store_false", dest="regression_include_interaction")
+    regression_group.add_argument(
+        "--regression-outcome", choices=["outcome", "predictor_residual", "predictor"], default=None
+    )
+    regression_group.add_argument(
+        "--regression-include-predictor",
+        action="store_true",
+        default=None,
+        dest="regression_include_predictor",
+    )
+    regression_group.add_argument(
+        "--no-regression-include-predictor",
+        action="store_false",
+        dest="regression_include_predictor",
+    )
+    regression_group.add_argument(
+        "--regression-predictor-control",
+        choices=["linear", "outcome_hat", "spline"],
+        default=None,
+        dest="regression_predictor_control",
+    )
+    regression_group.add_argument(
+        "--regression-predictor-spline-knots",
+        type=int,
+        default=None,
+        dest="regression_predictor_spline_knots",
+    )
+    regression_group.add_argument(
+        "--regression-predictor-spline-quantile-low",
+        type=float,
+        default=None,
+        dest="regression_predictor_spline_quantile_low",
+    )
+    regression_group.add_argument(
+        "--regression-predictor-spline-quantile-high",
+        type=float,
+        default=None,
+        dest="regression_predictor_spline_quantile_high",
+    )
+    regression_group.add_argument(
+        "--regression-predictor-spline-min-samples",
+        type=int,
+        default=None,
+        dest="regression_predictor_spline_min_samples",
+    )
+    regression_group.add_argument(
+        "--regression-include-trial-order", action="store_true", default=None
+    )
+    regression_group.add_argument(
+        "--no-regression-include-trial-order",
+        action="store_false",
+        dest="regression_include_trial_order",
+    )
+    regression_group.add_argument(
+        "--regression-include-prev-terms", action="store_true", default=None
+    )
+    regression_group.add_argument(
+        "--no-regression-include-prev-terms",
+        action="store_false",
+        dest="regression_include_prev_terms",
+    )
+    regression_group.add_argument(
+        "--regression-include-run-block", action="store_true", default=None
+    )
+    regression_group.add_argument(
+        "--no-regression-include-run-block",
+        action="store_false",
+        dest="regression_include_run_block",
+    )
+    regression_group.add_argument(
+        "--regression-include-interaction", action="store_true", default=None
+    )
+    regression_group.add_argument(
+        "--no-regression-include-interaction",
+        action="store_false",
+        dest="regression_include_interaction",
+    )
     regression_group.add_argument("--regression-standardize", action="store_true", default=None)
-    regression_group.add_argument("--no-regression-standardize", action="store_false", dest="regression_standardize")
+    regression_group.add_argument(
+        "--no-regression-standardize", action="store_false", dest="regression_standardize"
+    )
     regression_group.add_argument("--regression-min-samples", type=int, default=None)
-    regression_group.add_argument("--regression-primary-unit", choices=["trial", "run_mean"], default=None)
+    regression_group.add_argument(
+        "--regression-primary-unit", choices=["trial", "run_mean"], default=None
+    )
     regression_group.add_argument("--regression-permutations", type=int, default=None)
     regression_group.add_argument("--regression-max-features", type=int, default=None)
 
@@ -293,7 +474,9 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="Correlation types to compute (default from config)",
     )
-    correlations_group.add_argument("--correlations-primary-unit", choices=["trial", "run_mean"], default=None)
+    correlations_group.add_argument(
+        "--correlations-primary-unit", choices=["trial", "run_mean"], default=None
+    )
     correlations_group.add_argument(
         "--correlations-min-runs",
         type=int,
@@ -319,8 +502,17 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="correlations_permutations",
         help="Override permutation iterations for correlations only (unset=use global --n-perm)",
     )
-    correlations_group.add_argument("--correlations-use-crossfit-predictor-residual", action="store_true", default=None, dest="correlations_use_crossfit_predictor_residual")
-    correlations_group.add_argument("--no-correlations-use-crossfit-predictor-residual", action="store_false", dest="correlations_use_crossfit_predictor_residual")
+    correlations_group.add_argument(
+        "--correlations-use-crossfit-predictor-residual",
+        action="store_true",
+        default=None,
+        dest="correlations_use_crossfit_predictor_residual",
+    )
+    correlations_group.add_argument(
+        "--no-correlations-use-crossfit-predictor-residual",
+        action="store_false",
+        dest="correlations_use_crossfit_predictor_residual",
+    )
     correlations_group.add_argument(
         "--correlations-permutation-primary",
         action="store_true",
@@ -328,7 +520,11 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="correlations_permutation_primary",
         help="Use within-run/block permutation p-values for p_primary when available",
     )
-    correlations_group.add_argument("--no-correlations-permutation-primary", action="store_false", dest="correlations_permutation_primary")
+    correlations_group.add_argument(
+        "--no-correlations-permutation-primary",
+        action="store_false",
+        dest="correlations_permutation_primary",
+    )
     correlations_group.add_argument(
         "--correlations-target-column",
         type=str,
@@ -414,7 +610,9 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="events.tsv column to correlate against for temporal analyses (default: outcome from event_columns.outcome)",
     )
-    temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
+    temporal_group.add_argument(
+        "--temporal-correction-method", choices=["fdr", "cluster"], default=None
+    )
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-freqs-hz", nargs="+", type=float, default=None)
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
@@ -426,30 +624,135 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="Window size in milliseconds for temporal by-condition topomap summaries",
     )
-    temporal_group.add_argument("--temporal-split-by-condition", action="store_true", default=None, dest="temporal_split_by_condition")
-    temporal_group.add_argument("--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition")
-    temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.condition, then event_columns.binary_outcome)")
-    temporal_group.add_argument("--temporal-condition-values", nargs="+", default=None, metavar="VALUE", help="Subset of values to compute (empty = all unique values)")
-    temporal_group.add_argument("--temporal-include-roi-averages", action="store_true", default=None, dest="temporal_include_roi_averages", help="Include ROI-averaged rows in output")
-    temporal_group.add_argument("--no-temporal-include-roi-averages", action="store_false", dest="temporal_include_roi_averages", help="Exclude ROI-averaged rows from output")
-    temporal_group.add_argument("--temporal-include-tf-grid", action="store_true", default=None, dest="temporal_include_tf_grid", help="Include individual frequency (TF grid) rows in output")
-    temporal_group.add_argument("--no-temporal-include-tf-grid", action="store_false", dest="temporal_include_tf_grid", help="Exclude TF grid rows from output")
+    temporal_group.add_argument(
+        "--temporal-split-by-condition",
+        action="store_true",
+        default=None,
+        dest="temporal_split_by_condition",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition"
+    )
+    temporal_group.add_argument(
+        "--temporal-condition-column",
+        type=str,
+        default=None,
+        help="events.tsv column to split/filter by (default: event_columns.condition, then event_columns.binary_outcome)",
+    )
+    temporal_group.add_argument(
+        "--temporal-condition-values",
+        nargs="+",
+        default=None,
+        metavar="VALUE",
+        help="Subset of values to compute (empty = all unique values)",
+    )
+    temporal_group.add_argument(
+        "--temporal-include-roi-averages",
+        action="store_true",
+        default=None,
+        dest="temporal_include_roi_averages",
+        help="Include ROI-averaged rows in output",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-include-roi-averages",
+        action="store_false",
+        dest="temporal_include_roi_averages",
+        help="Exclude ROI-averaged rows from output",
+    )
+    temporal_group.add_argument(
+        "--temporal-include-tf-grid",
+        action="store_true",
+        default=None,
+        dest="temporal_include_tf_grid",
+        help="Include individual frequency (TF grid) rows in output",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-include-tf-grid",
+        action="store_false",
+        dest="temporal_include_tf_grid",
+        help="Exclude TF grid rows from output",
+    )
     # Temporal feature selection
-    temporal_group.add_argument("--temporal-feature-power", action="store_true", default=None, help="Enable power temporal correlations")
-    temporal_group.add_argument("--no-temporal-feature-power", action="store_false", dest="temporal_feature_power", help="Disable power temporal correlations")
-    temporal_group.add_argument("--temporal-feature-itpc", action="store_true", default=None, help="Enable ITPC temporal correlations")
-    temporal_group.add_argument("--no-temporal-feature-itpc", action="store_false", dest="temporal_feature_itpc", help="Disable ITPC temporal correlations")
-    temporal_group.add_argument("--temporal-feature-erds", action="store_true", default=None, help="Enable ERDS temporal correlations")
-    temporal_group.add_argument("--no-temporal-feature-erds", action="store_false", dest="temporal_feature_erds", help="Disable ERDS temporal correlations")
+    temporal_group.add_argument(
+        "--temporal-feature-power",
+        action="store_true",
+        default=None,
+        help="Enable power temporal correlations",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-feature-power",
+        action="store_false",
+        dest="temporal_feature_power",
+        help="Disable power temporal correlations",
+    )
+    temporal_group.add_argument(
+        "--temporal-feature-itpc",
+        action="store_true",
+        default=None,
+        help="Enable ITPC temporal correlations",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-feature-itpc",
+        action="store_false",
+        dest="temporal_feature_itpc",
+        help="Disable ITPC temporal correlations",
+    )
+    temporal_group.add_argument(
+        "--temporal-feature-erds",
+        action="store_true",
+        default=None,
+        help="Enable ERDS temporal correlations",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-feature-erds",
+        action="store_false",
+        dest="temporal_feature_erds",
+        help="Disable ERDS temporal correlations",
+    )
     # ITPC-specific temporal options
-    temporal_group.add_argument("--temporal-itpc-baseline-min", type=float, default=None, help="ITPC baseline window start (seconds)")
-    temporal_group.add_argument("--temporal-itpc-baseline-max", type=float, default=None, help="ITPC baseline window end (seconds)")
-    temporal_group.add_argument("--temporal-itpc-baseline-correction", action="store_true", default=None, help="Enable ITPC baseline correction")
-    temporal_group.add_argument("--no-temporal-itpc-baseline-correction", action="store_false", dest="temporal_itpc_baseline_correction", help="Disable ITPC baseline correction")
+    temporal_group.add_argument(
+        "--temporal-itpc-baseline-min",
+        type=float,
+        default=None,
+        help="ITPC baseline window start (seconds)",
+    )
+    temporal_group.add_argument(
+        "--temporal-itpc-baseline-max",
+        type=float,
+        default=None,
+        help="ITPC baseline window end (seconds)",
+    )
+    temporal_group.add_argument(
+        "--temporal-itpc-baseline-correction",
+        action="store_true",
+        default=None,
+        help="Enable ITPC baseline correction",
+    )
+    temporal_group.add_argument(
+        "--no-temporal-itpc-baseline-correction",
+        action="store_false",
+        dest="temporal_itpc_baseline_correction",
+        help="Disable ITPC baseline correction",
+    )
     # ERDS-specific temporal options
-    temporal_group.add_argument("--temporal-erds-baseline-min", type=float, default=None, help="ERDS baseline window start (seconds)")
-    temporal_group.add_argument("--temporal-erds-baseline-max", type=float, default=None, help="ERDS baseline window end (seconds)")
-    temporal_group.add_argument("--temporal-erds-method", choices=["percent", "zscore"], default=None, help="ERDS computation method")
+    temporal_group.add_argument(
+        "--temporal-erds-baseline-min",
+        type=float,
+        default=None,
+        help="ERDS baseline window start (seconds)",
+    )
+    temporal_group.add_argument(
+        "--temporal-erds-baseline-max",
+        type=float,
+        default=None,
+        help="ERDS baseline window end (seconds)",
+    )
+    temporal_group.add_argument(
+        "--temporal-erds-method",
+        choices=["percent", "zscore"],
+        default=None,
+        help="ERDS computation method",
+    )
 
     cluster_correction_group = parser.add_argument_group("Cluster correction options")
     cluster_correction_group.add_argument(
@@ -505,26 +808,97 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     # Cluster-specific options
     cluster_group = parser.add_argument_group("Cluster permutation options")
-    cluster_group.add_argument("--cluster-threshold", type=float, default=None, help="Cluster forming threshold")
-    cluster_group.add_argument("--cluster-min-size", type=int, default=None, help="Minimum cluster size")
-    cluster_group.add_argument("--cluster-tail", type=int, choices=[-1, 0, 1], default=None, help="Test tail: 0=two-tailed, 1=upper, -1=lower")
-    cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.condition, then event_columns.binary_outcome)")
-    cluster_group.add_argument("--cluster-condition-values", nargs="+", default=None, metavar="VALUE", help="Exactly 2 values to compare (e.g., 0 1 or condition_a condition_b)")
-    
+    cluster_group.add_argument(
+        "--cluster-threshold", type=float, default=None, help="Cluster forming threshold"
+    )
+    cluster_group.add_argument(
+        "--cluster-min-size", type=int, default=None, help="Minimum cluster size"
+    )
+    cluster_group.add_argument(
+        "--cluster-tail",
+        type=int,
+        choices=[-1, 0, 1],
+        default=None,
+        help="Test tail: 0=two-tailed, 1=upper, -1=lower",
+    )
+    cluster_group.add_argument(
+        "--cluster-condition-column",
+        type=str,
+        default=None,
+        help="events.tsv column to split by (default: event_columns.condition, then event_columns.binary_outcome)",
+    )
+    cluster_group.add_argument(
+        "--cluster-condition-values",
+        nargs="+",
+        default=None,
+        metavar="VALUE",
+        help="Exactly 2 values to compare (e.g., 0 1 or condition_a condition_b)",
+    )
+
     # Condition-specific options
     condition_group = parser.add_argument_group("Condition comparison options")
-    condition_group.add_argument("--condition-fail-fast", action="store_true", default=None, dest="condition_fail_fast")
-    condition_group.add_argument("--no-condition-fail-fast", action="store_false", dest="condition_fail_fast")
-    condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
-    condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
-    condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.condition, then event_columns.binary_outcome)")
-    condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or condition_a condition_b)")
-    condition_group.add_argument("--condition-compare-labels", nargs="+", default=None, metavar="LABEL", help="Optional labels aligned to --condition-compare-values")
-    condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")
-    condition_group.add_argument("--no-condition-overwrite", action="store_false", dest="condition_overwrite", help="Include compare_column in filename to avoid overwriting")
-    condition_group.add_argument("--condition-primary-unit", choices=["trial", "run_mean"], default=None)
-    condition_group.add_argument("--condition-permutation-primary", action="store_true", default=None, dest="condition_permutation_primary")
-    condition_group.add_argument("--no-condition-permutation-primary", action="store_false", dest="condition_permutation_primary")
+    condition_group.add_argument(
+        "--condition-fail-fast", action="store_true", default=None, dest="condition_fail_fast"
+    )
+    condition_group.add_argument(
+        "--no-condition-fail-fast", action="store_false", dest="condition_fail_fast"
+    )
+    condition_group.add_argument(
+        "--condition-effect-threshold",
+        type=float,
+        default=None,
+        help="Minimum effect size (Cohen's d) to report",
+    )
+    condition_group.add_argument(
+        "--condition-min-trials", type=int, default=None, help="Minimum trials per condition"
+    )
+    condition_group.add_argument(
+        "--condition-compare-column",
+        type=str,
+        default=None,
+        help="events.tsv column to use for condition split (default: event_columns.condition, then event_columns.binary_outcome)",
+    )
+    condition_group.add_argument(
+        "--condition-compare-values",
+        nargs="+",
+        default=None,
+        metavar="VALUE",
+        help="Values in the column to compare (e.g., 0 1 or condition_a condition_b)",
+    )
+    condition_group.add_argument(
+        "--condition-compare-labels",
+        nargs="+",
+        default=None,
+        metavar="LABEL",
+        help="Optional labels aligned to --condition-compare-values",
+    )
+    condition_group.add_argument(
+        "--condition-overwrite",
+        action="store_true",
+        default=None,
+        dest="condition_overwrite",
+        help="Overwrite existing condition effects files (default)",
+    )
+    condition_group.add_argument(
+        "--no-condition-overwrite",
+        action="store_false",
+        dest="condition_overwrite",
+        help="Include compare_column in filename to avoid overwriting",
+    )
+    condition_group.add_argument(
+        "--condition-primary-unit", choices=["trial", "run_mean"], default=None
+    )
+    condition_group.add_argument(
+        "--condition-permutation-primary",
+        action="store_true",
+        default=None,
+        dest="condition_permutation_primary",
+    )
+    condition_group.add_argument(
+        "--no-condition-permutation-primary",
+        action="store_false",
+        dest="condition_permutation_primary",
+    )
 
     output_group = parser.add_argument_group("Output options")
     output_group.add_argument(

@@ -32,24 +32,14 @@ class TestFeatureAlignmentMasking(unittest.TestCase):
             )
 
     def test_drop_mask_accounts_for_extra_blocks(self):
-        pow_df = pd.DataFrame(
-            {"power_active_alpha_global_logratio_mean": [0.1, 0.2, 0.3]}
-        )
-        baseline_df = pd.DataFrame(
-            {"power_baseline_alpha_global_mean": [1.0, 1.0, 1.0]}
-        )
-        conn_df = pd.DataFrame(
-            {"conn_active_alpha_global_wpli_mean": [0.2, 0.3, 0.4]}
-        )
-        aper_df = pd.DataFrame(
-            {"aperiodic_active_broadband_global_slope": [1.0, 1.1, 1.2]}
-        )
+        pow_df = pd.DataFrame({"power_active_alpha_global_logratio_mean": [0.1, 0.2, 0.3]})
+        baseline_df = pd.DataFrame({"power_baseline_alpha_global_mean": [1.0, 1.0, 1.0]})
+        conn_df = pd.DataFrame({"conn_active_alpha_global_wpli_mean": [0.2, 0.3, 0.4]})
+        aper_df = pd.DataFrame({"aperiodic_active_broadband_global_slope": [1.0, 1.1, 1.2]})
         y = pd.Series([10.0, 20.0, 30.0], name="target")
         aligned_events = pd.DataFrame({"trial": [1, 2, 3]})
         extra_blocks = {
-            "pac_trials": pd.DataFrame(
-                {"pac_active_theta_gamma_global_val": [0.5, np.nan, 0.7]}
-            )
+            "pac_trials": pd.DataFrame({"pac_active_theta_gamma_global_val": [0.5, np.nan, 0.7]})
         }
 
         (

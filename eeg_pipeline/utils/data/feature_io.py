@@ -39,7 +39,6 @@ from eeg_pipeline.utils.data.source_localization_paths import (
     source_localization_folder,
 )
 
-
 ###################################################################
 # READING UTILITIES
 ###################################################################
@@ -142,25 +141,23 @@ def _load_features_and_targets(
     epochs: Optional[Any] = None,
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
     """Load features and targets for a subject, validating alignment.
-    
+
     Targets are extracted from aligned_events using behavior_analysis.outcome_column
     (if set), then event_columns.outcome aliases.
     """
     from eeg_pipeline.utils.data.alignment import get_aligned_events
-    
+
     feats_dir = deriv_features_path(deriv_root, subject)
     logger = logging.getLogger(__name__)
-    
+
     temporal_path = _find_power_feature_path(feats_dir, "features_power")
     active_path = _find_power_feature_path(feats_dir, "features_power_active")
-        
+
     conn_path = find_connectivity_features_path(deriv_root, subject)
 
     power_path = active_path if active_path.exists() else temporal_path
     if not power_path.exists():
-        raise FileNotFoundError(
-            f"Missing features for sub-{subject}. Expected at {feats_dir}"
-        )
+        raise FileNotFoundError(f"Missing features for sub-{subject}. Expected at {feats_dir}")
 
     temporal_df = read_table(temporal_path) if temporal_path.exists() else None
     active_df = read_table(power_path)
@@ -177,10 +174,8 @@ def _load_features_and_targets(
             task_is_rest=is_resting_state_feature_mode(config),
         )
         if epochs is None:
-            raise FileNotFoundError(
-                f"Could not locate clean epochs for sub-{subject}, task-{task}"
-            )
-    
+            raise FileNotFoundError(f"Could not locate clean epochs for sub-{subject}, task-{task}")
+
     # Load targets from aligned_events using explicit outcome config first.
     aligned_events = get_aligned_events(
         epochs,
@@ -193,7 +188,7 @@ def _load_features_and_targets(
     )
     if aligned_events is None:
         raise ValueError(f"Failed to load aligned events for sub-{subject}, task-{task}")
-    
+
     target_col = pick_target_column(
         aligned_events,
         target_columns=_preferred_target_columns(config),
@@ -205,9 +200,7 @@ def _load_features_and_targets(
         )
     target_series = pd.to_numeric(aligned_events[target_col], errors="coerce")
 
-    _validate_feature_lengths(
-        subject, task, len(target_series), active_df, temporal_df, conn_df
-    )
+    _validate_feature_lengths(subject, task, len(target_series), active_df, temporal_df, conn_df)
     _validate_trial_id_alignment(
         subject,
         task,
@@ -218,9 +211,6 @@ def _load_features_and_targets(
     )
 
     return temporal_df, active_df, conn_df, target_series, getattr(epochs, "info", None)
-
-
-
 
 
 @dataclass
@@ -276,7 +266,7 @@ def _safe_read_feature_table_with_path(
     config: Optional[Any] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[Path]]:
     """Read feature table and return the DataFrame and resolved path if found.
-    
+
     For source localization features, resolves method-specific subfolders
     (`sourcelocalization/lcmv` or `sourcelocalization/eloreta`).
     """
@@ -392,7 +382,9 @@ def _assign_columns_safely(
     return df
 
 
-def _build_filename(base_name: str, suffix: Optional[str] = None, extension: str = ".parquet") -> str:
+def _build_filename(
+    base_name: str, suffix: Optional[str] = None, extension: str = ".parquet"
+) -> str:
     """Build filename with optional suffix."""
     if suffix:
         return f"{base_name}_{suffix}{extension}"
@@ -424,14 +416,14 @@ def _get_folder_for_feature(
         if name == "directed_connectivity" or name == "directedconnectivity":
             return "directedconnectivity"
         return name
-    
+
     if base_name == "aperiodic_qc":
         return "aperiodic"
     if base_name == "features_subject":
         return "subject"
     if base_name == "target_vas_ratings":
         return "behavior"
-    
+
     return ""
 
 
@@ -448,21 +440,24 @@ def _save_feature_dataframe(
 ) -> pd.DataFrame:
     """Save a feature dataframe with column assignment and logging."""
     from eeg_pipeline.utils.config.loader import get_config_value
-    
+
     df = _assign_columns_safely(df, column_names, feature_type, logger)
     df_to_save = attach_feature_alignment_columns(df, aligned_events)
     folder_name = _get_folder_for_feature(base_filename, config, df=df)
     filename = _build_filename(base_filename, suffix)
     file_path = features_dir / folder_name / filename
-    
+
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     logger.info("Saving %s: %s", feature_type, file_path)
     write_parquet(df_to_save, file_path)
-    
-    also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
+
+    also_save_csv = bool(
+        get_config_value(config, "feature_engineering.output.also_save_csv", False)
+    )
     if also_save_csv:
         from eeg_pipeline.infra.tsv import write_csv
+
         csv_filename = _build_filename(base_filename, suffix).replace(".parquet", ".csv")
         csv_path = features_dir / folder_name / csv_filename
         write_csv(df_to_save, csv_path, index=False)
@@ -491,9 +486,7 @@ def _save_feature_metadata(
     metadata_dir.mkdir(parents=True, exist_ok=True)
 
     subject_str = (
-        features_dir.parts[-3].replace("sub-", "")
-        if len(features_dir.parts) > 3
-        else "unknown"
+        features_dir.parts[-3].replace("sub-", "") if len(features_dir.parts) > 3 else "unknown"
     )
 
     base_out = Path(_build_filename(base_filename, suffix))
@@ -503,7 +496,9 @@ def _save_feature_metadata(
         feature_columns=filter_feature_payload_columns(df.columns),
         config=config,
         subject=subject_str,
-        task=task if task is not None else config.get("project.task") if config is not None else None,
+        task=(
+            task if task is not None else config.get("project.task") if config is not None else None
+        ),
         qc=qc,
         df_attrs=dict(getattr(df, "attrs", {}) or {}),
     )
@@ -590,11 +585,11 @@ def _save_aperiodic_qc(
     suffix: Optional[str] = None,
 ) -> None:
     """Save aperiodic QC data to TSV file with proper per-trial structure.
-    
+
     Creates a tidy-format TSV with one row per (trial, channel) combination,
     containing fit parameters and quality metrics. This replaces the previous
     mixed-dimension format that was scientifically invalid.
-    
+
     Columns:
         - trial: Trial index (0-based)
         - channel: Channel name
@@ -628,7 +623,7 @@ def _save_aperiodic_qc(
         kept_bins = aper_qc.get("kept_bins")
         peak_rejected = aper_qc.get("peak_rejected")
         channel_names = aper_qc.get("channel_names")
-        
+
         # Extract scalar QC metadata
         psd_fmin = aper_qc.get("psd_fmin", np.nan)
         psd_fmax = aper_qc.get("psd_fmax", np.nan)
@@ -639,7 +634,7 @@ def _save_aperiodic_qc(
         if slopes is None or not hasattr(slopes, "shape"):
             logger.warning("Aperiodic QC: slopes array missing or invalid")
             return
-        
+
         if slopes.ndim == 1:
             n_trials, n_channels = 1, slopes.shape[0]
             slopes = slopes.reshape(1, -1)
@@ -656,8 +651,12 @@ def _save_aperiodic_qc(
         rows = []
         for trial_idx in range(n_trials):
             for ch_idx in range(n_channels):
-                ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
-                
+                ch_name = (
+                    channel_names[ch_idx]
+                    if channel_names and ch_idx < len(channel_names)
+                    else f"ch_{ch_idx}"
+                )
+
                 row = {
                     "trial": trial_idx,
                     "channel": ch_name,
@@ -666,14 +665,22 @@ def _save_aperiodic_qc(
                     "r2": float(r2[trial_idx, ch_idx]) if r2 is not None else np.nan,
                     "rms": float(rms[trial_idx, ch_idx]) if rms is not None else np.nan,
                     "fit_ok": bool(fit_ok[trial_idx, ch_idx]) if fit_ok is not None else False,
-                    "n_valid_bins": int(valid_bins[trial_idx, ch_idx]) if valid_bins is not None else 0,
-                    "n_kept_bins": int(kept_bins[trial_idx, ch_idx]) if kept_bins is not None else 0,
-                    "peak_rejected": bool(peak_rejected[trial_idx, ch_idx]) if peak_rejected is not None else False,
+                    "n_valid_bins": (
+                        int(valid_bins[trial_idx, ch_idx]) if valid_bins is not None else 0
+                    ),
+                    "n_kept_bins": (
+                        int(kept_bins[trial_idx, ch_idx]) if kept_bins is not None else 0
+                    ),
+                    "peak_rejected": (
+                        bool(peak_rejected[trial_idx, ch_idx])
+                        if peak_rejected is not None
+                        else False
+                    ),
                 }
                 rows.append(row)
 
         df = pd.DataFrame(rows)
-        
+
         # Add metadata as JSON sidecar
         metadata = {
             "psd_fmin_hz": float(psd_fmin) if np.isfinite(psd_fmin) else None,
@@ -681,11 +688,13 @@ def _save_aperiodic_qc(
             "min_r2_threshold": float(min_r2_threshold) if np.isfinite(min_r2_threshold) else None,
             "n_trials": n_trials,
             "n_channels": n_channels,
-            "band_coverage": {k: float(v) for k, v in band_coverage.items()} if band_coverage else {},
+            "band_coverage": (
+                {k: float(v) for k, v in band_coverage.items()} if band_coverage else {}
+            ),
         }
-        
+
         write_tsv(df, save_path, index=False)
-        
+
         # Save metadata sidecar
         metadata_path = save_path.with_suffix(".json")
         try:
@@ -694,10 +703,14 @@ def _save_aperiodic_qc(
         except (OSError, IOError) as meta_exc:
             logger.debug("Could not save aperiodic QC metadata: %s", meta_exc)
 
-        logger.info("Saved aperiodic QC sidecar to %s (%d trials × %d channels)", save_path, n_trials, n_channels)
+        logger.info(
+            "Saved aperiodic QC sidecar to %s (%d trials × %d channels)",
+            save_path,
+            n_trials,
+            n_channels,
+        )
     except (OSError, IOError, TypeError, KeyError) as exc:
         logger.warning("Failed to save aperiodic QC TSV: %s", exc)
-
 
 
 def save_all_features(
@@ -774,7 +787,9 @@ def save_all_features(
             # should be avoided.
             has_baseline_cols_in_power = False
             if pow_df is not None and not pow_df.empty:
-                has_baseline_cols_in_power = any(str(c).startswith("power_baseline_") for c in pow_df.columns)
+                has_baseline_cols_in_power = any(
+                    str(c).startswith("power_baseline_") for c in pow_df.columns
+                )
 
             if has_baseline_cols_in_power:
                 logger.info(
@@ -783,9 +798,10 @@ def save_all_features(
                 )
             else:
                 baseline_df = _assign_columns_safely(baseline_df, baseline_cols, "Baseline", logger)
-                logger.debug("Adding Baseline block to direct features: %d columns", len(baseline_df.columns))
+                logger.debug(
+                    "Adding Baseline block to direct features: %d columns", len(baseline_df.columns)
+                )
                 direct_blocks.append(baseline_df)
-
 
     feature_save_configs = [
         (aper_df, aper_cols, "features_aperiodic", "aperiodic features"),
@@ -802,9 +818,24 @@ def save_all_features(
         (asymmetry_df, asymmetry_cols, "features_asymmetry", "asymmetry features"),
         (microstates_df, microstates_cols, "features_microstates", "microstate dynamics features"),
         (quality_df, quality_cols, "features_quality", "quality metrics"),
-        (dconn_df, dconn_cols, "features_directedconnectivity", "directed connectivity features (PSI, DTF, PDC)"),
-        (source_df, source_cols, "features_sourcelocalization", "source localization features (LCMV, eLORETA)"),
-        (source_contrast_df, source_contrast_cols, "features_sourcecontrast", "source condition-contrast features"),
+        (
+            dconn_df,
+            dconn_cols,
+            "features_directedconnectivity",
+            "directed connectivity features (PSI, DTF, PDC)",
+        ),
+        (
+            source_df,
+            source_cols,
+            "features_sourcelocalization",
+            "source localization features (LCMV, eLORETA)",
+        ),
+        (
+            source_contrast_df,
+            source_contrast_cols,
+            "features_sourcecontrast",
+            "source condition-contrast features",
+        ),
     ]
 
     for df, cols, base_name, description in feature_save_configs:
@@ -836,15 +867,16 @@ def save_all_features(
 
     if direct_blocks:
         direct_df = pd.concat(direct_blocks, axis=1)
-        direct_df = _dedupe_identical_duplicate_columns(
-            direct_df, "features_power.parquet", logger
-        )
+        direct_df = _dedupe_identical_duplicate_columns(direct_df, "features_power.parquet", logger)
     else:
         direct_df = pd.DataFrame()
 
     from eeg_pipeline.utils.config.loader import get_config_value
-    also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
-    
+
+    also_save_csv = bool(
+        get_config_value(config, "feature_engineering.output.also_save_csv", False)
+    )
+
     if not direct_df.empty:
         _save_feature_dataframe(
             direct_df,
@@ -857,7 +889,14 @@ def save_all_features(
             aligned_events=aligned_events,
         )
         _save_feature_metadata(
-            direct_df, "features_power", features_dir, config, logger, suffix, task=task, qc=feature_qc
+            direct_df,
+            "features_power",
+            features_dir,
+            config,
+            logger,
+            suffix,
+            task=task,
+            qc=feature_qc,
         )
 
     if active_df is not None and not active_df.empty:
@@ -872,7 +911,14 @@ def save_all_features(
             aligned_events=aligned_events,
         )
         _save_feature_metadata(
-            active_df, "features_power_active", features_dir, config, logger, suffix, task=task, qc=feature_qc
+            active_df,
+            "features_power_active",
+            features_dir,
+            config,
+            logger,
+            suffix,
+            task=task,
+            qc=feature_qc,
         )
 
     if conn_df is not None and not conn_df.empty:
@@ -892,13 +938,20 @@ def save_all_features(
         )
         if also_save_csv:
             from eeg_pipeline.infra.tsv import write_csv
+
             csv_path = features_dir / folder_name / conn_filename.replace(".parquet", ".csv")
             write_csv(conn_df_to_save, csv_path, index=False)
             logger.info("Also saved connectivity features as CSV: %s", csv_path)
         _save_feature_metadata(
-            conn_df, "features_connectivity", features_dir, config, logger, suffix, task=task, qc=feature_qc
+            conn_df,
+            "features_connectivity",
+            features_dir,
+            config,
+            logger,
+            suffix,
+            task=task,
+            qc=feature_qc,
         )
-
 
     return direct_df
 

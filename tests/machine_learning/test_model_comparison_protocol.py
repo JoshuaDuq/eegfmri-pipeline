@@ -124,7 +124,9 @@ def test_model_comparison_inner_tuning_enforces_subject_missingness_limit() -> N
         )
 
 
-def test_model_comparison_inner_tuning_enforces_subject_missingness_limit_in_wrapped_pipeline() -> None:
+def test_model_comparison_inner_tuning_enforces_subject_missingness_limit_in_wrapped_pipeline() -> (
+    None
+):
     from eeg_pipeline.analysis.machine_learning.orchestration import (
         _fit_subject_weighted_inner_cv_estimator,
     )

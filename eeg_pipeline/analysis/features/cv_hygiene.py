@@ -21,7 +21,6 @@ import mne
 import numpy as np
 from scipy.signal import find_peaks
 
-
 # Constants
 MIN_TRIALS_FOR_IAF = 5
 MIN_FREQ_POINTS_FOR_FIT = 10
@@ -113,6 +112,7 @@ def _compute_aperiodic_residual(
         return None
 
     from eeg_pipeline.analysis.features.spectral import _robust_aperiodic_fit
+
     slope, intercept = _robust_aperiodic_fit(log_freqs, log_power, fit_mask)
     if slope is None or intercept is None:
         slope, intercept = np.polyfit(log_freqs[fit_mask], log_power[fit_mask], 1)
@@ -237,9 +237,7 @@ def compute_iaf_for_fold(
     if residual is None:
         raise ValueError("CV hygiene: Failed to estimate aperiodic residual for IAF.")
 
-    iaf_hz = _estimate_iaf_from_residual(
-        freqs, residual, alpha_fmin, alpha_fmax, prominence
-    )
+    iaf_hz = _estimate_iaf_from_residual(freqs, residual, alpha_fmin, alpha_fmax, prominence)
     if iaf_hz is None:
         raise ValueError("CV hygiene: Failed to estimate IAF from the alpha residual.")
 

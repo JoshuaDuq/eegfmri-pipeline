@@ -55,7 +55,6 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
 from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.infra.paths import ensure_dir
 
-
 StageRegistry = _stage_registry.StageRegistry
 config_to_stage_names = _stage_registry.config_to_stage_names
 
@@ -78,9 +77,7 @@ def _write_parquet_with_optional_csv(
 
 def _also_save_csv_from_config(config: Any) -> bool:
     """Resolve whether parquet outputs should also be emitted as CSV."""
-    return bool(
-        require_config_value(config, "behavior_analysis.output.also_save_csv")
-    )
+    return bool(require_config_value(config, "behavior_analysis.output.also_save_csv"))
 
 
 ###################################################################
@@ -219,7 +216,7 @@ def _check_early_exit_conditions(
 
 def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
     """Helper to get a subfolder within stats_dir and ensure it exists.
-    
+
     If ctx.overwrite is False, appends a timestamp to the folder name
     (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
     """
@@ -235,7 +232,7 @@ def _get_stats_subfolder_with_overwrite(
     ensure: bool = True,
 ) -> Path:
     """Helper to get a subfolder within stats_dir with overwrite control.
-    
+
     If overwrite is False, appends a timestamp to the folder name
     (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
     """
@@ -289,15 +286,15 @@ def _get_feature_columns(
     computation_name: Optional[str] = None,
 ) -> List[str]:
     """Extract and filter feature columns from DataFrame.
-    
+
     Centralizes the pattern of extracting feature columns and applying
     band and computation-specific filters.
-    
+
     Args:
         df: DataFrame containing feature columns
         ctx: BehaviorContext with filtering preferences
         computation_name: Optional computation name for feature filtering
-        
+
     Returns:
         List of filtered feature column names
     """
@@ -348,8 +345,6 @@ def _compute_single_effect_size(*args: Any, **kwargs: Any) -> Dict[str, Any]:
     return _stages_correlate._compute_single_effect_size(*args, **kwargs)
 
 
-
-
 def stage_correlate_effect_sizes(
     ctx: BehaviorContext,
     config: Any,
@@ -360,11 +355,13 @@ def stage_correlate_effect_sizes(
         ctx,
         config,
         design,
-        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(str(feature_name), cfg),
-        feature_band_resolver_fn=lambda feature_name, cfg: cache.get_feature_band(str(feature_name), cfg),
+        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(
+            str(feature_name), cfg
+        ),
+        feature_band_resolver_fn=lambda feature_name, cfg: cache.get_feature_band(
+            str(feature_name), cfg
+        ),
     )
-
-
 
 
 def stage_correlate_pvalues(
@@ -704,13 +701,13 @@ def stage_condition_column(
     feature_cols: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Run column-based condition comparison.
-    
+
     Single responsibility: Column contrast comparison.
     Supports primary_unit=trial|run to control unit of analysis.
-    
+
     When overwrite=false, includes compare_column name in output filename to allow
     multiple comparisons without overwriting previous results.
-    
+
     If compare_values has 3+ values, delegates to multigroup comparison instead.
     """
     return _stages_condition.stage_condition_column_impl(
@@ -733,10 +730,9 @@ def stage_condition_column(
     )
 
 
-
 def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Backward-compatible condition stage (column or multigroup).
-    
+
     The pipeline wrapper historically called a single stage and expected a DataFrame.
     Internally, we keep single-responsibility sub-stages:
     - stage_condition_column (2-group comparison)
@@ -765,10 +761,10 @@ def stage_condition_multigroup(
     feature_cols: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Run multi-group condition comparison (3+ groups).
-    
+
     Computes all pairwise Mann-Whitney U tests between groups with FDR correction.
     Results are saved to condition_effects_multigroup*.tsv.
-    
+
     When overwrite=false, includes compare_column name in output filename to allow
     multiple comparisons without overwriting previous results.
     """
@@ -823,8 +819,6 @@ def stage_temporal_stats(
     )
 
 
-
-
 def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
     return _stages_temporal.stage_cluster_impl(ctx, config)
 
@@ -855,40 +849,26 @@ def run_group_level_correlations(
         config, "behavior_analysis.group_level.multilevel_correlations"
     )
     if not isinstance(multilevel_cfg, dict):
-        raise ValueError(
-            "behavior_analysis.group_level.multilevel_correlations must be a mapping."
-        )
+        raise ValueError("behavior_analysis.group_level.multilevel_correlations must be a mapping.")
 
     if use_block_permutation is None:
         use_block_permutation = bool(
             require_config_value(config, "behavior_analysis.group_level.block_permutation")
         )
     if n_perm is None:
-        n_perm = int(
-            require_config_value(config, "behavior_analysis.statistics.n_permutations")
-        )
+        n_perm = int(require_config_value(config, "behavior_analysis.statistics.n_permutations"))
     if fdr_alpha is None:
-        fdr_alpha = float(
-            require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
-        )
+        fdr_alpha = float(require_config_value(config, "behavior_analysis.statistics.fdr_alpha"))
     if target_col is None:
         target_col = str(require_config_value(multilevel_cfg, "target")).strip()
     if control_predictor is None:
-        control_predictor = bool(
-            require_config_value(multilevel_cfg, "control_predictor")
-        )
+        control_predictor = bool(require_config_value(multilevel_cfg, "control_predictor"))
     if control_trial_order is None:
-        control_trial_order = bool(
-            require_config_value(multilevel_cfg, "control_trial_order")
-        )
+        control_trial_order = bool(require_config_value(multilevel_cfg, "control_trial_order"))
     if control_run_effects is None:
-        control_run_effects = bool(
-            require_config_value(multilevel_cfg, "control_run_effects")
-        )
+        control_run_effects = bool(require_config_value(multilevel_cfg, "control_run_effects"))
     if max_run_dummies is None:
-        max_run_dummies = int(
-            require_config_value(multilevel_cfg, "max_run_dummies")
-        )
+        max_run_dummies = int(require_config_value(multilevel_cfg, "max_run_dummies"))
     if random_state is None:
         random_state = int(require_config_value(config, "project.random_state"))
 
@@ -936,6 +916,8 @@ def run_group_level_analysis(
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         also_save_csv_from_config_fn=_also_save_csv_from_config,
     )
+
+
 def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Compute hierarchical FDR summary across analysis types from cached FDR results."""
     cache = _get_cache(ctx)
@@ -946,6 +928,8 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
     )
+
+
 def _build_output_filename(
     ctx: BehaviorContext,
     pipeline_config: Any,

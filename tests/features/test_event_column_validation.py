@@ -94,7 +94,9 @@ class TestEventColumnValidation(unittest.TestCase):
             }
         )
         self.assertIsNone(resolve_outcome_column(events_df, config_without_match))
-        with self.assertRaisesRegex(ValueError, "Could not resolve a numeric behavior outcome column"):
+        with self.assertRaisesRegex(
+            ValueError, "Could not resolve a numeric behavior outcome column"
+        ):
             require_outcome_column(events_df, config_without_match)
 
     def test_behavior_resolution_rejects_missing_explicit_outcome_override(self):
@@ -142,7 +144,9 @@ class TestEventColumnValidation(unittest.TestCase):
             }
         )
         self.assertIsNone(resolve_predictor_column(events_df, config_without_match))
-        with self.assertRaisesRegex(ValueError, "Could not resolve a numeric behavior predictor column"):
+        with self.assertRaisesRegex(
+            ValueError, "Could not resolve a numeric behavior predictor column"
+        ):
             require_predictor_column(events_df, config_without_match)
 
     def test_behavior_resolution_rejects_nonnumeric_explicit_predictor_override(self):
@@ -192,7 +196,9 @@ class TestEventColumnValidation(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(ValueError, "Could not resolve a numeric behavior predictor column"):
+        with self.assertRaisesRegex(
+            ValueError, "Could not resolve a numeric behavior predictor column"
+        ):
             run_trialwise_feature_regressions(
                 trial_df,
                 feature_cols=["power_alpha"],

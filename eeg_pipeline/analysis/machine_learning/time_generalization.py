@@ -53,7 +53,7 @@ def _extract_trial_runs_from_records(
         metadata = getattr(epochs, "metadata", None)
         if not isinstance(metadata, pd.DataFrame):
             metadata = getattr(epochs, "_behavioral", None)
-            
+
         if not isinstance(metadata, pd.DataFrame) or metadata.empty:
             run_series_by_subject[str(subject_id)] = None
             continue
@@ -212,7 +212,12 @@ def _compute_time_generalization_significance(
     sig_maxstat = np.zeros_like(tg_r, dtype=bool)
     sig_cluster = np.zeros_like(tg_r, dtype=bool)
 
-    if not isinstance(null_r, np.ndarray) or null_r.size == 0 or tg_r.size == 0 or not np.any(tested_mask):
+    if (
+        not isinstance(null_r, np.ndarray)
+        or null_r.size == 0
+        or tg_r.size == 0
+        or not np.any(tested_mask)
+    ):
         return p_matrix, sig_fdr, sig_maxstat, sig_cluster, tested_mask
 
     n_perm_valid = int(null_r.shape[0])
@@ -239,7 +244,9 @@ def _compute_time_generalization_significance(
     null_abs_masked = np.where(tested_mask[None, :, :], np.abs(null_r), np.nan)
     null_max_abs = np.nanmax(null_abs_masked, axis=(1, 2))
     finite_null_max = null_max_abs[np.isfinite(null_max_abs)]
-    max_stat_threshold = float(np.percentile(finite_null_max, 95)) if finite_null_max.size > 0 else np.inf
+    max_stat_threshold = (
+        float(np.percentile(finite_null_max, 95)) if finite_null_max.size > 0 else np.inf
+    )
     sig_maxstat = tested_mask & (np.abs(tg_r) >= max_stat_threshold)
 
     cluster_alpha = float(
@@ -252,22 +259,32 @@ def _compute_time_generalization_significance(
     if finite_null_abs.size == 0:
         cluster_stat_threshold = np.inf
     else:
-        cluster_stat_threshold = float(np.percentile(finite_null_abs, 100.0 * (1.0 - cluster_alpha)))
+        cluster_stat_threshold = float(
+            np.percentile(finite_null_abs, 100.0 * (1.0 - cluster_alpha))
+        )
 
     uncorrected_sig = tested_mask & (np.abs(tg_r) >= cluster_stat_threshold)
     labeled_clusters, n_clusters = ndimage.label(uncorrected_sig)
     if n_clusters > 0:
-        observed_cluster_sizes = ndimage.sum(uncorrected_sig, labeled_clusters, range(1, n_clusters + 1))
+        observed_cluster_sizes = ndimage.sum(
+            uncorrected_sig, labeled_clusters, range(1, n_clusters + 1)
+        )
         null_max_clusters = np.zeros(n_perm_valid, dtype=float)
         for perm_idx in range(n_perm_valid):
             null_map = null_r[perm_idx]
-            null_sig = tested_mask & np.isfinite(null_map) & (np.abs(null_map) >= cluster_stat_threshold)
+            null_sig = (
+                tested_mask & np.isfinite(null_map) & (np.abs(null_map) >= cluster_stat_threshold)
+            )
             labeled_null, n_null_clusters = ndimage.label(null_sig)
             if n_null_clusters > 0:
-                null_cluster_sizes = ndimage.sum(null_sig, labeled_null, range(1, n_null_clusters + 1))
+                null_cluster_sizes = ndimage.sum(
+                    null_sig, labeled_null, range(1, n_null_clusters + 1)
+                )
                 null_max_clusters[perm_idx] = float(np.max(null_cluster_sizes))
 
-        cluster_size_threshold = float(np.percentile(null_max_clusters, 95)) if n_perm_valid > 0 else np.inf
+        cluster_size_threshold = (
+            float(np.percentile(null_max_clusters, 95)) if n_perm_valid > 0 else np.inf
+        )
         for cluster_id in range(1, n_clusters + 1):
             if observed_cluster_sizes[cluster_id - 1] >= cluster_size_threshold:
                 sig_cluster |= labeled_clusters == cluster_id
@@ -308,27 +325,27 @@ def _extract_window_features(
     """
     n_trials, n_channels, n_timepoints = data.shape
     n_windows = len(windows)
-    
+
     features = np.full((n_trials, n_windows, n_channels), np.nan, dtype=float)
-    
+
     for trial_idx in range(n_trials):
         sub, epoch_idx = trial_records[trial_idx]
         epochs = aligned_epochs[sub]
         times = epochs.times
-        
+
         trial_data = data[trial_idx]
-        
+
         for window_idx, (window_start, window_end) in enumerate(windows):
             if window_start < times[0] or window_end > times[-1]:
                 continue
-            
+
             time_mask = (times >= window_start) & (times <= window_end)
             if not np.any(time_mask):
                 continue
-            
+
             window_data = trial_data[:, time_mask]
             features[trial_idx, window_idx, :] = np.mean(window_data, axis=1)
-    
+
     return features
 
 
@@ -337,8 +354,12 @@ def _build_time_generalization_regressor(
     config: Dict[str, Any],
 ) -> TransformedTargetRegressor:
     transformer = PowerTransformer(
-        method=str(config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")),
-        standardize=bool(config.get("machine_learning.preprocessing.power_transformer_standardize", True)),
+        method=str(
+            config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")
+        ),
+        standardize=bool(
+            config.get("machine_learning.preprocessing.power_transformer_standardize", True)
+        ),
     )
     regressor = Pipeline(
         [
@@ -521,7 +542,9 @@ def time_generalization_regression(
         target=target,
         target_kind="continuous",
     )
-    trial_records, y_all_arr, groups_arr, subj_to_epochs, _ = prepare_trial_records_from_epochs(tuples)
+    trial_records, y_all_arr, groups_arr, subj_to_epochs, _ = prepare_trial_records_from_epochs(
+        tuples
+    )
     trial_runs_arr = _extract_trial_runs_from_records(trial_records, subj_to_epochs)
 
     config = config_dict or load_config()
@@ -537,7 +560,9 @@ def time_generalization_regression(
             "machine_learning.analysis.time_generalization.active_window must be a list/tuple of length 2."
         )
     active_window = (float(active_window_raw[0]), float(active_window_raw[1]))
-    window_len = float(require_config_value(config, "machine_learning.analysis.time_generalization.window_len"))
+    window_len = float(
+        require_config_value(config, "machine_learning.analysis.time_generalization.window_len")
+    )
     step = float(require_config_value(config, "machine_learning.analysis.time_generalization.step"))
 
     tmin_pl, tmax_pl = active_window
@@ -549,22 +574,30 @@ def time_generalization_regression(
 
     logo = LeaveOneGroupOut()
     n_folds_total = len(list(logo.split(np.arange(len(trial_records)), groups=groups_arr)))
-    
-    def _run_time_gen(y_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+    def _run_time_gen(
+        y_values: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         fold_mats_r = []
         fold_mats_r2 = []
         fold_counts = []
         window_centers_out = None
         n_folds_successful = 0
-        
-        for fold, (train_idx, test_idx) in enumerate(logo.split(np.arange(len(trial_records)), groups=groups_arr), start=1):
-            train_subjects = list({trial_records[i][0] for i in train_idx if trial_records[i][0] is not None})
+
+        for fold, (train_idx, test_idx) in enumerate(
+            logo.split(np.arange(len(trial_records)), groups=groups_arr), start=1
+        ):
+            train_subjects = list(
+                {trial_records[i][0] for i in train_idx if trial_records[i][0] is not None}
+            )
             test_subject = trial_records[int(test_idx[0])][0] if len(test_idx) else None
-            
-            common_chs = find_common_channels_train_test(train_subjects, test_subject, subj_to_epochs)
+
+            common_chs = find_common_channels_train_test(
+                train_subjects, test_subject, subj_to_epochs
+            )
             if not common_chs:
                 continue
-            
+
             min_channels_required = get_min_channels_required(config)
             if len(common_chs) < min_channels_required:
                 logger.warning(
@@ -572,50 +605,58 @@ def time_generalization_regression(
                     f"({min_channels_required}). Skipping fold."
                 )
                 continue
-            
-            subjects_in_fold = list({trial_records[i][0] for i in np.concatenate([train_idx, test_idx])})
-            aligned_epochs = {s: subj_to_epochs[s].copy().pick(common_chs) for s in subjects_in_fold}
-            
+
+            subjects_in_fold = list(
+                {trial_records[i][0] for i in np.concatenate([train_idx, test_idx])}
+            )
+            aligned_epochs = {
+                s: subj_to_epochs[s].copy().pick(common_chs) for s in subjects_in_fold
+            }
+
             train_idx_f, y_train = filter_finite_targets(train_idx, y_values)
             test_idx_f, y_test = filter_finite_targets(test_idx, y_values)
             if len(train_idx_f) == 0 or len(test_idx_f) == 0:
                 continue
-            
+
             X_train = extract_epoch_data_block(train_idx_f, trial_records, aligned_epochs)
             X_test = extract_epoch_data_block(test_idx_f, trial_records, aligned_epochs)
-            
+
             train_trial_records = [trial_records[int(i)] for i in train_idx_f]
             test_trial_records = [trial_records[int(i)] for i in test_idx_f]
-            
-            train_feats = _extract_window_features(X_train, train_trial_records, aligned_epochs, windows)
-            test_feats = _extract_window_features(X_test, test_trial_records, aligned_epochs, windows)
-            
+
+            train_feats = _extract_window_features(
+                X_train, train_trial_records, aligned_epochs, windows
+            )
+            test_feats = _extract_window_features(
+                X_test, test_trial_records, aligned_epochs, windows
+            )
+
             n_windows = len(windows)
             r_mat = np.full((n_windows, n_windows), np.nan, dtype=float)
             r2_mat = np.full_like(r_mat, np.nan)
             count_mat = np.zeros_like(r_mat, dtype=int)
-            
+
             if window_centers_out is None:
                 aligned_epochs[subjects_in_fold[0]]
                 window_centers_out = np.array([(w_start + w_end) / 2 for w_start, w_end in windows])
-            
+
             min_samples_per_window = int(
                 require_config_value(
                     config, "machine_learning.analysis.time_generalization.min_samples_per_window"
                 )
             )
-            
+
             for i in range(n_windows):
                 train_feat_i = train_feats[:, i, :]
                 finite_mask_train = np.isfinite(train_feat_i).any(axis=1)
                 if np.sum(finite_mask_train) < min_samples_per_window:
                     continue
-                
+
                 train_feat_i_clean = train_feat_i[finite_mask_train].copy()
                 col_mask = np.isfinite(train_feat_i_clean).sum(axis=0) > 0
                 if not col_mask.any():
                     continue
-                
+
                 train_feat_i_clean = train_feat_i_clean[:, col_mask]
                 groups_train_i = groups_arr[train_idx_f][finite_mask_train]
                 y_train_i = y_train[finite_mask_train]
@@ -653,7 +694,7 @@ def time_generalization_regression(
                     r_mat[i, j] = r_val
                     r2_mat[i, j] = r2_val
                     count_mat[i, j] = n_valid
-            
+
             if not np.isfinite(r_mat).any() or not np.any(count_mat > 0):
                 logger.warning(
                     "Fold %d: no evaluable time-generalization cells after quality filters; skipping fold.",
@@ -665,14 +706,14 @@ def time_generalization_regression(
             fold_mats_r2.append(r2_mat)
             fold_counts.append(count_mat)
             n_folds_successful += 1
-        
+
         if not fold_mats_r:
             logger.warning(
                 f"No successful folds out of {n_folds_total} total folds. "
                 "Cannot compute time-generalization matrices."
             )
             return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
-        
+
         if n_folds_successful < n_folds_total:
             coverage_pct = 100 * n_folds_successful / n_folds_total
             logger.warning(
@@ -699,15 +740,17 @@ def time_generalization_regression(
                     f"for reliable time-generalization analysis. "
                     f"Minimum {min_subjects_for_loso} successful folds required."
                 )
-        
+
         stacked_r = np.stack(fold_mats_r, axis=0)
         stacked_r2 = np.stack(fold_mats_r2, axis=0)
         stacked_counts = np.stack(fold_counts, axis=0)
-        tg_r, tg_r2, coverage_map, subject_coverage_map, _tested_mask = _aggregate_time_generalization_matrices(
-            stacked_r,
-            stacked_r2,
-            stacked_counts,
-            config,
+        tg_r, tg_r2, coverage_map, subject_coverage_map, _tested_mask = (
+            _aggregate_time_generalization_matrices(
+                stacked_r,
+                stacked_r2,
+                stacked_counts,
+                config,
+            )
         )
 
         return (
@@ -717,7 +760,7 @@ def time_generalization_regression(
             coverage_map,
             subject_coverage_map,
         )
-    
+
     tg_r, tg_r2, window_centers_out, coverage_map, subject_coverage_map = _run_time_gen(y_all_arr)
 
     null_r_list: List[np.ndarray] = []
@@ -772,7 +815,11 @@ def time_generalization_regression(
         n_perm_valid = len(null_r_list)
         completion_rate = (n_perm_valid / int(n_perm)) if int(n_perm) > 0 else 0.0
         min_completion = float(
-            get_config_value(config, "machine_learning.analysis.time_generalization.min_valid_permutation_fraction", 0.8)
+            get_config_value(
+                config,
+                "machine_learning.analysis.time_generalization.min_valid_permutation_fraction",
+                0.8,
+            )
         )
         if int(n_perm) > 0 and completion_rate < min_completion:
             raise RuntimeError(
@@ -782,16 +829,28 @@ def time_generalization_regression(
     null_r = np.stack(null_r_list, axis=0) if null_r_list else np.array([])
     null_r2 = np.stack(null_r2_list, axis=0) if null_r2_list else np.array([])
 
-    p_matrix, sig_fdr, sig_maxstat, sig_cluster, tested_mask = _compute_time_generalization_significance(
-        tg_r=tg_r,
-        null_r=null_r,
-        config=config,
+    p_matrix, sig_fdr, sig_maxstat, sig_cluster, tested_mask = (
+        _compute_time_generalization_significance(
+            tg_r=tg_r,
+            null_r=null_r,
+            config=config,
+        )
     )
     n_tested = int(np.sum(tested_mask))
     if n_tested > 0:
-        logger.info("Time-generalization FDR: %d/%d significant cells", int(np.sum(sig_fdr)), n_tested)
-        logger.info("Time-generalization max-stat (FWER): %d/%d significant cells", int(np.sum(sig_maxstat)), n_tested)
-        logger.info("Time-generalization cluster (FWER): %d/%d significant cells", int(np.sum(sig_cluster)), n_tested)
+        logger.info(
+            "Time-generalization FDR: %d/%d significant cells", int(np.sum(sig_fdr)), n_tested
+        )
+        logger.info(
+            "Time-generalization max-stat (FWER): %d/%d significant cells",
+            int(np.sum(sig_maxstat)),
+            n_tested,
+        )
+        logger.info(
+            "Time-generalization cluster (FWER): %d/%d significant cells",
+            int(np.sum(sig_cluster)),
+            n_tested,
+        )
 
     if results_dir is not None:
         try:

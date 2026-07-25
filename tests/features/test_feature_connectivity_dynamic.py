@@ -204,7 +204,9 @@ class TestDynamicConnectivityFeatures(unittest.TestCase):
             )
 
         expected = [
-            NamingSchema.build("conn", "full", "alpha", "chpair", "wpliswmean", channel_pair="C3-C4"),
+            NamingSchema.build(
+                "conn", "full", "alpha", "chpair", "wpliswmean", channel_pair="C3-C4"
+            ),
             NamingSchema.build("conn", "full", "alpha", "chpair", "aecswstd", channel_pair="C3-C4"),
             NamingSchema.build("conn", "full", "alpha", "roi", "wpliswac1", channel="Left-Right"),
             NamingSchema.build("conn", "full", "alpha", "global", "wpliswtopostab"),

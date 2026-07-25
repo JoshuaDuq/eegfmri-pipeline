@@ -35,8 +35,7 @@ def test_run_behavior_uses_behavior_yaml_as_runtime_source(tmp_path, monkeypatch
 behavior_analysis:
   statistics:
     base_seed: 123
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EEG_PIPELINE_BEHAVIOR_CONFIG", str(behavior_cfg))
@@ -61,8 +60,7 @@ def test_run_behavior_precedence_yaml_then_cli_then_set(tmp_path, monkeypatch) -
 behavior_analysis:
   statistics:
     predictor_control: "linear"
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("EEG_PIPELINE_BEHAVIOR_CONFIG", str(behavior_cfg))
@@ -87,7 +85,10 @@ behavior_analysis:
     config = ConfigDict({"project": {"task": "task"}})
     run_behavior(args, ["0001"], config)
 
-    assert _CaptureBehaviorPipeline.last_config.get("behavior_analysis.statistics.predictor_control") == "none"
+    assert (
+        _CaptureBehaviorPipeline.last_config.get("behavior_analysis.statistics.predictor_control")
+        == "none"
+    )
 
 
 def test_load_behavior_config_raises_for_missing_env_path(tmp_path, monkeypatch) -> None:

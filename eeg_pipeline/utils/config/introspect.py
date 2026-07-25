@@ -128,27 +128,27 @@ SET_PRECEDENCE_RULES: Sequence[Tuple[str, str, str]] = (
     (
         "eeg_pipeline/cli/commands/features_orchestrator.py",
         "_apply_feature_config_overrides(args, config)",
-        "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
+        'apply_set_overrides(config, getattr(args, "set_overrides", None))',
     ),
     (
         "eeg_pipeline/cli/commands/behavior_orchestrator.py",
         "_configure_behavior_compute_mode(args, config)",
-        "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
+        'apply_set_overrides(config, getattr(args, "set_overrides", None))',
     ),
     (
         "eeg_pipeline/cli/commands/preprocessing_orchestrator.py",
         "_update_alignment_event_config(args, config)",
-        "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
+        'apply_set_overrides(config, getattr(args, "set_overrides", None))',
     ),
     (
         "eeg_pipeline/cli/commands/machine_learning_orchestrator.py",
-        "config[\"feature_engineering.analysis_mode\"] = \"trial_ml_safe\"",
-        "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
+        'config["feature_engineering.analysis_mode"] = "trial_ml_safe"',
+        'apply_set_overrides(config, getattr(args, "set_overrides", None))',
     ),
     (
         "fmri_pipeline/cli/commands/fmri.py",
         "_update_fmri_config_from_args(args, config)",
-        "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
+        'apply_set_overrides(config, getattr(args, "set_overrides", None))',
     ),
 )
 
@@ -384,7 +384,9 @@ def _check_set_precedence(repo_root: Path) -> Tuple[bool, List[str]]:
         text = _read_text(repo_root / rel)
         before_idx = text.find(before_token)
         if before_idx < 0:
-            failures.append(f"Precedence check failed (missing before token) in {rel}: {before_token}")
+            failures.append(
+                f"Precedence check failed (missing before token) in {rel}: {before_token}"
+            )
             continue
 
         after_indices: List[int] = []

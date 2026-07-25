@@ -16,7 +16,7 @@ Usage:
         decode_binary_outcome,
         nested_loso_classification,
     )
-    
+
     # Quick classification
     results = decode_binary_outcome(X, y_binary, cv="loso", groups=subject_ids)
     print(f"AUC: {results['auc']:.3f}, Balanced Acc: {results['balanced_acc']:.3f}")
@@ -72,6 +72,7 @@ logger = logging.getLogger(__name__)
 # Pipeline Factories
 ###################################################################
 
+
 def _append_classification_resampler(steps: List[Tuple[str, Any]], cfg: Dict[str, Any]) -> None:
     resampler = str(cfg.get("classification_resampler", "none")).strip().lower()
     if resampler == "undersample":
@@ -82,7 +83,9 @@ def _append_classification_resampler(steps: List[Tuple[str, Any]], cfg: Dict[str
             )
         )
     elif resampler == "smote":
-        steps.append(("resampler", SMOTE(random_state=int(cfg.get("classification_resampler_seed", 42)))))
+        steps.append(
+            ("resampler", SMOTE(random_state=int(cfg.get("classification_resampler_seed", 42))))
+        )
 
 
 def _variance_param_prefix(n_covariates: int) -> str:
@@ -120,10 +123,10 @@ def create_svm_pipeline(
 ) -> Pipeline:
     """
     Create SVM classification pipeline.
-    
+
     SVM with RBF kernel is robust to outliers and works well
     for moderate-dimensional EEG feature spaces.
-    
+
     Parameters
     ----------
     kernel : str
@@ -132,7 +135,7 @@ def create_svm_pipeline(
         Random seed
     config : Any
         Configuration object
-    
+
     Returns
     -------
     Pipeline
@@ -170,10 +173,10 @@ def create_logistic_pipeline(
 ) -> Pipeline:
     """
     Create Logistic Regression classification pipeline.
-    
+
     L1 penalty gives sparse solutions (feature selection).
     L2 penalty is more stable for correlated features.
-    
+
     Parameters
     ----------
     penalty : str
@@ -182,7 +185,7 @@ def create_logistic_pipeline(
         Random seed
     config : Any
         Configuration object
-    
+
     Returns
     -------
     Pipeline
@@ -200,9 +203,9 @@ def create_logistic_pipeline(
         score_func=f_classif,
     )
     _append_classification_resampler(steps, cfg)
-    
+
     lr_kwargs = _get_lr_kwargs(penalty=penalty, l1_ratio=0.5 if penalty == "elasticnet" else None)
-    
+
     steps.append(
         (
             "lr",
@@ -225,17 +228,17 @@ def create_rf_classification_pipeline(
 ) -> Pipeline:
     """
     Create Random Forest classification pipeline.
-    
+
     RF captures non-linear relationships and provides
     built-in feature importance.
-    
+
     Parameters
     ----------
     seed : int
         Random seed
     config : Any
         Configuration object
-    
+
     Returns
     -------
     Pipeline
@@ -272,7 +275,7 @@ def create_ensemble_pipeline(
 ) -> Pipeline:
     """
     Create ensemble classifier combining SVM, LR, and RF.
-    
+
     Soft voting uses probability predictions for better calibration.
     """
     cfg = get_ml_config(config)
@@ -290,7 +293,9 @@ def create_ensemble_pipeline(
         max_iter=cfg["lr_max_iter"],
         random_state=seed,
         class_weight=cfg["lr_class_weight"],
-        l1_ratio=cfg.get("lr_l1_ratio_grid", [0.5])[0] if cfg["lr_penalty"] == "elasticnet" else None,
+        l1_ratio=(
+            cfg.get("lr_l1_ratio_grid", [0.5])[0] if cfg["lr_penalty"] == "elasticnet" else None
+        ),
     )
     rf = RandomForestClassifier(
         n_estimators=cfg["rf_n_estimators"],
@@ -301,6 +306,7 @@ def create_ensemble_pipeline(
 
     if cfg.get("calibrate_ensemble", False):
         from sklearn.calibration import CalibratedClassifierCV
+
         ensemble = VotingClassifier(
             estimators=[
                 ("svm", CalibratedClassifierCV(svm, method="sigmoid", cv=2)),
@@ -356,7 +362,9 @@ def build_logistic_param_grid(config: Any = None, n_covariates: int = 0) -> Dict
     return grid
 
 
-def build_rf_classification_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
+def build_rf_classification_param_grid(
+    config: Any = None, n_covariates: int = 0
+) -> Dict[str, List]:
     """Build parameter grid for Random Forest classifier."""
     cfg = get_ml_config(config)
     var_prefix = _variance_param_prefix(n_covariates)
@@ -376,12 +384,12 @@ def build_rf_classification_param_grid(config: Any = None, n_covariates: int = 0
 @dataclass
 class ClassificationResult:
     """Container for classification results."""
-    
+
     y_true: np.ndarray
     y_pred: np.ndarray
     y_prob: Optional[np.ndarray] = None
     groups: Optional[np.ndarray] = None
-    
+
     # Computed metrics
     accuracy: float = np.nan
     balanced_accuracy: float = np.nan
@@ -391,15 +399,15 @@ class ClassificationResult:
     precision: float = np.nan
     recall: float = np.nan
     specificity: float = np.nan
-    
+
     # Confusion matrix
     confusion: Optional[np.ndarray] = None
-    
+
     # ROC curve data
     fpr: Optional[np.ndarray] = None
     tpr: Optional[np.ndarray] = None
     thresholds: Optional[np.ndarray] = None
-    
+
     # Per-subject metrics (for LOSO)
     per_subject_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
     mean_subject_auc: float = np.nan
@@ -407,7 +415,7 @@ class ClassificationResult:
     test_indices: Optional[np.ndarray] = None
     failed_fold_count: int = 0
     n_folds_total: int = 0
-    
+
     def __post_init__(self):
         """Compute all metrics."""
         self._compute_metrics()
@@ -480,10 +488,14 @@ class ClassificationResult:
                 )
 
         if self.per_subject_metrics:
-            aucs = [m["auc"] for m in self.per_subject_metrics.values() if "auc" in m and np.isfinite(m["auc"])]
+            aucs = [
+                m["auc"]
+                for m in self.per_subject_metrics.values()
+                if "auc" in m and np.isfinite(m["auc"])
+            ]
             if aucs:
                 self.mean_subject_auc = float(np.mean(aucs))
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -500,10 +512,14 @@ class ClassificationResult:
             "n_positive": int(self.y_true.sum()),
             "n_negative": int(len(self.y_true) - self.y_true.sum()),
         }
-    
+
     def summary(self) -> str:
         """Human-readable summary."""
-        auc_str = f"{self.mean_subject_auc:.3f} (mean per-subject) / {self.auc:.3f} (pooled)" if np.isfinite(self.mean_subject_auc) else f"{self.auc:.3f} (pooled)"
+        auc_str = (
+            f"{self.mean_subject_auc:.3f} (mean per-subject) / {self.auc:.3f} (pooled)"
+            if np.isfinite(self.mean_subject_auc)
+            else f"{self.auc:.3f} (pooled)"
+        )
         return (
             f"Classification Results:\n"
             f"  AUC: {auc_str}\n"
@@ -532,7 +548,7 @@ def decode_binary_outcome(
 ) -> ClassificationResult:
     """
     Quick binary classification from features.
-    
+
     Parameters
     ----------
     X : np.ndarray
@@ -551,7 +567,7 @@ def decode_binary_outcome(
         Random seed
     config : Any
         Configuration object
-    
+
     Returns
     -------
     ClassificationResult
@@ -560,13 +576,13 @@ def decode_binary_outcome(
     # Validate
     X = np.asarray(X)
     y = np.asarray(y).astype(int)
-    
+
     if X.shape[0] != len(y):
         raise ValueError(f"X and y length mismatch: {X.shape[0]} vs {len(y)}")
-    
+
     if not np.all(np.isin(y, [0, 1])):
         raise ValueError("y must be binary (0 or 1)")
-    
+
     # Create pipeline
     if model == "svm":
         pipe = create_svm_pipeline(seed=seed, config=config, n_covariates=0)
@@ -578,7 +594,7 @@ def decode_binary_outcome(
         pipe = create_ensemble_pipeline(seed=seed, config=config, n_covariates=0)
     else:
         raise ValueError(f"Unknown model: {model}")
-    
+
     # Set up CV
     if cv == "loso":
         if groups is None:
@@ -600,7 +616,7 @@ def decode_binary_outcome(
                 "groups are required for numeric classification CV to avoid "
                 "subject/session leakage. Use cv='loso' or pass group labels."
             )
-    
+
     # Cross-validation predictions
     y_pred = np.zeros(len(y), dtype=int)
     y_prob = np.full(len(y), np.nan, dtype=float)
@@ -615,11 +631,15 @@ def decode_binary_outcome(
         X_train, X_test, _ = apply_fold_feature_harmonization(
             X_train,
             X_test,
-            groups_train if groups_train is not None else np.array(["all"] * len(X_train), dtype=object),
+            (
+                groups_train
+                if groups_train is not None
+                else np.array(["all"] * len(X_train), dtype=object)
+            ),
             "intersection" if groups_train is not None else "union_impute",
             n_covariates=0,
         )
-        
+
         pipe_clone = clone(pipe)
         pipe_clone.fit(X_train, y_train)
 
@@ -627,7 +647,7 @@ def decode_binary_outcome(
         fold_ids[test_idx] = int(fold_idx)
         if hasattr(pipe_clone, "predict_proba"):
             y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
-    
+
     return ClassificationResult(
         y_true=y,
         y_pred=y_pred,
@@ -659,10 +679,10 @@ def nested_loso_classification(
 ) -> Tuple[ClassificationResult, pd.DataFrame]:
     """
     Nested leave-one-subject-out classification with hyperparameter tuning.
-    
+
     Outer loop: LOSO for unbiased evaluation
     Inner loop: Stratified K-fold for hyperparameter tuning
-    
+
     Parameters
     ----------
     X : np.ndarray
@@ -683,19 +703,20 @@ def nested_loso_classification(
         Logger instance
     n_covariates : int
         Number of covariate columns appended to X
-    
+
     Returns
     -------
     Tuple[ClassificationResult, pd.DataFrame]
         (results, best_params_df)
     """
     import logging
+
     log = logger or logging.getLogger(__name__)
-    
+
     X = np.asarray(X)
     y = np.asarray(y).astype(int)
     groups = np.asarray(groups)
-    
+
     # Create pipeline and param grid
     if model == "svm":
         pipe = create_svm_pipeline(seed=seed, config=config, n_covariates=n_covariates)
@@ -704,14 +725,16 @@ def nested_loso_classification(
         pipe = create_logistic_pipeline(seed=seed, config=config, n_covariates=n_covariates)
         param_grid = build_logistic_param_grid(config, n_covariates=n_covariates)
     elif model == "rf":
-        pipe = create_rf_classification_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+        pipe = create_rf_classification_pipeline(
+            seed=seed, config=config, n_covariates=n_covariates
+        )
         param_grid = build_rf_classification_param_grid(config, n_covariates=n_covariates)
     else:
         raise ValueError(f"Unknown model: {model}")
-    
+
     outer_cv = LeaveOneGroupOut()
     outer_splits = list(outer_cv.split(X, y, groups))
-    
+
     y_pred = np.zeros(len(y), dtype=int)
     y_prob = np.full(len(y), np.nan, dtype=float)
     fold_ids = np.zeros(len(y), dtype=int)
@@ -719,7 +742,7 @@ def nested_loso_classification(
     best_params_records = []
     failed_fold_count = 0
     n_folds_total = len(outer_splits)
-    
+
     scoring_metric = str(
         require_config_value(config, "machine_learning.classification.scoring")
     ).strip()
@@ -728,7 +751,7 @@ def nested_loso_classification(
         fold_number = int(fold + 1)
         test_subject = groups[test_idx[0]]
         log.info(f"Fold {fold_number}: testing on subject {test_subject}")
-        
+
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
         train_groups = groups[train_idx]
@@ -739,28 +762,28 @@ def nested_loso_classification(
             harmonization_mode,
             n_covariates=n_covariates,
         )
-        
+
         # Skip if only one class in training
         if len(np.unique(y_train)) < 2:
             raise RuntimeError(
                 f"Fold {fold_number}: only one class in training for subject {test_subject}."
             )
-        
+
         # Inner CV: group-aware stratified CV to prevent within-subject mixing
         # This ensures hyperparameter tuning generalizes across subjects
         n_unique_train_groups = len(np.unique(train_groups))
         effective_splits = min(inner_splits, n_unique_train_groups)
-        
+
         # Check if minority class has enough samples for StratifiedGroupKFold
         counts = np.bincount(y_train)
         min_class_count = np.min(counts) if len(counts) > 0 else 0
-        
+
         if effective_splits < 2:
             raise RuntimeError(
                 f"Fold {fold_number}: inner CV requires at least 2 training "
                 f"groups, got {n_unique_train_groups}."
             )
-            
+
         if min_class_count < effective_splits:
             raise RuntimeError(
                 f"Fold {fold_number}: StratifiedGroupKFold requires each class "
@@ -768,9 +791,11 @@ def nested_loso_classification(
                 f"minority class count {min_class_count}."
             )
 
-        inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
+        inner_cv = StratifiedGroupKFold(
+            n_splits=effective_splits, shuffle=True, random_state=seed + fold
+        )
         cv_groups = train_groups
-        
+
         # GridSearch with group-aware inner CV
         gs = GridSearchCV(
             estimator=pipe,
@@ -781,23 +806,25 @@ def nested_loso_classification(
             refit=True,
             error_score="raise",
         )
-        
+
         try:
             gs.fit(X_train, y_train, groups=cv_groups)
-            best_params_records.append({
-                "fold": fold_number,
-                "test_subject": test_subject,
-                **gs.best_params_,
-                "best_score": gs.best_score_,
-            })
-            
+            best_params_records.append(
+                {
+                    "fold": fold_number,
+                    "test_subject": test_subject,
+                    **gs.best_params_,
+                    "best_score": gs.best_score_,
+                }
+            )
+
             y_pred[test_idx] = gs.predict(X_test)
             fold_ids[test_idx] = fold_number
             if hasattr(gs.best_estimator_, "predict_proba"):
                 y_prob[test_idx] = gs.best_estimator_.predict_proba(X_test)[:, 1]
         except Exception as e:
             raise RuntimeError(f"Fold {fold_number} failed: {e}") from e
-    
+
     result = ClassificationResult(
         y_true=y,
         y_pred=y_pred,
@@ -808,8 +835,8 @@ def nested_loso_classification(
         failed_fold_count=int(failed_fold_count),
         n_folds_total=int(n_folds_total),
     )
-    
+
     best_params_df = pd.DataFrame(best_params_records) if best_params_records else pd.DataFrame()
-    
+
     log.info(result.summary())
     return result, best_params_df

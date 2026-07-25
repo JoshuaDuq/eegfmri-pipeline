@@ -79,7 +79,11 @@ class BehaviorResultCache:
         suffix = self._trial_table_suffix_from_context_fn(ctx)
         fname = f"trials{suffix}"
         expected_dir = self._trial_table_output_dir_fn(ctx, False)
-        fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
+        fmt = (
+            str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv"))
+            .strip()
+            .lower()
+        )
         preferred_ext = ".parquet" if fmt == "parquet" else ".tsv"
         trial_table_path = expected_dir / f"{fname}{preferred_ext}"
         if not trial_table_path.exists():
@@ -116,7 +120,9 @@ class BehaviorResultCache:
             if ctx.selected_bands:
                 filtered = self._filter_feature_cols_by_band_fn(filtered, ctx)
             if computation_name:
-                filtered = self._filter_feature_cols_for_computation_fn(filtered, computation_name, ctx)
+                filtered = self._filter_feature_cols_for_computation_fn(
+                    filtered, computation_name, ctx
+                )
             filtered = self._filter_feature_cols_by_provenance_fn(filtered, ctx, computation_name)
             self._filtered_feature_cols[cache_key] = filtered
 

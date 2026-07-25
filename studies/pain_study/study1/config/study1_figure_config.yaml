@@ -96,6 +96,28 @@ study1:
         mne:
           label: "Final MNE processed"
           sampling_frequency_hz: 500.0
+    volume_locked_rectified_ecg:
+      dimensions_mm:
+        width: 183.0
+        height: 130.0
+      png_dpi: 300
+      marker_segments: ["Volume", "V  1"]
+      epoch_duration_s: 0.9
+      minimum_complete_epochs: 50
+      expected_runs_per_participant: 6
+      stages:
+        raw:
+          sampling_frequency_hz: 5000.0
+        processed:
+          sampling_frequency_hz: 1000.0
+      peak_detection:
+        prominence_fraction: 0.05
+        minimum_distance_ms: 30.0
+        search_radius_ms: 5.0
+        maximum_run_latency_sd_ms: 5.0
+      colors:
+        raw: "#D55E00"
+        processed: "#0072B2"
     temporal_specificity:
       dimensions_mm:
         width: 183.0

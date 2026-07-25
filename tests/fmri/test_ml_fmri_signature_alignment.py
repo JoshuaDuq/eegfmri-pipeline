@@ -66,7 +66,9 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                     "duration": [7.5, 7.5],
                 }
             )
-            sig_df.to_csv(sig_dir / "trial_signature_expression_sub_0001.tsv", sep="\t", index=False)
+            sig_df.to_csv(
+                sig_dir / "trial_signature_expression_sub_0001.tsv", sep="\t", index=False
+            )
 
             trials_df = pd.DataFrame(
                 {

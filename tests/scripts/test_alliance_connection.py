@@ -7,7 +7,6 @@ from pathlib import Path
 
 from tests import REPO_ROOT
 
-
 SOURCE_DIR = REPO_ROOT / "local_workflows" / "alliance_canada"
 
 

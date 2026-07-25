@@ -27,7 +27,7 @@ def _load_epochs_for_subject(
 ):
     """Load epochs for a subject and task."""
     from .epochs import load_epochs_for_analysis
-    
+
     epochs, _ = load_epochs_for_analysis(
         subject,
         task,
@@ -50,7 +50,7 @@ def _load_features_for_subject(
 ):
     """Load features and targets for a subject."""
     from .feature_io import _load_features_and_targets
-    
+
     temporal_df, active_df, conn_df, y, info = _load_features_and_targets(
         subject, task, deriv_root, config, epochs=epochs
     )
@@ -68,7 +68,7 @@ def _load_aligned_events_and_covariates(
     """Load aligned events and build covariate matrices."""
     from .alignment import get_aligned_events
     from .covariates import extract_predictor_data
-    
+
     aligned_events = get_aligned_events(
         epochs,
         subject,
@@ -77,12 +77,12 @@ def _load_aligned_events_and_covariates(
         logger=logger,
         config=config,
     )
-    
+
     pred_series, pred_col = extract_predictor_data(aligned_events, config)
     Z_df_full, Z_df_predictor = _build_covariate_matrices(
         aligned_events, partial_covars, pred_col, config
     )
-    
+
     return aligned_events, pred_series, Z_df_full, Z_df_predictor
 
 
@@ -97,16 +97,16 @@ def load_subject_scatter_data(
     Optional[pd.DataFrame],  # temporal_df
     Optional[pd.DataFrame],  # active_df (power)
     Optional[pd.DataFrame],  # y (target)
-    Optional[Any],           # info
-    Optional[pd.Series],     # pred_series
+    Optional[Any],  # info
+    Optional[pd.Series],  # pred_series
     Optional[pd.DataFrame],  # Z_df_full
     Optional[pd.DataFrame],  # Z_df_predictor
-    Optional[Dict],          # roi_map
+    Optional[Dict],  # roi_map
     Optional[pd.DataFrame],  # conn_df (connectivity)
 ]:
     """
     Load all data required for subject behavioral scatter plots.
-    
+
     Parameters
     ----------
     subject : str
@@ -121,26 +121,26 @@ def load_subject_scatter_data(
         Logger instance
     partial_covars : List[str], optional
         List of partial covariate names
-        
+
     Returns
     -------
     Tuple of 9 optional values:
         temporal_df, active_df, y, info, pred_series, Z_df_full, Z_df_predictor, roi_map, conn_df
     """
     epochs = _load_epochs_for_subject(subject, task, deriv_root, config, logger)
-    
+
     temporal_df, active_df, conn_df, y, info = _load_features_for_subject(
         subject, task, deriv_root, config, epochs
     )
-    
+
     _, pred_series, Z_df_full, Z_df_predictor = _load_aligned_events_and_covariates(
         epochs, subject, task, config, logger, partial_covars
     )
-    
+
     from ..analysis.tfr import build_rois_from_info
 
     roi_map = build_rois_from_info(info, config)
-    
+
     return (
         temporal_df,
         active_df,

@@ -97,19 +97,9 @@ class TestTuiConfigGapAudit(unittest.TestCase):
             )
 
     def test_yaml_exposes_scientific_config_defaults(self) -> None:
-        eeg_config_path = (
-            self.repo_root
-            / "eeg_pipeline"
-            / "utils"
-            / "config"
-            / "eeg_config.yaml"
-        )
+        eeg_config_path = self.repo_root / "eeg_pipeline" / "utils" / "config" / "eeg_config.yaml"
         fmri_config_path = (
-            self.repo_root
-            / "fmri_pipeline"
-            / "utils"
-            / "config"
-            / "fmri_config.yaml"
+            self.repo_root / "fmri_pipeline" / "utils" / "config" / "fmri_config.yaml"
         )
 
         eeg_config = yaml.safe_load(eeg_config_path.read_text(encoding="utf-8"))

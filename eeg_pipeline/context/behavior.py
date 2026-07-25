@@ -33,7 +33,6 @@ from eeg_pipeline.utils.data.feature_alignment import (
     require_trial_id_column,
 )
 
-
 ###################################################################
 # Constants
 ###################################################################
@@ -78,6 +77,7 @@ class ComputationStatus(Enum):
 @dataclass
 class ComputationResult:
     """Result of a computation."""
+
     name: str
     status: ComputationStatus
     records: List[CorrelationRecord] = field(default_factory=list)
@@ -100,6 +100,7 @@ class ComputationResult:
 @dataclass
 class BehaviorContext:
     """Shared context for behavior analysis."""
+
     subject: str
     task: str
     config: Any
@@ -117,12 +118,18 @@ class BehaviorContext:
     compute_reliability: bool = True
     stats_config: Optional[Any] = None
     feature_categories: Optional[List[str]] = None
-    selected_feature_files: Optional[List[str]] = None  # Specific files to load (e.g., ["power", "aperiodic"])
-    selected_bands: Optional[List[str]] = None  # Specific bands to include (e.g., ["alpha", "beta"])
-    computation_features: Optional[Dict[str, List[str]]] = None  # Per-computation feature category filters
+    selected_feature_files: Optional[List[str]] = (
+        None  # Specific files to load (e.g., ["power", "aperiodic"])
+    )
+    selected_bands: Optional[List[str]] = (
+        None  # Specific bands to include (e.g., ["alpha", "beta"])
+    )
+    computation_features: Optional[Dict[str, List[str]]] = (
+        None  # Per-computation feature category filters
+    )
     also_save_csv: bool = False  # Also save output tables as CSV files
     overwrite: bool = True  # If False, append timestamp to output folders
-    
+
     epochs: Any = None
     epochs_info: Any = None
     aligned_events: Optional[pd.DataFrame] = None
@@ -174,14 +181,16 @@ class BehaviorContext:
     @property
     def power_bands(self) -> List[str]:
         from eeg_pipeline.utils.config.loader import get_frequency_band_names
+
         return get_frequency_band_names(self.config)
 
     def get_min_samples(self, sample_type: str = "default") -> int:
         """Get minimum samples threshold from config.
-        
+
         Delegates to centralized get_min_samples in utils.config.loader.
         """
         from eeg_pipeline.utils.config.loader import get_min_samples
+
         return get_min_samples(self.config, sample_type)
 
     @property
@@ -224,8 +233,13 @@ class BehaviorContext:
         from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 
         self.epochs, self.aligned_events = load_epochs_for_analysis(
-            self.subject, self.task, align="strict", preload=True,
-            deriv_root=self.deriv_root, logger=self.logger, config=self.config
+            self.subject,
+            self.task,
+            align="strict",
+            preload=True,
+            deriv_root=self.deriv_root,
+            logger=self.logger,
+            config=self.config,
         )
         if self.epochs is None or self.aligned_events is None:
             self.logger.error("Failed to load epochs or events")
@@ -248,13 +262,11 @@ class BehaviorContext:
             )
             return False
 
-        coverage_info = ", ".join(
-            f"{k}={v}" for k, v in feature_counts.items() if v > 0
-        )
+        coverage_info = ", ".join(f"{k}={v}" for k, v in feature_counts.items() if v > 0)
         self.logger.info("Feature coverage loaded: %s", coverage_info)
 
         self._apply_category_filter(feature_counts)
-        
+
         return True
 
     def _load_selected_feature_files(self) -> None:
@@ -269,9 +281,7 @@ class BehaviorContext:
 
         for key in self.selected_feature_files:
             if key == "all":
-                raise ValueError(
-                    "Feature file key 'all' is not supported in behavior analysis."
-                )
+                raise ValueError("Feature file key 'all' is not supported in behavior analysis.")
             if key not in STANDARD_FEATURE_FILES:
                 raise ValueError(f"Unknown feature file key: {key}")
 
@@ -292,9 +302,7 @@ class BehaviorContext:
 
         attr_name = _FEATURE_FILE_TO_ATTR.get(key)
         if not attr_name:
-            raise KeyError(
-                f"Feature file key {key!r} has no mapped context attribute."
-            )
+            raise KeyError(f"Feature file key {key!r} has no mapped context attribute.")
 
         df = read_table(path)
         self.feature_paths[key] = path
@@ -311,16 +319,12 @@ class BehaviorContext:
         if current_df is None:
             setattr(self, attr_name, df)
         else:
-            new_columns = [
-                col for col in df.columns if col not in current_df.columns
-            ]
+            new_columns = [col for col in df.columns if col not in current_df.columns]
             if new_columns:
                 merged_df = pd.concat([current_df, df[new_columns]], axis=1)
                 setattr(self, attr_name, merged_df)
 
-        self.logger.info(
-            "Loaded %s: %d columns, %d rows", key, df.shape[1], df.shape[0]
-        )
+        self.logger.info("Loaded %s: %d columns, %d rows", key, df.shape[1], df.shape[0])
 
     def _load_all_features_from_bundle(self) -> None:
         """Load all features using feature bundle."""
@@ -365,7 +369,7 @@ class BehaviorContext:
 
     def iter_feature_tables(self) -> List[Tuple[str, Optional[pd.DataFrame]]]:
         """Iterate over all feature tables as (name, dataframe) pairs.
-        
+
         Centralizes the canonical ordering of feature types to avoid duplication.
         Uses FEATURE_CATEGORIES from domain.features.constants for consistency.
         """
@@ -392,8 +396,7 @@ class BehaviorContext:
         }
         feature_types = list(FEATURE_CATEGORIES) + ["temporal"]
         return [
-            (feature_type, feature_dataframes.get(feature_type))
-            for feature_type in feature_types
+            (feature_type, feature_dataframes.get(feature_type)) for feature_type in feature_types
         ]
 
     def _get_feature_counts(self) -> Dict[str, int]:
@@ -450,9 +453,7 @@ class BehaviorContext:
             else []
         )
         try:
-            return pick_target_column(
-                self.aligned_events, target_columns=outcome_columns
-            )
+            return pick_target_column(self.aligned_events, target_columns=outcome_columns)
         except (KeyError, AttributeError):
             return None
 
@@ -460,9 +461,7 @@ class BehaviorContext:
         """Align all feature tables to aligned_events index using iter_feature_tables."""
         base_index = self.aligned_events.index
         if not base_index.is_unique:
-            self.logger.error(
-                "Aligned events index contains duplicates for sub-%s", self.subject
-            )
+            self.logger.error("Aligned events index contains duplicates for sub-%s", self.subject)
             return False
 
         alignment_report: Dict[str, Any] = {}
@@ -477,12 +476,8 @@ class BehaviorContext:
             )
             setattr(self, attr_name, aligned_df)
 
-        if all(
-            df is None or df.empty for _, df in self.iter_feature_tables()
-        ):
-            self.logger.error(
-                "All feature tables failed alignment for sub-%s", self.subject
-            )
+        if all(df is None or df.empty for _, df in self.iter_feature_tables()):
+            self.logger.error("All feature tables failed alignment for sub-%s", self.subject)
             return False
 
         self.data_qc["alignment_checks"] = alignment_report
@@ -513,8 +508,7 @@ class BehaviorContext:
 
         if len(df) != len(base_index):
             self.logger.error(
-                "Feature table length mismatch for %s: %d rows vs %d targets "
-                "for sub-%s",
+                "Feature table length mismatch for %s: %d rows vs %d targets " "for sub-%s",
                 name,
                 len(df),
                 len(base_index),
@@ -711,8 +705,7 @@ class BehaviorContext:
                 return reindexed_df
 
             self.logger.error(
-                "Feature table index mismatch for %s (sub-%s): cannot align "
-                "indices",
+                "Feature table index mismatch for %s (sub-%s): cannot align " "indices",
                 name,
                 self.subject,
             )
@@ -764,22 +757,16 @@ class BehaviorContext:
             self.predictor_series, self.predictor_column = None, None
             return
 
-        self.predictor_series = pd.to_numeric(
-            self.aligned_events[resolved], errors="coerce"
-        )
+        self.predictor_series = pd.to_numeric(self.aligned_events[resolved], errors="coerce")
         self.predictor_column = str(resolved)
 
     def _build_raw_covariate_matrix(self) -> Optional[pd.DataFrame]:
         """Build raw covariate matrix from aligned events."""
         from eeg_pipeline.utils.data.covariates import build_covariate_matrix
 
-        return build_covariate_matrix(
-            self.aligned_events, self.partial_covars, self.config
-        )
+        return build_covariate_matrix(self.aligned_events, self.partial_covars, self.config)
 
-    def _identify_dropped_columns(
-        self, cov_raw: Optional[pd.DataFrame]
-    ) -> Dict[str, str]:
+    def _identify_dropped_columns(self, cov_raw: Optional[pd.DataFrame]) -> Dict[str, str]:
         """Identify columns that were dropped and why."""
         drop_reasons = {}
         if cov_raw is None or cov_raw.empty:
@@ -818,9 +805,7 @@ class BehaviorContext:
             columns=[self.predictor_column], errors="ignore"
         )
         self.covariates_df = self._sanitize_covariates(self.covariates_df)
-        cov_report.setdefault("dropped_by_rule", []).append(
-            self.predictor_column
-        )
+        cov_report.setdefault("dropped_by_rule", []).append(self.predictor_column)
 
     def _build_covariates_without_predictor(self) -> None:
         """Build covariates DataFrame without predictor column."""
@@ -830,16 +815,9 @@ class BehaviorContext:
             self.covariates_df, self.predictor_column
         )
 
-        if (
-            self.covariates_without_predictor_df is not None
-            and self.aligned_events is not None
-        ):
-            if not self.covariates_without_predictor_df.index.equals(
-                self.aligned_events.index
-            ):
-                self.covariates_without_predictor_df = (
-                    self.covariates_without_predictor_df.copy()
-                )
+        if self.covariates_without_predictor_df is not None and self.aligned_events is not None:
+            if not self.covariates_without_predictor_df.index.equals(self.aligned_events.index):
+                self.covariates_without_predictor_df = self.covariates_without_predictor_df.copy()
                 self.covariates_without_predictor_df.index = self.aligned_events.index
 
         self.covariates_without_predictor_df = self._sanitize_covariates(
@@ -849,22 +827,16 @@ class BehaviorContext:
     def _finalize_covariate_report(self, cov_report: Dict[str, Any]) -> None:
         """Finalize covariate QC report with final and dropped columns."""
         final_columns = (
-            []
-            if self.covariates_df is None
-            else [str(c) for c in self.covariates_df.columns]
+            [] if self.covariates_df is None else [str(c) for c in self.covariates_df.columns]
         )
         raw_columns = cov_report.get("raw_columns", [])
-        dropped_columns = [
-            c for c in raw_columns if c not in final_columns
-        ]
+        dropped_columns = [c for c in raw_columns if c not in final_columns]
 
         cov_report["final_columns"] = final_columns
         cov_report["dropped_columns"] = dropped_columns
         self.data_qc["covariates_qc"] = cov_report
 
-    def _sanitize_covariates(
-        self, cov: Optional[pd.DataFrame]
-    ) -> Optional[pd.DataFrame]:
+    def _sanitize_covariates(self, cov: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
         """Clean covariate DataFrame: convert to numeric, remove constants and NaN columns."""
         if cov is None or cov.empty:
             return None
@@ -883,10 +855,7 @@ class BehaviorContext:
 
     def _align_covariate_index(self, cov: pd.DataFrame) -> None:
         """Align covariate DataFrame index with aligned_events."""
-        if (
-            self.aligned_events is not None
-            and not cov.index.equals(self.aligned_events.index)
-        ):
+        if self.aligned_events is not None and not cov.index.equals(self.aligned_events.index):
             cov.index = self.aligned_events.index
 
     def _convert_to_numeric(self, cov: pd.DataFrame) -> None:
@@ -907,10 +876,7 @@ class BehaviorContext:
         constant_columns = [
             col
             for col in cov.columns
-            if int(
-                pd.to_numeric(cov[col], errors="coerce").nunique(dropna=True)
-            )
-            <= 1
+            if int(pd.to_numeric(cov[col], errors="coerce").nunique(dropna=True)) <= 1
         ]
         if constant_columns:
             cov.drop(columns=constant_columns, errors="ignore", inplace=True)
@@ -939,18 +905,12 @@ class BehaviorContext:
         trial_column = self._find_trial_column()
         if trial_column is None:
             self.control_trial_order = False
-            self.data_qc["trial_order"].update(
-                {"enabled": False, "reason": "missing_trial_column"}
-            )
+            self.data_qc["trial_order"].update({"enabled": False, "reason": "missing_trial_column"})
             return
 
-        trial_series = pd.to_numeric(
-            self.aligned_events[trial_column], errors="coerce"
-        )
+        trial_series = pd.to_numeric(self.aligned_events[trial_column], errors="coerce")
         max_missing_fraction = self._get_max_missing_fraction_threshold()
-        validation_result = self._validate_trial_order_column(
-            trial_series, max_missing_fraction
-        )
+        validation_result = self._validate_trial_order_column(trial_series, max_missing_fraction)
 
         self._record_trial_order_metadata(
             trial_column, trial_series, max_missing_fraction, validation_result
@@ -1005,9 +965,7 @@ class BehaviorContext:
     ) -> Dict[str, Any]:
         """Validate trial order column quality."""
         n_samples = len(trial_series)
-        missing_fraction = (
-            float(trial_series.isna().mean()) if n_samples > 0 else 1.0
-        )
+        missing_fraction = float(trial_series.isna().mean()) if n_samples > 0 else 1.0
         n_unique = int(trial_series.dropna().nunique())
         is_monotonic_global = bool(trial_series.dropna().is_monotonic_increasing)
         (
@@ -1021,9 +979,7 @@ class BehaviorContext:
         exceeds_missing_threshold = missing_fraction > max_missing
         is_not_monotonic = not is_monotonic
 
-        is_valid = not (
-            is_all_missing or exceeds_missing_threshold or is_not_monotonic
-        )
+        is_valid = not (is_all_missing or exceeds_missing_threshold or is_not_monotonic)
 
         return {
             "is_valid": is_valid,
@@ -1096,21 +1052,15 @@ class BehaviorContext:
                 "is_monotonic_increasing_global_non_nan": validation.get(
                     "is_monotonic_global", validation["is_monotonic"]
                 ),
-                "is_monotonic_within_group": validation.get(
-                    "is_monotonic_within_group", False
-                ),
+                "is_monotonic_within_group": validation.get("is_monotonic_within_group", False),
                 "monotonic_group_column": validation.get("monotonic_group_column"),
-                "n_non_monotonic_groups": int(
-                    validation.get("n_non_monotonic_groups", 0)
-                ),
+                "n_non_monotonic_groups": int(validation.get("n_non_monotonic_groups", 0)),
                 "max_missing_fraction_threshold": max_missing,
                 "added_trial_index_column": True,
             }
         )
 
-    def _find_equivalent_trial_order_covariate(
-        self, trial_series: pd.Series
-    ) -> Optional[str]:
+    def _find_equivalent_trial_order_covariate(self, trial_series: pd.Series) -> Optional[str]:
         """Return an existing covariate column that already encodes trial order."""
         if self.covariates_df is None or self.covariates_df.empty:
             return None
@@ -1140,7 +1090,7 @@ class BehaviorContext:
 
     def _extract_group_ids(self) -> None:
         """Extract group IDs for permutation testing.
-        
+
         Uses configurable preference order for group columns.
         Default order is block→run→session (more conservative for within-subject tests),
         preferring smaller units for permutation to be more conservative about
@@ -1179,9 +1129,7 @@ class BehaviorContext:
         ).strip()
         return run_col if run_col else "run_id"
 
-    def _build_group_column_preference_order(
-        self, run_column: str
-    ) -> List[str]:
+    def _build_group_column_preference_order(self, run_column: str) -> List[str]:
         """Build preference order for group columns."""
         from eeg_pipeline.utils.config.loader import get_config_value
 
@@ -1207,9 +1155,7 @@ class BehaviorContext:
         seen = set()
         return [item for item in items if item not in seen and not seen.add(item)]
 
-    def _resolve_column_name(
-        self, candidate: str, run_column: str
-    ) -> Optional[str]:
+    def _resolve_column_name(self, candidate: str, run_column: str) -> Optional[str]:
         """Resolve column name, handling aliases."""
         if candidate in self.aligned_events.columns:
             return candidate
@@ -1219,9 +1165,7 @@ class BehaviorContext:
 
         return None
 
-    def _try_extract_group_series(
-        self, column_name: str
-    ) -> Optional[pd.Series]:
+    def _try_extract_group_series(self, column_name: str) -> Optional[pd.Series]:
         """Try to extract group series from column, validating it."""
         try:
             values = self.aligned_events[column_name]
@@ -1229,12 +1173,9 @@ class BehaviorContext:
             if n_unique <= 1:
                 return None
 
-            return pd.Series(
-                values, index=self.aligned_events.index, name=column_name
-            )
+            return pd.Series(values, index=self.aligned_events.index, name=column_name)
         except (KeyError, AttributeError, ValueError):
             return None
-
 
     def add_result(self, result: ComputationResult) -> None:
         """Add a computation result."""

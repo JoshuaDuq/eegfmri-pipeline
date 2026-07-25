@@ -24,13 +24,16 @@ class TestBaseCompletion(unittest.TestCase):
         fake_cfg = DotConfig({"project": {"task": "task"}})
         fake_root = Path(tempfile.mkdtemp())
 
-        with patch("eeg_pipeline.pipelines.base.load_config", return_value=fake_cfg), patch(
-            "eeg_pipeline.pipelines.base.get_logger", return_value=Mock()
-        ), patch("eeg_pipeline.pipelines.base.setup_matplotlib"), patch(
-            "eeg_pipeline.pipelines.base.resolve_deriv_root", return_value=fake_root
-        ), patch("eeg_pipeline.pipelines.base.ensure_derivatives_dataset_description"), patch(
-            "eeg_pipeline.pipelines.base.get_subject_logger", return_value=Mock()
-        ) as mock_subj:
+        with (
+            patch("eeg_pipeline.pipelines.base.load_config", return_value=fake_cfg),
+            patch("eeg_pipeline.pipelines.base.get_logger", return_value=Mock()),
+            patch("eeg_pipeline.pipelines.base.setup_matplotlib"),
+            patch("eeg_pipeline.pipelines.base.resolve_deriv_root", return_value=fake_root),
+            patch("eeg_pipeline.pipelines.base.ensure_derivatives_dataset_description"),
+            patch(
+                "eeg_pipeline.pipelines.base.get_subject_logger", return_value=Mock()
+            ) as mock_subj,
+        ):
             d = Dummy("dummy", config=None)
             d.get_subject_logger("0001")
 
@@ -93,7 +96,10 @@ class TestBaseCompletion(unittest.TestCase):
 
         d = Dummy()
         failed = d._handle_batch_failures(
-            ledger=[{"subject": "0001", "status": "failed"}, {"subject": "0002", "status": "success"}],
+            ledger=[
+                {"subject": "0001", "status": "failed"},
+                {"subject": "0002", "status": "success"},
+            ],
             subjects=["0001", "0002"],
             ledger_path=Path("/tmp/l.tsv"),
             progress=None,
@@ -108,7 +114,9 @@ class TestBaseCompletion(unittest.TestCase):
         class Dummy(PipelineBase):
             def __init__(self):
                 self.name = "dummy"
-                self.config = DotConfig({"project": {"task": "x"}, "paths": {"bids_root": "/tmp/bids"}})
+                self.config = DotConfig(
+                    {"project": {"task": "x"}, "paths": {"bids_root": "/tmp/bids"}}
+                )
                 self.logger = Mock()
                 self.deriv_root = Path(tempfile.mkdtemp())
 

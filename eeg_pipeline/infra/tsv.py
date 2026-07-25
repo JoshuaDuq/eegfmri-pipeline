@@ -73,28 +73,28 @@ def write_stats_table(
     force_tsv: bool = False,
 ) -> Path:
     """Write stats DataFrame, using parquet for large tables.
-    
+
     Automatically switches to parquet format for DataFrames with more than
     _PARQUET_SIZE_THRESHOLD rows, unless force_tsv is True.
-    
+
     Args:
         df: DataFrame to write
         path: Output path (extension will be adjusted if needed)
         index: Whether to include index
         force_tsv: If True, always use TSV regardless of size
-        
+
     Returns:
         Actual path written (may differ from input if extension changed)
     """
     use_parquet = not force_tsv and len(df) > _PARQUET_SIZE_THRESHOLD
-    
+
     if use_parquet:
         actual_path = path.with_suffix(".parquet")
         write_parquet(df, actual_path, index=index)
     else:
         actual_path = path.with_suffix(".tsv") if path.suffix == ".parquet" else path
         write_tsv(df, actual_path, index=index)
-    
+
     return actual_path
 
 
@@ -107,4 +107,3 @@ __all__ = [
     "write_csv",
     "write_stats_table",
 ]
-

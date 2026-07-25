@@ -24,7 +24,7 @@ CorrelationMethod = Literal["spearman", "pearson"]
 @runtime_checkable
 class ConfigLike(Protocol):
     """Protocol for configuration objects with dict-like access."""
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value by dot-separated key."""
         ...
@@ -73,15 +73,16 @@ class CorrelationResult:
 @dataclass
 class BandData:
     """Pre-computed band-filtered data and derived quantities."""
+
     band: str
     fmin: float
     fmax: float
     filtered: np.ndarray  # (epochs, channels, times)
     analytic: np.ndarray  # Complex analytic signal
     envelope: np.ndarray  # Amplitude envelope
-    phase: np.ndarray     # Instantaneous phase
-    power: np.ndarray     # Envelope squared
-    
+    phase: np.ndarray  # Instantaneous phase
+    power: np.ndarray  # Envelope squared
+
     def crop(self, tmin_idx: int, tmax_idx: int) -> BandData:
         """Crop band data to specific time indices."""
         return BandData(
@@ -99,6 +100,7 @@ class BandData:
 @dataclass
 class PSDData:
     """Pre-computed power spectral density."""
+
     freqs: np.ndarray
     psd: np.ndarray  # (epochs, channels, freqs)
 
@@ -194,14 +196,14 @@ class PrecomputedQC:
 @dataclass
 class PrecomputedData:
     """Container for all pre-computed intermediate data."""
-    
+
     # Raw data
     data: np.ndarray  # (epochs, channels, times)
     times: np.ndarray
     sfreq: float
     ch_names: List[str]
     picks: np.ndarray
-    
+
     # Time windows
     windows: Optional[TimeWindows] = None
 
@@ -213,17 +215,17 @@ class PrecomputedData:
     # Provenance flags (important for scientific interpretation)
     evoked_subtracted: bool = False
     evoked_subtracted_conditionwise: bool = False
-    
+
     # Band-filtered data (computed on demand)
     band_data: Dict[str, BandData] = field(default_factory=dict)
-    
+
     # PSD (computed on demand)
     psd_data: Optional[PSDData] = None
-    
+
     # GFP (computed on demand)
     gfp: Optional[np.ndarray] = None  # (epochs, times)
     gfp_band: Dict[str, np.ndarray] = field(default_factory=dict)
-    
+
     # Configuration
     config: Any = None
     logger: Any = None
@@ -365,9 +367,7 @@ class PrecomputedData:
             spatial_transform=self.spatial_transform,
         )
 
-    def _crop_band_data(
-        self, cropped: "PrecomputedData", tmin_idx: int, tmax_idx: int
-    ) -> None:
+    def _crop_band_data(self, cropped: "PrecomputedData", tmin_idx: int, tmax_idx: int) -> None:
         """Crop all band data to the specified indices."""
         for band, band_data in self.band_data.items():
             cropped.band_data[band] = band_data.crop(tmin_idx, tmax_idx)

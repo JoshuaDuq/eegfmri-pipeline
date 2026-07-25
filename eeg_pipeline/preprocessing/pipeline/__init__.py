@@ -5,9 +5,9 @@ from . import tfr
 from . import stats
 
 __all__ = [
-    'utils',
-    'io',
-    'preprocess',
-    'tfr',
-    'stats',
+    "utils",
+    "io",
+    "preprocess",
+    "tfr",
+    "stats",
 ]

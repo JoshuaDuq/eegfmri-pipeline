@@ -5,7 +5,6 @@ import subprocess
 
 from tests import REPO_ROOT
 
-
 WORKFLOW_DIR = REPO_ROOT / "local_workflows" / "alliance_canada"
 EXPORTED_FIELDS = (
     "ALLIANCE_CLUSTER",
@@ -21,12 +20,8 @@ EXPORTED_FIELDS = (
 
 
 def _source_profile(cluster: str) -> subprocess.CompletedProcess[str]:
-    fields = " ".join(f'\"${{{field}}}\"' for field in EXPORTED_FIELDS)
-    command = (
-        "set -e; "
-        f'source "{WORKFLOW_DIR / "alliance_env.sh"}"; '
-        f"printf '%s\\n' {fields}"
-    )
+    fields = " ".join(f'"${{{field}}}"' for field in EXPORTED_FIELDS)
+    command = "set -e; " f'source "{WORKFLOW_DIR / "alliance_env.sh"}"; ' f"printf '%s\\n' {fields}"
     env = os.environ.copy()
     env["ALLIANCE_CLUSTER"] = cluster
     return subprocess.run(

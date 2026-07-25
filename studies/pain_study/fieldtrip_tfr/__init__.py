@@ -1,1 +1,1 @@
-"""Hybrid MNE-to-FieldTrip ICA and time-frequency workflow."""
+"""Exact MNE ICA component review and FieldTrip time-frequency workflow."""

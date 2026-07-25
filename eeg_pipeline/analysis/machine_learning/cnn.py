@@ -105,7 +105,9 @@ def fit_predict_cnn_binary_classifier(
     groups_train = np.asarray(groups_train)
 
     if X_train.ndim != 3 or X_test.ndim != 3:
-        raise ValueError(f"CNN expects 3D input [trials, channels, time], got {X_train.shape} and {X_test.shape}")
+        raise ValueError(
+            f"CNN expects 3D input [trials, channels, time], got {X_train.shape} and {X_test.shape}"
+        )
     if len(np.unique(y_train)) < 2:
         raise ValueError("CNN training fold has only one class.")
 
@@ -116,7 +118,9 @@ def fit_predict_cnn_binary_classifier(
     np.random.seed(int(seed))
 
     val_fraction = float(cfg.get("cnn_val_fraction", 0.2))
-    train_idx, val_idx = _split_train_val_indices(groups_train, y_train, seed=seed, val_fraction=val_fraction)
+    train_idx, val_idx = _split_train_val_indices(
+        groups_train, y_train, seed=seed, val_fraction=val_fraction
+    )
 
     X_fit = X_train[train_idx]
     y_fit = y_train[train_idx]
@@ -158,7 +162,13 @@ def fit_predict_cnn_binary_classifier(
         def __init__(self) -> None:
             super().__init__()
             self.block1 = nn.Sequential(
-                nn.Conv2d(1, temporal_filters, kernel_size=(1, kernel_len), padding=(0, kernel_len // 2), bias=False),
+                nn.Conv2d(
+                    1,
+                    temporal_filters,
+                    kernel_size=(1, kernel_len),
+                    padding=(0, kernel_len // 2),
+                    bias=False,
+                ),
                 nn.BatchNorm2d(temporal_filters),
                 nn.Conv2d(
                     temporal_filters,
@@ -181,7 +191,12 @@ def fit_predict_cnn_binary_classifier(
                     groups=temporal_filters * depth_multiplier,
                     bias=False,
                 ),
-                nn.Conv2d(temporal_filters * depth_multiplier, pointwise_filters, kernel_size=(1, 1), bias=False),
+                nn.Conv2d(
+                    temporal_filters * depth_multiplier,
+                    pointwise_filters,
+                    kernel_size=(1, 1),
+                    bias=False,
+                ),
                 nn.BatchNorm2d(pointwise_filters),
                 nn.ELU(inplace=True),
                 nn.AvgPool2d(kernel_size=(1, 8)),
@@ -207,7 +222,9 @@ def fit_predict_cnn_binary_classifier(
     n_neg = int(np.sum(y_fit == 0))
     pos_weight = None
     if n_pos > 0 and n_neg > 0:
-        pos_weight = torch.tensor([float(n_neg / max(n_pos, 1))], dtype=torch.float32, device=device)
+        pos_weight = torch.tensor(
+            [float(n_neg / max(n_pos, 1))], dtype=torch.float32, device=device
+        )
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = optim.AdamW(
         model.parameters(),

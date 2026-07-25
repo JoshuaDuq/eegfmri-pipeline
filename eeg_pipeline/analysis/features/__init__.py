@@ -111,19 +111,15 @@ _LAZY_IMPORTS = {
     "extract_connectivity_from_precomputed": "connectivity",
     "extract_directed_connectivity_features": "connectivity",
     "extract_directed_connectivity_from_precomputed": "connectivity",
-
     # Source Localization
     "extract_source_localization_features": "source_localization",
     "extract_source_connectivity_features": "source_localization",
     "extract_source_localization_from_precomputed": "source_localization",
-
     # Power
     "extract_power_features": "spectral",
     "extract_asymmetry_from_precomputed": "precomputed.extras",
-
     # Aperiodic
     "extract_aperiodic_features": "aperiodic",
-
     # Phase / PAC / ITPC
     "extract_phase_features": "phase",
     "compute_pac_comodulograms": "phase",
@@ -143,6 +139,7 @@ def __getattr__(name: str):
     """Lazy import for secondary functions."""
     if name in _LAZY_IMPORTS:
         import importlib
+
         module_path = _LAZY_IMPORTS[name]
         # Handle absolute module paths (starting with eeg_pipeline)
         if module_path.startswith("eeg_pipeline."):

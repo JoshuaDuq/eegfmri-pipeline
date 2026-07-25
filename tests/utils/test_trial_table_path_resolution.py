@@ -70,12 +70,7 @@ class TestTrialTablePathResolution(unittest.TestCase):
         module = _load_trial_table_module()
 
         root = Path(tempfile.mkdtemp())
-        legacy = (
-            root
-            / "trial_table"
-            / "connectivity_power"
-            / "trials_connectivity_power.parquet"
-        )
+        legacy = root / "trial_table" / "connectivity_power" / "trials_connectivity_power.parquet"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_bytes(b"PAR1")
 

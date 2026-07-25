@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 # Best Parameters I/O
 ###################################################################
 
+
 def prepare_best_params_path(
     base_path: Path,
     mode: str,
@@ -27,9 +28,7 @@ def prepare_best_params_path(
 
     if mode == "run_scoped":
         resolved_run_id = run_id or time.strftime("%Y%m%d_%H%M%S")
-        output_path = base_path.with_name(
-            f"{base_path.stem}_{resolved_run_id}{base_path.suffix}"
-        )
+        output_path = base_path.with_name(f"{base_path.stem}_{resolved_run_id}{base_path.suffix}")
     else:
         if mode == "truncate":
             base_path.unlink(missing_ok=True)
@@ -42,6 +41,7 @@ def prepare_best_params_path(
 ###################################################################
 # Predictions and Indices Export
 ###################################################################
+
 
 def export_predictions(
     y_true: np.ndarray,

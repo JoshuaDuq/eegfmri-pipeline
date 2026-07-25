@@ -48,7 +48,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
                 "--allow-misaligned-trim",
                 "--min-alignment-samples",
                 "7",
-                "--trim-to-first-volume",
+                "--trim-to-volume-bounds",
                 "--fmri-onset-reference",
                 "scanner_trigger",
                 "--event-col-predictor",
@@ -80,7 +80,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("epochs.autoreject_n_interpolate"), [4, 8, 16])
         self.assertTrue(config.get("alignment.allow_misaligned_trim", False))
         self.assertEqual(config.get("alignment.min_alignment_samples"), 7)
-        self.assertTrue(config.get("alignment.trim_to_first_volume", False))
+        self.assertTrue(config.get("alignment.trim_to_volume_bounds", False))
         self.assertEqual(config.get("alignment.fmri_onset_reference"), "first_stim_start")
         self.assertEqual(config.get("event_columns.predictor"), ["temperature", "stim_temp"])
         self.assertEqual(config.get("event_columns.outcome"), ["rating"])

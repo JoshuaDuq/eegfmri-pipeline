@@ -54,8 +54,12 @@ def build_stage_runners_impl(
         "temporal_tfr": lambda ctx, config, outputs: stage_temporal_tfr_fn(ctx),
         "temporal_stats": lambda ctx, config, outputs: stage_temporal_stats_fn(ctx),
         "cluster": lambda ctx, config, outputs: stage_cluster_fn(ctx, config),
-        "hierarchical_fdr_summary": lambda ctx, config, outputs: stage_hierarchical_fdr_summary_fn(ctx, config),
-        "export": lambda ctx, config, outputs: stage_export_fn(ctx, config, build_results_from_outputs_fn(outputs)),
+        "hierarchical_fdr_summary": lambda ctx, config, outputs: stage_hierarchical_fdr_summary_fn(
+            ctx, config
+        ),
+        "export": lambda ctx, config, outputs: stage_export_fn(
+            ctx, config, build_results_from_outputs_fn(outputs)
+        ),
     }
 
 

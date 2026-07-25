@@ -116,18 +116,14 @@ def _plot_local_comb(
 ) -> None:
     window = DEFAULT_HARMONIC_WINDOWS[index]
     reference_frequency = SCANNER_REFERENCE_FREQUENCIES_HZ[index]
-    reference_index = int(
-        np.argmin(np.abs(summary.frequencies_hz - reference_frequency))
-    )
+    reference_index = int(np.argmin(np.abs(summary.frequencies_hz - reference_frequency)))
     attenuation = float(
-        summary.input_median_db[reference_index]
-        - summary.final_median_db[reference_index]
+        summary.input_median_db[reference_index] - summary.final_median_db[reference_index]
     )
     distance = np.abs(summary.frequencies_hz - reference_frequency)
     background = (distance >= 0.35) & (distance <= 2.0)
     final_prominence = float(
-        summary.final_median_db[reference_index]
-        - np.median(summary.final_median_db[background])
+        summary.final_median_db[reference_index] - np.median(summary.final_median_db[background])
     )
 
     _plot_stage_spectra(
@@ -145,8 +141,7 @@ def _plot_local_comb(
     axis.text(
         0.02,
         0.96,
-        f"MNE attenuation {attenuation:.1f} dB\n"
-        f"Final prominence {final_prominence:.1f} dB",
+        f"MNE attenuation {attenuation:.1f} dB\n" f"Final prominence {final_prominence:.1f} dB",
         transform=axis.transAxes,
         fontsize=7.5,
         va="top",
@@ -167,9 +162,7 @@ def _plot_stage_spectra(
     low_hz: float,
     high_hz: float,
 ) -> None:
-    mask = (summary.frequencies_hz >= low_hz) & (
-        summary.frequencies_hz <= high_hz
-    )
+    mask = (summary.frequencies_hz >= low_hz) & (summary.frequencies_hz <= high_hz)
     _plot_stage(
         axis,
         summary.frequencies_hz[mask],

@@ -15,21 +15,20 @@ import pandas as pd
 
 from .validation import assert_continuous_predictor
 
-
 # Numerical stability threshold
 _NUMERICAL_TOLERANCE = 1e-12
 
 
 def _ols_fit(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
     """Fit OLS regression coefficients.
-    
+
     Parameters
     ----------
     X : np.ndarray
         Design matrix (n_samples, n_features)
     y : np.ndarray
         Target vector (n_samples,)
-        
+
     Returns
     -------
     Optional[np.ndarray]
@@ -42,9 +41,11 @@ def _ols_fit(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
     return beta
 
 
-def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray, min_denominator: float = _NUMERICAL_TOLERANCE) -> np.ndarray:
+def _hc3_se(
+    X: np.ndarray, y: np.ndarray, beta: np.ndarray, min_denominator: float = _NUMERICAL_TOLERANCE
+) -> np.ndarray:
     """Compute HC3 heteroscedasticity-consistent standard errors.
-    
+
     Parameters
     ----------
     X : np.ndarray
@@ -55,7 +56,7 @@ def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray, min_denominator: flo
         OLS coefficient vector (n_features,)
     min_denominator : float
         Minimum threshold for denominator to avoid division by zero
-        
+
     Returns
     -------
     np.ndarray
@@ -67,17 +68,17 @@ def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray, min_denominator: flo
         XtX_inv = np.linalg.inv(X.T @ X)
     except np.linalg.LinAlgError:
         return np.full(p, np.nan)
-    
+
     # Leverage: h_i = x_i^T (X'X)^-1 x_i
     leverage = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
     leverage_complement = 1.0 - leverage
     is_valid = np.isfinite(leverage_complement) & (np.abs(leverage_complement) > min_denominator)
     leverage_complement = np.where(is_valid, leverage_complement, np.nan)
-    
+
     # HC3 weights: w_i = (r_i^2) / (1 - h_i)^2
     weights = (residuals**2) / (leverage_complement**2)
     weights = np.where(np.isfinite(weights), weights, 0.0)
-    
+
     # HC3 covariance matrix
     middle_matrix = X.T @ (X * weights[:, None])
     covariance = XtX_inv @ middle_matrix @ XtX_inv
@@ -86,14 +87,14 @@ def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray, min_denominator: flo
 
 def _r2(y: np.ndarray, y_hat: np.ndarray) -> float:
     """Calculate R-squared coefficient of determination.
-    
+
     Parameters
     ----------
     y : np.ndarray
         Observed values
     y_hat : np.ndarray
         Predicted values
-        
+
     Returns
     -------
     float
@@ -117,11 +118,11 @@ def _build_covariate_design(
     return_design_df: bool = False,
 ) -> Union[Tuple[np.ndarray, List[str]], Tuple[np.ndarray, List[str], pd.DataFrame]]:
     """Build numeric covariate design matrix with categorical dummies.
-    
+
     Consolidated implementation for building design matrices from covariate columns.
     Handles categorical variables by creating dummy variables, and optionally adds
     an intercept term.
-    
+
     Parameters
     ----------
     df : pd.DataFrame
@@ -134,7 +135,7 @@ def _build_covariate_design(
         Maximum number of levels for categorical variables to create dummies (default: 20)
     return_design_df : bool
         If True, also return the design DataFrame (default: False)
-        
+
     Returns
     -------
     Union[Tuple[np.ndarray, List[str]], Tuple[np.ndarray, List[str], pd.DataFrame]]
@@ -143,18 +144,15 @@ def _build_covariate_design(
     use = df[covariate_cols].copy() if covariate_cols else pd.DataFrame(index=df.index)
     parts = []
     names: List[str] = []
-    
+
     if add_intercept:
         parts.append(pd.Series(1.0, index=df.index, name="intercept"))
         names.append("intercept")
-    
+
     for col in covariate_cols:
         s = use[col]
-        is_categorical = (
-            isinstance(s.dtype, pd.CategoricalDtype)
-            or pd.api.types.is_object_dtype(s)
-        )
-        
+        is_categorical = isinstance(s.dtype, pd.CategoricalDtype) or pd.api.types.is_object_dtype(s)
+
         if is_categorical:
             n_levels = int(s.nunique(dropna=True))
             if n_levels <= 1 or n_levels > max_dummies:
@@ -166,14 +164,14 @@ def _build_covariate_design(
         else:
             parts.append(pd.to_numeric(s, errors="coerce"))
             names.append(str(col))
-    
+
     if parts:
         design_df = pd.concat(parts, axis=1)
     else:
         design_df = pd.DataFrame(index=df.index)
-    
+
     X = design_df.to_numpy(dtype=float)
-    
+
     if return_design_df:
         return X, names, design_df
     return X, names
@@ -231,7 +229,12 @@ def _build_predictor_covariates(
     if ctrl in ("outcome_hat", "outcome_hat_from_predictor", "nonlinear"):
         if outcome not in exclude_outcomes and "outcome_hat_from_predictor" in trial_df.columns:
             covariates.append("outcome_hat_from_predictor")
-            meta.update({"predictor_control_used": "outcome_hat", "predictor_control_column": "outcome_hat_from_predictor"})
+            meta.update(
+                {
+                    "predictor_control_used": "outcome_hat",
+                    "predictor_control_column": "outcome_hat_from_predictor",
+                }
+            )
         else:
             raise ValueError(
                 "Regression predictor_control='outcome_hat' requires "
@@ -264,19 +267,25 @@ def _build_predictor_covariates(
             for col in spline_cols:
                 if col not in covariates:
                     covariates.append(col)
-            meta.update({
-                "predictor_control_used": "spline",
-                "predictor_control_column": predictor_col,
-                "predictor_spline": spline_meta,
-            })
+            meta.update(
+                {
+                    "predictor_control_used": "spline",
+                    "predictor_control_column": predictor_col,
+                    "predictor_spline": spline_meta,
+                }
+            )
         else:
-            meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"})
+            meta.update(
+                {"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"}
+            )
 
     # Linear control (default)
     elif predictor_col in trial_df.columns:
         covariates.append(predictor_col)
         meta.update({"predictor_control_used": "linear", "predictor_control_column": predictor_col})
     else:
-        meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"})
+        meta.update(
+            {"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"}
+        )
 
     return covariates, design_df, meta

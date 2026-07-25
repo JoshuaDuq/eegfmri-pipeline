@@ -100,6 +100,18 @@ def test_extract_volume_samples_rejects_remaining_v1_collision() -> None:
         extract_volume_samples(raw, annotation_description="Volume/V  1")
 
 
+def test_validate_unambiguous_vas_markers_rejects_ambiguous_vas_description() -> None:
+    raw = _raw_with_annotations(["Volume/V  1", "Vas_on/V  1"])
+
+    with pytest.raises(ValueError, match="Vas_on/V  1"):
+        validate_acquisition(
+            raw,
+            expected_sampling_frequency=1_000.0,
+            expected_channel_count=2,
+            ecg_channel="ECG",
+        )
+
+
 def test_validate_acquisition_assigns_the_ecg_channel_type() -> None:
     raw = _raw_with_annotations(["Volume/V  1", "Volume/V  1"])
 

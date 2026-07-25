@@ -84,11 +84,7 @@ def _find_missing_event_columns(
             explicit_key = "behavior_analysis.outcome_column"
         elif logical_name == "predictor":
             explicit_key = "behavior_analysis.predictor_column"
-        if (
-            explicit_key is not None
-            and config is not None
-            and hasattr(config, "get")
-        ):
+        if explicit_key is not None and config is not None and hasattr(config, "get"):
             explicit_col = str(config.get(explicit_key, "") or "").strip()
             if explicit_col and explicit_col in events_df.columns:
                 continue
@@ -97,37 +93,32 @@ def _find_missing_event_columns(
         if logical_name == "outcome":
             if resolve_outcome_column(events_df, config) is not None:
                 continue
-            missing_columns.append(
-                f"event_columns.{logical_name} (tried: {candidates})"
-            )
+            missing_columns.append(f"event_columns.{logical_name} (tried: {candidates})")
             continue
         elif logical_name == "predictor":
             if resolve_predictor_column(events_df, config) is not None:
                 continue
-            missing_columns.append(
-                f"event_columns.{logical_name} (tried: {candidates})"
-            )
+            missing_columns.append(f"event_columns.{logical_name} (tried: {candidates})")
             continue
         elif logical_name == "binary_outcome":
-            if config is not None and find_binary_outcome_column_in_events(events_df, config) is not None:
+            if (
+                config is not None
+                and find_binary_outcome_column_in_events(events_df, config) is not None
+            ):
                 continue
 
         if not isinstance(candidates, (list, tuple)):
             continue
         found = any(col in events_df.columns for col in candidates)
         if not found:
-            missing_columns.append(
-                f"event_columns.{logical_name} (tried: {candidates})"
-            )
+            missing_columns.append(f"event_columns.{logical_name} (tried: {candidates})")
     return missing_columns
 
 
 def _validate_align_mode(align: str) -> None:
     valid_align_modes = ("strict", "warn", "none")
     if align not in valid_align_modes:
-        raise ValueError(
-            f"align must be one of {valid_align_modes}, got '{align}'"
-        )
+        raise ValueError(f"align must be one of {valid_align_modes}, got '{align}'")
 
 
 def _resolve_task_is_rest(
@@ -159,9 +150,7 @@ def _validate_rest_epoch_overlap_for_analysis(
             "preprocessing.rest_epochs_overlap must be finite for resting-state analysis loading."
         )
     if overlap < 0:
-        raise ValueError(
-            "preprocessing.rest_epochs_overlap must be greater than or equal to 0."
-        )
+        raise ValueError("preprocessing.rest_epochs_overlap must be greater than or equal to 0.")
     if overlap > 0:
         raise ValueError(
             "Resting-state aligned analysis does not support preprocessing.rest_epochs_overlap > 0, "
@@ -184,9 +173,7 @@ def _handle_missing_events(
             subject,
             task,
         )
-        rest_events = pd.DataFrame(
-            {"trial_id": np.arange(1, len(epochs) + 1, dtype=int)}
-        )
+        rest_events = pd.DataFrame({"trial_id": np.arange(1, len(epochs) + 1, dtype=int)})
         return epochs, rest_events
 
     if align == "strict":
@@ -221,14 +208,12 @@ def load_epochs_for_analysis(
     _validate_align_mode(align)
     resolved_task_is_rest = _resolve_task_is_rest(config, task_is_rest)
     _validate_rest_epoch_overlap_for_analysis(config, resolved_task_is_rest)
-    
+
     epochs_path = find_clean_epochs_path(
         subject, task, deriv_root=deriv_root, config=config, constants=constants
     )
     if epochs_path is None or not epochs_path.exists():
-        logger.error(
-            f"Could not find cleaned epochs file for sub-{subject}, task-{task}"
-        )
+        logger.error(f"Could not find cleaned epochs file for sub-{subject}, task-{task}")
         return None, None
 
     logger.info(f"Loading epochs: {epochs_path}")
@@ -241,7 +226,7 @@ def load_epochs_for_analysis(
         config=config,
         constants=constants,
     )
-    
+
     if clean_events_path is None or not clean_events_path.exists():
         return _handle_missing_events(
             epochs,
@@ -257,22 +242,22 @@ def load_epochs_for_analysis(
         events_df,
         context=f"Clean events.tsv for sub-{subject}, task-{task}",
     )
-    
+
     logger.info(f"Loaded clean events.tsv: {len(events_df)} rows")
-    
+
     if len(events_df) != len(epochs):
         raise ValueError(
             f"Clean events.tsv length mismatch for sub-{subject}, task-{task}: "
             f"events={len(events_df)}, epochs={len(epochs)}"
         )
-    
+
     _validate_event_columns(
         events_df,
         config,
         logger,
         required_groups=required_event_groups,
     )
-    
+
     if use_cache:
         epochs._behavioral = events_df  # type: ignore[attr-defined]
     return epochs, events_df.reset_index(drop=True)

@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 _MISSING = object()
 
 
@@ -62,9 +61,7 @@ def resolve_resting_state_eeg_mode(config: Any) -> bool:
 def resolve_eeg_bids_root(config: Any, *, task_is_rest: Optional[bool] = None) -> Path:
     """Resolve the EEG BIDS input root for task or resting-state processing."""
     use_rest_root = (
-        resolve_resting_state_eeg_mode(config)
-        if task_is_rest is None
-        else bool(task_is_rest)
+        resolve_resting_state_eeg_mode(config) if task_is_rest is None else bool(task_is_rest)
     )
     if use_rest_root:
         return _resolve_required_path(
@@ -90,9 +87,7 @@ def resolve_eeg_bids_root(config: Any, *, task_is_rest: Optional[bool] = None) -
 def resolve_eeg_deriv_root(config: Any, *, task_is_rest: Optional[bool] = None) -> Path:
     """Resolve the EEG derivatives root for task or resting-state processing."""
     use_rest_root = (
-        resolve_resting_state_eeg_mode(config)
-        if task_is_rest is None
-        else bool(task_is_rest)
+        resolve_resting_state_eeg_mode(config) if task_is_rest is None else bool(task_is_rest)
     )
     if use_rest_root:
         return _resolve_required_path(
@@ -140,9 +135,7 @@ def resolve_resting_state_fmri_mode(config: Any) -> bool:
 def resolve_fmri_bids_root(config: Any, *, task_is_rest: Optional[bool] = None) -> Path:
     """Resolve the fMRI BIDS input root for task or resting-state processing."""
     use_rest_root = (
-        resolve_resting_state_fmri_mode(config)
-        if task_is_rest is None
-        else bool(task_is_rest)
+        resolve_resting_state_fmri_mode(config) if task_is_rest is None else bool(task_is_rest)
     )
     if use_rest_root:
         return _resolve_required_path(
@@ -168,9 +161,7 @@ def resolve_fmri_bids_root(config: Any, *, task_is_rest: Optional[bool] = None) 
 def resolve_fmri_deriv_root(config: Any, *, task_is_rest: Optional[bool] = None) -> Path:
     """Resolve the fMRI derivatives root for task or resting-state processing."""
     use_rest_root = (
-        resolve_resting_state_fmri_mode(config)
-        if task_is_rest is None
-        else bool(task_is_rest)
+        resolve_resting_state_fmri_mode(config) if task_is_rest is None else bool(task_is_rest)
     )
     if use_rest_root:
         return _resolve_required_path(

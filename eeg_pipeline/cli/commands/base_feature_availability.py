@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Shared helpers
 ###################################################################
 
+
 def _find_bands_in_columns(
     columns: Iterable[str],
     candidate_bands: Collection[str],
@@ -60,6 +61,7 @@ _FEATURE_AVAILABILITY_CATEGORIES = [
 def _read_parquet_columns_only(path: Path) -> List[str]:
     """Read only column names from parquet file without loading data."""
     import pyarrow.parquet as pq
+
     parquet_file = pq.ParquetFile(path)
     return [col for col in parquet_file.schema_arrow.names]
 
@@ -90,10 +92,7 @@ def _empty_feature_availability() -> dict:
             category: {"available": False, "last_modified": None}
             for category in _FEATURE_AVAILABILITY_CATEGORIES
         },
-        "bands": {
-            band: {"available": False, "last_modified": None}
-            for band in all_bands
-        },
+        "bands": {band: {"available": False, "last_modified": None} for band in all_bands},
         "computations": {
             computation: {"available": False, "last_modified": None}
             for computation in all_computations
@@ -122,7 +121,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         "bands": {},
         "computations": {},
     }
-    
+
     category_patterns = {
         "power": ["features_power*.parquet"],
         "connectivity": ["features_connectivity*.parquet"],
@@ -141,10 +140,10 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         "asymmetry": ["features_asymmetry*.parquet"],
         "microstates": ["features_microstates*.parquet"],
     }
-    
+
     bands = set(FREQUENCY_BANDS)
     band_times = {}
-    
+
     for category, patterns in category_patterns.items():
         found_file = None
         if features_path.exists():
@@ -155,10 +154,10 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                     if files:
                         found_file = max(files, key=lambda f: f.stat().st_mtime)
                         break
-        
+
         if found_file:
             mtime_str = _utc_timestamp(found_file.stat().st_mtime)
-            
+
             result["features"][category] = {
                 "available": True,
                 "last_modified": mtime_str,
@@ -178,17 +177,20 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                 )
         else:
             result["features"][category] = {"available": False, "last_modified": None}
-    
+
     for band in bands:
         if band in band_times:
             result["bands"][band] = {"available": True, "last_modified": band_times[band]}
         else:
             result["bands"][band] = {"available": False, "last_modified": None}
-    
+
     stats_dir = features_path.parent / "stats"
     computation_patterns = {
         "trial_table": ["trial_table*/*/trials_*.tsv", "trial_table*/*/trials_*.parquet"],
-        "predictor_residual": ["predictor_residual*/*/trials_with_residual*.tsv", "predictor_residual*/*/*.metadata.json"],
+        "predictor_residual": [
+            "predictor_residual*/*/trials_with_residual*.tsv",
+            "predictor_residual*/*/*.metadata.json",
+        ],
         "regression": [
             "trialwise_regression*/*/regression_feature_effects*.parquet",
             "trialwise_regression*/*/regression_feature_effects*.tsv",
@@ -215,7 +217,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         ],
         "cluster": ["cluster*/*/cluster_results_*.tsv", "cluster*/*/null_distribution_*.json"],
     }
-    
+
     for comp, patterns in computation_patterns.items():
         found_file = None
         if stats_dir.exists():
@@ -223,7 +225,8 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                 files = list(stats_dir.rglob(pattern))
                 if comp == "correlations":
                     files = [
-                        f for f in files
+                        f
+                        for f in files
                         if "temporal" not in f.name.lower()
                         and not f.name.startswith("corr_stats_temporal")
                         and not f.name.startswith("temporal_correlations")
@@ -231,7 +234,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                 if files:
                     found_file = max(files, key=lambda f: f.stat().st_mtime)
                     break
-        
+
         if found_file:
             mtime_str = _utc_timestamp(found_file.stat().st_mtime)
             result["computations"][comp] = {
@@ -240,5 +243,5 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             }
         else:
             result["computations"][comp] = {"available": False, "last_modified": None}
-    
+
     return result

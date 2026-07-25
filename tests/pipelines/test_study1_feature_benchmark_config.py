@@ -214,7 +214,6 @@ def test_feature_benchmark_siips1_residualization_includes_nps(tmp_path) -> None
 
     feature_config = feature_benchmark_config(config, target_name="SIIPS1")
 
-    assert (
-        get_config_value(feature_config, "machine_learning.target_residualization.columns", None)
-        == [*LEVEL2_COLUMNS, "NPS"]
-    )
+    assert get_config_value(
+        feature_config, "machine_learning.target_residualization.columns", None
+    ) == [*LEVEL2_COLUMNS, "NPS"]

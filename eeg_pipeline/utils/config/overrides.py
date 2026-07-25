@@ -64,16 +64,12 @@ def _apply_set_override(config: dict[str, Any], raw_override: str) -> None:
     if not override:
         raise ValueError("Empty override is invalid; expected KEY=VALUE.")
     if "=" not in override:
-        raise ValueError(
-            f"Invalid override {raw_override!r}; expected KEY=VALUE."
-        )
+        raise ValueError(f"Invalid override {raw_override!r}; expected KEY=VALUE.")
 
     key, raw_value = override.split("=", 1)
     path_parts = [part.strip() for part in key.split(".") if part.strip()]
     if not path_parts:
-        raise ValueError(
-            f"Invalid override key {key!r}; expected a non-empty dotted path."
-        )
+        raise ValueError(f"Invalid override key {key!r}; expected a non-empty dotted path.")
 
     cursor: dict[str, Any] = config
     for part in path_parts[:-1]:
@@ -110,14 +106,14 @@ def _coerce_set_value(raw_value: str) -> Any:
     except ValueError:
         pass
 
-    if raw_value.startswith("[") or raw_value.startswith("{") or (
-        raw_value.startswith('"') and raw_value.endswith('"')
+    if (
+        raw_value.startswith("[")
+        or raw_value.startswith("{")
+        or (raw_value.startswith('"') and raw_value.endswith('"'))
     ):
         try:
             return json.loads(raw_value)
         except json.JSONDecodeError:
-            raise ValueError(
-                f"Invalid JSON override value: {raw_value!r}"
-            ) from None
+            raise ValueError(f"Invalid JSON override value: {raw_value!r}") from None
 
     return raw_value
