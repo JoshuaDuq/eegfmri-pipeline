@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import matplotlib
 import mne
 import numpy as np
@@ -17,6 +19,7 @@ from eeg_pipeline.preprocessing.report.preservation import (  # noqa: E402
     compute_split_half_reliability,
     plot_preservation,
     preservation_html,
+    resolvable_prominence_threshold,
 )
 
 SFREQ = 250.0
@@ -24,9 +27,9 @@ POSTERIOR = ["Pz", "POz", "Oz", "O1", "O2", "PO3", "PO4"]
 ANTERIOR = ["Fz", "Cz", "C3", "C4"]
 
 
-def _continuous(*, alpha_amplitude: float, seconds: float = 120.0):
+def _continuous(*, alpha_amplitude: float, seconds: float = 120.0, seed: int = 1):
     """Continuous data carrying posterior alpha at 10.5 Hz and nothing else."""
-    rng = np.random.default_rng(1)
+    rng = np.random.default_rng(seed)
     names = POSTERIOR + ANTERIOR
     info = mne.create_info(names, SFREQ, "eeg")
     n_samples = int(seconds * SFREQ)
@@ -171,6 +174,25 @@ def test_posterior_alpha_is_found_where_it_was_injected() -> None:
     assert alpha.has_peak
 
 
+def test_the_posterior_spectrum_uses_the_same_power_reference_as_the_sensor_spectra() -> None:
+    """One report must not quote power in two scales.
+
+    The sensor-spectra panel is referenced to 1 µV²/Hz. This panel drew a bare "PSD (dB)"
+    against V²/Hz, so the same recording read about 120 dB quieter here than a few
+    sections earlier, and neither axis said so. Prominence is a difference and is
+    unaffected either way; the level is what a reader cannot otherwise place.
+    """
+    from eeg_pipeline.preprocessing.report.spectra import POWER_UNIT_LABEL
+
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+
+    assert alpha is not None
+    # A µV²-referenced EEG spectrum does not sit below -100 dB; a V²-referenced one does.
+    assert alpha.power_db.max() > -60.0
+    axis = plot_preservation(alpha=alpha).axes[0]
+    assert POWER_UNIT_LABEL in axis.get_ylabel()
+
+
 def test_a_recording_without_alpha_has_a_low_prominence() -> None:
     alpha = compute_posterior_alpha(_continuous(alpha_amplitude=0.0))
 
@@ -231,3 +253,257 @@ def test_the_section_reports_both_measurements_for_a_task() -> None:
 def test_an_empty_preservation_panel_is_an_error() -> None:
     with pytest.raises(ValueError, match="at least one measurement"):
         preservation_html()
+
+
+def test_the_panel_names_the_epochs_the_measurement_came_from() -> None:
+    """A pre-rejection number and a post-rejection number are not interchangeable.
+
+    The panel is worth showing at ICA-review time, before 16 of 22 components are
+    approved for exclusion, because every other panel at that point measures removal.
+    But the epochs it is measured on then still include the ones autoreject will drop,
+    so the figure has to say which set it used or the two readings are indistinguishable.
+    """
+    epochs = _evoked_epochs(response_amplitude=6e-6)
+    epochs.set_montage("standard_1020", verbose="ERROR")
+    reliability = compute_split_half_reliability(epochs)
+
+    document = preservation_html(
+        reliability=reliability,
+        analysis_status="Provisional — all task epochs",
+    )
+
+    assert "Provisional — all task epochs" in document
+
+
+def test_the_panel_states_its_basis_even_when_it_is_the_final_one() -> None:
+    """The default has to be stated too, or only provisional panels carry provenance."""
+    epochs = _evoked_epochs(response_amplitude=6e-6)
+    epochs.set_montage("standard_1020", verbose="ERROR")
+    reliability = compute_split_half_reliability(epochs)
+
+    document = preservation_html(reliability=reliability)
+
+    assert "retained epochs" in document
+
+
+def test_a_provisional_review_is_superseded_rather_than_duplicated() -> None:
+    """The final pass must replace the provisional panel, not sit beside it."""
+    epochs = _evoked_epochs(response_amplitude=6e-6)
+    epochs.set_montage("standard_1020", verbose="ERROR")
+    report = mne.Report(title="task", verbose="ERROR")
+
+    add_task_preservation_review(
+        report=report,
+        epochs=epochs,
+        analysis_status="Provisional — all task epochs",
+    )
+    add_task_preservation_review(report=report, epochs=epochs)
+
+    assert len(report._content) == 2
+    rendered = "".join(str(element.html) for element in report._content)
+    assert "Provisional" not in rendered
+
+
+def _posterior_evoked_epochs(*, response_amplitude: float, n_trials: int = 40):
+    """Epochs whose stimulus-locked deflection is confined to posterior channels.
+
+    :func:`_evoked_epochs` adds the same deflection to every channel. That response has
+    no topography, so average referencing removes all of it, which makes those epochs
+    unusable for any test about what survives referencing.
+    """
+    rng = np.random.default_rng(6)
+    names = POSTERIOR + ANTERIOR
+    info = mne.create_info(names, SFREQ, "eeg")
+    n_times = int(SFREQ)
+    times = np.arange(n_times) / SFREQ - 0.2
+    response = response_amplitude * np.exp(-(((times - 0.15) / 0.05) ** 2))
+    data = rng.normal(0, 1e-5, (n_trials, len(names), n_times))
+    for index, name in enumerate(names):
+        if name in POSTERIOR:
+            data[:, index, :] += response
+    return mne.EpochsArray(data, info, tmin=-0.2, verbose="ERROR")
+
+
+def test_the_plotted_traces_survive_average_referencing() -> None:
+    """The panel plotted the across-channel mean, which average referencing zeroes out.
+
+    Average referencing subtracts the across-channel mean from every channel, so that
+    mean is zero by construction afterwards and the traces were floating-point
+    cancellation noise around 1e-16 µV — drawn beneath a correlation computed on the
+    real data, which invited reading a reliable dataset as empty. Global field power is
+    a spatial standard deviation and the reference does not remove it.
+    """
+    epochs = _posterior_evoked_epochs(response_amplitude=20e-6)
+    epochs.set_eeg_reference("average", projection=False, verbose="ERROR")
+
+    reliability = compute_split_half_reliability(epochs)
+
+    assert reliability is not None
+    for trace in (reliability.odd_gfp_uv, reliability.even_gfp_uv):
+        # Microvolts, not the 1e-10 µV that the cancelling mean produced.
+        assert trace.max() > 1.0
+        assert np.all(trace >= 0.0)
+
+
+def test_the_plotted_traces_follow_the_response() -> None:
+    """Whatever the panel draws has to grow with the response that survived.
+
+    This is what the across-channel mean could not do: it returned the same
+    floating-point noise whether the response was intact or absent.
+    """
+    peaks = []
+    for amplitude in (0.0, 20e-6):
+        epochs = _posterior_evoked_epochs(response_amplitude=amplitude)
+        epochs.set_eeg_reference("average", projection=False, verbose="ERROR")
+        reliability = compute_split_half_reliability(epochs)
+        peaks.append(float(reliability.odd_gfp_uv.max()))
+
+    assert peaks[1] > 2.0 * peaks[0]
+
+
+# --------------------------------------------------------------------------------------
+# Resolvability: the peak is a maximum, and has to be judged as one
+# --------------------------------------------------------------------------------------
+
+
+def test_the_search_width_sets_the_bar_a_peak_has_to_clear() -> None:
+    """A wider search finds a larger maximum by chance, so it must demand a larger one.
+
+    The prominence is the largest excess over the fitted background across every bin in the
+    alpha band. Whether that maximum is remarkable depends on how many bins it was the
+    maximum of, which a criterion in fixed multiples of the residual cannot express: the
+    factor of two used previously sat below the two-and-a-half standard deviations a
+    seventy-bin maximum reaches by chance, before any allowance for the residual and the
+    excess being measured on opposite sides of the excluded window.
+    """
+    narrow = resolvable_prominence_threshold(10)
+    wide = resolvable_prominence_threshold(200)
+
+    assert wide > narrow
+    assert narrow > 2.0
+    # In multiples of the aperiodic fit residual. A real recording with an unambiguous
+    # 11 dB alpha peak measures about 14 on the same scale, so the bar separates a rhythm
+    # from noise by a wide margin rather than sitting between them.
+    assert 3.0 < narrow < 8.0
+    assert 3.0 < wide < 8.0
+
+
+def test_a_recording_with_no_rhythm_is_rarely_credited_with_one() -> None:
+    """The test exists to keep fabricated peaks out of the cohort's peak-frequency panel.
+
+    Scored against the fit residual and a fixed factor of two, rhythm-free recordings
+    passed about eighty per cent of the time: the residual is measured where the aperiodic
+    line was fitted and so is a smaller scale than the excess where that line is
+    extrapolated across the alpha window. Judging the maximum against the scatter of the
+    very bins it was the maximum of puts both on one footing.
+    """
+    resolvable = 0
+    for seed in range(30):
+        alpha = compute_posterior_alpha(_continuous(alpha_amplitude=0.0, seed=seed))
+        assert alpha is not None
+        resolvable += int(alpha.is_resolvable())
+
+    assert resolvable <= 6
+
+
+def test_a_real_rhythm_is_still_resolved_and_located() -> None:
+    """Specificity bought at the cost of finding nothing would be no improvement."""
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=4e-6))
+
+    assert alpha is not None
+    assert alpha.is_resolvable()
+    assert alpha.peak_frequency_hz == pytest.approx(10.5, abs=1.0)
+
+
+def test_the_search_width_is_recorded_so_the_peak_can_be_scored_as_a_maximum() -> None:
+    """Without it the test cannot tell a search over ten bins from one over a hundred."""
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=0.0))
+
+    assert alpha is not None
+    assert alpha.n_search_bins > 1
+
+
+def test_a_band_with_two_comparable_bumps_reports_the_contest() -> None:
+    """A bistable argmax must not enter a cohort histogram as a located rhythm.
+
+    Seen on real data: one participant's peak sat at 13.4 Hz before cleaning and 10.0 Hz
+    after, with the two bumps half a decibel apart. That is a coin toss reported as a
+    three-hertz shift in someone's alpha frequency.
+    """
+    rng = np.random.default_rng(11)
+    names = POSTERIOR + ANTERIOR
+    n_samples = int(SFREQ * 180.0)
+    times = np.arange(n_samples) / SFREQ
+    data = np.empty((len(names), n_samples))
+    frequencies = np.fft.rfftfreq(n_samples, 1 / SFREQ)
+    for index, name in enumerate(names):
+        spectrum = np.fft.rfft(rng.standard_normal(n_samples))
+        spectrum[1:] /= frequencies[1:] ** 0.5
+        data[index] = np.fft.irfft(spectrum, n_samples)[:n_samples] * 1e-5
+        if name in POSTERIOR:
+            # Two rhythms of near-equal size, three hertz apart.
+            data[index] += 6e-6 * np.sin(2 * np.pi * 9.5 * times + rng.uniform(0, 6))
+            data[index] += 6e-6 * np.sin(2 * np.pi * 12.5 * times + rng.uniform(0, 6))
+    raw = mne.io.RawArray(data, mne.create_info(names, SFREQ, "eeg"), verbose="ERROR")
+
+    alpha = compute_posterior_alpha(raw)
+
+    assert alpha is not None
+    # Both injected rhythms are found, as two separate candidates rather than as one bump.
+    assert np.isfinite(alpha.runner_up_frequency_hz)
+    assert abs(alpha.runner_up_frequency_hz - alpha.peak_frequency_hz) >= 1.0
+    found = sorted((alpha.peak_frequency_hz, alpha.runner_up_frequency_hz))
+    assert found[0] == pytest.approx(9.5, abs=0.6)
+    assert found[1] == pytest.approx(12.5, abs=0.6)
+    # And they are close enough in height that the winner is a near thing.
+    assert alpha.runner_up_gap_db < 0.5 * alpha.prominence_db
+
+
+def test_a_contest_is_judged_against_the_spectrum_s_own_roughness() -> None:
+    """Two bumps closer than the per-bin scatter are not separated by the data.
+
+    On a real recording the winner led by 0.50 dB against a residual of 0.59 -- and the
+    frequency duly moved 3.4 Hz when cleaning nudged the two. Scored against the spectrum's
+    own noise rather than an absolute decibel figure, so the criterion travels between
+    recordings of different quality.
+    """
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+    assert alpha is not None
+
+    near = replace(alpha, runner_up_gap_db=0.5, background_residual_db=0.59)
+    clear = replace(alpha, runner_up_gap_db=4.0, background_residual_db=0.59)
+
+    assert near.peak_is_contested
+    assert not clear.peak_is_contested
+
+
+def test_a_single_clear_rhythm_is_not_contested() -> None:
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+
+    assert alpha is not None
+    assert not alpha.peak_is_contested
+
+
+def test_a_band_with_one_bump_has_no_runner_up_at_all() -> None:
+    """An uncontested peak reports no rival rather than the shoulder of itself."""
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+
+    assert alpha is not None
+    if np.isfinite(alpha.runner_up_frequency_hz):
+        # Whatever it found is a separate bump, never a neighbouring bin of the winner.
+        assert abs(alpha.runner_up_frequency_hz - alpha.peak_frequency_hz) >= 1.0
+
+
+def test_a_maximum_on_the_band_edge_is_not_a_peak() -> None:
+    """The highest point of a window is not a peak unless the spectrum comes back down.
+
+    Outside the window it may go on rising, so an edge maximum locates the edge of the
+    search rather than a rhythm.
+    """
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+    assert alpha is not None
+
+    on_edge = replace(alpha, is_interior=False)
+
+    assert alpha.is_resolvable()
+    assert not on_edge.is_resolvable()

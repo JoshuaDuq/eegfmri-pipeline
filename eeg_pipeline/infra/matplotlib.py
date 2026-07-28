@@ -32,8 +32,13 @@ def setup_matplotlib(config: Any = None) -> None:
             "grid.linestyle": "--",
             "grid.linewidth": 0.8,
             "savefig.dpi": 300,
-            "font.family": "sans-serif",
-            "font.sans-serif": ["Arial", "DejaVu Sans"],
+            # Named directly rather than through the "sans-serif" generic. The generic
+            # resolves to the first available entry of font.sans-serif and stops there,
+            # so a character Arial lacks — the subscripts in the Poincare axis labels,
+            # the set symbol in the condition labels — is drawn as a replacement box
+            # instead of falling through to DejaVu. A family list keeps Arial as the
+            # face and makes the rest of the list a per-glyph fallback chain.
+            "font.family": ["Arial", "DejaVu Sans"],
         }
     )
 

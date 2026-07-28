@@ -10,7 +10,7 @@ python -m studies.pain_study.scripts.organize_source_eeg \
   --source-data-root /Volumes/KINGSTON/EEG_fMRI_data/source_data
 ```
 
-This copies original 5 kHz triplets into `sub-*/eeg/original_5khz/`. If legacy
+This copies original 5 kHz triplets into `sub-*/eeg/original_untrimmed_5khz/`. If legacy
 BrainVision-processed 1 kHz files are present, it also moves them into
 `sub-*/eeg/brainvision_processed_1khz/`; they are not required by the native pipeline. By default
 the organizer discovers every unorganized `sub-*` EEG directory. Repeat `--subject <ID>` to
@@ -60,7 +60,7 @@ Analyzer scanner-gradient and pulse-artifact stages. It reads the original 5 kHz
 versioned marker-sanitized derivative, applies synchronized phase-aligned AAS, automatic NeuXus LSTM
 R-peak detection, and MNE PCA-OBS, then writes a separate 1 kHz derivative with per-run spectral,
 QRS, and cardiac-locked QC. The source inventory is discovered directly from every matching
-`sub-*/eeg/original_5khz/*.vhdr`; no BrainVision-processed file or fixed subject/run count defines
+`sub-*/eeg/original_untrimmed_5khz/*.vhdr`; no BrainVision-processed file or fixed subject/run count defines
 the cohort. Each run has separate physiological and scanner-spectrum figures; the
 latter combines the full 15–90 Hz comb with four stage-resolved local PSD windows. The qualification
 boundary is every recording in the verified discovery manifest. After every run succeeds, the

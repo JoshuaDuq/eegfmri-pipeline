@@ -1,4 +1,4 @@
-"""Validation of BrainVision Analyzer pulse-artifact markers."""
+"""Description of BrainVision Analyzer pulse-artifact markers."""
 
 from __future__ import annotations
 
@@ -16,9 +16,19 @@ logger = logging.getLogger(__name__)
 PULSE_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
 
+def _number(value: float) -> str:
+    """Format a measurement, leaving an undefined one visibly empty rather than absent."""
+    return "" if not np.isfinite(value) else f"{value:.6f}"
+
+
 @dataclass(frozen=True)
 class PulseMarkerCriteria:
-    """Physiological acceptance criteria for Analyzer R markers."""
+    """Bounds the pulse-marker measurements are described against.
+
+    These are reference values for the reader, not acceptance criteria: nothing is
+    excluded from the cohort by falling outside them. They are written into the QC table
+    beside the measurements so the comparison can be re-derived at a different bound.
+    """
 
     minimum_bpm: float
     maximum_bpm: float
@@ -36,13 +46,20 @@ class PulseMarkerCriteria:
 
 @dataclass(frozen=True)
 class PulseMarkerMetrics:
-    """Validated run-level pulse-marker measurements."""
+    """Run-level pulse-marker measurements, taken without reference to any bound.
+
+    ``duration_seconds`` and ``expected_marker_count`` are carried so that every derived
+    quantity in the row can be recomputed by a reader who defines it differently.
+    Interval-derived fields are ``nan`` for a run with fewer than three markers.
+    """
 
     recording_id: str
     marker_count: int
+    duration_seconds: float
     median_bpm: float
     marker_fraction: float
     recording_coverage: float
+    expected_marker_count: int
 
 
 def _pulse_onsets(raw: mne.io.BaseRaw) -> np.ndarray:
@@ -53,146 +70,168 @@ def _pulse_onsets(raw: mne.io.BaseRaw) -> np.ndarray:
     )
 
 
-def validate_pulse_markers(
+def measure_pulse_markers(
     raw: mne.io.BaseRaw,
-    criteria: PulseMarkerCriteria,
     *,
     recording_id: str,
 ) -> PulseMarkerMetrics:
-    """Validate that Analyzer R markers cover a run at a physiological rate.
+    """Measure a run's Analyzer R-marker train. Makes no judgement about it.
 
-    ``minimum_bpm`` serves two roles: it bounds the plausible median heart rate, and it
-    sets the slowest rate used to derive the minimum expected marker count. Widening it
-    to admit slower participants therefore also relaxes the count floor.
+    Measurement is separated from evaluation because the previous combined version stopped
+    at the first bound a run fell outside and recorded nothing else for it. On this cohort
+    that blanked every measurement for 24 of 90 runs — the runs whose coverage most needed
+    describing were the ones the table described least, with the numbers surviving only
+    inside an error string.
 
-    ``marker_fraction`` compares the observed marker count against the count implied by
-    the 20th-percentile inter-beat interval. Estimating the beat period from a short
-    interval biases the expected count high, so a complete marker set scores below 1.0;
-    the shortfall grows with heart-rate variability (roughly 0.96 at 5% variability and
-    0.83 at 20%). Choose ``minimum_marker_fraction`` with that headroom in mind.
+    Everything a derived quantity is computed from is returned alongside it
+    (``duration_seconds``, ``expected_marker_count``), so a reader who disagrees with how
+    ``marker_fraction`` is defined can recompute their own from the same row.
+
+    Runs too sparse to yield an interval return ``nan`` for the interval-derived fields
+    rather than raising: "fewer than three markers" is itself the finding, and a run that
+    cannot be characterised still belongs in the table.
     """
     if not recording_id.strip():
         raise ValueError("recording_id must not be empty.")
 
     onsets = _pulse_onsets(raw)
+    duration_seconds = raw.n_times / float(raw.info["sfreq"])
+
     if len(onsets) < 3:
-        raise ValueError(f"{recording_id}: pulse marker count {len(onsets)} is insufficient.")
+        return PulseMarkerMetrics(
+            recording_id=recording_id,
+            marker_count=len(onsets),
+            duration_seconds=duration_seconds,
+            median_bpm=float("nan"),
+            marker_fraction=float("nan"),
+            recording_coverage=float("nan"),
+            expected_marker_count=0,
+        )
 
     intervals = np.diff(onsets)
     if np.any(intervals <= 0):
+        # Not a quality question. Non-increasing onsets mean the marker train is not a
+        # time series, so no measurement below is defined on it.
         raise ValueError(f"{recording_id}: pulse marker onsets must be strictly increasing.")
 
-    median_bpm = 60.0 / float(np.median(intervals))
-    if not criteria.minimum_bpm <= median_bpm <= criteria.maximum_bpm:
-        raise ValueError(
-            f"{recording_id}: median pulse-marker heart rate {median_bpm:.1f} bpm "
-            f"is outside {criteria.minimum_bpm:.1f}-{criteria.maximum_bpm:.1f} bpm."
-        )
-
-    duration_seconds = raw.n_times / float(raw.info["sfreq"])
-    minimum_marker_count = int(
-        np.ceil(duration_seconds * criteria.minimum_bpm / 60.0 * criteria.minimum_marker_fraction)
-    )
-    if len(onsets) < minimum_marker_count:
-        raise ValueError(
-            f"{recording_id}: pulse marker count {len(onsets)} is below the required "
-            f"minimum of {minimum_marker_count}."
-        )
-
+    # The 20th-percentile interval, not the median: it estimates the beat period from the
+    # run's faster beats, so a complete marker set scores near 1.0 while dropouts pull the
+    # fraction down. It also means a complete set scores slightly below 1.0 at high
+    # heart-rate variability, which is why the value is reported rather than thresholded
+    # here.
     representative_interval = float(np.quantile(intervals, 0.2, method="lower"))
     marker_span = float(onsets[-1] - onsets[0])
     expected_marker_count = int(np.floor(marker_span / representative_interval)) + 1
-    marker_fraction = min(1.0, len(onsets) / expected_marker_count)
-    if marker_fraction < criteria.minimum_marker_fraction:
-        raise ValueError(
-            f"{recording_id}: pulse marker fraction {marker_fraction:.3f} is below "
-            f"{criteria.minimum_marker_fraction:.3f}."
-        )
-
-    recording_coverage = float((onsets[-1] - onsets[0]) / duration_seconds)
-    if recording_coverage < criteria.minimum_recording_coverage:
-        raise ValueError(
-            f"{recording_id}: pulse-marker recording coverage {recording_coverage:.3f} "
-            f"is below {criteria.minimum_recording_coverage:.3f}."
-        )
 
     return PulseMarkerMetrics(
         recording_id=recording_id,
         marker_count=len(onsets),
-        median_bpm=median_bpm,
-        marker_fraction=marker_fraction,
-        recording_coverage=recording_coverage,
+        duration_seconds=duration_seconds,
+        median_bpm=60.0 / float(np.median(intervals)),
+        marker_fraction=min(1.0, len(onsets) / expected_marker_count),
+        recording_coverage=float(marker_span / duration_seconds),
+        expected_marker_count=expected_marker_count,
     )
 
 
-def validate_pulse_marker_recordings(
+def pulse_marker_bound_notes(
+    metrics: PulseMarkerMetrics,
+    criteria: PulseMarkerCriteria,
+) -> tuple[str, ...]:
+    """Name every configured bound this run's measurements fall outside.
+
+    Notes, not verdicts. Each states the measured value and the bound it is compared
+    against, so the comparison can be re-derived at a different bound without re-running
+    anything, and so a reader who thinks the bound is wrong still has the measurement.
+
+    Every bound is checked; the run is not abandoned at the first one. A run can be sparse
+    *and* poorly covered, and both facts are worth having.
+    """
+    notes: list[str] = []
+    if metrics.marker_count < 3:
+        notes.append(f"marker count {metrics.marker_count} is too few to derive an interval")
+        return tuple(notes)
+
+    if not criteria.minimum_bpm <= metrics.median_bpm <= criteria.maximum_bpm:
+        notes.append(
+            f"median rate {metrics.median_bpm:.1f} bpm is outside the configured "
+            f"{criteria.minimum_bpm:.0f}-{criteria.maximum_bpm:.0f} bpm"
+        )
+    if metrics.marker_fraction < criteria.minimum_marker_fraction:
+        notes.append(
+            f"marker fraction {metrics.marker_fraction:.3f} is below the configured "
+            f"{criteria.minimum_marker_fraction:.3f}"
+        )
+    if metrics.recording_coverage < criteria.minimum_recording_coverage:
+        notes.append(
+            f"marker span covers {metrics.recording_coverage:.3f} of the recording, below "
+            f"the configured {criteria.minimum_recording_coverage:.3f}"
+        )
+    return tuple(notes)
+
+
+def summarize_pulse_marker_recordings(
     recordings: Iterable[tuple[str, mne.io.BaseRaw]],
     criteria: PulseMarkerCriteria,
     *,
     output_path: Path,
-    strict: bool = True,
+    strict: bool = False,
 ) -> Path:
-    """Validate EEG source recordings to ensure robust marker-locked cardiac artifact QC."""
+    """Write one row of pulse-marker measurements per recording, and the bounds they meet.
+
+    Every run gets every measurement, whether or not it falls inside the configured
+    bounds. ``outside_configured_bounds`` and ``notes`` describe the relation between the
+    measurements and the bounds that were configured; they are not a quality grade, and
+    the thresholds are written into the table so the comparison stays re-derivable.
+
+    ``strict`` remains available for a caller that wants a hard gate, and is off by
+    default: on this dataset incomplete within-run coverage is a documented, open property
+    of the Analyzer export rather than a reason to stop.
+    """
     rows = []
-    errors = []
+    outside = []
     for recording_id, raw in recordings:
-        try:
-            metrics = validate_pulse_markers(
-                raw,
-                criteria,
-                recording_id=recording_id,
-            )
-            rows.append(
-                {
-                    "recording_id": metrics.recording_id,
-                    "marker_count": metrics.marker_count,
-                    "median_bpm": metrics.median_bpm,
-                    "marker_fraction": metrics.marker_fraction,
-                    "recording_coverage": metrics.recording_coverage,
-                    "status": "pass",
-                    "error": "",
-                }
-            )
-        except ValueError as error:
-            errors.append(str(error))
-            rows.append(
-                {
-                    "recording_id": recording_id,
-                    "marker_count": "",
-                    "median_bpm": "",
-                    "marker_fraction": "",
-                    "recording_coverage": "",
-                    "status": "fail",
-                    "error": str(error),
-                }
-            )
+        metrics = measure_pulse_markers(raw, recording_id=recording_id)
+        notes = pulse_marker_bound_notes(metrics, criteria)
+        if notes:
+            outside.append(f"{recording_id}: " + "; ".join(notes))
+        rows.append(
+            {
+                "recording_id": metrics.recording_id,
+                "marker_count": metrics.marker_count,
+                "duration_seconds": f"{metrics.duration_seconds:.3f}",
+                "median_bpm": _number(metrics.median_bpm),
+                "marker_fraction": _number(metrics.marker_fraction),
+                "recording_coverage": _number(metrics.recording_coverage),
+                "expected_marker_count": metrics.expected_marker_count,
+                "configured_bpm_range": f"{criteria.minimum_bpm:.0f}-{criteria.maximum_bpm:.0f}",
+                "configured_minimum_marker_fraction": f"{criteria.minimum_marker_fraction:.3f}",
+                "configured_minimum_coverage": (
+                    f"{criteria.minimum_recording_coverage:.3f}"
+                ),
+                "outside_configured_bounds": "yes" if notes else "no",
+                "notes": "; ".join(notes),
+            }
+        )
 
     if not rows:
         raise ValueError("No EEG recordings were provided for pulse-marker QC.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "recording_id",
-        "marker_count",
-        "median_bpm",
-        "marker_fraction",
-        "recording_coverage",
-        "status",
-        "error",
-    ]
+    fieldnames = list(rows[0])
     with output_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(output_file, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
         writer.writerows(rows)
 
-    if errors:
-        error_msg = "Invalid BrainVision Analyzer pulse markers: " + " | ".join(errors)
+    if outside:
+        summary = (
+            f"{len(outside)} of {len(rows)} recordings have pulse-marker measurements "
+            f"outside the configured bounds (see {output_path}): " + " | ".join(outside)
+        )
         if strict:
-            raise ValueError(error_msg)
-        else:
-            logger.warning(
-                "Pulse marker strict validation disabled. Proceeding with errors: %s", error_msg
-            )
+            raise ValueError(summary)
+        logger.info(summary)
 
     return output_path
 
@@ -201,6 +240,7 @@ __all__ = [
     "PULSE_MARKER_DESCRIPTION",
     "PulseMarkerCriteria",
     "PulseMarkerMetrics",
-    "validate_pulse_marker_recordings",
-    "validate_pulse_markers",
+    "measure_pulse_markers",
+    "pulse_marker_bound_notes",
+    "summarize_pulse_marker_recordings",
 ]

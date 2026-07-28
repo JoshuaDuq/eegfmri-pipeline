@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from eeg_pipeline.preprocessing import cardiac_artifact_qc as cardiac_qc
 from eeg_pipeline.preprocessing import ica_cardiac_review as cardiac_review
 from eeg_pipeline.preprocessing import ica_cardiac_report as cardiac_report
 from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
@@ -309,7 +310,7 @@ def test_write_cardiac_attenuation_qc_writes_run_metrics(tmp_path) -> None:
 def test_run_marker_ctps_qc_updates_native_table_without_excluding(monkeypatch, tmp_path) -> None:
     eeg_dir = tmp_path / "sub-0001" / "eeg"
     eeg_dir.mkdir(parents=True)
-    ica_path = eeg_dir / "sub-0001_proc-icafit_ica.fif"
+    ica_path = eeg_dir / "sub-0001_proc-ica_ica.fif"
     raw_path = eeg_dir / "sub-0001_task-pain_run-1_proc-filt_raw.fif"
     components_path = eeg_dir / "sub-0001_proc-ica_components.tsv"
     ica_path.touch()
@@ -393,3 +394,377 @@ def test_attenuation_is_reported_in_decibels_as_well_as_percent() -> None:
     # Halving amplitude is 6.02 dB, which 50% describes far less transparently.
     assert metrics.attenuation_db == pytest.approx(6.0206, abs=1e-3)
     assert metrics.attenuation_percent == pytest.approx(50.0)
+
+
+def _pulse_locked_raw_with_live_ecg(*, artifact_scale: float) -> mne.io.RawArray:
+    """A pulse-locked recording whose ECG channel carries a real, large QRS trace."""
+    sfreq = 100.0
+    times = np.arange(int(30.0 * sfreq)) / sfreq
+    pulse_onsets = np.arange(2.0, 29.0, 1.0)
+    artifact = np.zeros_like(times)
+    ecg = np.zeros_like(times)
+    for onset in pulse_onsets:
+        shape = np.exp(-0.5 * ((times - onset) / 0.03) ** 2)
+        artifact += artifact_scale * 100e-6 * shape
+        # Two orders of magnitude above the EEG artifact, as a real ECG lead is.
+        ecg += 10e-3 * shape
+
+    info = mne.create_info(["Cz", "Pz", "ECG"], sfreq, ["eeg", "eeg", "ecg"])
+    raw = mne.io.RawArray(np.vstack([artifact, artifact * 0.5, ecg]), info, verbose=False)
+    raw.set_annotations(
+        mne.Annotations(
+            pulse_onsets,
+            np.zeros(len(pulse_onsets)),
+            ["Pulse Artifact/R"] * len(pulse_onsets),
+        )
+    )
+    return raw
+
+
+def test_attenuation_ignores_the_ecg_channel_ica_never_touched() -> None:
+    """ICA cleans EEG only, so a live ECG trace must not dilute the measured attenuation.
+
+    The ECG channel is identical before and after and is perfectly R-locked, so including
+    it in the average would dominate the RMS and report a well-cleaned run as barely
+    cleaned at all.
+    """
+    metrics = compute_cardiac_attenuation(
+        _pulse_locked_raw_with_live_ecg(artifact_scale=1.0),
+        _pulse_locked_raw_with_live_ecg(artifact_scale=0.25),
+        recording_id="sub-0001_run-1",
+        baseline=(-0.25, -0.05),
+        measurement_window=(-0.05, 0.4),
+    )
+
+    assert metrics.attenuation_percent == pytest.approx(75.0)
+
+
+def test_marker_ctps_qc_finds_session_organized_derivatives(monkeypatch, tmp_path) -> None:
+    """A ses- directory and a missing run entity must not make the QC find nothing."""
+    eeg_dir = tmp_path / "sub-0001" / "ses-01" / "eeg"
+    eeg_dir.mkdir(parents=True)
+    ica_path = eeg_dir / "sub-0001_ses-01_proc-ica_ica.fif"
+    raw_path = eeg_dir / "sub-0001_ses-01_task-pain_proc-filt_raw.fif"
+    components_path = eeg_dir / "sub-0001_ses-01_proc-ica_components.tsv"
+    ica_path.touch()
+    raw_path.touch()
+    pd.DataFrame(
+        {
+            "component": [0, 1],
+            "status": ["bad", "good"],
+            "status_description": ["ICLabel", ""],
+        }
+    ).to_csv(components_path, sep="\t", index=False)
+
+    monkeypatch.setattr(mne.preprocessing, "read_ica", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        mne.io, "read_raw_fif", lambda *_a, **_k: _pulse_locked_raw(artifact_scale=1.0)
+    )
+    monkeypatch.setattr(
+        "eeg_pipeline.preprocessing.cardiac_artifact_qc.compute_marker_ctps_scores",
+        lambda *_a, **_k: (np.array([0.2, 0.04]), False),
+    )
+
+    output_path = run_marker_ctps_qc(
+        pipeline_root=tmp_path,
+        subjects=["0001"],
+        task="pain",
+        threshold=0.1,
+        epoch_window=(-0.25, 0.5),
+    )
+
+    updated = pd.read_csv(components_path, sep="\t")
+    assert updated["analyzer_marker_ctps_flag"].tolist() == [True, False]
+    summary = pd.read_csv(output_path, sep="\t")
+    assert summary["decomposition_id"].unique().tolist() == ["sub-0001_ses-01"]
+
+
+def test_attenuation_qc_reads_one_run_pair_at_a_time(monkeypatch, tmp_path) -> None:
+    """The cohort must never be held in memory all at once."""
+    eeg_dir = tmp_path / "sub-0001" / "eeg"
+    eeg_dir.mkdir(parents=True)
+    for run in (1, 2):
+        (eeg_dir / f"sub-0001_task-pain_run-{run}_proc-filt_raw.fif").touch()
+        (eeg_dir / f"sub-0001_task-pain_run-{run}_proc-clean_raw.fif").touch()
+
+    reads = 0
+    reads_before_first_measurement = None
+
+    def read_raw(path, **_kwargs):
+        nonlocal reads
+        reads += 1
+        scale = 0.25 if "proc-clean" in str(path) else 1.0
+        return _pulse_locked_raw(artifact_scale=scale)
+
+    real_compute = cardiac_qc.compute_cardiac_attenuation
+
+    def tracked_compute(*args, **kwargs):
+        nonlocal reads_before_first_measurement
+        if reads_before_first_measurement is None:
+            reads_before_first_measurement = reads
+        return real_compute(*args, **kwargs)
+
+    monkeypatch.setattr(mne.io, "read_raw_fif", read_raw)
+    monkeypatch.setattr(cardiac_qc, "compute_cardiac_attenuation", tracked_compute)
+
+    run_cardiac_attenuation_qc(
+        pipeline_root=tmp_path,
+        subjects=["0001"],
+        task="pain",
+        baseline=(-0.25, -0.05),
+        measurement_window=(-0.05, 0.4),
+    )
+
+    # Two runs exist. Streaming measures the first pair after reading exactly that pair;
+    # the previous implementation read all four files before measuring anything.
+    assert reads == 4
+    assert reads_before_first_measurement == 2
+
+
+def _dead_ecg_raw() -> mne.io.RawArray:
+    """A recording whose ECG lead came off: the channel exists and carries nothing.
+
+    Flat rather than noisy on purpose. MNE's detector finds spurious peaks in noise, so a
+    noisy fixture would be testing the detector's tuning; a detached lead is the case where
+    there is provably no cardiac signal to find.
+    """
+    sfreq = 200.0
+    times = np.arange(int(30.0 * sfreq)) / sfreq
+    info = mne.create_info(["Cz", "Pz", "ECG"], sfreq, ["eeg", "eeg", "ecg"])
+    return mne.io.RawArray(np.zeros((3, times.size)), info, verbose=False)
+
+
+def test_an_ecg_with_no_detectable_beats_raises_a_typed_signal() -> None:
+    """A run whose ECG yields no R peaks is a measurement that did not resolve.
+
+    The caller has to tell that apart from a programming error so it can keep the rest of
+    the study running, and a bare ``ValueError`` cannot express the difference: catching
+    ``ValueError`` around the detector would swallow every genuine bug inside it too.
+    """
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    with pytest.raises(cardiac_review.UnusableEcg):
+        cardiac_review.detect_ecg_events(_dead_ecg_raw(), settings)
+
+
+def test_an_unusable_ecg_is_still_a_value_error() -> None:
+    """Existing callers catch ValueError; narrowing the type must not slip past them."""
+    assert issubclass(cardiac_review.UnusableEcg, ValueError)
+
+
+def test_a_detectable_ecg_is_unaffected_by_the_new_signal() -> None:
+    """The guard must not change what happens to a run that detects normally."""
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    detection = cardiac_review.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
+
+    assert 25 <= len(detection.events) <= 31
+
+
+# --------------------------------------------------------------------------------------
+# One unusable run must not abort the study
+# --------------------------------------------------------------------------------------
+
+
+def _review_run_raw(*, detectable: bool, seconds: float = 30.0) -> mne.io.RawArray:
+    """One run for the end-to-end review: EEG plus an ECG that may or may not resolve."""
+    sfreq = 200.0
+    times = np.arange(int(seconds * sfreq)) / sfreq
+    rng = np.random.default_rng(0 if detectable else 1)
+    eeg = 5e-6 * rng.standard_normal((3, times.size))
+    ecg = np.zeros_like(times)
+    if detectable:
+        for peak_time in np.arange(1.0, seconds - 0.5, 1.0):
+            qrs = np.exp(-0.5 * ((times - peak_time) / 0.02) ** 2)
+            ecg += 1.0e-3 * qrs
+            eeg += 30e-6 * np.exp(-0.5 * ((times - peak_time - 0.08) / 0.04) ** 2)
+    info = mne.create_info(["Cz", "Pz", "Oz", "ECG"], sfreq, ["eeg", "eeg", "eeg", "ecg"])
+    raw = mne.io.RawArray(np.vstack([eeg, ecg]), info, verbose=False)
+    raw.set_montage(mne.channels.make_standard_montage("standard_1020"), verbose=False)
+    return raw
+
+
+def _write_review_inputs(directory, *, detectable_runs):
+    """Write the filtered runs, the ICA and its component table, and an empty report."""
+    from eeg_pipeline.preprocessing.ica_exclusions import components_path_for_ica
+
+    prefix = "sub-0000"
+    filtered_paths = []
+    for index, detectable in enumerate(detectable_runs, start=1):
+        raw = _review_run_raw(detectable=detectable)
+        path = directory / f"{prefix}_task-t_run-{index}_proc-filt_raw.fif"
+        raw.save(path, overwrite=True, verbose="ERROR")
+        filtered_paths.append(path)
+
+    fit = _review_run_raw(detectable=True)
+    ica = mne.preprocessing.ICA(n_components=2, random_state=0, max_iter=200, verbose="ERROR")
+    ica.fit(fit.copy().pick("eeg"), verbose="ERROR")
+    ica_path = directory / f"{prefix}_proc-ica_ica.fif"
+    ica.save(ica_path, overwrite=True, verbose="ERROR")
+
+    pd.DataFrame(
+        {
+            "component": [0, 1],
+            "status": ["bad", "good"],
+            "status_description": ["ecg", "kept"],
+        }
+    ).to_csv(components_path_for_ica(ica_path), sep="\t", index=False)
+
+    report_path = directory / f"{prefix}_report.h5"
+    report = mne.Report(title="sub-0000", verbose="ERROR")
+    # The cardiac review inserts itself before the ICA component section, which the real
+    # report already carries from the decomposition step. Without it the review has no
+    # anchor to order itself against.
+    report.add_html(
+        html="<p>components</p>",
+        title="ICA components",
+        section="ICA: components",
+        tags=("ica", "ica-component-review"),
+    )
+    report.save(report_path, overwrite=True, open_browser=False, verbose="ERROR")
+    return filtered_paths, ica_path, report_path
+
+
+def test_one_unusable_run_does_not_abort_the_cardiac_review(tmp_path) -> None:
+    """A dead ECG lead in run 2 must not cost the reviewer runs 1 and 3.
+
+    The failure this pins: a single run whose ECG yields no R peaks raised out of the
+    review, out of the ICA stage, and out of the pipeline -- ending a 15-participant run
+    at the review step and leaving no report for anybody, including the fourteen
+    participants whose recordings were fine.
+    """
+    filtered_paths, ica_path, report_path = _write_review_inputs(
+        tmp_path, detectable_runs=(True, False, True)
+    )
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    output = cardiac_report.generate_ica_cardiac_review(
+        filtered_raw_paths=filtered_paths,
+        ica_path=ica_path,
+        report_path=report_path,
+        output_path=tmp_path / "sub-0000_desc-icaecg_components.tsv",
+        settings=settings,
+    )
+
+    assert output.is_file()
+    runs = pd.read_csv(output.with_name(output.name.replace("components", "runs")), sep="\t")
+    reviewed = set(runs["recording_id"])
+    assert any("run-1" in name for name in reviewed)
+    assert any("run-3" in name for name in reviewed)
+    # The unusable run is absent from the reviewed set rather than carrying a fabricated rate.
+    assert not any("run-2" in name for name in reviewed)
+
+
+def test_the_unusable_run_is_reported_rather_than_dropped_silently(tmp_path) -> None:
+    """A run excluded from the evidence has to be named, or the denominator lies."""
+    filtered_paths, ica_path, report_path = _write_review_inputs(
+        tmp_path, detectable_runs=(True, False, True)
+    )
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    cardiac_report.generate_ica_cardiac_review(
+        filtered_raw_paths=filtered_paths,
+        ica_path=ica_path,
+        report_path=report_path,
+        output_path=tmp_path / "sub-0000_desc-icaecg_components.tsv",
+        settings=settings,
+    )
+
+    html = mne.open_report(report_path).html
+    document = " ".join(html) if isinstance(html, (list, tuple)) else str(html)
+    assert "run-2" in document
+    assert "R peaks" in document or "no usable" in document.lower()
+
+
+def test_a_subject_with_no_usable_run_still_reports_that(tmp_path) -> None:
+    """With every ECG dead there is no review to draw, and that is itself the finding."""
+    filtered_paths, ica_path, report_path = _write_review_inputs(
+        tmp_path, detectable_runs=(False, False)
+    )
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    output = cardiac_report.generate_ica_cardiac_review(
+        filtered_raw_paths=filtered_paths,
+        ica_path=ica_path,
+        report_path=report_path,
+        output_path=tmp_path / "sub-0000_desc-icaecg_components.tsv",
+        settings=settings,
+    )
+
+    assert output.is_file()
+    html = mne.open_report(report_path).html
+    document = " ".join(html) if isinstance(html, (list, tuple)) else str(html)
+    assert "no usable" in document.lower() or "no run" in document.lower()
+
+
+# --------------------------------------------------------------------------------------
+# Beat source: Analyzer markers in preference to channel detection
+# --------------------------------------------------------------------------------------
+
+
+def _raw_with_markers(*, marker_interval_s: float, qrs_interval_s: float) -> mne.io.RawArray:
+    """A recording whose Analyzer markers and ECG QRS deliberately disagree.
+
+    The two intervals differ so a test can tell which source a rate came from. Analyzer's
+    marker train is the one that was validated against the recording, so it has to win.
+    """
+    sfreq = 200.0
+    duration = 60.0
+    times = np.arange(int(duration * sfreq)) / sfreq
+    ecg = 0.02e-3 * np.sin(2 * np.pi * 1.0 * times)
+    eeg = np.zeros_like(times)
+    for peak_time in np.arange(1.0, duration - 0.5, qrs_interval_s):
+        ecg += 1.0e-3 * np.exp(-0.5 * ((times - peak_time) / 0.02) ** 2)
+        eeg += 30e-6 * np.exp(-0.5 * ((times - peak_time - 0.08) / 0.04) ** 2)
+    info = mne.create_info(["Cz", "Pz", "ECG"], sfreq, ["eeg", "eeg", "ecg"])
+    raw = mne.io.RawArray(np.vstack([eeg, -0.5 * eeg, ecg]), info, verbose=False)
+    onsets = np.arange(1.0, duration - 0.5, marker_interval_s)
+    raw.set_annotations(
+        mne.Annotations(onsets, np.zeros(onsets.size), ["Pulse Artifact/R"] * onsets.size)
+    )
+    return raw
+
+
+def test_the_analyzer_marker_train_is_preferred_over_channel_detection() -> None:
+    """Analyzer's markers drove the correction, and its detection is the validated one.
+
+    On this dataset ``find_ecg_events`` disagrees with the marker train on the same runs --
+    reporting 8 bpm where the markers report 61 -- so the review must not take the channel
+    detector's word where a marker train exists.
+    """
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+    raw = _raw_with_markers(marker_interval_s=1.2, qrs_interval_s=1.0)
+
+    detection = cardiac_review.detect_ecg_events(raw, settings)
+
+    assert detection.source == "analyzer-markers"
+    # 1.2 s between markers is 50 bpm; the QRS train would have given 60.
+    assert detection.average_pulse_bpm == pytest.approx(50.0, abs=3.0)
+
+
+def test_channel_detection_is_used_when_no_marker_train_exists() -> None:
+    """33 of 90 runs in this dataset carry no markers; they still need a beat train."""
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    detection = cardiac_review.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
+
+    assert detection.source == "ecg-channel"
+    assert detection.average_pulse_bpm == pytest.approx(60.0, abs=3.0)
+
+
+def test_neither_source_resolving_is_still_an_unusable_ecg() -> None:
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    with pytest.raises(cardiac_review.UnusableEcg):
+        cardiac_review.detect_ecg_events(_dead_ecg_raw(), settings)
+
+
+def test_a_marker_train_too_short_to_use_falls_back_to_the_channel() -> None:
+    """Two markers are not a beat train, and the channel may still carry one."""
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+    raw = _signal_detectable_ecg_raw()
+    raw.set_annotations(mne.Annotations([1.0, 2.0], [0.0, 0.0], ["Pulse Artifact/R"] * 2))
+
+    detection = cardiac_review.detect_ecg_events(raw, settings)
+
+    assert detection.source == "ecg-channel"

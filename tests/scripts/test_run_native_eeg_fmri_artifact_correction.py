@@ -45,7 +45,7 @@ def _input_root(tmp_path: Path) -> Path:
     row = {
         "subject": "sub-0001",
         "run": "1",
-        "source_layout": "original_5khz",
+        "source_layout": "original_untrimmed_5khz",
         "staged_vhdr": str(header),
         "source_vhdr_sha256": "a" * 64,
         "source_vmrk_sha256": "b" * 64,

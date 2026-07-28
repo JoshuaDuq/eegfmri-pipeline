@@ -13,15 +13,18 @@ not quality control.
 from __future__ import annotations
 
 import html
+import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Callable, Sequence
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.preprocessing.cardiac_artifact_qc import PULSE_EVENT_ID
 from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets
 from eeg_pipeline.preprocessing.report.style import (
@@ -29,7 +32,16 @@ from eeg_pipeline.preprocessing.report.style import (
     BEFORE_COLOR,
     FLAG_COLOR,
     GUIDE_COLOR,
+    MARK_COLOR,
     PRIMARY_COLOR,
+    RUN_COLORS,
+    run_label,
+)
+from eeg_pipeline.preprocessing.report.tables import (
+    Align,
+    Column,
+    SpanningRow,
+    grid_table,
 )
 
 PULSE_MARKER_QC_SUFFIX = "desc-pulsemarkers_qc.tsv"
@@ -41,6 +53,16 @@ MINIMUM_BEATS = 3
 #: Multiple of the run's median interval at which a single missed beat lands.
 MISSED_BEAT_FACTOR = 1.5
 
+#: Interval window the tachogram panels are drawn over, in seconds.
+#:
+#: 0.3–2.0 s spans 200 down to 30 bpm, which covers every rate a resting or task
+#: recording plausibly contains including the extremes. It is a fixed constant rather
+#: than a percentile of the data so that a run with a failed detector cannot rescale the
+#: panels of the runs beside it, and so that the same interval occupies the same height
+#: in every report. Samples outside it are drawn on the boundary and counted, never
+#: dropped.
+PLAUSIBLE_RR_RANGE_S = (0.3, 2.0)
+
 
 @dataclass(frozen=True)
 class AnalyzerCorrectionQc:
@@ -50,11 +72,19 @@ class AnalyzerCorrectionQc:
     runs: pd.DataFrame
 
     @property
-    def failed_runs(self) -> tuple[str, ...]:
-        if "status" not in self.runs.columns:
-            return ()
-        failed = self.runs.loc[self.runs["status"].astype(str) == "fail", "run"]
-        return tuple(str(value) for value in failed)
+    def runs_outside_bounds(self) -> tuple[str, ...]:
+        """Runs whose measurements fall outside the bounds the QC was configured with.
+
+        A pointer for the reader, not a grade. The bounds are reference values recorded
+        beside the measurements; a run named here is one to look at, not one to drop.
+        ``status``/``fail`` is read as well so that QC tables written before the column
+        was renamed still resolve.
+        """
+        for column, marker in (("outside_configured_bounds", "yes"), ("status", "fail")):
+            if column in self.runs.columns:
+                selected = self.runs.loc[self.runs[column].astype(str) == marker, "run"]
+                return tuple(str(value) for value in selected)
+        return ()
 
     @property
     def fallback_runs(self) -> tuple[str, ...]:
@@ -65,11 +95,8 @@ class AnalyzerCorrectionQc:
 
 
 def _run_label(recording_id: object) -> str:
-    text = str(recording_id)
-    marker = "_run-"
-    if marker not in text:
-        return text
-    return text.split(marker)[1].split("_")[0]
+    """Bare run number for the "run" column of the per-run QC table."""
+    return run_label(recording_id, bare=True)
 
 
 def load_analyzer_qc(
@@ -120,46 +147,103 @@ def load_analyzer_qc(
     return AnalyzerCorrectionQc(subject=subject, runs=runs)
 
 
+@dataclass(frozen=True)
+class _QcColumn:
+    """One column of the Analyzer QC table, and how its frame value is rendered.
+
+    The frame this table is built from is a working structure whose column names are
+    the pipeline's own (``marker_fraction``, ``before_rms_uv``). Rendering it with
+    ``DataFrame.to_html`` published those names and a single ``float_format`` into a
+    document whose every other table carries prose headers and per-quantity precision,
+    which is how a beat count came to be printed as ``520.00``.
+    """
+
+    source: str
+    column: Column
+    format: Callable[[Any], str]
+
+    def render(self, value: Any) -> str | None:
+        if value is None or (isinstance(value, float) and not math.isfinite(value)):
+            return None
+        try:
+            return self.format(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+
+def _text(value: Any) -> str:
+    return str(value)
+
+
+#: Columns of the Analyzer QC table, in reading order. A column absent from the frame
+#: is skipped, because which measurements exist depends on which QC stages ran.
+_QC_COLUMNS: tuple[_QcColumn, ...] = (
+    _QcColumn("run", Column("Run", align=Align.TEXT), lambda value: f"run-{value}"),
+    _QcColumn(
+        "outside_configured_bounds",
+        Column("Outside bounds", align=Align.TEXT),
+        _text,
+    ),
+    _QcColumn("marker_count", Column("R markers"), lambda value: f"{int(value):,}"),
+    _QcColumn("median_bpm", Column("Median rate (bpm)"), lambda value: f"{float(value):.1f}"),
+    _QcColumn(
+        "marker_fraction",
+        Column("Markers vs expected"),
+        lambda value: f"{float(value):.2f}",
+    ),
+    _QcColumn(
+        "recording_coverage",
+        Column("Recording covered"),
+        lambda value: f"{float(value):.0%}",
+    ),
+    _QcColumn(
+        "before_rms_uv",
+        Column("R-locked amplitude before ICA (µV)"),
+        lambda value: f"{float(value):.2f}",
+    ),
+    _QcColumn(
+        "after_rms_uv",
+        Column("R-locked amplitude after ICA (µV)"),
+        lambda value: f"{float(value):.2f}",
+    ),
+    _QcColumn(
+        "attenuation_db",
+        Column("Attenuation (dB)"),
+        lambda value: f"{float(value):+.1f}",
+    ),
+    _QcColumn(
+        "is_fallback",
+        Column("Markers from fallback", align=Align.TEXT),
+        lambda value: "yes" if value else "no",
+    ),
+)
+
+
 def analyzer_qc_html(qc: AnalyzerCorrectionQc) -> str:
     """Render the per-run Analyzer correction table and any failures."""
-    display_columns = [
-        column
-        for column in (
-            "run",
-            "status",
-            "marker_count",
-            "median_bpm",
-            "marker_fraction",
-            "recording_coverage",
-            "before_rms_uv",
-            "after_rms_uv",
-            "attenuation_db",
-            "is_fallback",
-        )
-        if column in qc.runs.columns
+    present = [spec for spec in _QC_COLUMNS if spec.source in qc.runs.columns]
+    rows = [
+        [spec.render(record.get(spec.source)) for spec in present]
+        for record in qc.runs.to_dict("records")
     ]
-    table = qc.runs[display_columns].to_html(
-        index=False,
-        na_rep="—",
-        float_format=lambda value: f"{value:.2f}",
-        border=0,
-        classes="table table-striped table-sm",
-    )
+    table = grid_table([spec.column for spec in present], rows)
     document = (
         "<p>Gradient and pulse-artifact correction were performed in BrainVision "
         "Analyzer before this pipeline ran, so their quality is an input rather than "
-        "something the MNE stages can fix. <code>before_rms_uv</code> and "
-        "<code>after_rms_uv</code> are the R-locked EEG amplitude either side of the "
-        "pipeline's own ICA, so a large <code>before</code> value means residual pulse "
-        "artifact reached this pipeline.</p>"
+        "something the MNE stages can fix. The R-locked EEG amplitude either side of "
+        "the pipeline's own ICA is given as before and after: a large <em>before</em> "
+        "value means residual pulse artifact reached this pipeline.</p>"
         f"{table}"
     )
-    if qc.failed_runs or qc.fallback_runs:
+    if qc.runs_outside_bounds or qc.fallback_runs:
         notes = []
-        if qc.failed_runs:
+        if qc.runs_outside_bounds:
             notes.append(
-                f"Analyzer's own pulse-marker check did not pass for run(s) "
-                f"{', '.join(qc.failed_runs)}."
+                f"Run(s) {', '.join(qc.runs_outside_bounds)} have pulse-marker "
+                "measurements outside the bounds this QC was configured with. The "
+                "measured values are in the table above and in the QC sidecar; the "
+                "bounds are reference values recorded beside them, not a threshold "
+                "any run was excluded by."
             )
         if qc.fallback_runs:
             notes.append(
@@ -225,28 +309,35 @@ def plot_analyzer_qc(qc: AnalyzerCorrectionQc) -> plt.Figure:
     )
     amplitude_axis.grid(axis="y", alpha=0.2)
     amplitude_axis.spines[["top", "right"]].set_visible(False)
-    amplitude_axis.legend(frameon=False, fontsize=8)
+    amplitude_axis.legend(frameon=False, fontsize=8, loc="best")
 
     if "attenuation_db" in runs.columns:
+        # The highlight is vermillion and the pre-ICA state above is orange. They were
+        # the same colour until the shared palette split them: one figure using one ink
+        # for "before correction" in its left panel and "used fallback detection" in its
+        # right panel is a reading trap, not a convention.
         colors = [FLAG_COLOR if flag else "0.80" for flag in fallback]
         attenuation_axis.bar(positions, runs["attenuation_db"], color=colors)
+        median_attenuation = float(np.nanmedian(runs["attenuation_db"]))
         attenuation_axis.axhline(
-            float(np.nanmedian(runs["attenuation_db"])),
+            median_attenuation,
             color=GUIDE_COLOR,
             linestyle="--",
             linewidth=1.0,
-            label="median",
+            label=f"median {median_attenuation:.1f} dB",
         )
-        title = "Cardiac attenuation achieved by pipeline ICA"
-        if fallback.any():
-            title += "\nhighlighted runs used fallback R-peak detection"
         attenuation_axis.set(
-            title=title,
+            title="Cardiac attenuation achieved by pipeline ICA",
             ylabel="Attenuation (dB)",
             xticks=positions,
             xticklabels=labels,
         )
-        attenuation_axis.legend(frameon=False, fontsize=8)
+        handles, _ = attenuation_axis.get_legend_handles_labels()
+        if fallback.any():
+            # Explain the highlight in the legend, beside the bars it marks, rather than
+            # in a second title line the eye has already left by the time it reaches them.
+            handles.append(Patch(facecolor=FLAG_COLOR, label="fallback R-peak detection"))
+        attenuation_axis.legend(handles=handles, frameon=False, fontsize=8)
         attenuation_axis.grid(axis="y", alpha=0.2)
         attenuation_axis.spines[["top", "right"]].set_visible(False)
     for axis in (amplitude_axis, attenuation_axis):
@@ -257,6 +348,131 @@ def plot_analyzer_qc(qc: AnalyzerCorrectionQc) -> plt.Figure:
     )
     plt.close(figure)
     return figure
+
+
+@dataclass(frozen=True)
+class CardiacResidual:
+    """How much beat-locked artifact one run still carries, and what it was measured on.
+
+    Measured before the ICA exclusions, because the question this answers is what the
+    *upstream* pulse-artifact correction left behind. Measured after them it would credit
+    Analyzer for whatever MNE's decomposition cleaned up, and a run that was never
+    corrected at all would read as corrected.
+    """
+
+    recording_id: str
+    #: Analyzer ``Pulse Artifact/R`` markers preserved in the recording. Zero means the
+    #: upstream correction had no beat train to key on, so no subtraction was possible.
+    marker_count: int
+    #: Which source the beats came from, or ``None`` when neither resolved one.
+    beat_source: str | None
+    #: Peak-to-peak of the across-channel RMS of the beat-locked average, in microvolts.
+    #: ``None`` where no beat train resolved -- an artifact that could not be measured is
+    #: not an artifact that is absent, and the two must not print the same.
+    residual_uv: float | None
+    #: Share of the recording the beat train spans, ``None`` where no train resolved.
+    #: ``residual_uv`` is an average over the beats it was given and describes only the
+    #: part of the run they cover, so the two belong together: a small residual over a
+    #: quarter of a run is not a corrected run.
+    beat_train_coverage: float | None = None
+
+
+#: Window the beat-locked average is cut over, and the baseline removed from it.
+RESIDUAL_WINDOW_S = (-0.2, 0.6)
+RESIDUAL_BASELINE_S = (-0.2, -0.1)
+#: Where the residual is read. The ballistocardiogram follows the R peak by roughly a
+#: fifth of a second, so the window opens at the peak and closes after the deflection.
+RESIDUAL_MEASUREMENT_S = (0.0, 0.5)
+#: Beats below which an average is not an average.
+MINIMUM_RESIDUAL_BEATS = 30
+
+
+def _beat_train_coverage(beat_times_s: np.ndarray, duration_s: float) -> float | None:
+    """Share of the recording the beat train spans, gaps excluded.
+
+    Gaps are counted with the same :data:`MISSED_BEAT_FACTOR` the tachogram's dropout count
+    uses, so the figure and this measurement cannot disagree about which intervals were
+    missed. Time before the first beat and after the last counts as uncovered too: a train
+    that starts four minutes in describes nothing about the four minutes before it.
+    """
+    if beat_times_s.size < 2 or duration_s <= 0:
+        return None
+    intervals = np.diff(beat_times_s)
+    median = float(np.median(intervals))
+    if not np.isfinite(median) or median <= 0:
+        return None
+    gaps = intervals[intervals > MISSED_BEAT_FACTOR * median]
+    uncovered = (
+        float(beat_times_s[0]) + float(duration_s - beat_times_s[-1]) + float(gaps.sum())
+    )
+    return float(np.clip((duration_s - uncovered) / duration_s, 0.0, 1.0))
+
+
+def compute_cardiac_residual(
+    raw: mne.io.BaseRaw,
+    *,
+    recording_id: str,
+    ecg_channel: str = "ECG",
+) -> CardiacResidual:
+    """Measure the beat-locked EEG deflection one run still carries.
+
+    Never raises for want of a measurement. A run with no resolvable beat train reports
+    ``residual_uv=None`` and keeps its marker count, because a run that cannot be measured
+    still has to appear in the re-export worklist -- it is precisely the run where both
+    beat sources failed.
+    """
+    from eeg_pipeline.preprocessing.ica_cardiac_review import (
+        CardiacReviewSettings,
+        UnusableEcg,
+        detect_ecg_events,
+    )
+
+    marker_count = int(np.asarray(annotation_onsets(raw, PULSE_MARKER_DESCRIPTION)).size)
+    if ecg_channel not in raw.ch_names and marker_count == 0:
+        return CardiacResidual(recording_id, marker_count, None, None)
+
+    try:
+        detection = detect_ecg_events(
+            raw, CardiacReviewSettings(enabled=True, ecg_channel=ecg_channel)
+        )
+    except (UnusableEcg, ValueError):
+        # ValueError as well: a recording with no ECG channel fails validation inside the
+        # detector, which for this measurement is the same ordinary outcome.
+        return CardiacResidual(recording_id, marker_count, None, None)
+
+    sfreq = float(raw.info["sfreq"])
+    coverage = _beat_train_coverage(
+        (detection.events[:, 0] - raw.first_samp) / sfreq, raw.n_times / sfreq
+    )
+
+    epochs = mne.Epochs(
+        raw,
+        detection.events,
+        event_id=int(detection.events[0, 2]),
+        tmin=RESIDUAL_WINDOW_S[0],
+        tmax=RESIDUAL_WINDOW_S[1],
+        baseline=RESIDUAL_BASELINE_S,
+        picks="eeg",
+        preload=True,
+        reject=None,
+        verbose="ERROR",
+    )
+    if len(epochs) < MINIMUM_RESIDUAL_BEATS:
+        return CardiacResidual(recording_id, marker_count, detection.source, None, coverage)
+
+    evoked = epochs.average()
+    # Across-channel RMS rather than a single channel: the ballistocardiogram is focal and
+    # which sensor carries it depends on head position, so a fixed channel would measure
+    # where the artifact happened to land rather than how large it was.
+    rms = np.sqrt((evoked.get_data() ** 2).mean(axis=0)) * 1e6
+    inside = (evoked.times >= RESIDUAL_MEASUREMENT_S[0]) & (
+        evoked.times <= RESIDUAL_MEASUREMENT_S[1]
+    )
+    if not inside.any():
+        return CardiacResidual(recording_id, marker_count, detection.source, None, coverage)
+    return CardiacResidual(
+        recording_id, marker_count, detection.source, float(np.ptp(rms[inside])), coverage
+    )
 
 
 @dataclass(frozen=True)
@@ -295,6 +511,314 @@ class RrIntervals:
         return int(np.sum(self.intervals_s > self.dropout_threshold_s))
 
 
+#: Distance within which a marker and a detected peak are taken to be the same beat.
+#:
+#: Analyzer marks the R peak its own correction modelled, and MNE picks the sample its
+#: detector settles on; the two routinely differ by tens of milliseconds on the same beat.
+#: A tolerance well below the shortest plausible interval (0.3 s at 200 bpm) therefore
+#: absorbs that disagreement without ever letting one beat match its neighbour.
+MARKER_AGREEMENT_TOLERANCE_S = 0.1
+
+
+@dataclass(frozen=True)
+class MarkerAgreement:
+    """How far two independent beat detectors agree about one run.
+
+    Analyzer's pulse correction is driven by its R markers, while this pipeline's cardiac
+    review detects R peaks from the ECG signal. Both are reported, in sections far enough
+    apart that a disagreement between them is easy to miss — and a disagreement is not a
+    detail: it says the correction whose output everything downstream inherits was driven
+    by a marker train the ECG does not support.
+    """
+
+    recording_id: str
+    #: Analyzer R-marker onsets, in seconds from the run start.
+    marker_onsets_s: np.ndarray
+    #: Signal-detected R-peak onsets, on the same timeline.
+    detected_onsets_s: np.ndarray
+    tolerance_s: float
+    #: Detected peaks that have a marker within the tolerance, matched one-to-one.
+    n_matched: int
+
+    @property
+    def n_markers(self) -> int:
+        return int(self.marker_onsets_s.size)
+
+    @property
+    def n_detected(self) -> int:
+        return int(self.detected_onsets_s.size)
+
+    @property
+    def matched_fraction(self) -> float | None:
+        """Share of detected beats Analyzer also marked.
+
+        ``None`` rather than zero when nothing was detected: the fraction is taken over
+        the detected beats, so with none there is no denominator. Zero would read as
+        "the detectors disagree completely", which is a different and much stronger
+        claim than "there was nothing to compare".
+        """
+        if self.n_detected == 0:
+            return None
+        return self.n_matched / self.n_detected
+
+
+def compute_marker_agreement(
+    *,
+    recording_id: str,
+    marker_onsets_s: np.ndarray,
+    detected_onsets_s: np.ndarray,
+    tolerance_s: float = MARKER_AGREEMENT_TOLERANCE_S,
+) -> MarkerAgreement:
+    """Match two beat trains against each other, one beat to one beat.
+
+    Takes onsets rather than a raw on purpose. Detection is the caller's business — the
+    per-run evidence pass already runs both detectors — and a function that re-ran them
+    would be measuring its own detector rather than the one whose output is in the report.
+
+    An empty train on either side is a result, not an error. The runs this panel exists to
+    surface are exactly the ones where Analyzer wrote almost no markers, so raising there
+    would suppress the evidence at the only moment it matters.
+    """
+    markers = np.sort(np.asarray(marker_onsets_s, dtype=float))
+    detected = np.sort(np.asarray(detected_onsets_s, dtype=float))
+    if tolerance_s <= 0:
+        raise ValueError(f"Marker agreement needs a positive tolerance, got {tolerance_s!r}.")
+
+    # Greedy nearest-neighbour matching with each marker consumed at most once. Counting
+    # "detected peaks with any marker nearby" instead would let a single marker vouch for
+    # a whole burst of beats, which reports full agreement for a train that has none.
+    consumed = np.zeros(markers.size, dtype=bool)
+    matched = 0
+    for onset in detected:
+        if not markers.size:
+            break
+        candidates = np.flatnonzero(
+            (np.abs(markers - onset) <= tolerance_s) & ~consumed,
+        )
+        if candidates.size == 0:
+            continue
+        nearest = candidates[np.argmin(np.abs(markers[candidates] - onset))]
+        consumed[nearest] = True
+        matched += 1
+
+    return MarkerAgreement(
+        recording_id=recording_id,
+        marker_onsets_s=markers,
+        detected_onsets_s=detected,
+        tolerance_s=float(tolerance_s),
+        n_matched=matched,
+    )
+
+
+def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
+    """Render the two beat counts per run, side by side."""
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Analyzer markers"),
+        Column("Beats detected from ECG"),
+        Column("Matched"),
+        Column("Share of detected beats marked"),
+    )
+    rows = [
+        [
+            run_label(agreement.recording_id),
+            agreement.n_markers,
+            agreement.n_detected,
+            agreement.n_matched,
+            None if agreement.matched_fraction is None else f"{agreement.matched_fraction:.1%}",
+        ]
+        for agreement in agreements
+    ]
+    return (
+        "<p>Two detectors, one heartbeat. Analyzer's R markers drove the pulse-artifact "
+        "correction that ran before this pipeline; the R peaks in the third column were "
+        "detected here from the ECG signal itself. The correction can only be as good as "
+        "the marker train it was given, so the comparison says whether that train "
+        "described the heartbeat the ECG recorded.</p>"
+        + grid_table(columns, rows)
+        + "<p>A beat counts as matched when a marker falls within "
+        f"{MARKER_AGREEMENT_TOLERANCE_S * 1000:.0f} ms of it, and each marker is spent on "
+        "at most one beat. The last column is a share of the beats the ECG shows, so it "
+        "falls when Analyzer marked fewer beats than occurred; it is left blank when no "
+        "beats were detected, because then there is nothing to take a share of.</p>"
+        "<p>What a low share means is not decided here. Analyzer marking few beats while "
+        "the ECG shows many says the correction ran on an incomplete train. The reverse "
+        "&mdash; markers without detected beats &mdash; more often points at the ECG "
+        "trace itself, which the beat-detection panels below show directly.</p>"
+    )
+
+
+#: Width of the window each detector's beat count is expressed over, in seconds.
+#:
+#: Wide enough that a healthy train gives a steady rate rather than a count that swings
+#: between eight and nine beats, and narrow enough to place the moment a train stops to
+#: within a few seconds of it.
+MARKER_RATE_BIN_S = 10.0
+
+
+def _binned_rate(onsets_s: np.ndarray, edges_s: np.ndarray) -> np.ndarray:
+    """Beats per minute in each window, as a rate rather than a count."""
+    counts, _ = np.histogram(onsets_s, bins=edges_s)
+    return counts * (60.0 / MARKER_RATE_BIN_S)
+
+
+def plot_marker_agreement(agreements: Sequence[MarkerAgreement]) -> plt.Figure:
+    """Draw both detectors' beat rate against time, one panel per run.
+
+    A total says the marker train was short; only the time axis says *when* it stopped, and
+    a train that never started and one that lost the trace partway are different faults
+    with different implications for the correction either side of that moment.
+
+    The rate is binned rather than drawn one tick per beat. A run holds several hundred
+    beats over a few hundred seconds, which is more events than the axis has pixels: drawn
+    individually they alias, and the interference banding reads as structure in the marker
+    train that is not in the data. Binning also puts both detectors in the same unit, so
+    the panel answers "were beats being marked at this moment, at the rate the ECG shows"
+    rather than leaving two tick rows to be compared by eye.
+    """
+    if not agreements:
+        raise ValueError("The marker agreement figure needs at least one run.")
+
+    figure, axes = plt.subplots(
+        len(agreements),
+        1,
+        figsize=(11.0, 1.9 * len(agreements) + 0.8),
+        squeeze=False,
+        sharex=True,
+        layout="constrained",
+    )
+    for axis, agreement in zip(axes[:, 0], agreements, strict=True):
+        onsets = np.concatenate([agreement.marker_onsets_s, agreement.detected_onsets_s])
+        stop = float(onsets.max()) if onsets.size else MARKER_RATE_BIN_S
+        edges = np.arange(0.0, stop + MARKER_RATE_BIN_S, MARKER_RATE_BIN_S)
+        centres = edges[:-1] + MARKER_RATE_BIN_S / 2.0
+        for onsets_s, color, label in (
+            (agreement.detected_onsets_s, PRIMARY_COLOR, "Detected from ECG"),
+            (agreement.marker_onsets_s, BEFORE_COLOR, "Analyzer markers"),
+        ):
+            # Steps, not a smooth line: the rate is constant within each window by
+            # construction, and interpolating between centres would draw a beat rate at
+            # moments where none was measured.
+            axis.step(
+                centres,
+                _binned_rate(onsets_s, edges),
+                where="mid",
+                color=color,
+                linewidth=1.1,
+                label=label,
+            )
+        # A run where Analyzer marked nothing draws one lone trace, and a reader who does
+        # not check the legend reads a single-detector panel as agreement. Saying it on
+        # the panel also states what the lone trace is evidence *of*: the ECG carried a
+        # heartbeat that was there to be marked, so the gap is in the marker train and
+        # not in the physiology.
+        if agreement.n_markers == 0 and agreement.n_detected > 0:
+            axis.annotate(
+                "Analyzer marked no beats in this run — the ECG trace is what it missed",
+                xy=(0.5, 0.5),
+                xycoords="axes fraction",
+                ha="center",
+                va="center",
+                fontsize=7.5,
+                color=FLAG_COLOR,
+            )
+        fraction = agreement.matched_fraction
+        share = "no beats detected" if fraction is None else f"{fraction:.1%} of beats marked"
+        axis.set(
+            title=(
+                f"{run_label(agreement.recording_id)} · "
+                f"{agreement.n_markers} markers · {agreement.n_detected} detected · {share}"
+            ),
+            ylabel="Beats per min",
+            ylim=(0, None),
+        )
+        axis.grid(axis="y", alpha=0.2)
+        axis.spines[["top", "right"]].set_visible(False)
+    axes[0, 0].legend(frameon=False, fontsize=8, ncol=2)
+    axes[-1, 0].set_xlabel(f"Time in run (s) · beats counted in {MARKER_RATE_BIN_S:.0f} s windows")
+    plt.close(figure)
+    return figure
+
+
+def compute_run_marker_agreement(
+    raw: mne.io.BaseRaw,
+    *,
+    recording_id: str,
+    description: str | None = None,
+) -> MarkerAgreement | None:
+    """Reconcile one run's Analyzer markers against R peaks detected from its ECG.
+
+    ``None`` when the run carries no channel typed ``ecg``. MNE will happily synthesize a
+    surrogate ECG out of the EEG channels when asked to detect without one, and that
+    surrogate is a different detector from the one whose beats the cardiac review reports.
+    Comparing Analyzer's markers against it would put a number in the table that no other
+    panel in the report corroborates, so the reconciliation is skipped instead.
+    """
+    if "ecg" not in raw.get_channel_types():
+        return None
+
+    markers = annotation_onsets(raw, description or PULSE_MARKER_DESCRIPTION)
+    events, _, _ = mne.preprocessing.find_ecg_events(
+        raw,
+        event_id=PULSE_EVENT_ID,
+        verbose="ERROR",
+    )
+    events = np.asarray(events, dtype=float)
+    detected = (
+        (events[:, 0] - raw.first_samp) / float(raw.info["sfreq"])
+        if events.size
+        else np.array([], dtype=float)
+    )
+    return compute_marker_agreement(
+        recording_id=recording_id,
+        marker_onsets_s=markers,
+        detected_onsets_s=detected,
+    )
+
+
+def add_marker_agreement_section(
+    *,
+    report: mne.Report,
+    agreements: Sequence[MarkerAgreement],
+    section: str = "Scanner artifact correction (Analyzer)",
+) -> None:
+    """Append the two-detector reconciliation, when there is a second detector to compare.
+
+    A dataset recorded outside a scanner has no Analyzer stage and therefore no R markers,
+    so there is one detector and nothing to reconcile; the section is omitted rather than
+    rendered as a table of zeros, which would read as total disagreement. The gate is any
+    marker anywhere in the session, not markers in every run: a train that collapsed in
+    half the runs is precisely what this panel is for.
+    """
+    from eeg_pipeline.preprocessing.report.organize import (
+        before_raw_sections,
+        move_tagged_content_before,
+        remove_tagged_content,
+    )
+    from eeg_pipeline.preprocessing.report.style import report_image_format
+
+    if not any(agreement.n_markers for agreement in agreements):
+        return
+
+    remove_tagged_content(report, tag="marker-agreement")
+    report.add_html(
+        html=marker_agreement_html(agreements),
+        title="Analyzer markers against the recorded ECG",
+        section=section,
+        tags=("raw", "marker-agreement"),
+        replace=True,
+    )
+    report.add_figure(
+        fig=plot_marker_agreement(agreements),
+        title="Both beat trains over time",
+        section=section,
+        tags=("raw", "marker-agreement"),
+        image_format=report_image_format(),
+        replace=True,
+    )
+    move_tagged_content_before(report, tag="marker-agreement", anchor=before_raw_sections)
+
+
 def compute_rr_intervals(
     raw: mne.io.BaseRaw,
     *,
@@ -320,72 +844,218 @@ def compute_rr_intervals(
     )
 
 
-def plot_rr_intervals(series: Sequence[RrIntervals]) -> plt.Figure:
-    """Plot the beat-to-beat interval series for every run."""
+def plot_rr_intervals(
+    series: Sequence[RrIntervals],
+    *,
+    missing: Sequence[str] = (),
+) -> plt.Figure:
+    """Plot the beat-to-beat interval series for every run.
+
+    ``missing`` names runs whose marker train was too short to describe a rhythm. They are
+    listed rather than dropped: a reader who sees runs 1, 3, 5 and 6 cannot tell whether
+    runs 2 and 4 were not acquired, were not measured, or failed, and the answer decides
+    whether the pulse correction had markers to work from at all.
+
+    Every panel shares one fixed interval window, :data:`PLAUSIBLE_RR_RANGE_S`, so a run
+    can be read against its neighbours.
+
+    The window is a physiological constant rather than the range of the data. Letting the
+    data set it meant one run whose detector had collapsed — seven markers across eight
+    minutes, intervals of two minutes — stretched the shared axis across two orders of
+    magnitude, and the ordinary beat-to-beat variation of every working run was flattened
+    into a band a few pixels tall. What the figure resolves now does not depend on which
+    runs happen to share it.
+
+    Nothing is hidden by the window. Intervals outside it are drawn as markers on the
+    boundary they exceeded and counted in the panel title, so a collapsed detector still
+    reads as collapsed — it simply no longer costs every other panel its resolution. This
+    keeps the property the shared log axis was protecting: no run is excluded from the
+    figure, and no threshold decides which runs "look like a rhythm".
+    """
     if not series:
         raise ValueError("The tachogram requires at least one run with R markers.")
+    low, high = PLAUSIBLE_RR_RANGE_S
     figure, axes = plt.subplots(
         len(series),
         1,
-        figsize=(10.0, 1.9 * len(series) + 1.0),
+        figsize=(10.0, 1.9 * len(series) + 1.2),
         squeeze=False,
+        sharex=True,
+        sharey=True,
         layout="constrained",
     )
     for axis, run in zip(axes[:, 0], series, strict=True):
+        minutes = run.beat_times_s / 60.0
+        intervals = run.intervals_s
+        inside = (intervals >= low) & (intervals <= high)
         axis.plot(
-            run.beat_times_s / 60.0,
-            run.intervals_s,
+            minutes,
+            np.where(inside, intervals, np.nan),
             color=PRIMARY_COLOR,
             linewidth=0.7,
             marker=".",
             markersize=1.6,
         )
+        # Drawn on the boundary rather than dropped, and in the annotation colour rather
+        # than the series colour, so a clipped sample cannot be mistaken for a measured
+        # one sitting at the edge of the range.
+        for outside, edge, marker in (
+            (intervals > high, high, "^"),
+            (intervals < low, low, "v"),
+        ):
+            if outside.any():
+                axis.plot(
+                    minutes[outside],
+                    np.full(int(outside.sum()), edge),
+                    linestyle="none",
+                    marker=marker,
+                    markersize=4.0,
+                    color=MARK_COLOR,
+                    clip_on=False,
+                )
         axis.axhline(run.median_interval_s, color=GUIDE_COLOR, linestyle="--", linewidth=1.0)
         # The same threshold the dropout count uses, so the figure and the table cannot
         # disagree about which intervals were counted.
         axis.axhline(run.dropout_threshold_s, color=FLAG_COLOR, linestyle=":", linewidth=1.0)
-        axis.set(
-            title=(
-                f"{run.recording_id} · {run.intervals_s.size + 1} beats · "
-                f"median {run.median_bpm:.0f} bpm · {run.dropout_count} interval(s) "
-                f"above {MISSED_BEAT_FACTOR:g}× the median"
-            ),
-            ylabel="RR (s)",
+        clipped = int((~inside).sum())
+        title = (
+            f"{run_label(run.recording_id)} · {run.intervals_s.size + 1} beats · "
+            f"median {run.median_bpm:.0f} bpm · {run.dropout_count} interval(s) "
+            f"above {MISSED_BEAT_FACTOR:g}× the median"
         )
+        if clipped:
+            title += f" · {clipped} outside the drawn range"
+        axis.set(title=title, ylabel="RR (s)", ylim=(low, high))
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
     axes[-1, 0].set_xlabel("Time in run (min)")
-    figure.suptitle(
-        "Beat-to-beat intervals from the R markers · dashed line is the run median, "
+    caption = (
+        "Beat-to-beat intervals from the R markers · dashed line is the run median\n"
         f"dotted line is {MISSED_BEAT_FACTOR:g}× the median, above which an interval is "
-        "counted as a missed beat",
-        fontsize=9,
+        "counted as a missed beat\n"
+        f"axis fixed to {low:g}–{high:g} s; triangles mark intervals outside it, "
+        "drawn on the boundary they exceeded"
     )
+    if missing:
+        caption += (
+            "\nNo interval series for "
+            + ", ".join(run_label(recording_id) for recording_id in missing)
+            + f": fewer than {MINIMUM_BEATS} R markers were found"
+        )
+    figure.suptitle(caption, fontsize=9)
     plt.close(figure)
     return figure
 
 
-def rr_intervals_html(series: Sequence[RrIntervals]) -> str:
-    """Render the per-run beat detection record."""
-    rows = "".join(
-        f"<tr><td>{html.escape(run.recording_id)}</td>"
-        f"<td>{run.intervals_s.size + 1}</td>"
-        f"<td>{run.median_bpm:.0f}</td>"
-        f"<td>{float(np.percentile(run.intervals_s, 5)):.2f}&ndash;"
-        f"{float(np.percentile(run.intervals_s, 95)):.2f}</td>"
-        f"<td>{run.dropout_count}</td></tr>"
-        for run in series
+def plot_rr_poincare(series: Sequence[RrIntervals]) -> plt.Figure:
+    """Plot each interval against the one after it, for every run.
+
+    The time series answers "when did detection go wrong". This answers "what went
+    wrong", which it cannot: a missed beat and a spuriously doubled one both appear there
+    as a single point away from the median, and they call for opposite responses.
+
+    Here they separate. Detection is self-correcting in a specific way — a missed beat
+    merges two intervals into one near twice the median and the next interval is normal,
+    so the pair lands on the horizontal 2× reference; a double detection splits one
+    interval into two halves, landing the pair on the 0.5× reference. Genuine
+    variability, which changes both intervals of a pair together, stays on the identity
+    line. Reference lines are drawn for all three, and interpreting the scatter against
+    them is left to the reviewer: an arrhythmia can put points off the identity line too.
+
+    Intervals are pooled per run and coloured by run, so a detector that failed in one
+    run only is visible as a cloud of one colour away from the diagonal.
+    """
+    if not series:
+        raise ValueError("The Poincaré plot requires at least one run with R markers.")
+    low, high = PLAUSIBLE_RR_RANGE_S
+    figure, axis = plt.subplots(figsize=(5.6, 5.4), layout="constrained")
+
+    for index, run in enumerate(series):
+        intervals = run.intervals_s
+        if intervals.size < 2:
+            continue
+        axis.scatter(
+            intervals[:-1],
+            intervals[1:],
+            s=6,
+            alpha=0.55,
+            linewidths=0.0,
+            color=RUN_COLORS[index % len(RUN_COLORS)],
+            label=run_label(run.recording_id),
+        )
+
+    reference = np.array([low, high])
+    # The detection-failure guides carry MARK_COLOR rather than FLAG_COLOR: the scatter
+    # already spends the hues on runs, and RUN_COLORS hands vermillion to the second run,
+    # so a vermillion reference line and run-2's cloud were the same ink. They also take
+    # different dash patterns, because two guides that differ only in slope are told
+    # apart by their legend entries otherwise, and the legend is not beside the line.
+    for factor, style, color, label in (
+        (1.0, "--", GUIDE_COLOR, "RRₙ₊₁ = RRₙ (no change)"),
+        (2.0, ":", MARK_COLOR, "2× — one beat missed"),
+        (0.5, "-.", MARK_COLOR, "0.5× — one beat counted twice"),
+    ):
+        axis.plot(
+            reference,
+            np.clip(reference * factor, low, high),
+            color=color,
+            linestyle=style,
+            linewidth=1.0,
+            label=label,
+        )
+    axis.set(
+        title="Each interval against the next",
+        xlabel="RRₙ (s)",
+        ylabel="RRₙ₊₁ (s)",
+        xlim=(low, high),
+        ylim=(low, high),
     )
+    axis.set_aspect("equal")
+    axis.grid(alpha=0.2)
+    axis.spines[["top", "right"]].set_visible(False)
+    axis.legend(frameon=False, fontsize=7, loc="upper right")
+    plt.close(figure)
+    return figure
+
+
+def rr_intervals_html(series: Sequence[RrIntervals], *, missing: Sequence[str] = ()) -> str:
+    """Render the per-run beat detection record.
+
+    Runs named in ``missing`` get a row stating that no series could be built, so the
+    table lists every run that was measured rather than only those that succeeded.
+    """
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Beats"),
+        Column("Median (bpm)"),
+        Column("RR 5th–95th percentile (s)"),
+        Column(f"Intervals above {MISSED_BEAT_FACTOR:g}× median"),
+    )
+    rows: list[Sequence[object] | SpanningRow] = [
+        [
+            run_label(run.recording_id),
+            run.intervals_s.size + 1,
+            f"{run.median_bpm:.0f}",
+            f"{float(np.percentile(run.intervals_s, 5)):.2f}–"
+            f"{float(np.percentile(run.intervals_s, 95)):.2f}",
+            run.dropout_count,
+        ]
+        for run in series
+    ]
+    rows += [
+        SpanningRow(
+            lead=[run_label(recording_id)],
+            note=f"No interval series: fewer than {MINIMUM_BEATS} R markers",
+        )
+        for recording_id in missing
+    ]
     return (
         "<p>Pulse-artifact correction can only be as good as the R markers it was "
         "driven by, and a marker count with a median rate cannot show a detector that "
         "worked for part of a run and then lost the trace. These are the intervals "
         "themselves.</p>"
-        "<table><thead><tr><th>Run</th><th>Beats</th><th>Median (bpm)</th>"
-        "<th>RR 5th&ndash;95th percentile (s)</th>"
-        f"<th>Intervals above {MISSED_BEAT_FACTOR:g}× median</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table>"
-        "<p>A missed beat produces an interval near twice the median, so the last "
+        + grid_table(columns, rows)
+        + "<p>A missed beat produces an interval near twice the median, so the last "
         "column separates heart-rate variability from detection dropout. Interpreting "
         "the count is left to the reviewer: a run with genuine arrhythmia and a run "
         "with a failing detector both raise it, and only the ECG trace distinguishes "
@@ -397,6 +1067,7 @@ def add_rr_interval_section(
     *,
     report: mne.Report,
     series: Sequence[RrIntervals],
+    missing: Sequence[str] = (),
     section: str = "Scanner artifact correction (Analyzer)",
 ) -> None:
     """Append the beat-detection record to a subject report."""
@@ -411,15 +1082,23 @@ def add_rr_interval_section(
         raise ValueError("The tachogram requires at least one run with R markers.")
     remove_tagged_content(report, tag="rr-intervals")
     report.add_html(
-        html=rr_intervals_html(series),
+        html=rr_intervals_html(series, missing=missing),
         title="Beat detection by run",
         section=section,
         tags=("raw", "rr-intervals"),
         replace=True,
     )
     report.add_figure(
-        fig=plot_rr_intervals(series),
+        fig=plot_rr_intervals(series, missing=missing),
         title="Beat-to-beat intervals",
+        section=section,
+        tags=("raw", "rr-intervals"),
+        image_format=report_image_format(),
+        replace=True,
+    )
+    report.add_figure(
+        fig=plot_rr_poincare(series),
+        title="Each interval against the next",
         section=section,
         tags=("raw", "rr-intervals"),
         image_format=report_image_format(),
@@ -478,14 +1157,24 @@ def add_analyzer_correction_review(
 __all__ = [
     "AnalyzerCorrectionQc",
     "CARDIAC_ATTENUATION_QC_SUFFIX",
+    "MARKER_AGREEMENT_TOLERANCE_S",
+    "MarkerAgreement",
     "PULSE_MARKER_QC_SUFFIX",
+    "CardiacResidual",
     "RrIntervals",
+    "compute_cardiac_residual",
     "add_analyzer_correction_review",
+    "add_marker_agreement_section",
     "add_rr_interval_section",
     "analyzer_qc_html",
+    "compute_marker_agreement",
     "compute_rr_intervals",
     "load_analyzer_qc",
+    "marker_agreement_html",
     "plot_analyzer_qc",
+    "plot_marker_agreement",
     "plot_rr_intervals",
+    "plot_rr_poincare",
+    "PLAUSIBLE_RR_RANGE_S",
     "rr_intervals_html",
 ]

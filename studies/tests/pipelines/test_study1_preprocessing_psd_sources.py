@@ -82,7 +82,7 @@ def test_raw_archive_discovery_rejects_participant_directory_mismatch(
         discover_raw_brainvision_runs,
     )
 
-    participant = tmp_path / "sub-0002" / "eeg" / "original_5khz"
+    participant = tmp_path / "sub-0002" / "eeg" / "original_untrimmed_5khz"
     participant.mkdir(parents=True)
     with ZipFile(participant / "raw.zip", "w") as archive:
         archive.writestr(f"raw/{RAW_STEM}.vhdr", _header(RAW_STEM, 200))
@@ -160,7 +160,7 @@ def test_raw_archive_discovery_applies_exact_correction_and_exclusion(
         discover_raw_brainvision_runs,
     )
 
-    participant = tmp_path / "sub-0003" / "eeg" / "original_5khz"
+    participant = tmp_path / "sub-0003" / "eeg" / "original_untrimmed_5khz"
     participant.mkdir(parents=True)
     archive_path = participant / "raw.zip"
     stems = (RAW_SUB3_ABORTED_STEM, RAW_SUB3_RUN1_STEM, RAW_SUB3_RUN3_STEM)
@@ -459,7 +459,7 @@ class _ClosableRaw:
 
 
 def _write_raw_archive(tmp_path: Path, *, include_data: bool = True) -> Path:
-    participant = tmp_path / "sub-0001" / "eeg" / "original_5khz"
+    participant = tmp_path / "sub-0001" / "eeg" / "original_untrimmed_5khz"
     participant.mkdir(parents=True)
     archive = participant / "raw.zip"
     with ZipFile(archive, "w") as handle:
@@ -472,7 +472,7 @@ def _write_raw_archive(tmp_path: Path, *, include_data: bool = True) -> Path:
 
 def _write_raw_triplet(tmp_path: Path, participant_directory: str, stem: str) -> Path:
     subject = participant_directory.replace("sub_", "sub-").split("_", maxsplit=1)[0]
-    directory = tmp_path / subject / "eeg" / "original_5khz"
+    directory = tmp_path / subject / "eeg" / "original_untrimmed_5khz"
     directory.mkdir(parents=True, exist_ok=True)
     header = directory / f"{stem}.vhdr"
     header.write_text(_header(stem, 200), encoding="utf-8")

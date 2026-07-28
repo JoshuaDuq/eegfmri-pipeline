@@ -248,11 +248,20 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
             random_states.append(random_state)
             raw_bad_snapshots.append(list(raw.info["bads"]))
 
+        def find_bad_by_nan_flat(self) -> None:
+            return None
+
         def find_bad_by_deviation(self) -> None:
+            return None
+
+        def find_bad_by_hfnoise(self) -> None:
             return None
 
         def find_bad_by_correlation(self) -> None:
             return None
+
+        def find_bad_by_ransac(self) -> None:
+            self._extra_info = {"bad_by_ransac": {"ransac_correlations": [[1.0, 1.0], [1.0, 1.0]]}}
 
         def get_bads(self) -> list[str]:
             return next(self.outputs)
@@ -315,6 +324,8 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
             bids_path=tmp_path,
             l_pass=None,
             repeats=3,
+            # Only RANSAC consumes the random state, so repeats are meaningful only here.
+            ransac=True,
             random_state=42,
         )
 
@@ -425,3 +436,120 @@ def test_preprocessing_stats_ignores_archived_epoch_files(tmp_path: Path) -> Non
         )
 
     assert loaded_epoch_paths == [active_path]
+
+
+def test_clean_recording_logs_no_bad_channels_rather_than_an_empty_name(
+    tmp_path: Path,
+) -> None:
+    """A recording with nothing wrong must log an empty list, not a nameless channel."""
+
+    class FakeRaw:
+        ch_names = ["Cz", "Pz"]
+
+        def __init__(self) -> None:
+            self.info = {"dig": "present", "bads": []}
+
+        def load_data(self) -> None:
+            return None
+
+        def get_montage(self) -> str:
+            return "existing"
+
+    class FakeNoisyChannels:
+        def __init__(self, raw, random_state=None) -> None:
+            return None
+
+        def find_bad_by_nan_flat(self) -> None:
+            return None
+
+        def find_bad_by_deviation(self) -> None:
+            return None
+
+        def find_bad_by_hfnoise(self) -> None:
+            return None
+
+        def find_bad_by_correlation(self) -> None:
+            return None
+
+        def get_bads(self) -> list[str]:
+            return []
+
+    written: dict[str, pd.DataFrame] = {}
+    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_eeg.vhdr"
+    eeg_path.write_text("", encoding="utf-8")
+    channels_path = tmp_path / "sub-0001_ses-01_task-pain_channels.tsv"
+    channels_path.write_text(
+        "name\ttype\tstatus\tdescription\nCz\tEEG\tgood\t\nPz\tEEG\tgood\t\n",
+        encoding="utf-8",
+    )
+    channels_df = pd.DataFrame(
+        {
+            "name": ["Cz", "Pz"],
+            "type": ["EEG", "EEG"],
+            "status": ["good", "good"],
+            "description": ["", ""],
+        }
+    )
+
+    with (
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
+            return_value={"subject": "0001", "session": "01", "task": "pain"},
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
+            return_value=str(channels_path),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
+            return_value=channels_df,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.write_channels_tsv",
+            side_effect=lambda frame, path, index=False: written.update({str(path): frame.copy()}),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
+            return_value=FakeRaw(),
+        ),
+        patch("eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.BaseRaw", FakeRaw),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
+            FakeNoisyChannels,
+        ),
+    ):
+        result = run_bads_detection_single_file(
+            str(eeg_path),
+            bids_path=tmp_path,
+            l_pass=None,
+            repeats=1,
+        )
+
+    assert result.loc[str(eeg_path), "n_bads"] == 0
+    assert result.loc[str(eeg_path), "bad_channels"] == []
+    assert written[str(channels_path)]["status"].tolist() == ["good", "good"]
+
+
+def test_run_sync_keeps_non_eeg_channel_status(tmp_path: Path) -> None:
+    """Synchronizing EEG bads must not clear a hand-marked bad ECG or EOG channel."""
+    from eeg_pipeline.preprocessing.pipeline.preprocess import (
+        synchronize_bad_channels_across_runs,
+    )
+
+    eeg_dir = tmp_path / "sub-0001" / "ses-01" / "eeg"
+    eeg_dir.mkdir(parents=True)
+    header = "name\ttype\tstatus\n"
+    run_1 = eeg_dir / "sub-0001_ses-01_task-pain_run-1_channels.tsv"
+    run_2 = eeg_dir / "sub-0001_ses-01_task-pain_run-2_channels.tsv"
+    run_1.write_text(header + "C3\teeg\tbad\nC4\teeg\tgood\nECG\tecg\tbad\n", encoding="utf-8")
+    run_2.write_text(header + "C3\teeg\tgood\nC4\teeg\tbad\nECG\tecg\tbad\n", encoding="utf-8")
+
+    synchronize_bad_channels_across_runs(str(tmp_path), "pain", subjects=["0001"])
+
+    for path in (run_1, run_2):
+        frame = pd.read_csv(path, sep="\t")
+        eeg_status = dict(zip(frame["name"], frame["status"]))
+        # Union of the EEG bads across runs, and the ECG row left exactly as it was.
+        assert eeg_status["C3"] == "bad"
+        assert eeg_status["C4"] == "bad"
+        assert eeg_status["ECG"] == "bad"

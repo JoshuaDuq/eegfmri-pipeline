@@ -99,7 +99,10 @@ def test_the_section_renders_and_replaces_on_rebuild() -> None:
     add_rr_interval_section(report=report, series=[series])
     add_rr_interval_section(report=report, series=[series])
 
-    assert len(report._content) == 2
+    # Counted by distinct title rather than by a total, so adding a panel to the section
+    # does not require editing a magic number in a test about accumulation.
+    titles = [element.name for element in report._content]
+    assert len(titles) == len(set(titles))
     assert all("rr-intervals" in element.tags for element in report._content)
     assert "run-1" in rr_intervals_html([series])
     assert plot_rr_intervals([series]).axes
@@ -110,3 +113,170 @@ def test_an_empty_section_is_an_error_rather_than_a_blank_panel() -> None:
 
     with pytest.raises(ValueError, match="at least one run"):
         add_rr_interval_section(report=report, series=[])
+
+
+def _series_for(count: int, *, period=0.85):
+    return [
+        compute_rr_intervals(
+            _raw_with_beats(_regular_beats(period=period, seed=index)),
+            recording_id=f"sub-01_task-x_run-{index + 1}",
+        )
+        for index in range(count)
+    ]
+
+
+def test_the_panels_share_one_interval_scale() -> None:
+    """A run whose detector collapsed reaches intervals of two minutes.
+
+    On independent axes that run gets the same panel height as the usable ones and every
+    other panel is compressed into a flat line, so the figure spends its space on the run
+    that is already known to be broken.
+    """
+    series = _series_for(3)
+    collapsed = compute_rr_intervals(
+        _raw_with_beats(np.array([1.0, 30.0, 95.0, 160.0])),
+        recording_id="sub-01_task-x_run-4",
+    )
+
+    figure = plot_rr_intervals([*series, collapsed])
+
+    assert len({axis.get_ylim() for axis in figure.axes}) == 1
+
+
+def test_a_collapsed_run_does_not_flatten_the_readable_ones() -> None:
+    """The shared scale is physiological, not driven by the worst run in the set.
+
+    Letting a run with a failed detector set the limits spent the axis on the two orders
+    of magnitude between a real interval and a two-minute gap, which left the ordinary
+    beat-to-beat variation of every good run inside a band a few pixels tall. The window
+    is a fixed plausible range instead, so what the panels resolve does not depend on
+    which runs happen to share the figure.
+    """
+    from eeg_pipeline.preprocessing.report.analyzer_qc import PLAUSIBLE_RR_RANGE_S
+
+    series = _series_for(3)
+    collapsed = compute_rr_intervals(
+        _raw_with_beats(np.array([1.0, 30.0, 95.0, 160.0])),
+        recording_id="sub-01_task-x_run-4",
+    )
+
+    with_collapsed = plot_rr_intervals([*series, collapsed])
+    without_collapsed = plot_rr_intervals(series)
+
+    assert with_collapsed.axes[0].get_ylim() == without_collapsed.axes[0].get_ylim()
+    lower, upper = with_collapsed.axes[0].get_ylim()
+    assert (lower, upper) == pytest.approx(PLAUSIBLE_RR_RANGE_S)
+
+
+def test_intervals_outside_the_window_are_counted_on_the_panel() -> None:
+    """Clipping without saying so would turn a failed detector into a tidy panel."""
+    collapsed = compute_rr_intervals(
+        _raw_with_beats(np.array([1.0, 30.0, 95.0, 160.0])),
+        recording_id="sub-01_task-x_run-4",
+    )
+
+    figure = plot_rr_intervals([collapsed])
+
+    title = figure.axes[0].get_title()
+    assert "3" in title
+    assert "outside" in title.lower()
+
+
+def test_a_run_entirely_inside_the_window_says_nothing_about_clipping() -> None:
+    """A clean run must not carry a note about a failure mode it did not have."""
+    figure = plot_rr_intervals(_series_for(1))
+
+    assert "outside" not in figure.axes[0].get_title().lower()
+
+
+def test_the_poincare_plot_separates_missed_from_double_detections() -> None:
+    """RR_n against RR_n+1, where the two failure modes land in different places.
+
+    A missed beat produces one interval near twice the median followed by a normal one,
+    so it sits on the 2x reference line; a double detection produces the mirror pair on
+    the 0.5x line. Neither is distinguishable from ordinary variability in the time
+    series, where both are simply "a tall point".
+    """
+    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+
+    figure = plot_rr_poincare(_series_for(2))
+
+    axis = figure.axes[0]
+    assert "RR" in axis.get_xlabel()
+    assert "RR" in axis.get_ylabel()
+    labels = " ".join(text.get_text() for text in axis.texts)
+    legend = axis.get_legend()
+    if legend is not None:
+        labels += " ".join(text.get_text() for text in legend.get_texts())
+    assert "2" in labels
+
+
+def test_a_poincare_reference_line_never_wears_a_run_colour() -> None:
+    """The 2x and 0.5x guides were drawn in the flag colour, which is also the colour
+    RUN_COLORS hands to the second run. In a four-run session run-2's cloud and the "one
+    beat missed" reference were the same vermillion, so the figure said a run was flagged
+    when nothing had flagged it."""
+    from matplotlib.colors import to_hex
+
+    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+
+    axis = plot_rr_poincare(_series_for(4)).axes[0]
+
+    run_colours = {to_hex(collection.get_facecolor()[0]) for collection in axis.collections}
+    guide_colours = {to_hex(line.get_color()) for line in axis.lines}
+    assert run_colours.isdisjoint(guide_colours)
+
+
+def test_the_two_poincare_failure_modes_are_told_apart_without_the_legend_text() -> None:
+    """Both dotted guides shared one colour and one dash pattern, so the only thing
+    separating "one beat missed" from "one beat counted twice" was reading which of two
+    identical entries sat higher in the legend."""
+    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+
+    axis = plot_rr_poincare(_series_for(2)).axes[0]
+
+    styles = {
+        (line.get_linestyle(), line.get_color())
+        for line in axis.lines
+        if "beat" in str(line.get_label())
+    }
+    assert len(styles) == 2
+
+
+def test_the_poincare_plot_needs_at_least_one_run() -> None:
+    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+
+    with pytest.raises(ValueError):
+        plot_rr_poincare([])
+
+
+def test_a_run_with_no_usable_markers_is_named_rather_than_omitted() -> None:
+    """Runs 2 and 4 simply vanished from this figure, and the reader had to cross-read the
+    Analyzer table to discover that a panel was missing rather than merely empty."""
+    figure = plot_rr_intervals(
+        _series_for(1),
+        missing=("sub-01_task-x_run-2", "sub-01_task-x_run-4"),
+    )
+
+    text = " ".join(
+        [figure.get_suptitle(), *(axis.get_title() for axis in figure.axes)]
+        + [artist.get_text() for axis in figure.axes for artist in axis.texts]
+    )
+    assert "run-2" in text and "run-4" in text
+
+
+def test_the_panels_name_the_run_without_the_full_recording_id() -> None:
+    figure = plot_rr_intervals(_series_for(2))
+
+    assert "run-1" in figure.axes[0].get_title()
+    assert "sub-01_task-x" not in figure.axes[0].get_title()
+
+
+def test_the_caption_fits_inside_the_figure() -> None:
+    """The suptitle was one long line wider than the axes, so it was clipped mid-word."""
+    figure = plot_rr_intervals(_series_for(3))
+    figure.canvas.draw()
+
+    title = figure._suptitle.get_window_extent()
+    assert title.x0 >= 0.0
+    assert title.x1 <= figure.get_window_extent().x1

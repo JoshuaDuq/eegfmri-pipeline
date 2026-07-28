@@ -138,7 +138,7 @@ def discover_cohort_recordings(
     recording_overrides: Mapping[str, int | None] | None = None,
 ) -> list[CohortRecording]:
     """Discover thermal recordings in the original and Analyzer-processed layouts."""
-    source_layouts = ("brainvision_processed_1khz", "original_5khz")
+    source_layouts = ("brainvision_processed_1khz", "original_untrimmed_5khz")
     source_headers = sorted(
         source_vhdr
         for source_layout in source_layouts

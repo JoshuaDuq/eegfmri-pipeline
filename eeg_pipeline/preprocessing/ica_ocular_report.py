@@ -11,21 +11,35 @@ import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.preprocessing.ica_exclusions import (
+    components_path_for_ica,
+    read_component_statuses,
+    read_ica_with_reviewed_exclusions,
+)
+from eeg_pipeline.preprocessing.report.build_record import save_subject_report
 from eeg_pipeline.preprocessing.report.organize import (
     before_ica_component_review,
     move_tagged_content_before,
+    open_subject_report,
 )
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,
     FLAG_COLOR,
     GUIDE_COLOR,
+    draw_component_status_strip,
     report_image_format,
     apply_report_style,
+    run_label,
 )
+from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
+
+#: Panel stating how many blinks each run's correlations were measured from.
+OCULAR_DETECTION_TITLE = "Blink detection by run"
 
 OCULAR_REPORT_TITLES = (
     "How to review EOG artifacts",
+    OCULAR_DETECTION_TITLE,
     "Blink-locked EEG before and after provisional ICA",
     "ICA components: EOG correlation by run",
 )
@@ -52,6 +66,8 @@ class RunOcularReview:
 
     recording_id: str
     blink_epoch_count: int
+    #: Length of the run the blinks were counted over, which the rate is taken against.
+    duration_s: float
     #: Absolute EOG correlation per component, maximized over the EOG channels.
     absolute_scores: np.ndarray
     #: Components flagged by MNE ``find_bads_eog`` for this run.
@@ -114,6 +130,17 @@ def _absolute_scores(scores: Any, *, component_count: int) -> np.ndarray:
     return np.max(np.abs(stacked), axis=0)
 
 
+class UnusableEog(ValueError):
+    """One run yielded no blink epoch to build ocular evidence from.
+
+    The counterpart of :class:`~eeg_pipeline.preprocessing.ica_cardiac_review.UnusableEcg`,
+    and a distinct type for the same reason: a run the blink detector cannot resolve is a
+    property of the recording, to be recorded and reported, while a missing channel or a
+    mistyped setting is a fault to fix. Catching plain ``RuntimeError`` around the overlay
+    to keep a study running would swallow every genuine bug inside it as well.
+    """
+
+
 def _plot_run_overlay(
     raw: mne.io.BaseRaw,
     *,
@@ -134,25 +161,58 @@ def _plot_run_overlay(
         ch_name=eog_channels,
         verbose="ERROR",
     )
-    evoked = eog_epochs.average(picks="eeg")
+    # Checked before averaging rather than after. MNE raises a bare RuntimeError from
+    # ``average()`` on an empty epoch set, which the caller cannot tell apart from a real
+    # fault -- so it propagated out of the pipeline and ended a fifteen-subject run.
+    if len(eog_epochs) == 0:
+        raise UnusableEog(
+            f"{recording_id}: the blink detector resolved no epoch, so there is no "
+            f"blink-locked average to overlay."
+        )
+    # The ICA's own channels, not every EEG channel. A bad channel is not in the
+    # decomposition and ``ICA.apply`` hands it back unchanged, so counting it in the
+    # global field power below adds the same value to "before" and "after" and shrinks
+    # the difference the panel exists to show.
+    evoked = eog_epochs.average(picks=list(ica.ch_names))
     corrected = ica.apply(evoked.copy(), exclude=ica.exclude, verbose="ERROR")
-    if surrogates:
-        evoked = evoked.copy().drop_channels(list(surrogates))
-        corrected = corrected.copy().drop_channels(list(surrogates))
-        scope = f"excluding surrogates {', '.join(surrogates)}"
+
+    # Only the surrogates that are in the decomposition can be dropped from it, and only
+    # those needed dropping. A surrogate PyPREP marked bad — Fp1 on sub-0012 here — was
+    # never fitted, so it carries none of the circularity this exclusion exists to remove,
+    # and asking to drop it raises "Channel(s) Fp1 not found, nothing dropped".
+    fitted_surrogates = [name for name in surrogates if name in evoked.ch_names]
+    excluded_surrogates = [name for name in surrogates if name not in evoked.ch_names]
+    if fitted_surrogates:
+        evoked = evoked.copy().drop_channels(fitted_surrogates)
+        corrected = corrected.copy().drop_channels(fitted_surrogates)
+        scope = f"excluding surrogates {', '.join(fitted_surrogates)}"
+        if excluded_surrogates:
+            # Named, because a reader comparing subjects would otherwise see the scope
+            # change between them with nothing to explain it.
+            scope += (
+                f" ({', '.join(excluded_surrogates)} bad, so outside the decomposition)"
+            )
+    elif surrogates:
+        scope = (
+            f"all decomposed channels ({', '.join(surrogates)} bad, "
+            "so outside the decomposition)"
+        )
     else:
         scope = "all EEG channels"
 
     figure, axis = plt.subplots(figsize=(7.0, 3.6), layout="constrained")
-    times_ms = evoked.times * 1e3
+    # Seconds, matching the R-locked panels of the cardiac review. The two sections answer
+    # the same question about two artifacts over windows of the same length, so a reader
+    # moving between them should not have to rescale by a thousand.
+    times_s = evoked.times
     axis.plot(
-        times_ms,
+        times_s,
         evoked.data.std(axis=0) * 1e6,
         color=BEFORE_COLOR,
         label="Before ICA",
     )
     axis.plot(
-        times_ms,
+        times_s,
         corrected.data.std(axis=0) * 1e6,
         color=AFTER_COLOR,
         label="After ICA",
@@ -174,7 +234,7 @@ def _plot_run_overlay(
     )
     axis.set(
         title=f"{recording_id} · {len(eog_epochs)} blink-locked epochs · {scope}",
-        xlabel="Time from blink peak (ms)",
+        xlabel="Time from blink peak (s)",
         ylabel="Global field power (µV)",
     )
     axis.legend(frameon=False)
@@ -209,10 +269,27 @@ def _plot_component_scores(
     )
 
     scores = np.stack([review.absolute_scores for review in run_reviews])
-    axis.bar(
+    medians = np.median(scores, axis=0)
+    # A blink component correlates at ~0.9 while the rest of the decomposition sits
+    # below 0.15. On a linear axis that one component sets the scale and flattens every
+    # other one — including the ones the detector flagged — onto the floor, so the axis
+    # is logarithmic and the comparison the panel exists for stays legible.
+    #
+    # Logarithmic also rules out bars, for the reason given in
+    # ``report.summary.plot_variance_overview``: a bar reads its quantity as a length
+    # from zero, and zero is at negative infinity here, so the length would be set by
+    # the axis limit rather than by the data. Markers encode position only.
+    positive = scores[scores > 0.0]
+    floor = float(positive.min()) / 2.0 if positive.size else 1e-3
+    axis.vlines(components, floor, medians, color="0.90", linewidth=0.7, zorder=1)
+    axis.scatter(
         components,
-        np.median(scores, axis=0),
-        color="0.80",
+        medians,
+        s=26,
+        color="0.45",
+        edgecolor="white",
+        linewidth=0.5,
+        zorder=3,
         label="Median across runs",
     )
     for review in run_reviews:
@@ -223,6 +300,7 @@ def _plot_component_scores(
             facecolor="none",
             edgecolor=AFTER_COLOR,
             linewidth=0.8,
+            zorder=2,
             label="Individual runs" if review is run_reviews[0] else None,
         )
 
@@ -236,39 +314,24 @@ def _plot_component_scores(
             marker="x",
             color=FLAG_COLOR,
             s=48,
+            zorder=4,
             label="Flagged by MNE find_bads_eog",
         )
     axis.set(
         title=f"Absolute EOG correlation per component ({len(run_reviews)} runs)",
         ylabel="Absolute correlation",
+        yscale="log",
+        ylim=(floor, 1.2),
     )
     axis.legend(frameon=False, fontsize=8)
     axis.grid(axis="y", alpha=0.2)
     axis.spines[["top", "right"]].set_visible(False)
 
-    # Exclusion status lives in its own strip. Drawn as full-height shading it would
-    # cover a third of the axis and outweigh the correlations the panel is about.
-    excluded_set = set(int(component) for component in excluded)
-    status_axis.bar(
-        components,
-        1.0,
-        width=1.0,
-        color=[FLAG_COLOR if c in excluded_set else "0.88" for c in components],
+    draw_component_status_strip(
+        status_axis,
+        excluded=excluded,
+        component_count=component_count,
     )
-    status_axis.set(
-        xlim=(-0.7, component_count - 0.3),
-        ylim=(0, 1),
-        yticks=[],
-        xlabel="ICA component",
-    )
-    status_axis.set_ylabel(
-        f"excluded\n({len(excluded_set)}/{component_count})",
-        fontsize=6,
-        rotation=0,
-        ha="right",
-        va="center",
-    )
-    status_axis.spines[["top", "right", "left"]].set_visible(False)
     plt.close(figure)
     return figure
 
@@ -307,6 +370,53 @@ def _clear_ocular_review(report: mne.Report) -> None:
         report.remove(title=title, tags=("ica-ocular-review",), remove_all=True)
 
 
+def ocular_detection_html(run_reviews: Sequence[RunOcularReview]) -> str:
+    """Render what the blink detector found in each run, before any correlation is read.
+
+    Every ocular number downstream is a correlation against blink-locked activity, and a
+    correlation is only as meaningful as the number of blinks behind it. That number was
+    already measured — it titles each slide of the overlay carousel — but a carousel shows
+    one run at a time, so comparing runs meant stepping through the slider and holding
+    counts in memory. A run with four detected blinks produces a correlation that looks
+    exactly like a run with two hundred, and nothing on the page distinguished them.
+
+    The rate is given beside the count because runs differ in length, and a count alone
+    confounds how often the participant blinked with how long the run was. What counts as
+    too few blinks is left to the reviewer: it depends on the montage, the surrogate
+    channels, and the task, none of which this table can see.
+    """
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Duration (min)"),
+        Column("Blink epochs"),
+        Column("Blinks per minute"),
+        Column("Components flagged"),
+    )
+    rows = [
+        [
+            run_label(review.recording_id),
+            f"{review.duration_s / 60.0:.1f}",
+            review.blink_epoch_count,
+            f"{review.blink_epoch_count / (review.duration_s / 60.0):.1f}",
+            len(review.flagged_components),
+        ]
+        for review in run_reviews
+    ]
+    return (
+        "<p>What the blink detector found in each run. Every correlation in this section "
+        "is measured against these blinks, so a run with few of them carries a "
+        "correlation that means correspondingly less &mdash; while looking no different "
+        "from any other run's.</p>"
+        + grid_table(columns, rows)
+        + "<p>Blink rate varies with the participant, the task, and whether the ocular "
+        "channels are dedicated electrodes or frontopolar surrogates, so no count is "
+        "read as adequate or inadequate here. The comparison that is available on this "
+        "table is between runs of one session, where the montage and the participant are "
+        "held fixed and a run standing apart from its neighbours is a fact about that "
+        "run.</p>"
+    )
+
+
 def ocular_evidence_table(run_reviews: list[RunOcularReview]) -> pd.DataFrame:
     """Create a per-component summary of MNE EOG detection outputs."""
     scores = np.stack([review.absolute_scores for review in run_reviews])
@@ -324,6 +434,76 @@ def ocular_evidence_table(run_reviews: list[RunOcularReview]) -> pd.DataFrame:
     )
 
 
+def _unusable_ocular_html(unusable: Sequence[tuple[str, str]], *, n_total: int) -> str:
+    """Name the runs excluded from the ocular evidence, and why.
+
+    The overlays and correlations below are measured from the blinks that were resolved, so
+    a reader comparing them against the session has to know which runs contributed none.
+    """
+    if not unusable:
+        return ""
+    rows = [[run_label(recording_id), reason] for recording_id, reason in unusable]
+    columns = (
+        Column("Run", align=Align.TEXT, code=True),
+        Column("Why it is not in the evidence below", align=Align.TEXT),
+    )
+    return (
+        "<h4>Runs excluded from the ocular evidence</h4>"
+        f"<p><strong>{len(unusable)} of {n_total} run(s) yielded no blink epoch.</strong> "
+        "Every panel in this section is built from the remaining runs and its counts describe "
+        "those alone. The runs are named rather than dropped: a blink correction that cannot "
+        "be verified against a blink is not the same as one that was verified and passed.</p>"
+        + grid_table(columns, rows)
+        + "<p>A run reaching this table has not necessarily got clean frontopolar data. The "
+        "detector's amplitude threshold is relative to the recording, so a session whose "
+        "frontopolar channels carry less variance than usual can resolve very few blinks "
+        "while the participant blinked normally. The blink counts above are what to read this "
+        "against.</p>"
+    )
+
+
+def _write_unusable_ocular_review(
+    *,
+    report_path: Path,
+    output_path: Path,
+    unusable: Sequence[tuple[str, str]],
+) -> Path:
+    """Record that no run yielded a blink epoch, in the report and in the sidecar.
+
+    The empty table is written on purpose: a downstream reader distinguishes "reviewed and
+    found nothing to show" from "never reviewed" by the file existing, and only the first is
+    true here.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"recording_id": recording_id, "unusable_reason": reason}
+            for recording_id, reason in unusable
+        ]
+    ).to_csv(output_path, sep="\t", index=False)
+
+    report = open_subject_report(report_path)
+    _clear_ocular_review(report)
+    report.add_html(
+        html=(
+            "<p><strong>No run of this subject yielded a blink epoch, so there is no ocular "
+            "review to draw.</strong> The frontopolar channels were read and the blink "
+            "detector ran; it resolved no blink in any run.</p>"
+            "<p>Reported rather than omitted, because the absence is the measurement: the "
+            "ocular correction applied to this subject cannot be verified against a blink "
+            "here, which is a different statement from its having been checked and found "
+            "adequate.</p>"
+            + _unusable_ocular_html(unusable, n_total=len(unusable))
+        ),
+        title=OCULAR_REPORT_TITLES[1],
+        section="ICA ocular artifact review",
+        tags=("ica", "eog", "ica-ocular-review", "eog-detection-summary"),
+        replace=True,
+    )
+    save_subject_report(report, report_path, stage="ica-ocular-review")
+    return output_path
+
+
 def generate_ica_ocular_review(
     *,
     filtered_raw_paths: list[Path],
@@ -339,10 +519,13 @@ def generate_ica_ocular_review(
         raise ValueError("No filtered raw recordings were provided for EOG review.")
     apply_report_style()
 
-    ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
+    # The blink overlays and the excluded-component marks must show the exclusions that
+    # build the cleaned data, which live in the component table rather than the ICA file.
+    ica = read_ica_with_reviewed_exclusions(ica_path)
     component_count = int(ica.n_components_)
 
     run_reviews = []
+    unusable: list[tuple[str, str]] = []
     surrogates: tuple[str, ...] = ()
     for path in filtered_raw_paths:
         raw = mne.io.read_raw_fif(path, preload=True, verbose="ERROR")
@@ -350,35 +533,46 @@ def generate_ica_ocular_review(
         surrogates = _surrogate_channels(raw, eog_channels)
         recording_id = path.name.removesuffix("_proc-filt_raw.fif")
         flagged, scores = ica.find_bads_eog(raw, ch_name=eog_channels, verbose="ERROR")
-        overlay_figure, blink_count = _plot_run_overlay(
-            raw,
-            ica=ica,
-            eog_channels=eog_channels,
-            surrogates=surrogates,
-            recording_id=recording_id,
-        )
+        try:
+            overlay_figure, blink_count = _plot_run_overlay(
+                raw,
+                ica=ica,
+                eog_channels=eog_channels,
+                surrogates=surrogates,
+                recording_id=recording_id,
+            )
+        except UnusableEog as exc:
+            # Only this signal: a broad except here would hide real faults in the overlay.
+            unusable.append((recording_id, str(exc)))
+            continue
         run_reviews.append(
             RunOcularReview(
                 recording_id=recording_id,
                 blink_epoch_count=blink_count,
+                duration_s=float(raw.n_times) / float(raw.info["sfreq"]),
                 absolute_scores=_absolute_scores(scores, component_count=component_count),
                 flagged_components=tuple(int(index) for index in flagged),
                 overlay_figure=overlay_figure,
             )
         )
 
-    component_status_path = ica_path.with_name(
-        ica_path.name.replace("_proc-ica_ica.fif", "_proc-ica_components.tsv")
+    if not run_reviews:
+        return _write_unusable_ocular_review(
+            report_path=report_path,
+            output_path=output_path,
+            unusable=unusable,
+        )
+
+    read_component_statuses(
+        components_path_for_ica(ica_path),
+        component_count=component_count,
     )
-    statuses = pd.read_csv(component_status_path, sep="\t")
-    if not np.array_equal(statuses["component"].to_numpy(), np.arange(component_count)):
-        raise ValueError(f"ICA component status table is invalid: {component_status_path}")
 
     table = ocular_evidence_table(run_reviews)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(output_path, sep="\t", index=False)
 
-    report = mne.open_report(report_path)
+    report = open_subject_report(report_path)
     _clear_ocular_review(report)
     section = "ICA ocular artifact review"
     report.add_html(
@@ -388,9 +582,19 @@ def generate_ica_ocular_review(
         tags=("ica", "eog", "ica-ocular-review"),
         replace=True,
     )
+    # Ahead of the overlays and the correlations, both of which are measured from these
+    # blinks and neither of which states how many there were.
+    report.add_html(
+        html=ocular_detection_html(run_reviews)
+        + _unusable_ocular_html(unusable, n_total=len(filtered_raw_paths)),
+        title=OCULAR_REPORT_TITLES[1],
+        section=section,
+        tags=("ica", "eog", "ica-ocular-review", "eog-detection-summary"),
+        replace=True,
+    )
     report.add_figure(
         fig=[review.overlay_figure for review in run_reviews],
-        title=OCULAR_REPORT_TITLES[1],
+        title=OCULAR_REPORT_TITLES[2],
         caption=[review.recording_id for review in run_reviews],
         section=section,
         tags=("ica", "eog", "ica-ocular-review", "eog-run-review"),
@@ -399,7 +603,7 @@ def generate_ica_ocular_review(
     )
     report.add_figure(
         fig=_plot_component_scores(run_reviews, excluded=ica.exclude),
-        title=OCULAR_REPORT_TITLES[2],
+        title=OCULAR_REPORT_TITLES[3],
         section=section,
         tags=("ica", "eog", "ica-ocular-review", "eog-component-review"),
         image_format=report_image_format(),
@@ -410,9 +614,14 @@ def generate_ica_ocular_review(
         tag="ica-ocular-review",
         anchor=before_ica_component_review,
     )
-    report.save(report_path, overwrite=True, open_browser=False)
-    report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+    save_subject_report(report, report_path, stage="ica-ocular-review")
     return output_path
 
 
-__all__ = ["OcularReviewSettings", "generate_ica_ocular_review", "ocular_evidence_table"]
+__all__ = [
+    "OCULAR_DETECTION_TITLE",
+    "OcularReviewSettings",
+    "generate_ica_ocular_review",
+    "ocular_detection_html",
+    "ocular_evidence_table",
+]

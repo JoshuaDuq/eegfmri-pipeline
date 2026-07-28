@@ -2,29 +2,47 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.preprocessing.report.build_record import save_subject_report
+from eeg_pipeline.preprocessing.report.organize import (
+    drop_replaced_ica_ecg_panels,
+    open_subject_report,
+)
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,
     FLAG_COLOR,
+    GUIDE_COLOR,
+    MARK_COLOR,
     REFERENCE_COLOR,
     RUN_COLORS,
     report_image_format,
     apply_report_style,
+    run_label,
+)
+from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
+from eeg_pipeline.preprocessing.ica_exclusions import (
+    components_path_for_ica,
+    promote_exclusions,
+    read_component_statuses,
+    read_ica_with_reviewed_exclusions,
 )
 from eeg_pipeline.preprocessing.ica_cardiac_review import (
     CardiacReviewSettings,
     ComponentCardiacReview,
     RunCardiacReview,
+    UnusableEcg,
     _build_component_cardiac_review,
     _build_run_cardiac_review,
     component_cardiac_evidence_table,
     component_run_cardiac_evidence_table,
+    ctps_promotions,
 )
 
 #: Runs below this count give a quantile band no more meaning than a min-max envelope.
@@ -46,43 +64,128 @@ def _plot_run_cardiac_review(
     import matplotlib.pyplot as plt
 
     figure, axes = plt.subplot_mosaic(
-        [["ecg", "ecg", "heart_rate"], ["gfp", "before", "after"]],
-        figsize=(15.0, 7.2),
+        [["ecg", "ecg", "heart_rate", "heart_rate"], ["gfp", "gfp", "before", "after"]],
+        figsize=(16.0, 7.2),
         layout="constrained",
     )
     axes["ecg"].plot(
         review.representative_times,
         review.representative_ecg_mv,
         color="#000000",
+        linewidth=0.9,
+        zorder=2,
     )
-    for peak_time in review.representative_peak_times:
-        axes["ecg"].axvline(peak_time, color=FLAG_COLOR, alpha=0.65, linewidth=1.0)
+    # Marking each detection at the amplitude the ECG actually had there, rather than
+    # with a full-height rule, is what makes a misplaced detection visible: a marker
+    # floating off the R peak is obvious, whereas a vertical line beside one is not.
+    peak_amplitudes = np.interp(
+        review.representative_peak_times,
+        review.representative_times,
+        review.representative_ecg_mv,
+    )
+    axes["ecg"].scatter(
+        review.representative_peak_times,
+        peak_amplitudes,
+        marker="v",
+        s=42,
+        color=FLAG_COLOR,
+        zorder=3,
+        label="Detected R peak",
+    )
     axes["ecg"].set(
         title="Representative ECG with signal-detected R peaks",
         xlabel="Recording time (s)",
         ylabel="ECG (mV)",
     )
+    axes["ecg"].legend(frameon=False, fontsize=7, loc="upper right")
 
     heart_rate_axis = axes["heart_rate"]
-    heart_rate_axis.plot(
+    # No connecting line. Successive beats are not a continuous signal, and joining a
+    # few hundred of them turns an alternating detection pattern — the signature of a
+    # doubled or missed R peak — into a solid block of ink that hides it.
+    heart_rate_axis.scatter(
         review.rr_times,
         review.heart_rate_bpm,
         color=REFERENCE_COLOR,
-        linewidth=0.8,
-        alpha=0.75,
+        s=7,
+        alpha=0.8,
+        linewidth=0,
     )
-    heart_rate_axis.scatter(review.rr_times, review.heart_rate_bpm, color=REFERENCE_COLOR, s=9)
+    median_bpm = float(np.median(review.heart_rate_bpm))
     heart_rate_axis.axhline(
-        np.median(review.heart_rate_bpm),
-        color="0.35",
+        median_bpm,
+        color=GUIDE_COLOR,
         linestyle="--",
         linewidth=1.0,
+        label=f"median {median_bpm:.0f} bpm",
     )
+    # Half and double the median, where the two detector failures land. A missed beat
+    # spans two intervals and halves the instantaneous rate; a T wave counted as an R
+    # peak doubles it. Both produce a second cloud parallel to the median rather than
+    # scattered noise, and sub-0015's run-1 carries a clear one at half rate that the
+    # panel drew without naming. The lines are guides, not thresholds: which of genuine
+    # bradycardia, a pause, and a dropout produced a point on them is not decided here.
+    for factor, style in ((0.5, (0, (4, 2))), (2.0, (0, (4, 2)))):
+        heart_rate_axis.axhline(
+            median_bpm * factor,
+            color=GUIDE_COLOR,
+            linestyle=style,
+            linewidth=0.8,
+            alpha=0.6,
+        )
+    heart_rate_axis.annotate(
+        "½ × median: one beat spanned",
+        xy=(0.0, median_bpm * 0.5),
+        xycoords=("axes fraction", "data"),
+        xytext=(3, 2),
+        textcoords="offset points",
+        ha="left",
+        va="bottom",
+        fontsize=6,
+        color=GUIDE_COLOR,
+    )
+    # A handful of implausible intervals would otherwise set the axis and compress every
+    # real beat into a band a few pixels tall, so the range is taken from a percentile
+    # and the beats left outside it are counted rather than silently dropped.
+    low, high = np.percentile(review.heart_rate_bpm, [1.0, 99.0])
+    margin = max(5.0, 0.1 * (high - low))
+    lower_limit, upper_limit = low - margin, high + margin
+    outside = int(
+        np.count_nonzero(
+            (review.heart_rate_bpm < lower_limit) | (review.heart_rate_bpm > upper_limit)
+        )
+    )
+    heart_rate_axis.set_ylim(lower_limit, upper_limit)
+    notes = []
+    if outside:
+        notes.append(f"{outside} of {review.heart_rate_bpm.size} beats outside this range")
+    # The suptitle reports beats per recording minute; this median is the typical
+    # instantaneous rate. The two measure different things and agree only when every beat
+    # was detected, so their ratio is stated here rather than left as an apparent
+    # contradiction between the panel and the title. No threshold decides when to show it:
+    # the ratio is a measurement, and what it implies is the reviewer's call.
+    notes.append(
+        f"detected {review.average_pulse_bpm:.0f}/recording min "
+        f"= {review.average_pulse_bpm / median_bpm:.0%} of the median rate"
+    )
+    if notes:
+        heart_rate_axis.annotate(
+            "\n".join(notes),
+            xy=(1.0, 1.0),
+            xycoords="axes fraction",
+            xytext=(-4, -4),
+            textcoords="offset points",
+            ha="right",
+            va="top",
+            fontsize=6.5,
+            color=GUIDE_COLOR,
+        )
     heart_rate_axis.set(
         title="Beat-to-beat heart rate",
         xlabel="Recording time (s)",
         ylabel="Heart rate (bpm)",
     )
+    heart_rate_axis.legend(frameon=False, fontsize=7, loc="lower right")
 
     axes["gfp"].plot(
         review.locked_times,
@@ -96,7 +199,7 @@ def _plot_run_cardiac_review(
         color=AFTER_COLOR,
         label="After ICA",
     )
-    axes["gfp"].axvline(0.0, color="0.35", linestyle="--", linewidth=1.0)
+    axes["gfp"].axvline(0.0, color=GUIDE_COLOR, linestyle="--", linewidth=1.0)
     axes["gfp"].set(
         title="R-locked EEG global field power",
         xlabel="Time from R peak (s)",
@@ -130,7 +233,7 @@ def _plot_run_cardiac_review(
         axis.spines[["top", "right"]].set_visible(False)
     figure.suptitle(
         f"{review.recording_id} · {review.r_locked_epoch_count} R-locked epochs · "
-        f"MNE average pulse {review.average_pulse_bpm:.1f} bpm"
+        f"{review.average_pulse_bpm:.1f} detected beats per recording minute"
     )
     plt.close(figure)
     return figure
@@ -148,7 +251,17 @@ def _plot_component_cardiac_review(
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
-    figure, axes = plt.subplots(1, 3, figsize=(13.5, 3.8), layout="constrained")
+    # Four panels, not three. The two score panels are narrow because each carries one
+    # column of points, while the waveform panel needs the width to resolve a QRS-width
+    # deflection. Laid out as one grid rather than by splitting a panel afterwards:
+    # removing an axes that a subgridspec was taken from collapses constrained layout.
+    figure, axes = plt.subplots(
+        1,
+        4,
+        figsize=(14.6, 4.2),
+        width_ratios=(1.0, 2.0, 0.62, 0.62),
+        layout="constrained",
+    )
     mne.viz.plot_topomap(
         ica.get_components()[:, component],
         ica.info,
@@ -166,24 +279,21 @@ def _plot_component_cardiac_review(
     # Runs are drawn in their own colours so this panel can be read together with the
     # scores panel: a cardiac deflection present in one run only is a different finding
     # from one present in all of them, and a single shared colour hides which is which.
-    for run_index, (run_mean, recording_id) in enumerate(
-        zip(run_means, review.run_ids, strict=True)
-    ):
+    for run_index, run_mean in enumerate(run_means):
         axes[1].plot(
             review.times,
             run_mean,
             color=run_colors[run_index],
             alpha=0.85,
             linewidth=0.9,
-            label=recording_id.rsplit("_", maxsplit=1)[-1],
         )
-    axes[1].plot(review.times, median, color="black", linewidth=2.0, label="Median")
+    axes[1].plot(review.times, median, color="black", linewidth=2.0)
     # A quantile band drawn from a handful of runs is just the min-max envelope wearing
     # the clothes of a distribution, so it is only shown once there are enough runs.
     if run_count >= minimum_runs_for_band:
         lower, upper = np.quantile(run_means, [0.16, 0.84], axis=0)
         axes[1].fill_between(review.times, lower, upper, color="0.6", alpha=0.20)
-    axes[1].axvline(0.0, color="0.35", linestyle="--", linewidth=1.0)
+    axes[1].axvline(0.0, color=GUIDE_COLOR, linestyle="--", linewidth=1.0)
     axes[1].set(
         title=f"R-locked ICA waveform and ECG timing ({run_count} runs)",
         xlabel="Time from R peak (s)",
@@ -193,94 +303,121 @@ def _plot_component_cardiac_review(
     ecg_axis.plot(
         review.times,
         np.median(review.run_ecg_z, axis=0),
-        color="0.35",
+        color=GUIDE_COLOR,
         linestyle="--",
         linewidth=1.2,
         label="ECG median",
     )
     # The ECG trace is shown for timing only and its normalized amplitude carries no
     # interpretable scale, so it gets no numeric ticks to compete with the z axis.
-    ecg_axis.set_ylabel("Normalized ECG (timing only)", color="0.35", fontsize=8)
+    ecg_axis.set_ylabel("Normalized ECG (timing only)", color=GUIDE_COLOR, fontsize=8)
     ecg_axis.set_yticks([])
-    source_handles, source_labels = axes[1].get_legend_handles_labels()
-    ecg_handles, ecg_labels = ecg_axis.get_legend_handles_labels()
-    axes[1].legend(
-        source_handles + ecg_handles,
-        source_labels + ecg_labels,
-        frameon=False,
-        fontsize=7,
-        ncol=2,
-        loc="upper left",
-    )
+
+    # Correlation and CTPS are not commensurate: find_bads_ecg returns a signed Pearson
+    # correlation against the ECG channel and a CTPS kappa that cannot be negative.
+    # Sharing one axis put a correlation of -0.13 opposite a kappa of 0.15 and made them
+    # read as one effect reflected about zero, so each gets its own axis and its own
+    # scale.
+    correlation_axis, ctps_axis = axes[2], axes[3]
 
     correlation = review.correlation_scores[:, component]
     ctps = review.ctps_scores[:, component]
     run_positions = np.linspace(-0.16, 0.16, run_count)
-    for run_index, (recording_id, offset) in enumerate(
-        zip(review.run_ids, run_positions, strict=True)
+    for axis, scores, flags, title, label, floor in (
+        (
+            correlation_axis,
+            correlation,
+            review.correlation_flags[:, component],
+            "ECG correlation (r)",
+            "Correlation score (r)",
+            None,
+        ),
+        (
+            ctps_axis,
+            ctps,
+            review.ctps_flags[:, component],
+            "CTPS (kappa)",
+            "CTPS score (κ)",
+            0.0,
+        ),
     ):
-        short_id = recording_id.rsplit("_", maxsplit=1)[-1]
-        axes[2].scatter(
-            offset,
-            correlation[run_index],
-            color=run_colors[run_index],
-            edgecolor="white",
-            linewidth=0.8,
-            s=32,
-            label=short_id,
-        )
-        axes[2].scatter(
-            1.0 + offset,
-            ctps[run_index],
-            color=run_colors[run_index],
-            edgecolor="white",
-            linewidth=0.8,
-            s=32,
-        )
-        # Ring a flagged score rather than stamping over it: an opaque marker would hide
-        # the run colour, which is what connects this panel to the waveform panel.
-        for position, score, flagged in (
-            (offset, correlation[run_index], review.correlation_flags[run_index, component]),
-            (1.0 + offset, ctps[run_index], review.ctps_flags[run_index, component]),
-        ):
-            if flagged:
-                axes[2].scatter(
-                    position,
-                    score,
+        for run_index, offset in enumerate(run_positions):
+            axis.scatter(
+                offset,
+                scores[run_index],
+                color=run_colors[run_index],
+                edgecolor="white",
+                linewidth=0.8,
+                s=32,
+            )
+            # Ring a flagged score rather than stamping over it: an opaque marker would
+            # hide the run colour, which is what connects this panel to the waveform
+            # panel. The ring is black because every hue is already spoken for by a run.
+            if flags[run_index]:
+                axis.scatter(
+                    offset,
+                    scores[run_index],
                     s=150,
                     facecolor="none",
-                    edgecolor=FLAG_COLOR,
+                    edgecolor=MARK_COLOR,
                     linewidth=1.5,
                     zorder=1,
                 )
-    lower_limit = min(-0.3, 1.15 * float(correlation.min()))
-    upper_limit = max(0.3, 1.15 * float(max(correlation.max(), ctps.max())))
-    axes[2].set(
-        title="MNE find_bads_ecg scores by run",
-        ylabel="Score",
-        xticks=[0, 1],
-        xticklabels=["ECG correlation", "CTPS"],
-        xlim=(-0.35, 1.35),
-        ylim=(lower_limit, upper_limit),
+        # The limits follow the scores. A fixed ±0.3 floor was padding every panel out to
+        # a range most components never reach, which left their scores in a flat line
+        # near zero and hid the differences between runs that this panel exists to show.
+        span = float(scores.max() - scores.min())
+        margin = max(0.02, 0.15 * span)
+        lower = float(scores.min()) - margin
+        axis.axhline(0.0, color=GUIDE_COLOR, linewidth=0.8)
+        axis.set(
+            title=title,
+            ylabel=label,
+            xticks=[],
+            xlim=(-0.35, 0.35),
+            # CTPS is bounded below at zero, so an axis that opens negative space invites
+            # reading a sign into a quantity that has none.
+            ylim=(lower if floor is None else max(floor, lower), float(scores.max()) + margin),
+        )
+    for axis in (axes[1], correlation_axis, ctps_axis):
+        axis.grid(axis="y", alpha=0.2)
+        axis.spines[["top", "right"]].set_visible(False)
+
+    # One run legend for the whole figure. Both data panels are keyed by the same run
+    # colours, so repeating the key inside each of them cost two blocks of 7 pt text
+    # sitting on top of the traces they were meant to explain.
+    run_handles = [
+        Line2D([], [], color=color, linewidth=1.6, label=run_id.rsplit("_", maxsplit=1)[-1])
+        for color, run_id in zip(run_colors, review.run_ids, strict=True)
+    ]
+    run_handles.append(Line2D([], [], color="black", linewidth=2.0, label="Median"))
+    run_handles.append(
+        Line2D([], [], color=GUIDE_COLOR, linestyle="--", linewidth=1.2, label="ECG median")
     )
-    score_handles, score_labels = axes[2].get_legend_handles_labels()
-    score_handles.append(
+    # The flag key joins the run key rather than sitting inside a score panel, where it
+    # covered the lowest points on an axis scaled to those very points. Naming the
+    # detector here also keeps the scores' provenance on the figure when a slide is
+    # exported on its own, away from the section prose that otherwise carries it.
+    run_handles.append(
         Line2D(
             [],
             [],
-            color=FLAG_COLOR,
+            color=MARK_COLOR,
             marker="o",
             markerfacecolor="none",
             markersize=9,
             linestyle="none",
-            label="MNE flag",
+            label="flagged by MNE find_bads_ecg",
         )
     )
-    score_labels.append("MNE flag")
-    axes[2].legend(score_handles, score_labels, frameon=False, fontsize=7, ncol=2)
-    for axis in axes[1:]:
-        axis.grid(axis="y", alpha=0.2)
-        axis.spines[["top", "right"]].set_visible(False)
+    figure.legend(
+        handles=run_handles,
+        loc="outside lower center",
+        ncol=min(len(run_handles), 8),
+        frameon=False,
+        fontsize=7,
+    )
+
     description = status_description or "No exclusion reason recorded"
     figure.suptitle(f"ICA{component:03d} · Current ICA status: {status} — {description}")
     plt.close(figure)
@@ -293,9 +430,19 @@ def _ordered_cardiac_indices(content) -> list[int]:
         for index, element in enumerate(content)
         if "ica-cardiac-review" in element.tags
     }
-    if set(cardiac_indices) != set(CARDIAC_REPORT_TITLES):
-        raise ValueError("ICA cardiac-review content does not match the required report entries.")
-    return [cardiac_indices[title] for title in CARDIAC_REPORT_TITLES]
+    # A subset rather than the whole set. A subject whose ECG resolved in no run contributes
+    # the detection summary and no figures, which is a shorter review rather than a broken
+    # one. An entry that is *not* on the list is still a fault: that is a misnamed or stray
+    # panel, which is what this guard was written to catch.
+    unexpected = sorted(set(cardiac_indices) - set(CARDIAC_REPORT_TITLES))
+    if unexpected:
+        raise ValueError(
+            "ICA cardiac-review content carries unrecognized report entries: "
+            + ", ".join(unexpected)
+        )
+    return [
+        cardiac_indices[title] for title in CARDIAC_REPORT_TITLES if title in cardiac_indices
+    ]
 
 
 def _organize_cardiac_review(report: mne.Report) -> None:
@@ -330,6 +477,14 @@ def _cardiac_review_guide_html(settings: CardiacReviewSettings) -> str:
         "topography, and R-locked component waveform directly. Correlation and CTPS scores "
         "and red × markers come from MNE <code>find_bads_ecg</code>. They are displayed "
         "without additional pipeline classification or recommendation.</p>"
+        "<p>Each run reports two rates, which measure different things. The heading gives "
+        "detected beats per minute <em>of recording</em>, so a detector that misses beats "
+        "lowers it; the dashed line on the heart-rate panel is the median instantaneous "
+        "<code>60/RR</code>, which a missed beat barely moves. The panel states the first "
+        "as a percentage of the second. They agree at 100% only when every beat was found, "
+        "so a lower figure means intervals were spanned rather than detected — by dropout, "
+        "by a stretch of unusable ECG, or by a genuine pause. Which of those it was is "
+        "visible in the interval series, not in the percentage.</p>"
         f"<p>R-locked epoch: {settings.epoch_window[0]:g} to "
         f"{settings.epoch_window[1]:g} s; baseline: {settings.baseline[0]:g} to "
         f"{settings.baseline[1]:g} s; MNE CTPS threshold: {ctps_threshold}. "
@@ -338,15 +493,7 @@ def _cardiac_review_guide_html(settings: CardiacReviewSettings) -> str:
 
 
 def _component_statuses(path: Path, *, component_count: int) -> pd.DataFrame:
-    statuses = pd.read_csv(path, sep="\t")
-    required = {"component", "status", "status_description"}
-    if not required.issubset(statuses.columns) or not np.array_equal(
-        statuses["component"].to_numpy(), np.arange(component_count)
-    ):
-        raise ValueError(f"ICA component status table is invalid: {path}")
-    statuses = statuses.copy()
-    statuses["status_description"] = statuses["status_description"].fillna("")
-    return statuses
+    return read_component_statuses(path, component_count=component_count)
 
 
 def run_cardiac_review_table(run_reviews: list[RunCardiacReview]) -> pd.DataFrame:
@@ -363,11 +510,114 @@ def run_cardiac_review_table(run_reviews: list[RunCardiacReview]) -> pd.DataFram
     )
 
 
+def run_cardiac_review_html(run_reviews: list[RunCardiacReview]) -> str:
+    """Render the per-run detection summary for the report.
+
+    Rendered from the reviews rather than from :func:`run_cardiac_review_table`, whose
+    column names belong to the TSV sidecar it is written as. Publishing that frame with
+    ``DataFrame.to_html`` put ``r_locked_epoch_count`` and full BIDS recording ids into
+    a document where every other table says "Run" and "run-1".
+    """
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("R-locked epochs"),
+        Column("Average rate (bpm)"),
+    )
+    rows = [
+        [
+            run_label(review.recording_id),
+            f"{int(review.r_locked_epoch_count):,}",
+            f"{float(review.average_pulse_bpm):.1f}",
+        ]
+        for review in run_reviews
+    ]
+    return grid_table(columns, rows)
+
+
 def _cardiac_sidecar(output_path: Path, suffix: str) -> Path:
     expected_suffix = "_components.tsv"
     if not output_path.name.endswith(expected_suffix):
         raise ValueError(f"ECG component output must end with {expected_suffix!r}.")
     return output_path.with_name(output_path.name.removesuffix(expected_suffix) + f"_{suffix}.tsv")
+
+
+def _unusable_runs_html(unusable: Sequence[tuple[str, str]], *, n_total: int) -> str:
+    """Name the runs excluded from the cardiac evidence, and why.
+
+    A denominator that quietly shrinks is the failure this exists to prevent: the panels
+    below are built from the runs whose ECG resolved, and a reader comparing them against
+    the session has to know which runs are not in them. The reason is carried verbatim from
+    the detector rather than summarised, because "no R peaks" and "an implausible rate" are
+    different recordings.
+    """
+    if not unusable:
+        return ""
+    rows = [[run_label(recording_id), reason] for recording_id, reason in unusable]
+    columns = (
+        Column("Run", align=Align.TEXT, code=True),
+        Column("Why it is not in the evidence below", align=Align.TEXT),
+    )
+    return (
+        f"<h4>Runs excluded from the cardiac evidence</h4>"
+        f"<p><strong>{len(unusable)} of {n_total} run(s) carry no usable beat train.</strong> "
+        "Their ECG did not yield a detectable R-peak series, so every panel in this section "
+        "is built from the remaining runs and its counts describe those alone. The runs are "
+        "named rather than dropped: a cardiac correction that cannot be verified against a "
+        "beat train is not the same as one that was verified and passed.</p>"
+        + grid_table(columns, rows)
+        + "<p>No rate is reported for them. Forcing the detector's threshold low enough to "
+        "return peaks on a weak ECG produces a beat count, not a heart rate &mdash; it "
+        "double-counts T waves, and a fabricated rate in this table would be indistinguishable "
+        "from a measured one.</p>"
+    )
+
+
+def _write_unusable_cardiac_review(
+    *,
+    report_path: Path,
+    output_path: Path,
+    unusable: Sequence[tuple[str, str]],
+    settings: CardiacReviewSettings,
+) -> Path:
+    """Record that no run's ECG resolved, in the report and in the sidecars.
+
+    The empty tables are written on purpose. A downstream reader distinguishes "this
+    subject's cardiac review found nothing to report" from "this subject was never
+    reviewed" by the presence of the file, and only the first of those is true here.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(columns=["component", "status", "status_description"]).to_csv(
+        output_path, sep="\t", index=False
+    )
+    pd.DataFrame(
+        [
+            {"recording_id": recording_id, "unusable_reason": reason}
+            for recording_id, reason in unusable
+        ]
+    ).to_csv(_cardiac_sidecar(output_path, "runs"), sep="\t", index=False)
+
+    report = open_subject_report(report_path)
+    _clear_cardiac_review(report)
+    drop_replaced_ica_ecg_panels(report)
+    report.add_html(
+        html=(
+            "<p><strong>No run of this subject carries a usable beat train, so there is no "
+            "cardiac review to draw.</strong> The ECG channel exists and was read; the "
+            "detector could not resolve an R-peak series from any run of it.</p>"
+            "<p>This is reported rather than omitted because the absence is the measurement. "
+            "It means the cardiac correction applied to this subject cannot be verified "
+            "against its own heartbeat here, which is a different statement from the "
+            "correction having been checked and found adequate.</p>"
+            + _unusable_runs_html(unusable, n_total=len(unusable))
+        ),
+        title="ECG detection summary",
+        section="ICA cardiac artifact review",
+        tags=("ica", "ecg", "ica-cardiac-review", "ecg-detection-summary"),
+        replace=True,
+    )
+    _organize_cardiac_review(report)
+    save_subject_report(report, report_path, stage="ica-cardiac-review")
+    return output_path
 
 
 def generate_ica_cardiac_review(
@@ -377,35 +627,90 @@ def generate_ica_cardiac_review(
     report_path: Path,
     output_path: Path,
     settings: CardiacReviewSettings,
+    _rebuilding: bool = False,
 ) -> Path:
-    """Append direct ECG diagnostics and review-only ICA evidence to an MNE report."""
+    """Append direct ECG diagnostics and ICA cardiac evidence to an MNE report.
+
+    With ``settings.promote_exclusions`` the CTPS detections this review computes are also
+    written into the component table as exclusions; otherwise nothing here changes what the
+    cleaned data contain. ``_rebuilding`` is internal: a promotion invalidates the
+    before/after panels drawn from the old exclusion set, so the function re-enters itself
+    once to redraw them, and the flag stops it recursing again.
+    """
     if not settings.enabled:
         raise ValueError("generate_ica_cardiac_review requires cardiac_review.enabled=true.")
     if not filtered_raw_paths:
         raise ValueError("No filtered raw recordings were provided for ECG review.")
     apply_report_style()
-    ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
-    raws = [mne.io.read_raw_fif(path, preload=True, verbose="ERROR") for path in filtered_raw_paths]
-    run_reviews = [
-        _build_run_cardiac_review(
-            raw,
-            ica=ica,
-            recording_id=path.name.removesuffix("_proc-filt_raw.fif"),
+    # The "after ICA" traces below must show the exclusions that build the cleaned data,
+    # which live in the component table rather than in the ICA file.
+    ica = read_ica_with_reviewed_exclusions(ica_path)
+
+    # A run whose ECG the detector cannot resolve is excluded from the evidence and named,
+    # not thrown. Raising here ended the whole pipeline at the review stage: one detached
+    # ECG lead in one run of one participant left fifteen participants with no report,
+    # including the fourteen whose recordings were fine. The reviewer needs the runs that
+    # did resolve, and needs to be told which ones did not.
+    raws: list[mne.io.BaseRaw] = []
+    run_reviews: list[RunCardiacReview] = []
+    unusable: list[tuple[str, str]] = []
+    for path in filtered_raw_paths:
+        recording_id = path.name.removesuffix("_proc-filt_raw.fif")
+        raw = mne.io.read_raw_fif(path, preload=True, verbose="ERROR")
+        try:
+            review = _build_run_cardiac_review(
+                raw,
+                ica=ica,
+                recording_id=recording_id,
+                settings=settings,
+            )
+        except UnusableEcg as exc:
+            # Only this signal. A broad except here would hide real faults in the review.
+            unusable.append((recording_id, str(exc)))
+            continue
+        raws.append(raw)
+        run_reviews.append(review)
+
+    if not run_reviews:
+        # Nothing to draw, and that is the finding rather than a failure to report one.
+        return _write_unusable_cardiac_review(
+            report_path=report_path,
+            output_path=output_path,
+            unusable=unusable,
             settings=settings,
         )
-        for path, raw in zip(filtered_raw_paths, raws, strict=True)
-    ]
+
     component_review = _build_component_cardiac_review(
         raws,
         run_reviews,
         ica=ica,
         settings=settings,
     )
-    component_status_path = ica_path.with_name(
-        ica_path.name.replace("_proc-ica_ica.fif", "_proc-ica_components.tsv")
-    )
+
+    if settings.promote_exclusions and not _rebuilding:
+        newly_promoted = promote_exclusions(
+            components_path_for_ica(ica_path),
+            components=ctps_promotions(
+                component_review,
+                minimum_run_fraction=settings.promotion_minimum_run_fraction,
+            ),
+            component_count=int(ica.n_components_),
+        )
+        if newly_promoted:
+            # Everything drawn below applies ``ica.exclude``, which was read before those
+            # components were added. Redraw once against the exclusion set that will
+            # actually build the cleaned data, so the report and the derivative agree.
+            return generate_ica_cardiac_review(
+                filtered_raw_paths=filtered_raw_paths,
+                ica_path=ica_path,
+                report_path=report_path,
+                output_path=output_path,
+                settings=settings,
+                _rebuilding=True,
+            )
+
     statuses = _component_statuses(
-        component_status_path,
+        components_path_for_ica(ica_path),
         component_count=int(ica.n_components_),
     )
     table = component_cardiac_evidence_table(component_review, statuses=statuses)
@@ -423,8 +728,12 @@ def generate_ica_cardiac_review(
         index=False,
     )
 
-    report = mne.open_report(report_path)
+    report = open_subject_report(report_path)
     _clear_cardiac_review(report)
+    # MNE's own ECG panels measure the same thing this section is about to render per
+    # run, without saying whether the beats behind them were detected well. Dropped here
+    # so that a report built without the cardiac review keeps them.
+    drop_replaced_ica_ecg_panels(report)
     section = "ICA cardiac artifact review"
     report.add_html(
         html=_cardiac_review_guide_html(settings),
@@ -434,12 +743,8 @@ def generate_ica_cardiac_review(
         replace=True,
     )
     report.add_html(
-        html=run_table.to_html(
-            index=False,
-            float_format=lambda value: f"{value:.3f}",
-            border=0,
-            classes="table table-striped table-sm",
-        ),
+        html=run_cardiac_review_html(run_reviews)
+        + _unusable_runs_html(unusable, n_total=len(filtered_raw_paths)),
         title="ECG detection summary",
         section=section,
         tags=("ica", "ecg", "ica-cardiac-review", "ecg-detection-summary"),
@@ -474,8 +779,7 @@ def generate_ica_cardiac_review(
         replace=True,
     )
     _organize_cardiac_review(report)
-    report.save(report_path, overwrite=True, open_browser=False)
-    report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+    save_subject_report(report, report_path, stage="ica-cardiac-review")
     return output_path
 
 

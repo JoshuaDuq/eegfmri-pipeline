@@ -10,7 +10,6 @@ are properties of the fitted ICA that the pipeline already computes and then dis
 
 from __future__ import annotations
 
-import html
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -18,13 +17,23 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
+from matplotlib.patches import Rectangle
 
 from eeg_pipeline.preprocessing.report.settings import ReportSettings
 from eeg_pipeline.preprocessing.report.style import (
-    AFTER_COLOR,
-    FLAG_COLOR,
+    EXCLUDED_COLOR,
+    EXCLUDED_PANEL_FILL,
     GUIDE_COLOR,
     RUN_COLORS,
+    draw_component_status_strip,
+    run_label,
+)
+from eeg_pipeline.preprocessing.report.tables import (
+    Align,
+    Column,
+    Metric,
+    grid_table,
+    metric_table,
 )
 
 #: Samples per squared component below which an infomax fit is under-determined.
@@ -45,9 +54,30 @@ class DecompositionSummary:
     data_rank: int
     condition_number: float
     samples_per_squared_component: float
-    #: Fraction of sensor variance carried by each component, in component order.
-    explained_variance: np.ndarray
+    #: Sensor variance each component accounts for *alone*, in component order.
+    #:
+    #: These do not add up, and nothing may sum them. ICA components are not orthogonal,
+    #: so the variance a set of them accounts for is not the sum of what each accounts
+    #: for individually — MNE's ``get_explained_variance_ratio`` documents this, and the
+    #: sum over all components is generally not 1. Summing them here reported 99.0% of
+    #: sensor variance removed for sub-0015 where the measured joint value was 91.8%,
+    #: understating retained variance roughly eightfold. Named ``individual_`` so that
+    #: any future use has to acknowledge what it holds.
+    individual_variance: np.ndarray
     excluded: tuple[int, ...]
+    #: Sensor variance the whole exclusion set accounts for, measured jointly.
+    #:
+    #: A field rather than a property: it cannot be derived from
+    #: :attr:`individual_variance` and has to be measured against the data, so every
+    #: construction site is required to supply it.
+    variance_removed: float
+    #: Individual-share threshold that :attr:`variance_above_floor` split the set at.
+    variance_floor: float
+    #: Joint variance of the excluded components whose individual share reaches the
+    #: floor, and of those below it. Each is its own joint measurement, so the two do
+    #: not add to :attr:`variance_removed` and must never be presented as if they did.
+    variance_above_floor: float
+    variance_below_floor: float
     #: Channels dropped from the fit because the pipeline marked them bad. Recorded so
     #: the expected rank can be stated rather than inferred.
     n_bad_channels: int = 0
@@ -81,12 +111,6 @@ class DecompositionSummary:
         return ", ".join(terms)
 
     @property
-    def variance_removed(self) -> float:
-        if not self.excluded:
-            return 0.0
-        return float(self.explained_variance[list(self.excluded)].sum())
-
-    @property
     def variance_retained(self) -> float:
         return 1.0 - self.variance_removed
 
@@ -108,6 +132,23 @@ class DecompositionSummary:
         """Dimensions left for downstream analysis after the exclusions are applied."""
         return self.data_rank - len(self.excluded)
 
+    @property
+    def unfitted_dimensions(self) -> int:
+        """Dimensions of the data that never entered the decomposition.
+
+        ``ICA.apply`` restores the PCA components between ``n_components_`` and the data
+        rank unmodified, so whatever artifact lives in them survives every exclusion. The
+        count matters because a variance criterion collapses precisely when artifact
+        dominates variance: on sub-0015, blink and cardiac accounted for 85% of it and
+        ``n_components=0.99`` fitted 22 components of a rank-62 recording, leaving 40
+        dimensions no exclusion could reach.
+
+        Clamped at zero. Fitting *beyond* the rank is a separate fault with its own
+        measurement in :attr:`is_rank_deficient`, and reporting it here as a negative
+        number of pass-through dimensions would describe something that cannot happen.
+        """
+        return max(0, self.data_rank - self.n_components)
+
     def exclusion_cost(
         self,
         *,
@@ -121,18 +162,29 @@ class DecompositionSummary:
         buys almost no cleaning while still reducing the rank available to covariance
         estimation, source localisation, and connectivity.
 
-        Returns ``(n_above, variance_above, n_below, variance_below)``.
+        Both variances are joint measurements of their own subgroup, taken when the
+        summary was built. They therefore do not add to :attr:`variance_removed`, and a
+        caller that adds them has reintroduced the non-additivity bug this replaced.
+
+        ``variance_floor`` must match the floor the summary was measured at: the split
+        cannot be recomputed here without the data. Returns
+        ``(n_above, variance_above, n_below, variance_below)``.
         """
         if not self.excluded:
             return 0, 0.0, 0, 0.0
+        if not np.isclose(variance_floor, self.variance_floor):
+            raise ValueError(
+                f"This summary was measured at a variance floor of {self.variance_floor!r}; "
+                f"the joint subgroup variances cannot be restated at {variance_floor!r}. "
+                "Pass the floor to summarize_decomposition instead."
+            )
         excluded = np.asarray(self.excluded, dtype=int)
-        variance = self.explained_variance[excluded]
-        above = variance >= variance_floor
+        above = self.individual_variance[excluded] >= variance_floor
         return (
             int(above.sum()),
-            float(variance[above].sum()),
+            self.variance_above_floor,
             int((~above).sum()),
-            float(variance[~above].sum()),
+            self.variance_below_floor,
         )
 
 
@@ -154,12 +206,34 @@ def count_bad_eeg(epochs: mne.BaseEpochs) -> int:
     return len(all_eeg) - len(good_eeg)
 
 
+def _joint_variance(
+    ica: mne.preprocessing.ICA,
+    eeg: mne.BaseEpochs,
+    components: Sequence[int],
+) -> float:
+    """Return the sensor variance a set of components accounts for, measured together.
+
+    ``get_explained_variance_ratio`` computes jointly when handed more than one
+    component, which is the only correct way to score a set: the individual ratios are
+    not additive because the components are not orthogonal.
+    """
+    if not len(components):
+        return 0.0
+    return float(ica.get_explained_variance_ratio(eeg, components=list(components))["eeg"])
+
+
 def summarize_decomposition(
     *,
     ica: mne.preprocessing.ICA,
     epochs: mne.BaseEpochs,
+    variance_floor: float = LOW_VARIANCE_EXCLUSION_FLOOR,
 ) -> DecompositionSummary:
-    """Measure the rank, conditioning, and variance impact of a fitted ICA."""
+    """Measure the rank, conditioning, and variance impact of a fitted ICA.
+
+    ``variance_floor`` is fixed here rather than at render time because the subgroup
+    variances either side of it are joint measurements against the data, and the data
+    are only available at this point.
+    """
     eeg = pick_good_eeg(epochs)
     data = eeg.get_data(copy=False)
     flattened = data.transpose(1, 0, 2).reshape(data.shape[1], -1)
@@ -170,12 +244,17 @@ def summarize_decomposition(
     condition_number = float(singular_values[0] / singular_values[data_rank - 1])
 
     component_count = int(ica.n_components_)
-    explained_variance = np.array(
+    # Per-component shares, for the scatter that locates each component. Reported as
+    # individual values only; the set-level numbers below are measured separately.
+    individual_variance = np.array(
         [
             float(ica.get_explained_variance_ratio(eeg, components=[index])["eeg"])
             for index in range(component_count)
         ]
     )
+    excluded = tuple(int(index) for index in sorted(ica.exclude))
+    above_floor = [index for index in excluded if individual_variance[index] >= variance_floor]
+    below_floor = [index for index in excluded if individual_variance[index] < variance_floor]
     # A projection is only counted when it is applied; an unapplied average-reference
     # projector has not yet cost the data a dimension.
     uses_average_reference = any(
@@ -189,8 +268,12 @@ def summarize_decomposition(
         data_rank=data_rank,
         condition_number=condition_number,
         samples_per_squared_component=float(centered.shape[1]) / float(component_count**2),
-        explained_variance=explained_variance,
-        excluded=tuple(int(index) for index in sorted(ica.exclude)),
+        individual_variance=individual_variance,
+        excluded=excluded,
+        variance_removed=_joint_variance(ica, eeg, excluded),
+        variance_floor=float(variance_floor),
+        variance_above_floor=_joint_variance(ica, eeg, above_floor),
+        variance_below_floor=_joint_variance(ica, eeg, below_floor),
         n_bad_channels=count_bad_eeg(epochs),
         uses_average_reference=bool(uses_average_reference),
     )
@@ -203,7 +286,7 @@ def decomposition_summary_html(
 ) -> str:
     """Render the decomposition's measured properties, without grading them."""
     settings = settings or ReportSettings()
-    rows = [
+    rows: list[Metric | tuple[str, object]] = [
         ("EEG channels used", f"{summary.n_channels}"),
         ("Components fitted", f"{summary.n_components}"),
         (
@@ -214,7 +297,7 @@ def decomposition_summary_html(
             "Numerical data rank",
             f"{summary.data_rank}"
             + (
-                f" &mdash; {summary.rank_shortfall} below expected"
+                f" — {summary.rank_shortfall} below expected"
                 if summary.rank_shortfall > 0
                 else ""
             ),
@@ -223,53 +306,167 @@ def decomposition_summary_html(
         (
             "Samples per squared component",
             f"{summary.samples_per_squared_component:.0f} "
-            f"(want &ge; {settings.min_samples_per_squared_component:.0f})",
+            f"(want ≥ {settings.min_samples_per_squared_component:.0f})",
         ),
         ("Components excluded", f"{len(summary.excluded)} of {summary.n_components}"),
         (
             "Dimensions left after removal",
             f"{summary.retained_dimensions} of {summary.data_rank}",
         ),
-        (
-            "<strong>Sensor variance removed</strong>",
-            f"<strong>{summary.variance_removed:.1%}</strong>",
+        *(
+            [
+                (
+                    "Dimensions outside the fit",
+                    f"{summary.unfitted_dimensions} of {summary.data_rank}",
+                )
+            ]
+            if summary.unfitted_dimensions
+            else []
         ),
-        (
-            "<strong>Sensor variance retained</strong>",
-            f"<strong>{summary.variance_retained:.1%}</strong>",
-        ),
+        Metric("Sensor variance removed", f"{summary.variance_removed:.1%}", emphasis=True),
+        Metric("Sensor variance retained", f"{summary.variance_retained:.1%}", emphasis=True),
     ]
-    body = "".join(f"<tr><td>{name}</td><td>{value}</td></tr>" for name, value in rows)
     document = (
         "<p>Properties of the decomposition as a whole, before judging any single "
         "component. Component numbers refer to the standard broadband ICA used for "
         "artifact removal.</p>"
-        f"<table><tbody>{body}</tbody></table>"
+        f"{metric_table(rows)}"
         "<p>The expected rank follows from the montage and the reference alone, so a "
         "measured rank that matches it is not a deficiency: an average reference always "
         "costs one dimension. A measured rank <em>below</em> the expectation means "
         "something further reduced the data, most often interpolation or a duplicated "
         "channel, and that is the case worth chasing.</p>"
-        "<p>Variance figures describe how much of the recorded sensor variance the "
+        + (
+            "<p>Fewer components were fitted than the data has dimensions, so "
+            f"{summary.unfitted_dimensions} of {summary.data_rank} dimensions never "
+            "entered the decomposition. Applying the ICA restores them "
+            "<strong>unmodified</strong>, which means no exclusion can reach whatever "
+            "they carry. This is worth reading beside the variance figures rather than "
+            "after them: a criterion that selects components by variance stops early "
+            "when artifact holds most of the variance, which is the usual case inside a "
+            "scanner, so the components it did fit can explain almost all of the "
+            "variance while leaving most of the dimensions untouched.</p>"
+            if summary.unfitted_dimensions
+            else ""
+        )
+        + "<p>Variance figures describe how much of the recorded sensor variance the "
         "current exclusion set removes. A high value is not wrong on its own &mdash; "
         "ocular and cardiac artifact genuinely dominate variance, especially inside the "
         "scanner &mdash; but it is the number that most needs to be defensible.</p>"
+        "<p>Sensor variance removed is measured for the exclusion set as a whole, "
+        "against the data. It is <strong>not</strong> the sum of the per-component "
+        "shares plotted below: ICA components are not orthogonal, so their individual "
+        "shares are <strong>not additive</strong> and generally do not total 100% even "
+        "across every component. Adding them overstates removal, and correspondingly "
+        "understates what was kept.</p>"
     )
     above_count, above_variance, below_count, below_variance = summary.exclusion_cost(
-        variance_floor=settings.low_variance_exclusion_floor
+        variance_floor=summary.variance_floor
     )
     if below_count:
         document += (
             "<p>Split at "
-            f"{settings.low_variance_exclusion_floor:.0%} of variance "
+            f"{summary.variance_floor:.0%} of variance "
             "(<code>report.thresholds.low_variance_exclusion_floor</code>): "
-            f"{above_count} excluded component(s) above it account for "
-            f"{above_variance:.1%} of sensor variance, and {below_count} below it for "
-            f"{below_variance:.2%}. Each exclusion costs one dimension, so the rank "
-            f"available downstream is {summary.retained_dimensions} of "
-            f"{summary.data_rank}.</p>"
+            f"{above_count} excluded component(s) sit above it and account for "
+            f"{above_variance:.1%} of sensor variance together, and {below_count} below "
+            f"it account for {below_variance:.2%} together. Each figure is measured "
+            "jointly for its own group, so the two do not add to the total above. Each "
+            "exclusion costs one dimension whatever its size, so the rank available "
+            f"downstream is {summary.retained_dimensions} of {summary.data_rank}.</p>"
         )
     return document
+
+
+def decomposition_measurements(summary: DecompositionSummary) -> dict[str, float | int]:
+    """Return the decomposition's headline numbers, ready for the build record.
+
+    These are the figures the decomposition panel renders as prose, and the ones a
+    decision about whether to keep a subject actually turns on. Emitting them as data
+    means such a decision reads a JSON file rather than parsing a paragraph, and reads the
+    same numbers the report shows because both come from one measurement.
+
+    Every value is a plain Python number: the record is serialised as JSON, and the numpy
+    scalars these are computed as are not serialisable.
+    """
+    return {
+        "n_channels": int(summary.n_channels),
+        "n_components": int(summary.n_components),
+        "n_excluded": int(len(summary.excluded)),
+        "data_rank": int(summary.data_rank),
+        "retained_dimensions": int(summary.retained_dimensions),
+        "condition_number": float(summary.condition_number),
+        "samples_per_squared_component": float(summary.samples_per_squared_component),
+        "variance_removed": float(summary.variance_removed),
+        "n_bad_channels": int(summary.n_bad_channels),
+    }
+
+
+def exclusion_ledger_html(
+    summary: DecompositionSummary,
+    *,
+    status_descriptions: Sequence[str],
+) -> str:
+    """Render one row per component: the decision, what made it, and what it cost.
+
+    The report already stated the decision, in MNE-BIDS-Pipeline's ICLabel table, and
+    already stated the ICLabel class beside it. What it never stated is that those two
+    columns answer different questions. ICLabel is one of several detectors that can mark
+    a component — the ECG correlation and the ocular correlation mark their own — so a
+    component reading "brain, 0.93" next to "excluded: yes" looked like the table
+    contradicting itself rather than like two detectors disagreeing.
+
+    ``status_descriptions`` is the ``status_description`` column of
+    ``*_proc-ica_components.tsv``, which is where the pipeline already records which
+    detector fired and is empty for a component nothing marked. That table is also what
+    decides the exclusions applied to the data, so a ledger built from it cannot drift
+    from the derivative the way one rebuilt from ``ICA.exclude`` could.
+
+    Retained components are listed too. A reviewer asking whether a detector was too eager
+    is asking about what it spared, and a table of removals alone cannot answer that.
+    """
+    if len(status_descriptions) != summary.n_components:
+        raise ValueError(
+            f"The ledger needs one status description per component: got "
+            f"{len(status_descriptions)} for {summary.n_components} components."
+        )
+    excluded = set(summary.excluded)
+    rows = []
+    for component in range(summary.n_components):
+        reason = str(status_descriptions[component]).strip()
+        is_excluded = component in excluded
+        # An exclusion with no recorded reason is worth naming as such rather than
+        # leaving blank, which reads as "retained" at a glance.
+        if is_excluded and not reason:
+            reason = "excluded with no detector recorded"
+        rows.append(
+            [
+                f"ICA{component:03d}",
+                "excluded" if is_excluded else "retained",
+                reason or None,
+                f"{summary.individual_variance[component]:.1%}",
+            ]
+        )
+    columns = (
+        Column("Component", align=Align.TEXT, code=True),
+        Column("Decision", align=Align.TEXT),
+        Column("Marked by", align=Align.TEXT),
+        Column("Variance share"),
+    )
+    return (
+        "<p>Which detector marked each component, and what excluding it cost. The "
+        "decision comes from <code>*_proc-ica_components.tsv</code>, the same table the "
+        "pipeline reads when it applies the ICA, so this ledger and the cleaned data "
+        "cannot disagree.</p>"
+        f"{grid_table(columns, rows)}"
+        "<p>Detectors are independent of each other. ICLabel classifies a component from "
+        "its topography, spectrum, and time course; the cardiac and ocular detectors "
+        "correlate it against a measured reference. A component ICLabel calls brain can "
+        "therefore be excluded on a correlation it never saw, which is a disagreement "
+        "between detectors to be reviewed rather than an inconsistency in the table. "
+        "Variance share is the component's own, and shares are not additive across "
+        "components.</p>"
+    )
 
 
 def plot_variance_overview(
@@ -277,24 +474,38 @@ def plot_variance_overview(
     *,
     settings: ReportSettings | None = None,
 ) -> plt.Figure:
-    """Plot per-component variance, the exclusion set, and the cumulative total.
+    """Plot the sensor variance each component accounts for on its own.
 
     Variance spans several orders of magnitude, so the axis is logarithmic. That rules
     out bars: a bar encodes its quantity by length measured from zero, and zero is at
     negative infinity on a log axis, so the length would be set by the arbitrary axis
     limit rather than by the data. Markers encode position only, which stays honest.
+
+    There is deliberately no cumulative curve. It plotted a running total of these shares
+    in ICA's own component order, and both halves of that are unsound: the shares are not
+    additive because the components are not orthogonal, and the order is arbitrary, so
+    the curve was neither a valid cumulative total nor a scree plot. Computing it jointly
+    would not rescue it — the quantity it claimed to show is not defined. The set-level
+    number lives in the summary table, measured against the data.
     """
-    settings = settings or ReportSettings()
+    # The floor comes from the summary, not from settings: it is the floor the subgroup
+    # variances were actually measured at, so taking it from anywhere else lets the guide
+    # line and the table below the figure describe different splits.
+    floor = summary.variance_floor
     components = np.arange(summary.n_components)
     excluded_mask = np.zeros(summary.n_components, dtype=bool)
     excluded_mask[list(summary.excluded)] = True
-    share = summary.explained_variance * 100.0
+    share = summary.individual_variance * 100.0
 
-    figure, (share_axis, cumulative_axis) = plt.subplots(
+    # The decision gets its own strip rather than only the marker's lightness. At the
+    # marker size that fits sixty components, "excluded" and "retained" were two pale
+    # greys a few pixels across, which made the panel's own subject the hardest thing on
+    # it to read. Same strip the ocular correlation panel carries, so the two read alike.
+    figure, (share_axis, status_axis) = plt.subplots(
         2,
         1,
-        figsize=(11.0, 5.8),
-        height_ratios=(2, 1),
+        figsize=(11.0, 4.9),
+        height_ratios=(12, 1),
         sharex=True,
         layout="constrained",
     )
@@ -310,7 +521,7 @@ def plot_variance_overview(
     )
     for mask, color, label in (
         (~excluded_mask, "0.45", "Retained"),
-        (excluded_mask, FLAG_COLOR, "Excluded"),
+        (excluded_mask, EXCLUDED_COLOR, "Excluded"),
     ):
         share_axis.scatter(
             components[mask],
@@ -323,14 +534,14 @@ def plot_variance_overview(
             linewidth=0.5,
         )
     share_axis.axhline(
-        settings.low_variance_exclusion_floor * 100.0,
+        floor * 100.0,
         color=GUIDE_COLOR,
         linestyle=":",
         linewidth=1.0,
     )
     share_axis.annotate(
-        f"{settings.low_variance_exclusion_floor:.0%} of variance",
-        xy=(summary.n_components, settings.low_variance_exclusion_floor * 100.0),
+        f"{floor:.0%} of variance",
+        xy=(summary.n_components, floor * 100.0),
         xytext=(-2, 3),
         textcoords="offset points",
         ha="right",
@@ -340,46 +551,39 @@ def plot_variance_overview(
     share_axis.set(
         title=(
             f"Sensor variance per component · {int(excluded_mask.sum())} excluded "
-            f"components remove {summary.variance_removed:.1%} of variance"
+            f"components remove {summary.variance_removed:.1%} of variance, "
+            "measured jointly"
         ),
-        ylabel="Variance explained (%)",
+        ylabel="Variance explained alone (%)",
         yscale="log",
+    )
+    # Stated on the figure, not only in the surrounding prose: a slide exported on its own
+    # otherwise invites exactly the addition that produced the wrong headline number.
+    #
+    # The ordering caveat rides along here rather than in the axis label, where it used to
+    # sit. Component order is ICA's own and carries no ranking, but the shares often fall
+    # monotonically anyway, which is exactly when a reader mistakes the panel for a scree
+    # plot — so the warning belongs with the other thing this panel is not.
+    figure.text(
+        0.5,
+        0.005,
+        "individual shares — not additive, they do not sum to the joint total, "
+        "and component order carries no ranking",
+        ha="center",
+        va="bottom",
+        fontsize=7,
+        color=GUIDE_COLOR,
     )
     share_axis.grid(axis="y", alpha=0.2)
     share_axis.spines[["top", "right"]].set_visible(False)
     share_axis.legend(frameon=False, fontsize=8)
-
-    # Both panels share the component axis, so the cumulative curve follows component
-    # order too. Mixing a variance-rank curve with a component-order axis would give the
-    # same x position two different meanings.
-    cumulative = np.cumsum(share)
-    cumulative_axis.plot(components, cumulative, color=AFTER_COLOR)
-    cumulative_axis.fill_between(
-        components,
-        0.0,
-        cumulative,
-        where=excluded_mask,
-        color=FLAG_COLOR,
-        alpha=0.12,
-        step="mid",
+    # The strip carries its own key, so the scatter no longer needs to explain the greys.
+    draw_component_status_strip(
+        status_axis,
+        excluded=summary.excluded,
+        component_count=summary.n_components,
+        legend=False,
     )
-    cumulative_axis.axhline(90.0, color=GUIDE_COLOR, linestyle="--", linewidth=1.0)
-    cumulative_axis.annotate(
-        "90%",
-        xy=(summary.n_components, 90.0),
-        xytext=(-4, 3),
-        textcoords="offset points",
-        ha="right",
-        fontsize=7,
-        color=GUIDE_COLOR,
-    )
-    cumulative_axis.set(
-        xlabel="ICA component (components are ordered by decreasing variance)",
-        ylabel="Cumulative (%)",
-        ylim=(0, 101),
-    )
-    cumulative_axis.grid(axis="y", alpha=0.2)
-    cumulative_axis.spines[["top", "right"]].set_visible(False)
     plt.close(figure)
     return figure
 
@@ -446,15 +650,21 @@ def removal_topography_html(topography: RemovalTopography) -> str:
     return (
         "<p>Sensor variance removed is one number for the whole head, and the same "
         "number can mean two opposite things. This is where that amplitude came from.</p>"
-        "<table><tbody>"
-        f"<tr><td>Median change across channels</td>"
-        f"<td>{topography.median_change_db:.1f} dB</td></tr>"
-        f"<tr><td>Largest single-channel change</td>"
-        f"<td>{topography.worst_change_db:.1f} dB at "
-        f"{html.escape(topography.worst_channel)}</td></tr>"
-        f"<tr><td><strong>Spatial spread (10th to 90th percentile)</strong></td>"
-        f"<td><strong>{topography.spatial_spread_db:.1f} dB</strong></td></tr>"
-        "</tbody></table>"
+        + metric_table(
+            [
+                ("Median change across channels", f"{topography.median_change_db:.1f} dB"),
+                (
+                    "Largest single-channel change",
+                    f"{topography.worst_change_db:.1f} dB at {topography.worst_channel}",
+                ),
+                Metric(
+                    "Spatial spread (10th to 90th percentile)",
+                    f"{topography.spatial_spread_db:.1f} dB",
+                    emphasis=True,
+                ),
+            ]
+        )
+        +
         "<p>Artifact sources are focal, so removing them leaves a wide spread: frontal "
         "or peripheral channels lose a great deal and central channels lose little. A "
         "removal that is close to uniform across the montage has no such spatial "
@@ -484,7 +694,11 @@ def plot_removal_topography(topography: RemovalTopography) -> plt.Figure:
         vlim=(-limit, 0.0),
         contours=0,
     )
-    figure.colorbar(image, ax=map_axis, shrink=0.7, label="Amplitude change (dB)")
+    # The colourbar carries no label of its own. Constrained layout places it hard
+    # against the ranked panel, whose y-axis measures the same quantity in the same
+    # units, so labelling both printed "Amplitude change (dB)" twice, side by side and
+    # overlapping. The ranked panel's label serves both.
+    figure.colorbar(image, ax=map_axis, shrink=0.7)
     map_axis.set_title("Where the amplitude was removed", fontsize=9)
 
     order = np.argsort(topography.change_db)
@@ -526,6 +740,34 @@ _SHORT_LABELS = {
     "other": "other",
     "unlabeled": "",
 }
+
+
+def _mark_excluded_panel(axis: plt.Axes) -> None:
+    """Shade one topography panel to mark the component as excluded.
+
+    ``mne.viz.plot_topomap`` calls ``set_axis_off`` on the axis it draws into, which stops
+    the spines rendering no matter what visibility is set afterwards. An outline drawn
+    through the spines is therefore silently dropped, which previously left the exclusion
+    resting on a title in 0.25 grey against a black one — the weakest possible encoding
+    for the most consequential read in the figure. Artists added to the axis are still
+    drawn with the axis off, so the mark is a patch in axes coordinates.
+
+    The fill stays on the neutral status ramp rather than taking a hue, because in this
+    report hue always encodes a measured quantity and never a decision the pipeline made.
+    """
+    patch = Rectangle(
+        (0.0, 0.0),
+        1.0,
+        1.0,
+        transform=axis.transAxes,
+        facecolor=EXCLUDED_PANEL_FILL,
+        edgecolor=EXCLUDED_COLOR,
+        linewidth=1.0,
+        zorder=-5,
+    )
+    # Tagged so a test can assert the mark exists without matching on colour or geometry.
+    patch._is_exclusion_mark = True
+    axis.add_patch(patch)
 
 
 def plot_component_overview(
@@ -573,18 +815,15 @@ def plot_component_overview(
         axis.set_title(
             f"IC{index:03d}{' ×' if is_excluded else ''}\n{short} {probability:.2f}".rstrip(),
             fontsize=6.5,
-            color=FLAG_COLOR if is_excluded else "black",
+            color=EXCLUDED_COLOR if is_excluded else "black",
             pad=2,
         )
         if is_excluded:
-            for spine in axis.spines.values():
-                spine.set_visible(True)
-                spine.set_color(FLAG_COLOR)
-                spine.set_linewidth(1.4)
+            _mark_excluded_panel(axis)
     for axis in flat[component_count:]:
         axis.remove()
     figure.suptitle(
-        f"All {component_count} components · {len(excluded)} excluded (×, outlined) · "
+        f"All {component_count} components · {len(excluded)} excluded (×, shaded panel) · "
         "label and ICLabel probability beneath each topography\n"
         "Each map is scaled to its own range and ICA signs are arbitrary, so compare "
         "spatial pattern, not colour or polarity",
@@ -618,7 +857,7 @@ def plot_run_component_variance(
         raw = mne.io.read_raw_fif(path, preload=True, verbose="ERROR")
         sources = ica.get_sources(raw).get_data()
         variances.append(sources.var(axis=1))
-        run_labels.append(path.name.split("_run-")[-1].split("_")[0])
+        run_labels.append(run_label(path.name, bare=True))
     matrix = np.stack(variances)
 
     # Normalize each component to its own across-run median so that components with

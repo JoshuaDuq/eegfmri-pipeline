@@ -125,3 +125,58 @@ def test_spectra_respect_a_low_sampling_rate(tmp_path) -> None:
     )
 
     assert evidence.spectra[0].frequencies[-1] <= 49.0
+
+
+class _Config:
+    """A config that knows the difference between "set to false" and "never set"."""
+
+    def __init__(self, values):
+        self._values = dict(values)
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+
+def test_settings_the_dataset_never_configured_are_omitted() -> None:
+    """An EEG-only report must not carry a row about scanner correction.
+
+    A key absent from the configuration influenced nothing, so listing it as "not set"
+    spends a row telling the reader about equipment they do not have. A key present and
+    false is different: that was a decision, and reproducing the report needs it.
+    """
+    from eeg_pipeline.preprocessing.report.provenance import provenance_html
+
+    document = provenance_html(
+        _Config(
+            {
+                "eeg.reference": "average",
+                "preprocessing.l_freq": 0.1,
+                "ica.use_icalabel": False,
+            }
+        )
+    )
+
+    assert "Analyzer correction upstream" not in document
+    assert "not set" not in document
+    assert "EEG reference" in document
+    # Present and false: a recorded decision, so it stays.
+    assert "ICLabel used" in document
+
+
+def test_a_configured_scanner_setting_is_reported_even_when_off() -> None:
+    from eeg_pipeline.preprocessing.report.provenance import provenance_html
+
+    document = provenance_html(_Config({"preprocessing.brainvision_analyzer.enabled": False}))
+
+    assert "Analyzer correction upstream" in document
+    assert ">no<" in document
+
+
+def test_a_report_whose_settings_are_all_absent_says_so() -> None:
+    """An empty table would read as a report with no settings rather than no record."""
+    from eeg_pipeline.preprocessing.report.provenance import provenance_html
+
+    document = provenance_html(_Config({}))
+
+    assert "<table" not in document
+    assert "no recorded settings" in document.lower()

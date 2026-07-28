@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,9 +21,23 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 
 from eeg_pipeline.preprocessing.report.settings import ReportSettings
-from eeg_pipeline.preprocessing.report.style import AFTER_COLOR, FLAG_COLOR, GUIDE_COLOR
+from eeg_pipeline.preprocessing.report.style import (
+    AFTER_COLOR,
+    FLAG_COLOR,
+    GUIDE_COLOR,
+    RETAINED_COLOR,
+)
+from eeg_pipeline.preprocessing.report.tables import (
+    Align,
+    Column,
+    Metric,
+    grid_table,
+    metric_table,
+)
 
 BAD_CHANNEL_UNION_QC_STEM = "bad_channel_union_qc"
 
@@ -106,6 +121,194 @@ def load_channel_coverage(
     )
 
 
+@dataclass(frozen=True)
+class RunBadChannels:
+    """The channels one run lost, and why the detector said so."""
+
+    run_label: str
+    bad_channels: tuple[str, ...]
+    #: Detector reason per channel, keyed by channel name. Empty where none was recorded.
+    reasons: dict[str, str]
+
+
+def load_run_bad_channels(
+    *,
+    deriv_eeg_root: Path,
+    task: str,
+    subject: str,
+) -> list[RunBadChannels]:
+    """Read the per-run bad-channel record written beside each processed run.
+
+    The union table says which channels the subject lost; it cannot say whether a channel
+    failed once or throughout, and those call for different responses. The per-run
+    ``_bads.tsv`` files carry that, so they are read here rather than inferred.
+
+    An absent record yields an empty list rather than an error: a dataset processed by a
+    configuration that writes no per-run record simply has no such table to show.
+    """
+    root = deriv_eeg_root / f"sub-{subject}"
+    if not root.is_dir():
+        return []
+    paths = sorted(
+        path
+        for path in root.rglob(f"sub-{subject}_task-{task}*_bads.tsv")
+        if path.is_file() and not path.name.startswith("._")
+    )
+    runs: list[RunBadChannels] = []
+    for path in paths:
+        frame = pd.read_csv(path, sep="\t")
+        names = (
+            sorted(str(name) for name in frame["name"].dropna()) if "name" in frame.columns else []
+        )
+        reasons = (
+            {str(row["name"]): str(row.get("reason", "")) for _, row in frame.iterrows()}
+            if "name" in frame.columns
+            else {}
+        )
+        runs.append(
+            RunBadChannels(
+                run_label=_run_label_from_bads_path(path, subject=subject, task=task),
+                bad_channels=tuple(names),
+                reasons=reasons,
+            )
+        )
+    return runs
+
+
+def _run_label_from_bads_path(path: Path, *, subject: str, task: str) -> str:
+    """Return the run-identifying label for one ``_bads.tsv`` file.
+
+    A single-run dataset has no ``run-`` entity at all, so the label falls back to the
+    session or to "run" rather than leaving the row unlabelled.
+    """
+    stem = path.name.removeprefix(f"sub-{subject}_").removesuffix("_bads.tsv")
+    for part in stem.split("_"):
+        if part.startswith("run-"):
+            return part
+    for part in stem.split("_"):
+        if part.startswith("ses-"):
+            return part
+    return "run"
+
+
+def run_matrix_is_informative(runs: Sequence[RunBadChannels]) -> bool:
+    """Whether the runs disagree about which channels are bad.
+
+    When every run names the same channels, the matrix is a block of identical columns
+    and the table above it already states the block's contents. The matrix earns its
+    space only when it can separate "bad throughout" from "bad during one run".
+    """
+    if len(runs) < 2:
+        return False
+    return len({run.bad_channels for run in runs}) > 1
+
+
+def run_bad_channel_html(runs: Sequence[RunBadChannels]) -> str:
+    """Render one row per run, clean runs included."""
+    if not runs:
+        return ""
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Bad channels"),
+        Column("Names", align=Align.TEXT),
+    )
+    rows = [
+        [run.run_label, len(run.bad_channels), ", ".join(run.bad_channels) or None]
+        for run in runs
+    ]
+    return (
+        "<p>Bad channels recorded for each run. A channel bad in every run is a property "
+        "of the montage or the preparation; one bad in a single run is something that "
+        "happened during the session, and only the second is worth reviewing the run "
+        "for.</p>"
+        f"{grid_table(columns, rows)}"
+    )
+
+
+def plot_run_bad_channel_matrix(runs: Sequence[RunBadChannels]) -> plt.Figure:
+    """Plot which channels were bad in which run.
+
+    Channels on the vertical axis and runs on the horizontal, so a channel bad throughout
+    reads as a full row and a run that went bad reads as a full column. Only channels
+    that failed somewhere are drawn: a montage of 63 rows, 61 of them empty, hides the
+    two that carry the information.
+    """
+    if not runs:
+        raise ValueError("The bad-channel matrix requires at least one run.")
+    channels = sorted({name for run in runs for name in run.bad_channels})
+    if not channels:
+        raise ValueError("The bad-channel matrix requires at least one bad channel.")
+
+    grid = np.array(
+        [[name in run.bad_channels for run in runs] for name in channels],
+        dtype=float,
+    )
+    figure, axis = plt.subplots(
+        figsize=(max(4.0, 0.7 * len(runs) + 2.0), max(2.4, 0.32 * len(channels) + 1.2)),
+        layout="constrained",
+    )
+    # Two states, so a two-colour listed map rather than a continuous ramp: an intensity
+    # scale would invite reading a severity into a boolean.
+    axis.imshow(
+        grid,
+        aspect="auto",
+        cmap=ListedColormap([RETAINED_COLOR, FLAG_COLOR]),
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+    )
+    axis.set(
+        xticks=np.arange(len(runs)),
+        xticklabels=[run.run_label for run in runs],
+        yticks=np.arange(len(channels)),
+        yticklabels=channels,
+        title="Bad channels by run",
+    )
+    axis.set_xticks(np.arange(len(runs) + 1) - 0.5, minor=True)
+    axis.set_yticks(np.arange(len(channels) + 1) - 0.5, minor=True)
+    axis.grid(which="minor", color="white", linewidth=1.5)
+    axis.tick_params(which="minor", length=0)
+    axis.tick_params(axis="y", labelsize=8)
+    handles = [
+        Patch(facecolor=FLAG_COLOR, label="Bad"),
+        Patch(facecolor=RETAINED_COLOR, label="Good"),
+    ]
+    axis.legend(
+        handles=handles, frameon=False, fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0)
+    )
+    plt.close(figure)
+    return figure
+
+
+def _unassigned_rows(coverage: ChannelCoverage) -> list[tuple[str, object]]:
+    """Account for channels that belong to no region of interest.
+
+    The regions are analysis groupings, not a partition of the montage, so they routinely
+    sum to fewer channels than the recording has. Left unstated that reads as the table
+    contradicting itself; stated, it is just the montage.
+    """
+    if coverage.rois.empty:
+        return []
+    assigned = int(coverage.rois["n_total"].sum())
+    unassigned = int(coverage.n_channels) - assigned
+    if unassigned <= 0:
+        return []
+    return [("In no region of interest", unassigned)]
+
+
+def coverage_figure_is_informative(rois: pd.DataFrame) -> bool:
+    """Whether the per-region figure shows anything the summary table does not.
+
+    The figure draws the region total behind the surviving count. When nothing was
+    excluded the two layers are identical, so the front bars hide the back ones exactly
+    and the legend names a series that is not visible anywhere on the axes. There is no
+    loss to plot, and the sentence in the summary says so more directly.
+    """
+    if rois.empty:
+        return False
+    return bool((rois["n_remaining"].to_numpy() < rois["n_total"].to_numpy()).any())
+
+
 def coverage_html(
     coverage: ChannelCoverage,
     *,
@@ -117,16 +320,25 @@ def coverage_html(
         "<p>Bad channels are excluded rather than interpolated, so what matters for "
         "analysis is not how many were lost but whether each region of interest still "
         "has enough sensors to average over.</p>"
-        "<table><tbody>"
-        f"<tr><td>EEG channels</td><td>{coverage.n_channels}</td></tr>"
-        f"<tr><td>Runs harmonized</td><td>{coverage.n_runs} "
-        f"({html.escape(coverage.sync_policy)})</td></tr>"
-        f"<tr><td><strong>Bad channels</strong></td>"
-        f"<td><strong>{len(coverage.bad_channels)} "
-        f"({coverage.bad_fraction:.1%})</strong></td></tr>"
-        f"<tr><td>Excluded</td><td>{html.escape(listed)}</td></tr>"
-        "</tbody></table>"
+        + metric_table(
+            [
+                ("EEG channels", coverage.n_channels),
+                ("Runs harmonized", f"{coverage.n_runs} ({coverage.sync_policy})"),
+                Metric(
+                    "Bad channels",
+                    f"{len(coverage.bad_channels)} ({coverage.bad_fraction:.1%})",
+                    emphasis=True,
+                ),
+                ("Excluded", listed),
+                *_unassigned_rows(coverage),
+            ]
+        )
     )
+    if not coverage_figure_is_informative(coverage.rois):
+        document += (
+            "<p>No channel was excluded, so every region keeps its full complement and "
+            "there is no per-region loss to plot.</p>"
+        )
     below = coverage.failed_rois_below(minimum_roi_channels)
     if below:
         document += (
@@ -199,6 +411,7 @@ def add_coverage_review(
     """Append channel and ROI coverage evidence to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
         before_raw_sections,
+        drop_replaced_per_run_bad_channels,
         move_tagged_content_before,
         remove_tagged_content,
     )
@@ -221,7 +434,28 @@ def add_coverage_review(
         tags=("data-quality", "channel-coverage"),
         replace=True,
     )
-    if not coverage.rois.empty:
+    runs = load_run_bad_channels(deriv_eeg_root=deriv_eeg_root, task=task, subject=subject)
+    if runs:
+        # Only once the replacement exists, so that a report built without this section
+        # keeps MNE-BIDS-Pipeline's per-run items rather than losing both.
+        drop_replaced_per_run_bad_channels(report)
+        report.add_html(
+            html=run_bad_channel_html(runs),
+            title="Bad channels by run",
+            section=section,
+            tags=("data-quality", "channel-coverage"),
+            replace=True,
+        )
+        if run_matrix_is_informative(runs):
+            report.add_figure(
+                fig=plot_run_bad_channel_matrix(runs),
+                title="Which channels failed in which run",
+                section=section,
+                tags=("data-quality", "channel-coverage"),
+                image_format=report_image_format(),
+                replace=True,
+            )
+    if coverage_figure_is_informative(coverage.rois):
         report.add_figure(
             fig=plot_coverage(coverage, minimum_roi_channels=minimum),
             title="Channels remaining per region",
@@ -238,8 +472,14 @@ __all__ = [
     "BAD_CHANNEL_UNION_QC_STEM",
     "MINIMUM_ROI_CHANNELS",
     "ChannelCoverage",
+    "RunBadChannels",
     "add_coverage_review",
+    "coverage_figure_is_informative",
     "coverage_html",
     "load_channel_coverage",
+    "load_run_bad_channels",
     "plot_coverage",
+    "plot_run_bad_channel_matrix",
+    "run_bad_channel_html",
+    "run_matrix_is_informative",
 ]

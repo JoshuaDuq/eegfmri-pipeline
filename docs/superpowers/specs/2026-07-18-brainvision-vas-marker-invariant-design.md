@@ -45,7 +45,7 @@ directory.
 ## Cohort publication
 
 The canonical derivative is `brainvision_marker_sanitized-v2`. It contains both
-`original_5khz` and `brainvision_processed_1khz` layouts for all selected thermal-task
+`original_untrimmed_5khz` and `brainvision_processed_1khz` layouts for all selected thermal-task
 recordings. Source marker and signal files remain unchanged. Consumers are updated to v2 in one
 change; there is no fallback to v1 or unsanitized source data.
 

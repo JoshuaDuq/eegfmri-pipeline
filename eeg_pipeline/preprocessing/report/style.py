@@ -8,6 +8,13 @@ Conventions
 Categorical colours come from the Okabe-Ito palette, which stays distinguishable
 under the common forms of colour vision deficiency.
 
+Hue encodes a measured quantity: a processing stage, a physiological reference, a run.
+Decisions the pipeline made — excluded, dropped, retained — are drawn as a neutral
+light-to-dark ramp instead, so no reader has to work out whether an orange bar means
+"before correction" or "this one was thrown away". A flag that has to sit on top of an
+already-coloured series is drawn in :data:`MARK_COLOR`, because any hue chosen for it
+would collide with whichever run already owns that hue.
+
 Zero-centred power in decibels is drawn with a diverging, colour-vision-safe
 colormap on a symmetric scale, so that the neutral colour always marks "no change
 from baseline". Sequential rainbow colormaps such as ``jet`` and ``turbo`` are not
@@ -23,6 +30,8 @@ a vector frame carries a raster interior.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -42,15 +51,44 @@ OKABE_ITO = {
 #: Colour for a signal, source, or condition shown on its own.
 PRIMARY_COLOR = OKABE_ITO["blue"]
 #: Colour for the state before a correction step.
-BEFORE_COLOR = OKABE_ITO["vermillion"]
+#:
+#: Orange rather than vermillion so that "before correction" and "flagged" are never the
+#: same ink. They previously shared vermillion, which meant a single figure could use one
+#: colour for a pre-ICA trace in one panel and for a flagged run in the next.
+BEFORE_COLOR = OKABE_ITO["orange"]
 #: Colour for the state after a correction step.
 AFTER_COLOR = OKABE_ITO["blue"]
 #: Colour for a physiological reference trace (ECG, EOG) shown as context.
 REFERENCE_COLOR = OKABE_ITO["reddish_purple"]
-#: Colour reserved for flags, exclusions, and threshold crossings.
+#: Colour for a detector flag or threshold crossing drawn as a fill or a line.
+#:
+#: Use only where no per-run colours share the axis; :data:`MARK_COLOR` covers the rest.
 FLAG_COLOR = OKABE_ITO["vermillion"]
+#: Colour for a flag mark drawn on top of an already-coloured series.
+#:
+#: Rings and crosses that annotate run-coloured points cannot carry a hue of their own:
+#: any hue collides with whichever run happens to wear it. Black reads as annotation
+#: rather than as another series.
+MARK_COLOR = OKABE_ITO["black"]
 #: Neutral colour for guides, medians, and zero lines.
 GUIDE_COLOR = "0.35"
+
+#: Fill for an item the pipeline excluded or dropped.
+#:
+#: Status is drawn as a light-to-dark neutral ramp rather than a hue, so that the hues in
+#: a figure always mean "measured quantity" and never "decision". This also keeps the
+#: status strips from out-inking the measurements they annotate.
+EXCLUDED_COLOR = "0.25"
+#: Fill for an item the pipeline retained, paired with :data:`EXCLUDED_COLOR`.
+RETAINED_COLOR = "0.85"
+
+#: Background wash marking a whole panel as excluded, rather than a mark inside it.
+#:
+#: Distinct from :data:`EXCLUDED_COLOR` because this ink sits *behind* a topography and
+#: has to stay light enough for the map on top to keep its own contrast. It is the same
+#: neutral ramp, taken from the light end, and it is paired with an
+#: :data:`EXCLUDED_COLOR` edge so the panel still reads as marked and not merely tinted.
+EXCLUDED_PANEL_FILL = "0.85"
 
 #: Per-run colours, cycled. Shared so that a run keeps one colour across every panel.
 RUN_COLORS = (
@@ -94,6 +132,181 @@ def report_image_format(*, has_dense_image: bool = False, is_figure_list: bool =
     if is_figure_list or has_dense_image:
         return REPORT_RASTER_IMAGE_FORMAT
     return REPORT_IMAGE_FORMAT
+
+
+def run_label(recording_id: object, *, bare: bool = False) -> str:
+    """Return the run-identifying tail of a BIDS recording id.
+
+    A figure that repeats ``sub-0015_task-thermalactive_run-1`` in six panel titles spends
+    most of its title bar restating the subject and task named in the report heading, so
+    panels are labelled ``run-1``. A table column already headed "run" wants the bare
+    ``1``, which is what ``bare`` selects.
+
+    Shared because three modules previously parsed this string three ways and two of them
+    disagreed about whether the ``run-`` prefix was part of the label.
+    """
+    text = str(recording_id)
+    _, separator, run = text.partition("_run-")
+    if not separator:
+        return text
+    run = run.split("_")[0]
+    return run if bare else f"run-{run}"
+
+
+def separated_labels(
+    values: Iterable[tuple[float, str]],
+    *,
+    minimum_gap: float,
+) -> list[tuple[float, str]]:
+    """Nudge overlapping labels apart along one axis, keeping their order.
+
+    Three panels label individual participants at the right edge of a trace or at the end
+    of a paired line, and all three need the same thing: the label identifies a line while
+    the marker carries the value, so moving a label a little to keep it readable costs
+    nothing a reader relies on, whereas two identifiers printed over each other cost the
+    panel its point.
+
+    Order is preserved rather than merely the positions adjusted, because a label that
+    overtook its neighbour would name the wrong line -- which is worse than an unreadable
+    one, since it is legibly wrong.
+
+    Shared because this was written twice, verbatim, and a third panel that needed it drew
+    every label at one coordinate instead.
+    """
+    placed: list[tuple[float, str]] = []
+    for value, label in sorted(values):
+        if placed and value - placed[-1][0] < minimum_gap:
+            value = placed[-1][0] + minimum_gap
+        placed.append((value, label))
+    return placed
+
+
+#: Marker that makes :func:`apply_report_css` idempotent across repeated opens.
+_REPORT_CSS_SENTINEL = "/* eeg-pipeline report css */"
+
+#: Style rules the subject report needs and MNE's template does not provide.
+#:
+#: Matplotlib writes an absolute ``width`` in points onto every SVG it exports, and MNE
+#: inlines that markup verbatim. Raster figures escape the problem because MNE gives them
+#: Bootstrap's ``img-fluid``; inline SVGs get no such class and no ``max-width``, so a
+#: figure wider than the column overflows it rather than scaling down to fit.
+#:
+#: The selector stays scoped to ``figure`` on purpose. A bare ``svg`` rule would also
+#: match the accordion chevrons, whose size comes from a rule of MNE's own.
+#:
+#: The table rules style ``.report-table`` alone, which is the class every table this
+#: pipeline builds carries. Bootstrap's ``table-striped`` is deliberately not used:
+#: zebra striping is a light-to-dark neutral ramp, and this document reserves that ramp
+#: for pipeline decisions (:data:`EXCLUDED_COLOR`, :data:`RETAINED_COLOR`). Striping
+#: every row would spend the document's decision ink on rows that decide nothing.
+#:
+#: ``tabular-nums`` matters more than it looks. Arial's default figures are
+#: proportional, so a column of run durations does not line up its decimal points and a
+#: reader cannot compare magnitudes by scanning down it.
+REPORT_CSS = f"""{_REPORT_CSS_SENTINEL}
+figure svg {{ max-width: 100%; height: auto; }}
+table.report-table {{ border-collapse: collapse; margin: 0.5rem 0 0.75rem; }}
+table.report-table th,
+table.report-table td {{ padding: 0.25rem 0.75rem 0.25rem 0; border-bottom: 1px solid #e4e4e4; }}
+table.report-table thead th {{ border-bottom: 1px solid #b8b8b8; font-weight: 600; }}
+table.report-table tbody tr:last-child th,
+table.report-table tbody tr:last-child td {{ border-bottom: none; }}
+table.report-table th[scope='row'] {{ font-weight: 400; text-align: left; }}
+table.report-table tr.key th,
+table.report-table tr.key td {{ font-weight: 600; }}
+table.report-table tr.sub th[scope='row'] {{ padding-left: 1.5rem; color: #555; }}
+table.report-table .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+"""
+
+
+def apply_report_css(report) -> None:
+    """Add :data:`REPORT_CSS` to ``report`` unless it is already there.
+
+    ``Report.add_custom_css`` appends to ``Report.include`` with no deduplication, and a
+    subject report is opened and saved once per review stage. Without the guard a
+    six-stage run embeds the same stylesheet six times.
+    """
+    include = getattr(report, "include", "")
+    # A real report always carries a string here. Anything else means there is nothing to
+    # have found the sentinel in, so treat it as "not yet applied" rather than failing.
+    if isinstance(include, str) and _REPORT_CSS_SENTINEL in include:
+        return
+    report.add_custom_css(REPORT_CSS)
+
+
+#: Largest number of component ticks drawn before the labels are thinned.
+_MAX_COMPONENT_TICKS = 32
+
+
+def draw_component_status_strip(
+    axis,
+    *,
+    excluded,
+    component_count: int,
+    legend: bool = True,
+) -> None:
+    """Draw the excluded/retained decision for every component as a strip under an axis.
+
+    Shared because two panels ask a reader to relate a per-component measurement to the
+    decision taken about that component, and only one of them used to make the decision
+    legible. The correlation panel drew this strip; the variance panel encoded the same
+    fact as the marker's own lightness, which at the marker size that fits 62 components
+    is a distinction between two pale greys.
+
+    A strip rather than shading behind the measurement: full-height shading covers a
+    third of the axis and out-inks the quantity the panel is about.
+
+    The neutral ramp is deliberate and follows this module's convention — "excluded" is
+    a decision, not a measurement, so it never takes a hue. It is also not
+    :data:`FLAG_COLOR`: "this component was excluded" and "this component crossed a
+    detector's threshold" are different statements, and most exclusions in a typical
+    decomposition were never flagged by the detector whose panel they sit under.
+    """
+    from matplotlib.patches import Patch
+
+    components = np.arange(component_count)
+    excluded_set = {int(component) for component in excluded}
+    axis.bar(
+        components,
+        1.0,
+        width=1.0,
+        color=[EXCLUDED_COLOR if c in excluded_set else RETAINED_COLOR for c in components],
+    )
+    # Component index is categorical, so the ticks are the indices themselves rather than
+    # whatever round numbers a continuous locator picks: "2.5" names no component and does
+    # not line up with the cells of this strip.
+    step = max(1, int(np.ceil(component_count / _MAX_COMPONENT_TICKS)))
+    axis.set(
+        xlim=(-0.7, component_count - 0.3),
+        ylim=(0, 1),
+        yticks=[],
+        xticks=components[::step],
+        xlabel="ICA component",
+    )
+    axis.tick_params(axis="x", labelsize=7)
+    axis.set_ylabel(
+        f"excluded\n({len(excluded_set)}/{component_count})",
+        fontsize=6,
+        rotation=0,
+        ha="right",
+        va="center",
+    )
+    if legend:
+        # Two greys need a key: the count alone never said which shade carried it.
+        axis.legend(
+            handles=[
+                Patch(facecolor=EXCLUDED_COLOR, label="Excluded"),
+                Patch(facecolor=RETAINED_COLOR, label="Retained"),
+            ],
+            frameon=False,
+            fontsize=6.5,
+            ncol=2,
+            loc="upper left",
+            bbox_to_anchor=(0.0, -0.55),
+            handlelength=1.2,
+            handleheight=0.9,
+        )
+    axis.spines[["top", "right", "left"]].set_visible(False)
 
 
 #: Percentile of the absolute values that defines a robust symmetric colour limit.
@@ -140,16 +353,25 @@ __all__ = [
     "BEFORE_COLOR",
     "COLOR_LIMIT_PERCENTILE",
     "DIVERGING_POWER_COLORMAP",
+    "EXCLUDED_COLOR",
+    "EXCLUDED_PANEL_FILL",
     "FLAG_COLOR",
     "GUIDE_COLOR",
+    "MARK_COLOR",
     "OKABE_ITO",
+    "RETAINED_COLOR",
     "PRIMARY_COLOR",
     "REFERENCE_COLOR",
     "RUN_COLORS",
+    "REPORT_CSS",
     "REPORT_IMAGE_FORMAT",
     "REPORT_RASTER_IMAGE_FORMAT",
+    "apply_report_css",
     "apply_report_style",
+    "draw_component_status_strip",
     "report_image_format",
     "power_colorbar_label",
     "robust_symmetric_limit",
+    "run_label",
+    "separated_labels",
 ]

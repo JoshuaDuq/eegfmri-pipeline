@@ -27,7 +27,6 @@ reviewer decides what the spectra mean.
 
 from __future__ import annotations
 
-import html
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -42,7 +41,14 @@ from eeg_pipeline.preprocessing.report.aperiodic import (
     aperiodic_line_db,
     fit_aperiodic,
 )
-from eeg_pipeline.preprocessing.report.style import AFTER_COLOR, BEFORE_COLOR, GUIDE_COLOR
+from eeg_pipeline.preprocessing.report.filtering import notch_windows
+from eeg_pipeline.preprocessing.report.style import (
+    AFTER_COLOR,
+    BEFORE_COLOR,
+    GUIDE_COLOR,
+    run_label,
+)
+from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 
 #: Welch segment length in seconds. Long enough to resolve a narrow line-noise peak.
 WELCH_SECONDS = 4.0
@@ -50,10 +56,6 @@ WELCH_SECONDS = 4.0
 #: Percentiles of the across-channel distribution drawn as a shaded band.
 SPREAD_PERCENTILES = (10.0, 90.0)
 
-#: Half-width of the band excluded around each line-noise harmonic before the aperiodic
-#: fit. A notch filter cuts a narrow trough, and a trough is a negative deviation that
-#: the fit's peak-removal step is not designed to catch, so it would tilt the slope.
-NOTCH_EXCLUSION_HALF_WIDTH_HZ = 2.0
 
 
 @dataclass(frozen=True)
@@ -120,16 +122,34 @@ class RunSpectra:
         return self.after.aperiodic.exponent - self.before.aperiodic.exponent
 
 
+#: Power reference the spectra are expressed against, as a decibel offset from V²/Hz.
+#:
+#: MNE returns EEG power in V²/Hz, which puts an ordinary spectrum between about -150 and
+#: -120 dB. Those numbers are right and unreadable: EEG is quoted in microvolts
+#: everywhere, so no published reference value lands in that scale and a reviewer has
+#: nothing to read the level against. 1 V² is 1e12 µV², hence a fixed 120 dB. It is a
+#: shift, not a rescaling, so every shape in the figure — slope, peak prominence, the
+#: before/after difference — is unchanged.
+MICROVOLT_REFERENCE_DB = 120.0
+
+#: Unit string for the power axis and any table column carrying one of these levels.
+POWER_UNIT_LABEL = "dB re 1 µV²/Hz"
+
+
 def _channel_spectra_db(
     raw: mne.io.BaseRaw,
     *,
     fmin: float,
     fmax: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return the frequency grid and per-channel power in decibels.
+    """Return the frequency grid and per-channel power in decibels re 1 µV²/Hz.
 
     Bad channels are excluded: ``picks="eeg"`` drops ``info["bads"]``, so a sensor the
     pipeline already rejected cannot inflate the spread it is not part of.
+
+    The reference conversion happens here rather than at each drawing site so that the
+    aperiodic fit, the table, and the figure cannot end up quoting different units for
+    the same quantity.
     """
     segment = min(int(round(WELCH_SECONDS * raw.info["sfreq"])), raw.n_times)
     spectrum = raw.compute_psd(
@@ -143,26 +163,46 @@ def _channel_spectra_db(
         verbose="ERROR",
     )
     power = np.asarray(spectrum.get_data(), dtype=float)
-    return np.asarray(spectrum.freqs, dtype=float), 10.0 * np.log10(
-        np.maximum(power, np.finfo(float).tiny)
-    )
+    power_db = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
+    return np.asarray(spectrum.freqs, dtype=float), power_db + MICROVOLT_REFERENCE_DB
 
 
-def _notch_windows(
-    line_frequency: float | None,
+def _set_power_limits(
+    axis: plt.Axes,
+    spectra: "RunSpectra",
     *,
-    fmax: float,
-    half_width: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
-) -> tuple[tuple[float, float], ...]:
-    """Return the bands around each line-noise harmonic to keep out of the fit."""
-    if not line_frequency:
-        return ()
-    harmonics = np.arange(line_frequency, fmax + line_frequency, line_frequency)
-    return tuple(
-        (float(harmonic - half_width), float(harmonic + half_width))
-        for harmonic in harmonics
-        if harmonic - half_width < fmax
+    line_frequency: float | None,
+) -> None:
+    """Bound the power axis by the spectrum rather than by the notch it contains.
+
+    A notch filter drives its band to the numerical floor, which for this data is tens of
+    decibels below anything else in the run. Included in the limits it stretched the axis
+    by 40 dB and left the spectrum the panel exists to show squeezed into the top third.
+
+    The notch bands are the same ones the aperiodic fit already excludes, so the figure and
+    the fit agree about which bins are filter rather than signal. The trace is still drawn
+    through them and simply leaves the axis, which reads as a filtered band rather than as
+    missing data.
+    """
+    windows = notch_windows(line_frequency, fmax=float(spectra.frequencies[-1]))
+    keep = np.ones_like(spectra.frequencies, dtype=bool)
+    for low, high in windows:
+        keep &= (spectra.frequencies < low) | (spectra.frequencies > high)
+    if not keep.any():
+        return
+    stacked = np.concatenate(
+        [
+            stage_values[keep]
+            for stage in (spectra.before, spectra.after)
+            for stage_values in (stage.spread_low_db, stage.max_db)
+        ]
     )
+    finite = stacked[np.isfinite(stacked)]
+    if finite.size == 0:
+        return
+    low, high = float(np.min(finite)), float(np.max(finite))
+    margin = max(1.0, 0.05 * (high - low))
+    axis.set_ylim(low - margin, high + margin)
 
 
 def _resolve_ceiling(sfreq: float, fmax: float | None) -> tuple[float, str]:
@@ -174,6 +214,41 @@ def _resolve_ceiling(sfreq: float, fmax: float | None) -> tuple[float, str]:
     return float(fmax), f"configured low-pass ({fmax:g} Hz)"
 
 
+#: Half-width of a withheld harmonic, in frequency bins either side of the tooth.
+#:
+#: One bin is not enough: a tooth leaks into its neighbours through the Welch window, so
+#: the bins beside it are part of the peak rather than part of the background. Three is not
+#: better: at a short repetition time the harmonics are close together and a wide skirt
+#: would withhold the whole range, leaving the fit nothing to sit on.
+_HARMONIC_SKIRT_BINS = 1.5
+
+
+def gradient_windows(
+    fundamental_hz: float | None,
+    *,
+    frequencies: np.ndarray,
+) -> tuple[tuple[float, float], ...]:
+    """Frequency windows covering the gradient comb, for exclusion from a fit.
+
+    Empty where there is no volume rate, which is the ordinary case outside a scanner.
+
+    Withheld rather than trimmed, because the peak-residual trim inside
+    :func:`fit_aperiodic` finds outliers against a line that the comb has already tilted.
+    Naming the harmonics is possible here and guessing is not: the volume rate is measured.
+    """
+    if not fundamental_hz or fundamental_hz <= 0.0:
+        return ()
+    grid = np.asarray(frequencies, dtype=float)
+    if grid.size < 2:
+        return ()
+    skirt = _HARMONIC_SKIRT_BINS * float(np.median(np.diff(grid)))
+    highest = float(grid[-1])
+    orders = range(1, int(highest / fundamental_hz) + 1)
+    return tuple(
+        (order * fundamental_hz - skirt, order * fundamental_hz + skirt) for order in orders
+    )
+
+
 def compute_run_spectra(
     raw: mne.io.BaseRaw,
     cleaned: mne.io.BaseRaw,
@@ -182,6 +257,7 @@ def compute_run_spectra(
     fmin: float = 1.0,
     fmax: float | None = None,
     line_frequency: float | None = None,
+    gradient_fundamental_hz: float | None = None,
 ) -> RunSpectra:
     """Compute the across-channel sensor spectrum before and after ICA.
 
@@ -191,6 +267,11 @@ def compute_run_spectra(
 
     ``fmax`` should be the configured low-pass. Above it the filter, not the recording,
     determines the trace, so plotting further presents roll-off as data.
+
+    ``gradient_fundamental_hz`` is the volume rate of an in-scanner recording. Its
+    harmonics are withheld from the aperiodic fit: the comb runs straight through the fit
+    range, and a line fitted across a forest of narrow peaks is a line fitted partly to the
+    scanner. Absent for a recording made outside a bore, which has no comb.
     """
     upper, reason = _resolve_ceiling(float(raw.info["sfreq"]), fmax)
     if upper <= fmin:
@@ -198,7 +279,9 @@ def compute_run_spectra(
 
     frequencies, before_channels = _channel_spectra_db(raw, fmin=fmin, fmax=upper)
     _, after_channels = _channel_spectra_db(cleaned, fmin=fmin, fmax=upper)
-    excluded = _notch_windows(line_frequency, fmax=upper)
+    excluded = tuple(notch_windows(line_frequency, fmax=upper)) + gradient_windows(
+        gradient_fundamental_hz, frequencies=frequencies
+    )
     return RunSpectra(
         recording_id=recording_id,
         frequencies=frequencies,
@@ -274,8 +357,9 @@ def plot_run_spectra(
             f"median (solid), {low_percentile:g}-{high_percentile:g}th percentile across "
             "channels (shaded), worst channel (dotted), aperiodic fit (dashed)"
         ),
-        ylabel="PSD (dB)",
+        ylabel=f"PSD ({POWER_UNIT_LABEL})",
     )
+    _set_power_limits(level_axis, spectra, line_frequency=line_frequency)
     level_axis.legend(frameon=False, fontsize=8)
 
     difference_axis.plot(
@@ -317,9 +401,23 @@ def plot_run_spectra(
                 axis.axvline(mark, color=GUIDE_COLOR, linestyle=":", linewidth=0.7, alpha=0.7)
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
+    notes = []
     if marks:
+        notes.append(
+            "dotted vertical lines mark line-noise harmonics, gradient harmonics, "
+            "and configured frequencies of interest"
+        )
+    # The power axis is bounded excluding the notch bands, so the trace dives off the
+    # bottom of the panel at each one. Undeclared, a trace leaving the axis is
+    # indistinguishable from data that stops, and a reader has no way to tell which.
+    if line_frequency:
+        notes.append(
+            f"the trace leaves the axis at each {line_frequency:g} Hz notch: "
+            "the stopband is excluded from the limits, not from the data"
+        )
+    if notes:
         difference_axis.annotate(
-            "dotted vertical lines mark line-noise harmonics and configured frequencies of interest",
+            "\n".join(notes),
             xy=(0.5, 1.02),
             xycoords="axes fraction",
             ha="center",
@@ -331,38 +429,43 @@ def plot_run_spectra(
     return figure
 
 
-def _aperiodic_cells(fit: AperiodicFit | None) -> str:
+def _aperiodic_values(fit: AperiodicFit | None) -> list[object]:
     if fit is None:
-        return "<td>&mdash;</td><td>&mdash;</td>"
-    return f"<td>{fit.exponent:.2f}</td><td>{fit.offset_db:.1f}</td>"
+        return [None, None]
+    return [f"{fit.exponent:.2f}", f"{fit.offset_db:.1f}"]
 
 
 def spectra_summary_html(spectra: Sequence[RunSpectra]) -> str:
     """Render the aperiodic fits and the across-channel spread, per run."""
     if not spectra:
         raise ValueError("The spectra summary requires at least one run.")
-    rows = "".join(
-        f"<tr><td>{html.escape(run.recording_id)}</td>"
-        f"{_aperiodic_cells(run.before.aperiodic)}"
-        f"{_aperiodic_cells(run.after.aperiodic)}"
-        f"<td>{'—' if run.exponent_change is None else format(run.exponent_change, '+.2f')}</td>"
-        f"<td>{run.after.worst_channel_gap_db:.1f}</td></tr>"
-        for run in spectra
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("exponent", group="Before ICA"),
+        Column("offset (dB re 1 µV²/Hz)", group="Before ICA"),
+        Column("exponent", group="After ICA"),
+        Column("offset (dB re 1 µV²/Hz)", group="After ICA"),
+        Column("Δ exponent"),
+        Column("Worst channel above median (dB)"),
     )
+    rows = [
+        [
+            run_label(run.recording_id),
+            *_aperiodic_values(run.before.aperiodic),
+            *_aperiodic_values(run.after.aperiodic),
+            None if run.exponent_change is None else format(run.exponent_change, "+.2f"),
+            f"{run.after.worst_channel_gap_db:.1f}",
+        ]
+        for run in spectra
+    ]
     fit_low, fit_high = DEFAULT_FIT_RANGE_HZ
     return (
         "<p>The aperiodic background is a robust line through the spectrum in log-log "
         f"coordinates over {fit_low:g}-{fit_high:g} Hz, after dropping the bins that sit "
         "in the upper quartile of the residuals so that oscillatory peaks do not tilt "
         "it. The exponent is the tilt and the offset is the level at 1 Hz.</p>"
-        "<table><thead><tr><th rowspan='2'>Run</th>"
-        "<th colspan='2'>Before ICA</th><th colspan='2'>After ICA</th>"
-        "<th rowspan='2'>Δ exponent</th>"
-        "<th rowspan='2'>Worst channel above median (dB)</th></tr>"
-        "<tr><th>exponent</th><th>offset (dB)</th>"
-        "<th>exponent</th><th>offset (dB)</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table>"
-        "<p>Broadband artifact raises the offset and flattens the exponent; removing "
+        + grid_table(columns, rows)
+        + "<p>Broadband artifact raises the offset and flattens the exponent; removing "
         "components takes the offset down with it. A large exponent change across ICA "
         "means cleaning altered the background the analysis sits on, not only the "
         "artifact on top of it. The last column is the widest across-channel gap after "
@@ -381,6 +484,7 @@ def add_spectra_section(
     """Append already-computed per-run spectra to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
         before_ica_component_review,
+        drop_replaced_filtered_spectrum,
         move_tagged_content_before,
         remove_tagged_content,
     )
@@ -397,6 +501,9 @@ def add_spectra_section(
         for run in spectra
     ]
     remove_tagged_content(report, tag="sensor-spectra")
+    # Dropped beside its replacement, so a report built without this section keeps MNE's
+    # full-bandwidth panel rather than losing every view of the filtered spectrum.
+    drop_replaced_filtered_spectrum(report)
     report.add_html(
         html=spectra_summary_html(spectra),
         title="Spectral background before and after ICA",
@@ -421,7 +528,6 @@ def add_spectra_section(
 
 
 __all__ = [
-    "NOTCH_EXCLUSION_HALF_WIDTH_HZ",
     "SPREAD_PERCENTILES",
     "WELCH_SECONDS",
     "RunSpectra",

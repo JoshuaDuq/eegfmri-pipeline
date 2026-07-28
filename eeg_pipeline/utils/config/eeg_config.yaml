@@ -180,7 +180,6 @@ time_windows:
   baseline_tfr_morlet: &baseline_window_tfr_morlet [-4.6, -2.4]
   # Multitaper with a constant 1.0 s window: half-width 0.5 s.
   baseline_tfr_multitaper: &baseline_window_tfr_multitaper [-5.0, -0.5]
-  baseline_erp: [-0.2, 0.0]  # ERP baseline window [s]
 
 # 2.3 Numeric Guards
 numeric:
@@ -230,7 +229,16 @@ eeg:
   montage: "easycap-M1"
   ch_types: "eeg"
   reference: "average"
-  eog_channels: null
+  # This montage has no dedicated EOG electrode, so blink recovery needs surrogates named
+  # here. Left null, MNE-BIDS-Pipeline finds no EOG channel, breaks out of its ocular
+  # detection loop without raising, and reports zero ocular components — indistinguishable
+  # from a participant who never blinked. Upstream treats these as *virtual* EOG: they
+  # stay in the EEG analysis and are not removed from it.
+  #
+  # Because the surrogates are themselves in the ICA decomposition, component-to-surrogate
+  # correlation is partly circular. That is the same caveat ica.ocular_review already
+  # states and reports; it is a weaker detector than a true EOG lead, not an absent one.
+  eog_channels: ["Fp1", "Fp2"]
   ecg_channels: ["ECG"]
 
 preprocessing:
@@ -239,7 +247,17 @@ preprocessing:
   h_freq: 100
   notch_freq: 60
   line_freq: 60
-  n_jobs: 1
+  # Worker count for PyPREP's loop over recordings and for MNE-BIDS-Pipeline's loop over
+  # subjects and runs, including the autoreject threshold search that ica.reject and
+  # epochs.reject both request. It selects how the work is executed, not what is
+  # computed: every worker reads the same inputs, the seeds are fixed, and results are
+  # reassembled by index rather than by completion order.
+  #
+  # 6 rather than -1 because -1 also enlists efficiency cores, which finish their share
+  # late and hold up the whole batch, and because each worker holds its own preloaded
+  # recording — RAM, not cores, is the ceiling that gets hit first. Raise it only after
+  # watching memory during a run.
+  n_jobs: 6
   random_state: 42
   # Heuristics for condition auto-detection in BIDS events.tsv.
   # Empty disables prefix preference filtering.
@@ -248,6 +266,22 @@ preprocessing:
   rest_epochs_duration: 10.0       # Fixed-length resting-state epoch duration [s]
   rest_epochs_overlap: 0.0         # Resting-state epoch overlap [s]
   find_breaks: true
+  # Persist AutoReject's per-channel, per-epoch verdict as a derivative.
+  #
+  # MNE-BIDS-Pipeline fits AutoReject, uses the reject log for one log line and one
+  # report figure, and discards it. That log is the only record of which channel-in-trial
+  # samples are measured and which are spline estimates from neighbouring electrodes, and
+  # the distinction changes what some features mean: an interpolated channel is by
+  # construction a weighted sum of its neighbours, so connectivity between it and those
+  # neighbours — wPLI, AEC, and anything built on a CSD transform — is partly set by the
+  # interpolation rather than by the brain. Measured on this cohort, 5-11% of
+  # channel-trial cells are interpolated, each spanning the full 22 s epoch.
+  #
+  # Producing it refits AutoReject on the same pre-rejection epochs with the same
+  # settings, which roughly doubles the cost of the epoching step. The refit is checked
+  # against the cleaned epochs it describes, so a fit that diverged is an error rather
+  # than a wrong sidecar. Requires epochs.reject = "autoreject_local".
+  autoreject_log: true
   write_clean_events: true           # Write post-rejection (kept-epochs) *_proc-clean_events.tsv in derivatives
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
@@ -291,6 +325,14 @@ preprocessing:
     confidence_level: 0.95
 
 pyprep:
+  # Low-pass applied before bad-channel detection only. null = none, which is the right
+  # default: PyPREP's high-frequency-noise criterion is the ratio of a channel's >50 Hz
+  # amplitude to its <50 Hz amplitude, so a low-pass deletes the band the criterion is
+  # defined on. This used to be wired to preprocessing.h_freq, which on 1000 Hz data cut
+  # everything above 100 Hz — where contact and electrode noise live — and left the
+  # detector reading a 50-100 Hz sliver with the line notch cut out of it. The notch is
+  # still applied; MATLAB PREP removes line noise before detection too.
+  detection_low_pass: null
   ransac: true
   repeats: 3
   bad_channel_sync_policy: "per_run"  # "per_run" or "subject_union"
@@ -307,13 +349,35 @@ pyprep:
 ica:
   algorithm: "extended_infomax"
   method: "extended_infomax"
+  # Average referencing removes one degree of freedom and every excluded channel removes
+  # another, so the data are rank-deficient and asking for all components yields split
+  # and ghost components that ICLabel then has to label.
+  #
+  # null is the rank-safe answer to that, not a variance fraction. MNE resolves null to
+  # 0.999999, which is documented as its guard against rank-deficient whitening: it keeps
+  # the decomposition inside the true rank whatever the bad-channel count turns out to
+  # be, which is exactly what this setting wanted.
+  #
+  # A lower fraction does not do the same job. It is a *variance* criterion, and it stops
+  # early precisely when artifact owns the variance — the usual case inside a scanner.
+  # With 0.99 on sub-0015, blink and cardiac held 85% of the variance, 22 components were
+  # fitted from a rank-62 recording, and 16 of those 22 were excluded, leaving six
+  # components to carry everything neural. The 40 dimensions outside the fit are restored
+  # unmodified by ICA.apply, so no exclusion can reach the artifact in them, and ICLabel
+  # was scoring an under-decomposed model: three of the 22 components had no confident
+  # label. The report now states the dimensions outside the fit for this reason.
   n_components: null
   l_freq: 1.0
   h_freq: 100.0
   reject: "autoreject_local"
   use_icalabel: true
-  use_ecg_detection: false
-  use_eog_detection: false
+  # ICLabel was trained on scalp EEG recorded outside a scanner, where it never saw
+  # ballistocardiogram components; it under-calls them as "heart beat" and they land in
+  # its "other" catch-all, which this config retains. CTPS scoring against the recorded
+  # ECG is the detector that does transfer, so it provides the automated baseline and the
+  # manual review adjusts it rather than being the only line of defence.
+  use_ecg_detection: true
+  use_eog_detection: true
   require_manual_review: true
   manual_review_complete: false  # Set true only after reviewing *_proc-ica_components.tsv.
   process_raw_clean: true
@@ -329,6 +393,24 @@ ica:
     measurement_window: [0.0, 0.4]
     ctps_threshold: "auto"
     representative_window_seconds: 10.0
+    # Write this review's CTPS detections into *_proc-ica_components.tsv as exclusions.
+    #
+    # MNE-BIDS-Pipeline's own ECG step builds its heartbeat epochs from the first run
+    # only, cropped to 5 minutes / n_runs around that run's midpoint: on this cohort that
+    # is ~50 s of run 1, roughly sixty beats, scoring a decomposition fitted across six
+    # runs and ~46 minutes. BCG topography moves with head position, so components that
+    # are cardiac in runs 3-6 are never scored at all. This review already runs the same
+    # CTPS test per run over every beat in every recording, so turning this on replaces a
+    # sample with the full measurement.
+    #
+    # It changes the cleaned data, not just the report, which is why it is explicit. The
+    # manual review still runs afterwards and can undo any of it; each promoted row names
+    # the runs that flagged it in status_description.
+    promote_exclusions: true
+    # Fraction of usable runs that must flag a component before it is promoted. One run
+    # out of six disagreeing is as likely to be a threshold crossing as a cardiac
+    # component, so a bare majority is the floor rather than any single detection.
+    promotion_minimum_run_fraction: 0.5
   # Optional manual-review evidence for residual ocular artifact. Blinks are detected
   # from the configured ocular channels; no component is excluded by this review.
   ocular_review:
@@ -342,6 +424,16 @@ ica:
   band_specific_report:
     enabled: true
     fit_decim: 2
+    # Write the exploratory band decompositions to their own HTML beside the subject
+    # report, linked from it, instead of inlining them.
+    #
+    # They dominate the subject report while controlling nothing in it: on sub-0015 the
+    # five sliders were 30 MB of a 101 MB document, sitting under a guide that says
+    # ICLabel was not validated for narrow-band decompositions and that artifact removal
+    # is decided on the standard ICA. Split out, the evidence is one click away for the
+    # reader who wants it and costs nothing to the many who do not. Set false for a single
+    # self-contained file.
+    exploratory_separate_file: true
     tfr:
       # Event-locked, baseline-relative time-frequency power for each component.
       # Set false for resting-state or any continuous recording: fixed-length epochs
@@ -359,7 +451,15 @@ ica:
       # post-stimulus data. The leak scales with each condition's own response, so it
       # biases condition differences instead of cancelling in them.
       baseline_tmax_s: -1.5
-    comparisons: []
+    comparisons:
+      - name: max_vs_low_temp
+        column: stimulus_temp
+        group_a:
+          label: Max Temp
+          values: [48.3, 49.3]
+        group_b:
+          label: Low Temp
+          values: [44.3, 45.3]
 
 epochs:
   # IMPORTANT: Keep epochs.tmin earlier than the earliest baseline time window.
@@ -412,7 +512,6 @@ time_frequency_analysis:
         hspace: 0.15
         wspace: 0.8
       window_size_ms: 100.0  # Size of each time window in milliseconds (for fixed-size windows)
-      window_count: 5        # Number of time windows (for fixed-count windows)
   
   constants:
     # Only keys read by the pipeline belong here. A guard that nothing enforces is
@@ -1136,12 +1235,10 @@ statistics:
   n_bootstrap: 1000
   cluster_n_jobs: -1
   cluster_n_perm: 1000
-  min_samples_per_channel: 5
   
   constants:
     fisher_z_clip_min: -0.999999
     fisher_z_clip_max: 0.999999
-    min_samples_for_stats: 2
     min_samples_for_correlation: 5
     min_samples_per_covariate: 5
     partial_corr_base_samples: 5

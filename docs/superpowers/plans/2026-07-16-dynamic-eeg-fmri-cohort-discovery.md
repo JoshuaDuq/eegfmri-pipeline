@@ -16,7 +16,7 @@
 - Modify: `studies/pain_study/scripts/sanitize_brainvision_vas_markers.py`
 - Test: `tests/scripts/test_sanitize_brainvision_vas_markers.py`
 
-- [ ] Replace the fixed subject tuple and expected run count with discovery from `sub-*/eeg/original_5khz/*.vhdr`.
+- [ ] Replace the fixed subject tuple and expected run count with discovery from `sub-*/eeg/original_untrimmed_5khz/*.vhdr`.
 - [ ] Validate non-empty discovery, directory/filename subject agreement, unique subject/run identities, and complete BrainVision companions.
 - [ ] Add optional repeated `--subject` selection without changing the all-subject default.
 - [ ] Run the focused sanitizer tests.

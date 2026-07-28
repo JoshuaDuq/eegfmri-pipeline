@@ -49,6 +49,14 @@ class AperiodicFit:
     #: Bins that survived peak removal and defined the final fit.
     n_bins_used: int
     n_bins_available: int
+    #: RMS departure of the background bins from the fitted line, in decibels.
+    #:
+    #: The scale of the spectrum's own roughness, measured after oscillatory peaks were
+    #: trimmed, so it describes the background rather than what sits on it. A peak worth
+    #: reporting has to clear it: the largest bin in a band is always above the line by
+    #: something, and without a scale to compare that something against, a recording with
+    #: no rhythm still yields a confident-looking peak frequency.
+    residual_db: float = 0.0
 
     @property
     def slope_db_per_decade(self) -> float:
@@ -131,6 +139,9 @@ def fit_aperiodic(
         fit_range_hz=(float(low), float(high)),
         n_bins_used=int(background.sum()),
         n_bins_available=available,
+        # Free: the residual sum of squares is already formed for the coefficient of
+        # determination above, and this is only its per-bin root.
+        residual_db=float(np.sqrt(residual_variance / max(int(background.sum()), 1))),
     )
 
 

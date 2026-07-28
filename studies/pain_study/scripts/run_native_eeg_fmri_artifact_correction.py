@@ -134,7 +134,7 @@ def read_input_recordings(
             _require_manifest_fields(row, line_number)
             if row["verified"] != "True":
                 raise ValueError(f"Marker manifest line {line_number} is not verified")
-            if row["source_layout"] != "original_5khz":
+            if row["source_layout"] != "original_untrimmed_5khz":
                 continue
             vhdr_path = Path(row["staged_vhdr"]).resolve()
             if not vhdr_path.is_relative_to(input_root.resolve()):

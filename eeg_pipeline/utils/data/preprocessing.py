@@ -642,6 +642,19 @@ def _compute_clean_events_qc_table(
     return out.reset_index(drop=True)
 
 
+def _matches_condition(trial_type: str, condition: str) -> bool:
+    """Apply MNE's condition matching to one trial type.
+
+    MNE treats ``/`` as a tag separator, so the condition ``pain`` selects the trial type
+    ``pain/high``. It is not a plain prefix match: ``pain`` must not select ``painless``,
+    which would silently pull extra rows into the events table and misalign it against the
+    epochs MNE actually built.
+    """
+    if trial_type == condition:
+        return True
+    return condition in trial_type.split("/")
+
+
 def _build_epoch_event_mask(
     events_df: pd.DataFrame,
     conditions: List[str],
@@ -652,9 +665,70 @@ def _build_epoch_event_mask(
 
     mask = pd.Series(False, index=events_df.index)
     for cond in cond_norm:
-        # Support both exact-match and prefix-match conditions.
-        mask = mask | (trial_type_norm == cond) | trial_type_norm.str.startswith(cond)
+        mask = mask | trial_type_norm.map(lambda value, cond=cond: _matches_condition(value, cond))
     return mask, condition_column
+
+
+def _kept_event_mask(epochs: mne.BaseEpochs, target_count: int) -> np.ndarray:
+    """Return which of the condition-matching events survived to the clean epochs.
+
+    ``Epochs.drop_log`` has one entry per event MNE was originally given — every
+    annotation on the concatenated raw, not just the ones being epoched. Entries tagged
+    ``IGNORED`` are the events whose trial type was not among the requested conditions, so
+    dropping those leaves exactly the condition-matching events, in order, with an empty
+    tuple marking each one that was kept.
+
+    This is why the mapping is taken from ``drop_log`` rather than ``Epochs.selection``:
+    ``selection`` indexes the full event array, which for this dataset is dominated by
+    scanner-volume and pulse markers, so using it to index the condition-filtered events
+    table lines the two up only by coincidence.
+    """
+    drop_log = epochs.drop_log
+    considered = [entry for entry in drop_log if "IGNORED" not in entry]
+    if len(considered) != target_count:
+        raise ValueError(
+            f"Epoch drop log describes {len(considered)} condition events but the events "
+            f"table has {target_count}. The conditions used for epoching and the ones "
+            "used here do not select the same events."
+        )
+    return np.array([len(entry) == 0 for entry in considered], dtype=bool)
+
+
+def _autoreject_counts_for_clean_events(
+    *,
+    epochs_path: Path,
+    config: Any,
+    n_epochs: int,
+) -> Optional[pd.DataFrame]:
+    """Per-trial AutoReject repair counts to carry into the clean events table.
+
+    Returns ``None`` when the log is not requested. When it is, a missing or
+    disagreeing log is an error: a clean events table that silently omits which
+    channels were reconstructed is worse than one that fails to be written.
+    """
+    from eeg_pipeline.preprocessing.autoreject_log import (
+        autoreject_log_path_for_epochs,
+        kept_epoch_counts,
+        read_autoreject_log,
+    )
+
+    if not bool(get_config_value(config, "preprocessing.autoreject_log", False)):
+        return None
+
+    log_path = autoreject_log_path_for_epochs(epochs_path)
+    if not log_path.exists():
+        raise FileNotFoundError(
+            f"preprocessing.autoreject_log is enabled but {log_path} is missing. "
+            "Write the AutoReject log before writing clean events."
+        )
+
+    counts = kept_epoch_counts(read_autoreject_log(log_path))
+    if len(counts) != n_epochs:
+        raise ValueError(
+            f"AutoReject log keeps {len(counts)} epochs but the clean epochs file holds "
+            f"{n_epochs}. The log does not describe this derivative."
+        )
+    return counts
 
 
 def _resolve_epoch_condition_column(events_df: pd.DataFrame) -> str:
@@ -754,12 +828,25 @@ def write_clean_events_tsv_for_epochs(
     config: Any,
     conditions: Optional[List[str]] = None,
     overwrite: bool = True,
+    after_rejection: bool = True,
     _logger: Optional[logging.Logger] = None,
 ) -> Path:
-    """Write a clean, epoch-aligned events.tsv that excludes rejected epochs.
+    """Write an epoch-aligned events.tsv for a set of epochs.
 
-    Output is written next to the clean epochs file (derivatives), using the
-    same naming stem (e.g., ``*_proc-clean_events.tsv``).
+    Output is written next to the epochs file (derivatives), using the same naming stem
+    (e.g., ``*_proc-clean_events.tsv``).
+
+    ``after_rejection`` says whether these epochs have been through the rejection step.
+    It is not a switch for how much detail to include: AutoReject is *fitted* in that
+    step, so before it has run there is no per-trial repair record to attach, and
+    demanding one asks for a measurement that does not exist yet. The provisional
+    band-ICA comparisons run at ICA-fitting time against pre-rejection epochs and pass
+    ``False`` for exactly that reason.
+
+    The default stays ``True`` so the post-rejection callers keep failing loudly when the
+    AutoReject log is genuinely missing — that log is the only record of which
+    channel-in-trial samples are spline estimates rather than measurements, and a clean
+    events table that silently omits it is worse than one that is not written.
     """
     from eeg_pipeline.analysis.utilities.bids_metadata import ensure_events_sidecar
 
@@ -815,23 +902,17 @@ def write_clean_events_tsv_for_epochs(
         log.warning("All epochs were rejected; wrote empty clean events: %s", out_path)
         return out_path
 
-    if hasattr(epochs, "selection"):
-        sel = list(getattr(epochs, "selection"))
-        if len(sel) == n_epochs and sel and max(sel) < len(target):
-            kept = target.iloc[sel].copy().reset_index(drop=True)
-        elif len(target) == n_epochs:
-            kept = target.copy().reset_index(drop=True)
-        else:
-            raise ValueError(
-                f"Cannot map kept epochs to events for {subject_label}, task-{task}: "
-                f"epochs={n_epochs}, target_events={len(target)}, selection_len={len(sel)}."
-            )
-    elif len(target) == n_epochs:
-        kept = target.copy().reset_index(drop=True)
-    else:
+    try:
+        kept_mask = _kept_event_mask(epochs, len(target))
+    except ValueError as exc:
         raise ValueError(
-            f"Cannot map kept epochs to events for {subject_label}, task-{task}: "
-            f"epochs={n_epochs}, target_events={len(target)} and epochs.selection unavailable."
+            f"Cannot map kept epochs to events for {subject_label}, task-{task}: {exc}"
+        ) from exc
+    kept = target.loc[kept_mask].copy().reset_index(drop=True)
+    if len(kept) != n_epochs:
+        raise ValueError(
+            f"Cannot map kept epochs to events for {subject_label}, task-{task}: the drop "
+            f"log marks {len(kept)} events as kept but the file holds {n_epochs} epochs."
         )
 
     kept.insert(0, "trial_id", range(1, len(kept) + 1))
@@ -842,6 +923,18 @@ def write_clean_events_tsv_for_epochs(
             f"QC table length mismatch for {subject_label}, task-{task}: {len(qc_table)} vs {len(kept)}."
         )
     kept = pd.concat([kept.reset_index(drop=True), qc_table], axis=1)
+
+    autoreject_counts = (
+        _autoreject_counts_for_clean_events(
+            epochs_path=epochs_path,
+            config=config,
+            n_epochs=n_epochs,
+        )
+        if after_rejection
+        else None
+    )
+    if autoreject_counts is not None:
+        kept = pd.concat([kept.reset_index(drop=True), autoreject_counts], axis=1)
 
     kept.to_csv(out_path, sep="\t", index=False)
     ensure_events_sidecar(out_path, list(kept.columns))

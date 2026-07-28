@@ -20,10 +20,14 @@ Modes:
 from __future__ import annotations
 
 import csv
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
+from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -42,8 +46,118 @@ STEP_ICA_CARDIAC_QC = "ica-cardiac-qc"
 STEP_CARDIAC_ATTENUATION_QC = "cardiac-attenuation-qc"
 
 
+@lru_cache(maxsize=1)
+def _mne_annotation_event_pattern() -> "re.Pattern[str]":
+    """Return the pattern MNE uses to decide which annotations become events.
+
+    Read from ``mne.events_from_annotations`` rather than copied, so that the conditions
+    this pipeline epochs on and the events MNE actually creates cannot drift apart. The
+    default is a negative lookahead on ``BAD``/``EDGE``, applied to the whole description
+    and anchored at its start.
+
+    Raises rather than guessing. A silent fallback here would restore exactly the
+    duplicate-rule problem this exists to remove, and it would do so invisibly.
+
+    Imported inside the function to match this module's convention: binding MNE at module
+    level would defeat the dependency stubbing in ``tests/pipelines``.
+    """
+    import mne
+
+    parameter = inspect.signature(mne.events_from_annotations).parameters.get("regexp")
+    if parameter is None or not isinstance(parameter.default, str) or not parameter.default:
+        raise RuntimeError(
+            "Cannot read the default 'regexp' of mne.events_from_annotations, so the "
+            "conditions this pipeline selects cannot be checked against the events MNE "
+            "will create. MNE's signature has changed; update "
+            "_mne_annotation_event_pattern to match it."
+        )
+    return re.compile(parameter.default)
+
+
 def _is_events_tsv(path: Path) -> bool:
     return path.is_file() and path.name.endswith("_events.tsv") and not path.name.startswith("._")
+
+
+def _preservation_measurements(*, reliability, alpha) -> dict:
+    """Headline numbers from the preservation section, for the report's landing panel.
+
+    Which of the two exists depends on the paradigm rather than on whether anything went
+    wrong: rest has no evoked response to split in half, and a montage with no posterior
+    sensors has no alpha to measure. Each is recorded only when it was measured, so the
+    panel carries the evidence this recording could actually supply.
+    """
+    measurements: dict = {}
+    if reliability is not None:
+        measurements["split_half_r"] = float(reliability.corrected_correlation)
+        # Reliability grows with test length, so the correlation above is only comparable
+        # with another participant's once both are stepped to a common trial count. The
+        # count is recorded here so a cohort can do that without reopening the epochs.
+        measurements["split_half_n_trials"] = int(reliability.n_trials)
+        window_start, window_end = reliability.response_window_s
+        measurements["split_half_window_start_s"] = float(window_start)
+        measurements["split_half_window_end_s"] = float(window_end)
+    if alpha is not None:
+        measurements["alpha_prominence_db"] = float(alpha.prominence_db)
+    return measurements
+
+
+def _recorded_versions(record: dict) -> dict:
+    """The package versions that built this report, latest stage wins.
+
+    Collapsed the same way the measurements are, and for the same reason: the sidecar
+    describes the document as it stands, and a stage rerun under a newer MNE built the
+    section that is in the file now.
+    """
+    versions: dict = {}
+    stages = sorted(
+        (entry for entry in record.get("stages", ()) if isinstance(entry, dict)),
+        key=lambda entry: str(entry.get("written_at", "")),
+    )
+    for entry in stages:
+        recorded = entry.get("versions") or {}
+        if isinstance(recorded, dict):
+            versions.update({str(k): str(v) for k, v in recorded.items()})
+    return versions
+
+
+def _subject_of_report(report_path: Path) -> Optional[str]:
+    """Recover the participant label a BIDS derivative filename encodes."""
+    for part in report_path.name.split("_"):
+        if part.startswith("sub-"):
+            return part[len("sub-") :]
+    return None
+
+
+def _review_stage_measurements(*, coverage, evidence) -> dict:
+    """Headline numbers the review stage measures, for the report's landing panel.
+
+    Only what this stage owns. The panel is assembled from the build record so that every
+    number on it is the one its own section measured, which means each stage writes down
+    its own and none of them recompute anyone else's.
+
+    Absent inputs produce absent keys rather than zeros. A dataset recorded outside a
+    scanner has no marker agreement to report, and a row reading "0%" for it would state
+    a total disagreement between two detectors where there was only ever one.
+    """
+    measurements: dict = {}
+    if coverage is not None:
+        measurements["n_channels"] = int(coverage.n_channels)
+        measurements["n_bad_channels"] = len(coverage.bad_channels)
+        measurements["n_runs"] = int(coverage.n_runs)
+    if evidence is not None:
+        if getattr(evidence, "spectra", None):
+            measurements["n_runs"] = len(evidence.spectra)
+        # The lowest agreement across runs, because the panel exists to surface the run
+        # that stands apart rather than an average that hides it. Runs whose fraction is
+        # undefined carry no number to be lowest.
+        fractions = [
+            agreement.matched_fraction
+            for agreement in getattr(evidence, "marker_agreements", ())
+            if agreement.matched_fraction is not None
+        ]
+        if fractions:
+            measurements["worst_marker_agreement"] = float(min(fractions))
+    return measurements
 
 
 class PreprocessingPipeline(PipelineBase):
@@ -113,7 +227,7 @@ class PreprocessingPipeline(PipelineBase):
         resolved_task = self._resolve_requested_task(task, task_is_rest)
         mode = kwargs.get("mode", "ica")
         use_pyprep = kwargs.get("use_pyprep", True)
-        n_jobs = kwargs.get("n_jobs", 1)
+        n_jobs = self._validate_n_jobs(kwargs.get("n_jobs", 1))
         progress = ensure_progress_reporter(kwargs.get("progress"))
 
         return (
@@ -124,6 +238,27 @@ class PreprocessingPipeline(PipelineBase):
             n_jobs,
             progress,
         )
+
+    @staticmethod
+    def _validate_n_jobs(n_jobs: Any) -> int:
+        """Return the worker count, rejecting the one value neither backend accepts.
+
+        Negatives are the "leave this many cores free" selector both joblib and
+        MNE-BIDS-Pipeline understand, so they pass through. Zero is not a smaller version
+        of that: joblib raises on it deep inside a worker pool, and MNE-BIDS-Pipeline
+        resolves it to zero workers. Either way the failure surfaces from a subprocess,
+        after the run has already opened recordings.
+        """
+        try:
+            resolved = int(n_jobs)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"n_jobs must be an integer, got {n_jobs!r}.") from error
+        if resolved == 0:
+            raise ValueError(
+                "n_jobs must be a non-zero integer: a positive worker count, or a "
+                "negative value to leave that many cores free (-1 uses all cores)."
+            )
+        return resolved
 
     def _resolve_requested_task(
         self,
@@ -172,7 +307,7 @@ class PreprocessingPipeline(PipelineBase):
         progress.subject_start(f"sub-{subject}")
 
         try:
-            steps = self._get_steps_for_run(mode, task_is_rest)
+            steps = self._get_steps_for_run(mode, task_is_rest, [subject], resolved_task)
 
             self._execute_steps(
                 steps=steps,
@@ -207,7 +342,14 @@ class PreprocessingPipeline(PipelineBase):
                 - progress: ProgressReporter for TUI feedback
 
         Returns:
-            List of per-subject status dictionaries
+            One status dictionary per subject, all carrying the same status.
+
+            The outcome is genuinely batch-level rather than per-subject: MNE-BIDS-Pipeline
+            processes the whole subject list in one invocation and a failure anywhere
+            raises for the run, so this either returns success for every subject or raises.
+            Do not read an individual entry as evidence that that subject specifically
+            succeeded; the per-subject record of what happened is the run metadata and the
+            subject reports.
         """
         resolved_task, mode, use_pyprep, task_is_rest, n_jobs, progress = (
             self._extract_preprocessing_params(task, kwargs)
@@ -227,7 +369,7 @@ class PreprocessingPipeline(PipelineBase):
         try:
             progress.start("preprocessing", subjects)
 
-            steps = self._get_steps_for_run(mode, task_is_rest)
+            steps = self._get_steps_for_run(mode, task_is_rest, subjects, resolved_task)
 
             run_outputs = self._execute_steps(
                 steps=steps,
@@ -309,21 +451,158 @@ class PreprocessingPipeline(PipelineBase):
 
         return mode_steps[mode]
 
-    def _get_steps_for_run(self, mode: str, task_is_rest: bool) -> List[str]:
-        """Append cohort QC only when task epoch outputs are produced."""
+    def _get_steps_for_run(
+        self,
+        mode: str,
+        task_is_rest: bool,
+        subjects: Optional[List[str]] = None,
+        task: Optional[str] = None,
+    ) -> List[str]:
+        """Append cohort QC only when the outputs it measures are produced.
+
+        Keyed off the steps themselves rather than the mode name, so that ``full`` — which
+        runs both ICA fitting and epoching — gets the same QC as running ``ica`` and
+        ``epochs`` separately, instead of silently producing derivatives with no cardiac
+        QC attached.
+        """
         steps = self._get_steps_for_mode(mode)
         analyzer_enabled = bool(
             self.config.get("preprocessing.brainvision_analyzer.enabled", False)
         )
         if analyzer_enabled:
             steps.insert(0, STEP_PULSE_MARKER_QC)
-            if mode == "ica":
+            if STEP_ICA_FIT in steps:
                 steps.append(STEP_ICA_CARDIAC_QC)
-            if mode == "epochs":
+            if STEP_EPOCHS in steps:
                 steps.append(STEP_CARDIAC_ATTENUATION_QC)
                 if not task_is_rest:
                     steps.append(STEP_SCANNER_HARMONIC_QC)
+        if subjects is not None:
+            self._validate_bad_channel_sync_policy_for_steps(steps, subjects, task)
         return steps
+
+    def _validate_bad_channel_sync_policy_for_steps(
+        self,
+        steps: List[str],
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        """Reject a sync policy the requested steps cannot satisfy, before any work runs.
+
+        MNE-BIDS-Pipeline concatenates runs for the shared ICA and for epoching, which
+        requires one bad-channel set per subject. Under ``per_run`` that constraint is
+        violated by any subject whose runs disagree — the normal case once PyPREP has run.
+
+        The BIDS ``channels.tsv`` files already record the per-run decision and cost
+        nothing to read, so the same failure that used to surface after PyPREP and
+        filtering surfaces here instead, before the first recording is opened. Subjects
+        whose channel files do not exist yet are left to the later check.
+        """
+        if not ({STEP_ICA_FIT, STEP_EPOCHS} & set(steps)):
+            return
+        if self._resolve_bad_channel_sync_policy() == "subject_union":
+            return
+
+        for subject in self._resolve_bids_subjects(subjects):
+            bads_by_run = self._read_bids_bad_channels(subject, task)
+            if len(bads_by_run) < 2:
+                continue
+            distinct = {tuple(bads) for bads in bads_by_run.values()}
+            if len(distinct) > 1:
+                raise ValueError(
+                    f"sub-{subject} has different bad channels in different runs "
+                    f"({bads_by_run}), but pyprep.bad_channel_sync_policy='per_run'. "
+                    "MNE-BIDS-Pipeline concatenates runs for the shared ICA and for "
+                    "epoching, which requires one bad-channel set per subject. Set "
+                    "pyprep.bad_channel_sync_policy='subject_union', or process each run "
+                    "as its own task."
+                )
+
+    def _resolve_bids_subjects(self, subjects: List[str]) -> List[str]:
+        """Resolve explicit or discovered subjects against the BIDS root."""
+        if subjects == ["all"]:
+            return sorted(
+                path.name.removeprefix("sub-")
+                for path in self.bids_root.glob("sub-*")
+                if path.is_dir()
+            )
+        return [subject.removeprefix("sub-") for subject in subjects]
+
+    def _read_bids_bad_channels(
+        self,
+        subject: str,
+        task: Optional[str],
+    ) -> Dict[str, tuple[str, ...]]:
+        """Read the bad EEG channels each run's channels.tsv records."""
+        selector = f"_task-{task}_" if task is not None else "_task-"
+        bads_by_run: Dict[str, tuple[str, ...]] = {}
+        subject_dir = self.bids_root / f"sub-{subject}"
+        for path in sorted(subject_dir.rglob(f"sub-{subject}_*_channels.tsv")):
+            if path.name.startswith("._") or selector not in path.name:
+                continue
+            # utf-8-sig: mne-bids writes these with a BOM.
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle, delimiter="\t"))
+            bads_by_run[path.name] = tuple(
+                sorted(
+                    row["name"]
+                    for row in rows
+                    if str(row.get("type", "")).lower() == "eeg"
+                    and str(row.get("status", "")).lower() == "bad"
+                )
+            )
+        return bads_by_run
+
+    def _bids_eog_channel_names(self) -> set[str]:
+        """Return every channel any run types as EOG in its channels.tsv."""
+        names: set[str] = set()
+        for path in sorted(self.bids_root.rglob("*_channels.tsv")):
+            if path.name.startswith("._") or "eeg" not in path.parts:
+                continue
+            # utf-8-sig: mne-bids writes these with a BOM.
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                for row in csv.DictReader(handle, delimiter="\t"):
+                    if str(row.get("type", "")).lower() == "eog":
+                        names.add(str(row["name"]))
+        return names
+
+    def _resolve_eog_detection_channels(self) -> List[str]:
+        """Return the channels MNE-BIDS-Pipeline will use to recover blinks.
+
+        MNE-BIDS-Pipeline detects ocular components by correlating them against EOG
+        channels. When neither ``eeg.eog_channels`` nor a channel typed EOG in the BIDS
+        ``channels.tsv`` supplies one, upstream breaks out of its detection loop and
+        leaves the component list empty — no warning, no error, and a report that reads
+        exactly like a recording with no blinks in it. This montage has no dedicated EOG
+        electrode, so that is the default outcome unless surrogates are named.
+        """
+        configured = self.config.get("eeg.eog_channels")
+        if isinstance(configured, str):
+            channels = [name.strip() for name in configured.split(",") if name.strip()]
+        elif isinstance(configured, (list, tuple)):
+            channels = [str(name).strip() for name in configured if str(name).strip()]
+        else:
+            channels = []
+
+        if channels:
+            return channels
+        return sorted(self._bids_eog_channel_names())
+
+    def _validate_eog_detection_is_reachable(self) -> None:
+        """Reject an EOG detection request that upstream would silently skip."""
+        if not bool(self.config.get("ica.use_eog_detection")):
+            return
+        if self._resolve_eog_detection_channels():
+            return
+        raise ValueError(
+            "ica.use_eog_detection is true, but no EOG channel is available: "
+            "eeg.eog_channels is unset and no channels.tsv under "
+            f"{self.bids_root} types a channel as EOG. MNE-BIDS-Pipeline skips ocular "
+            "component detection entirely in that case without raising, so blink removal "
+            "would rest on ICLabel alone. Name frontopolar surrogates in eeg.eog_channels "
+            "(upstream treats them as virtual EOG without removing them from the EEG "
+            "analysis), or set ica.use_eog_detection=false to make the omission explicit."
+        )
 
     def _execute_steps(
         self,
@@ -376,12 +655,14 @@ class PreprocessingPipeline(PipelineBase):
                     subjects=subjects,
                     task=task,
                     task_is_rest=task_is_rest,
+                    n_jobs=n_jobs,
                 )
             elif step == STEP_EPOCHS:
                 self._run_epoch_creation(
                     subjects=subjects,
                     task=task,
                     task_is_rest=task_is_rest,
+                    n_jobs=n_jobs,
                 )
             elif step == STEP_STATS:
                 self._collect_stats(task=task)
@@ -412,12 +693,17 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str],
         task: Optional[str],
     ) -> Path:
-        """Validate preserved Analyzer R markers before preprocessing."""
+        """Measure the preserved Analyzer R markers and record them per run.
+
+        Descriptive by default: the configured bounds are written beside the measurements
+        rather than used to drop runs. ``strict_pulse_qc`` turns them into a gate for a
+        caller that wants one.
+        """
         from mne_bids import BIDSPath, read_raw_bids
 
         from eeg_pipeline.preprocessing.pulse_artifact_qc import (
             PulseMarkerCriteria,
-            validate_pulse_marker_recordings,
+            summarize_pulse_marker_recordings,
         )
 
         qc_config = self.config.get("preprocessing.brainvision_analyzer.pulse_artifact_qc")
@@ -477,7 +763,7 @@ class PreprocessingPipeline(PipelineBase):
             "preprocessing.brainvision_analyzer.strict_pulse_qc", False
         )
 
-        return validate_pulse_marker_recordings(
+        return summarize_pulse_marker_recordings(
             recordings,
             criteria,
             output_path=output_path,
@@ -492,6 +778,22 @@ class PreprocessingPipeline(PipelineBase):
                 "preprocessing.brainvision_analyzer.cardiac_artifact_qc"
             )
         return config
+
+    def _resolve_ecg_channel(self) -> str:
+        """Resolve the single ECG channel the cardiac QC steps read."""
+        channels = self.config.get("eeg.ecg_channels")
+        if not channels:
+            raise ValueError(
+                "Cardiac QC requires eeg.ecg_channels to name the recorded ECG channel."
+            )
+        if isinstance(channels, str):
+            return channels.strip()
+        if len(channels) != 1:
+            raise ValueError(
+                "Cardiac QC reads exactly one ECG channel; eeg.ecg_channels has "
+                f"{len(channels)}: {list(channels)}."
+            )
+        return str(channels[0]).strip()
 
     def _run_marker_ctps_qc(
         self,
@@ -508,6 +810,7 @@ class PreprocessingPipeline(PipelineBase):
             task=task,
             threshold=float(config["ctps_threshold"]),
             epoch_window=tuple(config["ctps_epoch_window"]),
+            ecg_channel=self._resolve_ecg_channel(),
         )
 
     def _run_cardiac_attenuation_qc(
@@ -527,6 +830,7 @@ class PreprocessingPipeline(PipelineBase):
             task=task,
             baseline=tuple(config["baseline"]),
             measurement_window=tuple(config["measurement_window"]),
+            ecg_channel=self._resolve_ecg_channel(),
         )
 
     def _run_bad_channel_detection(
@@ -557,7 +861,12 @@ class PreprocessingPipeline(PipelineBase):
             subjects=normalized_subjects,
             n_jobs=n_jobs,
             montage=self.config.get("eeg.montage", "easycap-M1"),
-            l_pass=self.config.get("preprocessing.h_freq", 100),
+            # Detection filtering is its own decision, not the analysis band. Passing
+            # ``preprocessing.h_freq`` here removed the >100 Hz content that PyPREP's
+            # high-frequency-noise criterion is defined on, so the detector measured a
+            # band that had already been filtered away. ``pyprep.detection_low_pass``
+            # defaults to no low-pass; set it only if a recording needs one.
+            l_pass=pyprep_cfg.get("detection_low_pass"),
             notch=self.config.get("preprocessing.notch_freq"),
             ransac=pyprep_cfg.get("ransac", False),
             repeats=pyprep_cfg.get("repeats", 3),
@@ -631,6 +940,8 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str],
         task: Optional[str],
         task_is_rest: Optional[bool] = None,
+        *,
+        n_jobs: int,
     ) -> None:
         """Run ICA fitting via MNE-BIDS pipeline."""
         self._run_mne_bids_pipeline(
@@ -638,6 +949,7 @@ class PreprocessingPipeline(PipelineBase):
             subjects=subjects,
             task=task,
             task_is_rest=task_is_rest,
+            n_jobs=n_jobs,
         )
         self._harmonize_filtered_raw_bads_for_mne_concat(subjects, task)
         self._run_mne_bids_pipeline(
@@ -645,6 +957,7 @@ class PreprocessingPipeline(PipelineBase):
             subjects=subjects,
             task=task,
             task_is_rest=task_is_rest,
+            n_jobs=n_jobs,
         )
 
         if bool(self.config.get("ica.cardiac_review.enabled", False)):
@@ -672,6 +985,7 @@ class PreprocessingPipeline(PipelineBase):
                     subjects=subjects,
                     task=task,
                     task_is_rest=False,
+                    n_jobs=n_jobs,
                 )
                 self._append_provisional_band_ica_condition_tfrs(
                     subjects=subjects,
@@ -693,6 +1007,21 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.preprocessing.ica_cardiac_review import CardiacReviewSettings
 
         settings = CardiacReviewSettings.from_mapping(self.config.get("ica.cardiac_review", {}))
+
+        # Promotion writes into the same table the manual review edits, and it cannot tell
+        # a component nobody has looked at from one a reviewer deliberately cleared. Once
+        # the review is signed off, the reviewer's table is the answer and this step must
+        # not re-open it. Before sign-off it is the automated baseline the review adjusts,
+        # which is the whole point of running it.
+        if bool(self.config.get("ica.manual_review_complete")) and getattr(
+            settings, "promote_exclusions", False
+        ):
+            settings = replace(settings, promote_exclusions=False)
+            self.logger.info(
+                "ica.manual_review_complete is set; leaving the reviewed component table "
+                "alone instead of re-applying CTPS promotions."
+            )
+
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
             for epochs_path, report_path, output_prefix in self._find_band_ica_report_inputs(
@@ -859,6 +1188,10 @@ class PreprocessingPipeline(PipelineBase):
                     config=self.config,
                     conditions=conditions,
                     overwrite=True,
+                    # These are the pre-ICA task epochs, before any rejection: that is what
+                    # makes the comparison below provisional. AutoReject is fitted in the
+                    # rejection step, so no per-trial repair record exists yet to attach.
+                    after_rejection=False,
                     _logger=self.logger,
                 )
                 report_path = task_epochs_path.with_name(f"{entity_prefix}_report.h5")
@@ -891,13 +1224,15 @@ class PreprocessingPipeline(PipelineBase):
             if len(filtered_paths) < 2:
                 continue
 
-            raw_by_path = {}
+            # Only metadata is needed to decide whether anything must change, and a
+            # rewrite is the exception rather than the rule — the second call of this
+            # method in a run always finds the runs already harmonized. Reading headers
+            # here keeps that pass off the data entirely.
             bads_by_path = {}
             ch_names_by_path = {}
             eeg_ch_names_by_path = {}
             for path in filtered_paths:
-                raw = mne.io.read_raw_fif(path, preload=True, verbose=False)
-                raw_by_path[path] = raw
+                raw = mne.io.read_raw_fif(path, preload=False, verbose=False)
                 bads_by_path[path] = sorted(set(raw.info.get("bads", [])))
                 ch_names_by_path[path] = set(raw.ch_names)
                 eeg_ch_names_by_path[path] = set(self._get_eeg_channel_names(raw))
@@ -938,7 +1273,8 @@ class PreprocessingPipeline(PipelineBase):
                         f"channels missing from this run: {missing_channels}"
                     )
 
-            for path, raw in raw_by_path.items():
+            for path in filtered_paths:
+                raw = mne.io.read_raw_fif(path, preload=True, verbose=False)
                 raw.info["bads"] = subject_bad_union
                 self._save_raw_with_updated_bads(raw, path)
 
@@ -1056,6 +1392,26 @@ class PreprocessingPipeline(PipelineBase):
             writer.writeheader()
             writer.writerows(records)
 
+    def _filtered_sampling_rate(self, filtered_path: Path) -> float:
+        """Return the sampling rate of a filtered run, without loading its data."""
+        import mne
+
+        return float(mne.io.read_raw_fif(filtered_path, verbose="ERROR").info["sfreq"])
+
+    def _configured_epoch_window(self) -> Optional[tuple]:
+        """Return the epoch bounds the filter response is drawn against.
+
+        ``None`` for a resting-state run, which is analysed continuously and has no epoch
+        for filter ringing to reach into.
+        """
+        if self._resolve_task_is_rest():
+            return None
+        tmin = self.config.get("epochs.tmin", None)
+        tmax = self.config.get("epochs.tmax", None)
+        if tmin is None or tmax is None:
+            return None
+        return (float(tmin), float(tmax))
+
     def _resolve_bad_harmonization_subjects(self, subjects: List[str]) -> List[str]:
         """Resolve explicit or discovered subjects for bad-channel harmonization."""
         if subjects == ["all"]:
@@ -1071,39 +1427,51 @@ class PreprocessingPipeline(PipelineBase):
         task: Optional[str],
     ) -> List[Path]:
         """Find non-split filtered raw run files for one subject."""
-        subject_root = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
-        subject_prefix = f"sub-{subject}_"
-        task_selector = f"_task-{task}_" if task is not None else "_task-"
-        all_paths = sorted(
-            path
-            for path in subject_root.rglob("*_run-*_proc-filt_raw.fif")
-            if path.name.startswith(subject_prefix) and task_selector in path.name
+        from eeg_pipeline.preprocessing.derivatives import find_filtered_raw_runs
+
+        return find_filtered_raw_runs(
+            self.deriv_root / "preprocessed" / "eeg",
+            subject=subject,
+            task=task,
         )
-        split_paths = [path for path in all_paths if "_split-" in path.name]
-        if split_paths:
-            raise RuntimeError(
-                "Cannot harmonize split filtered raw files for MNE-BIDS "
-                f"concatenation: {split_paths}"
-            )
-        return all_paths
 
     def _save_raw_with_updated_bads(self, raw: Any, path: Path) -> None:
         """Rewrite a raw FIF after changing only its bad-channel metadata."""
         if not path.name.endswith("_raw.fif"):
             raise ValueError(f"Expected raw FIF path ending in '_raw.fif', got {path}")
-        tmp_path = path.with_name(path.name.replace("_raw.fif", "_badsync_raw.fif"))
-        tmp_path.unlink(missing_ok=True)
+        # The marker is matched anywhere in the name so that split parts are found under
+        # either naming scheme: 'bids' inserts a `split-NN` entity mid-name rather than
+        # appending to the stem.
+        marker = "_badsync_"
+        tmp_path = path.with_name(path.name.replace("_raw.fif", f"{marker}raw.fif"))
+
+        def written_parts() -> List[Path]:
+            return sorted(p for p in tmp_path.parent.glob("*.fif") if marker in p.name)
+
+        for stale in written_parts():
+            stale.unlink(missing_ok=True)
         try:
             raw.save(tmp_path, overwrite=True, split_naming="bids")
+            # A split save would leave the later parts behind while only the first was
+            # moved into place, silently truncating the run.
+            parts = written_parts()
+            if parts != [tmp_path]:
+                raise RuntimeError(
+                    f"Rewriting bad-channel metadata split {path} across {len(parts)} "
+                    f"files: {parts}. Split recordings are not supported here."
+                )
             tmp_path.replace(path)
         finally:
-            tmp_path.unlink(missing_ok=True)
+            for leftover in written_parts():
+                leftover.unlink(missing_ok=True)
 
     def _run_epoch_creation(
         self,
         subjects: List[str],
         task: Optional[str],
         task_is_rest: bool,
+        *,
+        n_jobs: int,
     ) -> None:
         """Create epochs and apply ICA via MNE-BIDS pipeline."""
         steps = "preprocessing/_07_make_epochs,preprocessing/_08a_apply_ica,preprocessing/_09_ptp_reject"
@@ -1114,7 +1482,12 @@ class PreprocessingPipeline(PipelineBase):
             subjects=subjects,
             task=task,
             task_is_rest=task_is_rest,
+            n_jobs=n_jobs,
         )
+
+        # Before clean events, which carry the per-trial repair counts this produces.
+        if bool(self.config.get("preprocessing.autoreject_log", False)):
+            self._write_autoreject_logs(subjects=subjects, task=task)
 
         if task_is_rest:
             self.logger.info("Skipping clean events export for resting-state preprocessing")
@@ -1129,6 +1502,72 @@ class PreprocessingPipeline(PipelineBase):
 
         self.logger.info("Epoch creation complete")
 
+    def _write_autoreject_logs(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        """Persist AutoReject's per-channel verdict beside each subject's epochs.
+
+        MNE-BIDS-Pipeline discards the reject log after using it for one report figure,
+        so it is refitted here with the same settings on the same input and checked
+        against the cleaned epochs it claims to describe.
+        """
+        import mne
+
+        from eeg_pipeline.infra.paths import find_clean_epochs_path
+        from eeg_pipeline.preprocessing.autoreject_log import (
+            AutorejectLogSettings,
+            autoreject_log_path_for_epochs,
+            compute_autoreject_log,
+            pre_rejection_epochs_path,
+            verify_log_describes_clean_epochs,
+            write_autoreject_log,
+        )
+
+        settings = AutorejectLogSettings.from_config(self.config)
+
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            clean_path = find_clean_epochs_path(
+                subject,
+                task,
+                deriv_root=self.deriv_root,
+                config=self.config,
+            )
+            if clean_path is None or not clean_path.is_file():
+                raise FileNotFoundError(
+                    f"Clean epochs not found; cannot log AutoReject for sub-{subject}, "
+                    f"task-{task}"
+                )
+            fit_path = pre_rejection_epochs_path(clean_path)
+            if not fit_path.is_file():
+                raise FileNotFoundError(
+                    f"Pre-rejection epochs not found at {fit_path}; AutoReject cannot be "
+                    f"refitted for sub-{subject}, task-{task}"
+                )
+
+            log = compute_autoreject_log(
+                mne.read_epochs(fit_path, preload=True, verbose="ERROR"),
+                settings,
+            )
+            verify_log_describes_clean_epochs(
+                log,
+                mne.read_epochs(clean_path, preload=False, verbose="ERROR"),
+            )
+            written = write_autoreject_log(log, autoreject_log_path_for_epochs(clean_path))
+            self.logger.info(
+                "sub-%s: AutoReject dropped %d of %d epochs, interpolated %d channel-trials "
+                "(n_interpolate=%d, consensus=%.2f) -> %s",
+                subject,
+                int(log.bad_epochs.sum()),
+                len(log.bad_epochs),
+                int((log.labels[~log.bad_epochs] == 2).sum()),
+                log.n_interpolate,
+                log.consensus,
+                written,
+            )
+
     def _append_epoch_rejection_review(
         self,
         *,
@@ -1140,6 +1579,8 @@ class PreprocessingPipeline(PipelineBase):
         import pandas as pd
 
         from eeg_pipeline.infra.paths import find_clean_epochs_path
+        from eeg_pipeline.preprocessing.report.build_record import save_subject_report
+        from eeg_pipeline.preprocessing.report.organize import open_subject_report
         from eeg_pipeline.preprocessing.report.rejection import add_rejection_review
 
         for subject in self._resolve_bad_harmonization_subjects(subjects):
@@ -1166,20 +1607,29 @@ class PreprocessingPipeline(PipelineBase):
 
             events_path = epochs_path.with_name(epochs_path.name.replace("_epo.fif", "_events.tsv"))
             clean_events = pd.read_csv(events_path, sep="\t") if events_path.is_file() else None
-            report = mne.open_report(report_path)
+            report = open_subject_report(report_path)
             summary = add_rejection_review(
                 report=report,
                 clean_epochs=mne.read_epochs(epochs_path, preload=False, verbose="ERROR"),
                 clean_events=clean_events,
                 config=self.config,
             )
-            self._append_signal_preservation(
+            preservation = self._append_signal_preservation(
                 report=report,
                 epochs_path=epochs_path,
                 subject=subject,
             )
-            report.save(report_path, overwrite=True, open_browser=False)
-            report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+            save_subject_report(
+                report,
+                report_path,
+                stage="epochs",
+                measurements={
+                    "epochs_kept": int(summary.kept),
+                    "epochs_total": int(summary.total),
+                    "epochs_dropped_fraction": float(summary.dropped_fraction),
+                    **preservation,
+                },
+            )
             self.logger.info(
                 "sub-%s retained %d of %d epochs (%.1f%% dropped)",
                 subject,
@@ -1194,8 +1644,11 @@ class PreprocessingPipeline(PipelineBase):
         report,
         epochs_path: Path,
         subject: str,
-    ) -> None:
-        """Add evidence that brain signal survived, beside the evidence of removal."""
+    ) -> dict:
+        """Add evidence that brain signal survived, beside the evidence of removal.
+
+        Returns the measurements it made so the caller can record them beside the report.
+        """
         import mne
 
         from eeg_pipeline.preprocessing.report.preservation import (
@@ -1205,7 +1658,7 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
         if not ReportSettings.from_config(self.config).enabled:
-            return
+            return {}
         epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
         if bool(self.config.get("preprocessing.task_is_rest", False)):
             reliability = None
@@ -1218,6 +1671,63 @@ class PreprocessingPipeline(PipelineBase):
             "n/a" if reliability is None else f"{reliability.corrected_correlation:.3f}",
             "n/a" if alpha is None else f"{alpha.prominence_db:.1f} dB",
         )
+        return _preservation_measurements(reliability=reliability, alpha=alpha)
+
+    def _append_provisional_signal_preservation(
+        self,
+        *,
+        report,
+        report_path: Path,
+        task: str,
+        subject: str,
+    ):
+        """Add preservation evidence before the exclusions are approved.
+
+        The same section is rendered again after rejection, on the epochs that survived
+        it. This earlier pass exists because by the time the final one runs the decision
+        it informs has already been taken: at ICA review the reviewer is looking at a
+        page on which every panel measures removal, and nothing yet says whether anything
+        was left. The status string is what keeps the two readings apart, and the
+        tag-scoped removal inside the preservation section means the later pass replaces
+        this one rather than sitting beside it.
+
+        Absent inputs are not an error. A report built from the bad-channel stage alone
+        has no epochs to measure, and a resting-state recording is measured on its
+        posterior rhythm rather than an evoked response.
+        """
+        import mne
+
+        from eeg_pipeline.preprocessing.report.preservation import (
+            add_rest_preservation_review,
+            add_task_preservation_review,
+        )
+
+        prefix = report_path.name.removesuffix("_report.h5")
+        epochs_path = report_path.with_name(f"{prefix}_task-{task}_epo.fif")
+        if not epochs_path.exists():
+            self.logger.info(
+                "No pre-rejection epochs for sub-%s; skipping provisional preservation",
+                subject,
+            )
+            return None
+
+        status = "Provisional — all task epochs, before rejection"
+        epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
+        if bool(self.config.get("preprocessing.task_is_rest", False)):
+            return add_rest_preservation_review(
+                report=report,
+                epochs=epochs,
+                analysis_status=status,
+            )
+        _, alpha = add_task_preservation_review(
+            report=report,
+            epochs=epochs,
+            analysis_status=status,
+        )
+        # Returned rather than discarded: this is the one place the posterior rhythm is
+        # measured on the cleaned data, and the cohort sidecar needs the measurement
+        # object rather than the headline scalar the build record keeps.
+        return alpha
 
     def _append_report_review_sections(
         self,
@@ -1230,12 +1740,16 @@ class PreprocessingPipeline(PipelineBase):
         Every section is optional and absent when its inputs are: a dataset recorded
         outside a scanner simply has no Analyzer section, rather than an empty one.
         """
-        import mne
-
         from eeg_pipeline.preprocessing.report.analyzer_qc import (
             add_analyzer_correction_review,
         )
         from eeg_pipeline.preprocessing.report.coverage import add_coverage_review
+        from eeg_pipeline.preprocessing.report.filtering import (
+            add_filter_review,
+            describe_configured_filter,
+        )
+        from eeg_pipeline.preprocessing.report.build_record import save_subject_report
+        from eeg_pipeline.preprocessing.report.organize import open_subject_report
         from eeg_pipeline.preprocessing.report.provenance import add_provenance_review
         from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
@@ -1260,8 +1774,22 @@ class PreprocessingPipeline(PipelineBase):
                 continue
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
             for report_path in reports:
-                report = mne.open_report(report_path)
+                report = open_subject_report(report_path)
                 add_provenance_review(report=report, config=self.config)
+                # Skipped without a filtered run to read the sampling rate from, which is
+                # the case for a dataset filtered upstream: there is no pipeline filter to
+                # describe, and inventing a rate would describe one that was never applied.
+                if filtered_paths:
+                    description = describe_configured_filter(
+                        self.config,
+                        sfreq=self._filtered_sampling_rate(filtered_paths[0]),
+                    )
+                    if description is not None:
+                        add_filter_review(
+                            report=report,
+                            description=description,
+                            epoch_window_s=self._configured_epoch_window(),
+                        )
                 analyzer = add_analyzer_correction_review(
                     report=report,
                     qc_dir=deriv_eeg_root / "qc",
@@ -1281,11 +1809,30 @@ class PreprocessingPipeline(PipelineBase):
                     filtered_paths=filtered_paths,
                     settings=report_settings,
                 )
-                report.save(report_path, overwrite=True, open_browser=False)
-                report.save(
-                    report_path.with_suffix(".html"),
-                    overwrite=True,
-                    open_browser=False,
+                self._append_provisional_signal_preservation(
+                    report=report,
+                    report_path=report_path,
+                    task=task,
+                    subject=subject,
+                )
+                record = save_subject_report(
+                    report,
+                    report_path,
+                    stage="report-review",
+                    measurements=_review_stage_measurements(
+                        coverage=coverage,
+                        evidence=evidence,
+                    ),
+                )
+                # Written after the report is saved, so the sidecar carries the record of
+                # the document that exists rather than of the one being built.
+                self._write_qc_sidecar(
+                    report_path=report_path,
+                    record=record,
+                    subject=subject,
+                    task=task,
+                    evidence=evidence,
+                    settings=report_settings,
                 )
                 self.logger.info(
                     "sub-%s report sections: analyzer=%s coverage=%s gradient=%s runs=%d",
@@ -1299,6 +1846,175 @@ class PreprocessingPipeline(PipelineBase):
                     ),
                     0 if evidence is None else len(evidence.spectra),
                 )
+
+    def _write_qc_sidecar(
+        self,
+        *,
+        report_path: Path,
+        record: dict,
+        subject: str,
+        task: str,
+        evidence,
+        settings,
+    ) -> None:
+        """Write the QC sidecar a cohort report reads, beside the subject report.
+
+        This is the seam the whole cohort feature rests on. ``measure_runs`` has just made
+        the one expensive pass over every run -- read, apply the exclusions, measure -- and
+        those results are about to go out of scope. Writing them down here means a cohort
+        document reads tables rather than buying that pass again from a gigabyte of
+        filtered raw per participant, and it means the cohort figure and the subject figure
+        beneath it are provably the same measurement rather than two computations that have
+        to be kept agreeing.
+
+        Failure here is logged and swallowed. The subject report is already written and is
+        the deliverable; losing a participant from a future cohort run is a smaller harm
+        than failing the stage that produced the document, and the cohort command lists a
+        participant with no sidecar rather than silently dropping it.
+        """
+        from dataclasses import asdict
+
+        from eeg_pipeline.preprocessing.report.at_a_glance import latest_measurements
+        from eeg_pipeline.preprocessing.report.cohort.record import (
+            AFTER,
+            BEFORE,
+            build_subject_sidecar,
+            pool_alpha_runs,
+        )
+        from eeg_pipeline.preprocessing.report.cohort.sidecar import write_sidecar
+
+        if evidence is None or not evidence.spectra:
+            self.logger.info("No per-run evidence for sub-%s; no QC sidecar written", subject)
+            return
+
+        try:
+            presented, retained = self._condition_counts(report_path=report_path, task=task)
+            sidecar = build_subject_sidecar(
+                subject=subject,
+                task=task,
+                spectra=evidence.spectra,
+                continuity=evidence.continuity,
+                timings=evidence.timings,
+                locked_averages=evidence.locked_averages,
+                combs=evidence.combs,
+                rr_intervals=evidence.rr_intervals,
+                marker_agreements=evidence.marker_agreements,
+                cardiac_residuals=evidence.cardiac_residuals,
+                # Both sides come from the measuring pass, which is the only place the
+                # same data exists before and after the exclusions. The epochs-based
+                # measurement in ``alpha`` stays on the subject panel under its own
+                # unsuffixed key: it is a better measurement of the final rhythm, but it
+                # has no "before" to be paired against, and pairing two estimators would
+                # measure the difference between them rather than the effect of cleaning.
+                alpha=self._paired_alpha(evidence, pool=pool_alpha_runs, stages=(BEFORE, AFTER)),
+                components=self._ica_component_table(report_path),
+                channel_positions=evidence.channel_positions,
+                bad_channels_by_run=evidence.bad_channels_by_run,
+                trials_by_condition=presented,
+                retained_by_condition=retained,
+                measurements=latest_measurements(record),
+                settings=asdict(settings),
+                versions=_recorded_versions(record),
+                acquisition_date=evidence.acquisition_date,
+            )
+            paths = write_sidecar(report_path, sidecar)
+        except (ValueError, OSError, KeyError) as error:
+            self.logger.warning("Could not write the QC sidecar for sub-%s: %s", subject, error)
+            return
+        self.logger.info(
+            "sub-%s QC sidecar: %d run(s), %d condition(s) -> %s",
+            subject,
+            sidecar.n_runs,
+            len(sidecar.conditions),
+            paths.subject_json.name,
+        )
+
+    @staticmethod
+    def _paired_alpha(evidence, *, pool, stages: tuple[str, str]) -> dict:
+        """The rhythm either side of the exclusions, or nothing when it is not paired.
+
+        Both sides or neither. A participant carrying only one side would sit in the paired
+        panel as half a comparison, and the panel would either drop them silently or draw a
+        difference against a value it does not have.
+        """
+        before, after = stages
+        pooled = {
+            before: pool(getattr(evidence, "posterior_alpha_before", ())),
+            after: pool(getattr(evidence, "posterior_alpha_after", ())),
+        }
+        if any(value is None for value in pooled.values()):
+            return {}
+        return pooled
+
+    def _ica_component_table(self, report_path: Path):
+        """The reviewed component table beside a report, or ``None`` when there is none."""
+        import pandas as pd
+
+        from eeg_pipeline.preprocessing.ica_exclusions import components_path_for_ica
+
+        prefix = report_path.name.removesuffix("_report.h5")
+        path = components_path_for_ica(report_path.with_name(f"{prefix}_proc-ica_ica.fif"))
+        if not path.is_file():
+            return None
+        try:
+            return pd.read_csv(path, sep="\t")
+        except (OSError, ValueError):
+            return None
+
+    def _condition_counts(self, *, report_path: Path, task: str) -> tuple[dict, dict]:
+        """Trials presented and trials retained, per condition.
+
+        Presented comes from the pre-rejection epochs and retained from the clean ones, so
+        the two counts are read from the two files that define them rather than one being
+        inferred from the other. Either may be absent -- a resting-state recording has
+        neither, and a run that stopped after ICA has only the first -- and an absent one
+        contributes no counts rather than zeros.
+        """
+        from eeg_pipeline.infra.paths import find_clean_epochs_path
+
+        prefix = report_path.name.removesuffix("_report.h5")
+        presented = self._epoch_condition_counts(
+            report_path.with_name(f"{prefix}_task-{task}_epo.fif")
+        )
+        subject = _subject_of_report(report_path)
+        retained = (
+            {}
+            if subject is None
+            else self._epoch_condition_counts(
+                find_clean_epochs_path(
+                    subject, task, deriv_root=self.deriv_root, config=self.config
+                )
+            )
+        )
+        return presented, retained
+
+    def _epoch_condition_counts(self, epochs_path: Optional[Path]) -> dict:
+        """Count trials per condition in an epochs file, from its event mapping.
+
+        ``event_id`` is used rather than the metadata table because it is what defines a
+        condition to MNE: it is present whether or not the pipeline wrote metadata, and it
+        names conditions exactly as every other section of the report does.
+
+        Counted by matching the event codes directly rather than by selecting with
+        ``epochs[name]``. Selection resolves a hierarchical id such as ``painful/left``
+        against every level of the hierarchy, so ``painful`` would count the trials of
+        every condition beneath it and the counts would sum to more than the trials that
+        were presented.
+        """
+        import mne
+
+        if epochs_path is None or not Path(epochs_path).exists():
+            return {}
+        try:
+            epochs = mne.read_epochs(epochs_path, preload=False, verbose="ERROR")
+        except (OSError, ValueError) as error:
+            self.logger.info("Could not read %s for condition counts: %s", epochs_path, error)
+            return {}
+        codes = epochs.events[:, 2]
+        # A condition present in the mapping and absent from the data counts zero rather
+        # than dropping out: "this participant saw none of that condition" is exactly the
+        # cell the cohort events panel exists to make visible.
+        return {str(name): int((codes == code).sum()) for name, code in epochs.event_id.items()}
 
     def _append_run_evidence(
         self,
@@ -1314,8 +2030,9 @@ class PreprocessingPipeline(PipelineBase):
         all need each run before and after the ICA exclusions, so they are measured in a
         single pass rather than one read and one ``ICA.apply`` per section.
         """
-        import mne
-
+        from eeg_pipeline.preprocessing.ica_exclusions import (
+            read_ica_with_reviewed_exclusions,
+        )
         from eeg_pipeline.preprocessing.report.run_evidence import add_run_evidence_review
 
         prefix = report_path.name.removesuffix("_report.h5")
@@ -1327,7 +2044,10 @@ class PreprocessingPipeline(PipelineBase):
         return add_run_evidence_review(
             report=report,
             filtered_raw_paths=run_paths,
-            ica=mne.preprocessing.read_ica(ica_path, verbose="ERROR"),
+            # The exclusions live in the component table, not in the ICA file: reading
+            # them off the file would compare each run against an uncleaned copy of
+            # itself and render that as a reassuringly small correction.
+            ica=read_ica_with_reviewed_exclusions(ica_path),
             settings=settings,
         )
 
@@ -1418,7 +2138,7 @@ class PreprocessingPipeline(PipelineBase):
         overwrite = bool(self.config.get("preprocessing.clean_events_overwrite", True))
         strict = bool(self.config.get("preprocessing.clean_events_strict", True))
 
-        for subj in subjects:
+        for subj in self._resolve_bad_harmonization_subjects(subjects):
             epochs_path = find_clean_epochs_path(
                 subj,
                 task,
@@ -1497,6 +2217,8 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str] = None,
         task: Optional[str] = None,
         task_is_rest: Optional[bool] = None,
+        *,
+        n_jobs: int,
     ) -> None:
         """Run MNE-BIDS pipeline with a generated config file.
 
@@ -1504,11 +2226,17 @@ class PreprocessingPipeline(PipelineBase):
         not CLI arguments. This generates a temporary config and passes it
         via --config.
 
+        ``n_jobs`` is keyword-only and has no default on purpose. MNE-BIDS-Pipeline
+        defaults it to 1, so a call site that forgets it produces a run that succeeds
+        serially rather than one that fails — the failure mode this argument exists to
+        prevent is silent.
+
         Args:
             steps: MNE-BIDS pipeline steps to run
             subjects: List of subject IDs to process (without 'sub-' prefix)
             task: Task name to constrain MNE-BIDS-Pipeline subject selection
             task_is_rest: Override config to enable/disable resting-state preprocessing
+            n_jobs: Worker count for MNE-BIDS-Pipeline's own parallelism
         """
         import tempfile
 
@@ -1517,6 +2245,7 @@ class PreprocessingPipeline(PipelineBase):
             subjects=subjects,
             task=task,
             task_is_rest=task_is_rest,
+            n_jobs=n_jobs,
         )
 
         with tempfile.NamedTemporaryFile(
@@ -1556,7 +2285,7 @@ class PreprocessingPipeline(PipelineBase):
             if result.stdout:
                 self.logger.debug("MNE-BIDS stdout: %s", result.stdout)
             if result.stderr:
-                self.logger.warning("MNE-BIDS stderr: %s", result.stderr)
+                self._log_mne_bids_warnings(result.stderr)
 
             if result.returncode != 0:
                 output_sections = []
@@ -1568,6 +2297,31 @@ class PreprocessingPipeline(PipelineBase):
                 raise RuntimeError(f"MNE-BIDS pipeline failed: {error_msg}")
         finally:
             Path(config_path).unlink(missing_ok=True)
+
+    #: Substrings marking a stderr line worth raising above the rest of the subprocess
+    #: output. A successful MNE-BIDS run still reports rank deficiency, ICA
+    #: non-convergence, and dropped epochs this way, and logging the whole stream as one
+    #: blob is how those go unread.
+    _MNE_BIDS_NOTABLE_WARNINGS = (
+        "rank",
+        "did not converge",
+        "not converge",
+        "dropped",
+        "RuntimeWarning",
+        "UserWarning",
+        "DeprecationWarning",
+    )
+
+    def _log_mne_bids_warnings(self, stderr: str) -> None:
+        """Log the MNE-BIDS subprocess stderr, promoting the lines that matter."""
+        notable = [
+            line
+            for line in stderr.splitlines()
+            if any(marker.lower() in line.lower() for marker in self._MNE_BIDS_NOTABLE_WARNINGS)
+        ]
+        for line in notable:
+            self.logger.warning("MNE-BIDS: %s", line.strip())
+        self.logger.info("MNE-BIDS stderr: %s", stderr)
 
     def _get_rest_epoch_parameters(self) -> tuple[float, float]:
         """Return validated fixed-length epoch settings for resting-state preprocessing."""
@@ -1676,12 +2430,18 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str] = None,
         task: Optional[str] = None,
         task_is_rest: Optional[bool] = None,
+        n_jobs: int = 1,
     ) -> str:
         """Generate Python config file content for mne_bids_pipeline.
 
         Args:
             steps: MNE-BIDS pipeline steps to run
             subjects: List of subject IDs to process (without 'sub-' prefix)
+            task: Task name to constrain MNE-BIDS-Pipeline subject selection
+            task_is_rest: Override config to enable/disable resting-state preprocessing
+            n_jobs: Worker count. The default mirrors upstream's own default rather than
+                inventing one, so the generated config says what MNE-BIDS-Pipeline would
+                have assumed anyway. Production always passes the resolved value.
         """
         resolved_task_is_rest = self._resolve_task_is_rest(task_is_rest)
         resolved_task = task
@@ -1694,6 +2454,16 @@ class PreprocessingPipeline(PipelineBase):
             f'deriv_root = "{self.deriv_root / "preprocessed" / "eeg"}"',
             "",
         ]
+
+        # Execution. MNE-BIDS-Pipeline sorts its settings into ones that shape the
+        # outputs and ones that only shape how the work is executed, and n_jobs is in the
+        # second group: it fans the loop over subjects and runs out across workers, and
+        # hands autoreject its worker count, while pinning each worker's BLAS to one
+        # thread (inner_max_num_threads=1) and hardcoding n_jobs=1 inside filtering, ICA
+        # artifact detection and ICA application so nothing nests. Every step still reads
+        # the same inputs and computes the same function of them.
+        lines.append(f"n_jobs = {int(n_jobs)}")
+        lines.append("")
 
         # Subject filter (critical to avoid processing all subjects)
         if subjects:
@@ -1717,7 +2487,10 @@ class PreprocessingPipeline(PipelineBase):
         if eeg_reference:
             lines.append(f'eeg_reference = "{eeg_reference}"')
 
-        # EOG channels
+        # EOG channels. Emitted from the configured names only: a channel already typed
+        # EOG in channels.tsv is found by upstream on its own, and restating it here
+        # would be redundant. The guard below is what makes the "neither" case loud.
+        self._validate_eog_detection_is_reachable()
         eog_channels = self.config.get("eeg.eog_channels")
         if eog_channels:
             if isinstance(eog_channels, list):
@@ -1936,18 +2709,46 @@ class PreprocessingPipeline(PipelineBase):
             )
         else:
             preferred_prefixes = ()
+        # Markers this project records alongside the task, which are never conditions.
+        # Unlike the bad/edge rule below, these are ours to decide.
         excluded_prefixes = (
             "Volume",
             "Pulse",
             "SyncStatus",
             "New Segment",
-            "Bad",
-            "EDGE",
             "Response",
         )
+        becomes_an_event = _mne_annotation_event_pattern()
+
+        def _is_excluded(trial_type: str) -> bool:
+            """Whether a trial type is something MNE will not epoch, or is not a condition.
+
+            The bad/edge half of this is taken from MNE rather than restated, because the
+            two have to agree exactly. ``events_from_annotations`` drops those annotations
+            before an event exists, so a condition list that admits one selects rows in the
+            events table that have no epoch behind them, and the trial table silently stops
+            being 1:1 with the epochs.
+
+            That is what happened with ``BAD_restart/Trig_therm/T  1``: a hand-maintained
+            list tested ``startswith("Bad")`` against a string spelled ``BAD_``, admitted it
+            as its own condition, and the events table came out two rows longer than the
+            epochs. Restating MNE's rule is how the two lists drift; reading it is how they
+            cannot.
+
+            Note the rule is deliberately leading-anchored, matching MNE: a bad tag that is
+            not first — ``Trig_therm/BAD_restart/T  1`` — *does* become an event upstream,
+            so excluding it here would recreate the same mismatch in the other direction.
+            """
+            if not becomes_an_event.match(trial_type):
+                return True
+            return any(
+                trial_type.lower().startswith(prefix.lower()) for prefix in excluded_prefixes
+            )
 
         preferred = sorted(
-            t for t in conditions if any(t.startswith(p) for p in preferred_prefixes)
+            t
+            for t in conditions
+            if any(t.startswith(p) for p in preferred_prefixes) and not _is_excluded(t)
         )
         if preferred:
             self.logger.info(
@@ -1957,9 +2758,7 @@ class PreprocessingPipeline(PipelineBase):
             )
             return preferred
 
-        filtered = sorted(
-            t for t in conditions if not any(t.startswith(p) for p in excluded_prefixes)
-        )
+        filtered = sorted(t for t in conditions if not _is_excluded(t))
         if not filtered:
             return None
 

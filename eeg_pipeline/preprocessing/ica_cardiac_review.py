@@ -9,6 +9,8 @@ import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
+
 PULSE_EVENT_ID = 999
 
 
@@ -43,6 +45,15 @@ class CardiacReviewSettings:
     measurement_window: tuple[float, float] = (0.0, 0.4)
     ctps_threshold: str | float = "auto"
     representative_window_seconds: float = 10.0
+    #: Write this review's CTPS detections into the component table as exclusions.
+    #:
+    #: Off by default because it changes what the cleaned data contain, not just what the
+    #: report says. On, it replaces the fifty seconds of one run that MNE-BIDS-Pipeline's
+    #: own ECG step samples with the full beat train of every run. The manual review still
+    #: runs afterwards and can undo any of it.
+    promote_exclusions: bool = False
+    #: Fraction of usable runs that must flag a component before it is promoted.
+    promotion_minimum_run_fraction: float = 0.5
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> CardiacReviewSettings:
@@ -56,6 +67,8 @@ class CardiacReviewSettings:
             "measurement_window",
             "ctps_threshold",
             "representative_window_seconds",
+            "promote_exclusions",
+            "promotion_minimum_run_fraction",
         }
         unsupported = sorted(set(values) - supported)
         if unsupported:
@@ -82,6 +95,13 @@ class CardiacReviewSettings:
                     cls.representative_window_seconds,
                 )
             ),
+            promote_exclusions=bool(values.get("promote_exclusions", cls.promote_exclusions)),
+            promotion_minimum_run_fraction=float(
+                values.get(
+                    "promotion_minimum_run_fraction",
+                    cls.promotion_minimum_run_fraction,
+                )
+            ),
         )
         if not settings.ecg_channel:
             raise ValueError("ica.cardiac_review.ecg_channel must not be empty.")
@@ -94,15 +114,36 @@ class CardiacReviewSettings:
                 raise ValueError(f"ica.cardiac_review.{name} must lie inside epoch_window.")
         if settings.representative_window_seconds <= 0:
             raise ValueError("ica.cardiac_review.representative_window_seconds must be positive.")
+        if not 0.0 < settings.promotion_minimum_run_fraction <= 1.0:
+            raise ValueError(
+                "ica.cardiac_review.promotion_minimum_run_fraction must lie in (0, 1]."
+            )
         return settings
+
+
+#: Beat train taken from the BrainVision Analyzer markers preserved in the recording.
+ANALYZER_MARKER_SOURCE = "analyzer-markers"
+#: Beat train detected from the ECG channel, independently of any annotation.
+ECG_CHANNEL_SOURCE = "ecg-channel"
+
+#: Beats below which a marker train is not a train, and the channel is tried instead.
+#:
+#: The same floor the channel detector is held to. Two markers give one interval, which is
+#: not a rate, and a run whose export carries a handful of stray markers is better served by
+#: the channel than by them.
+MINIMUM_BEATS = 3
 
 
 @dataclass(frozen=True)
 class EcgDetection:
-    """R peaks detected directly from an ECG channel."""
+    """The run's beat train, and which of the two sources it came from."""
 
     events: np.ndarray
     average_pulse_bpm: float
+    #: :data:`ANALYZER_MARKER_SOURCE` or :data:`ECG_CHANNEL_SOURCE`. Carried so every panel
+    #: can say where its beats came from: the two sources fail on different runs, so a rate
+    #: is not interpretable without knowing which one produced it.
+    source: str = ECG_CHANNEL_SOURCE
 
 
 @dataclass(frozen=True)
@@ -141,6 +182,19 @@ class ComponentCardiacReview:
     run_ecg_z: np.ndarray
 
 
+class UnusableEcg(ValueError):
+    """One run's ECG yielded no usable beat train.
+
+    A distinct type because the caller's response is different in kind. A missing channel
+    or a mistyped setting is a fault to fix; an ECG the detector cannot resolve is a
+    property of the recording, and the reviewer needs it recorded and reported rather than
+    thrown. Catching plain :class:`ValueError` around the detector to keep a study running
+    would swallow every genuine bug inside it as well, which is why this is narrower.
+
+    Kept a :class:`ValueError` subclass so existing callers that catch that still do.
+    """
+
+
 def _validate_ecg_channel(raw: mne.io.BaseRaw, channel: str) -> None:
     if channel not in raw.ch_names:
         raise ValueError(f"ECG review requires channel {channel!r}.")
@@ -151,12 +205,80 @@ def _validate_ecg_channel(raw: mne.io.BaseRaw, channel: str) -> None:
         )
 
 
+def _marker_beats(raw: mne.io.BaseRaw) -> np.ndarray:
+    """The Analyzer R-marker train preserved in the recording, if it carries one.
+
+    Returns an empty array where the export has no markers, which on this dataset is a third
+    of runs: Analyzer's R detection failed, so it could not compute the R-to-artifact delay,
+    accepted its 0.21 s default and marked nothing. Absence here is an ordinary outcome.
+    """
+    try:
+        events, _ = mne.events_from_annotations(
+            raw,
+            event_id={PULSE_MARKER_DESCRIPTION: PULSE_EVENT_ID},
+            use_rounding=True,
+            verbose="ERROR",
+        )
+    except ValueError as exc:
+        # MNE's way of saying the description is absent. Any other ValueError is a fault.
+        if "Could not find any of the events" in str(exc):
+            return np.empty((0, 3), dtype=int)
+        raise
+    return np.asarray(events, dtype=int)
+
+
+def _rate_from_beats(events: np.ndarray, sfreq: float) -> float:
+    """Beats per minute from the median interval of a beat train.
+
+    A median rather than the count over the recording length, because a train with gaps --
+    which is what a partially failed detection produces -- reports a rate far below the
+    heart's when divided by the whole duration. The median interval describes the beats that
+    were found rather than the ones that were missed.
+    """
+    if events.shape[0] < 2:
+        return float("nan")
+    intervals = np.diff(np.sort(events[:, 0].astype(float))) / float(sfreq)
+    intervals = intervals[intervals > 0]
+    if intervals.size == 0:
+        return float("nan")
+    return float(60.0 / np.median(intervals))
+
+
 def detect_ecg_events(
     raw: mne.io.BaseRaw,
     settings: CardiacReviewSettings,
 ) -> EcgDetection:
-    """Detect R peaks from the ECG signal independently of event annotations."""
+    """The run's beat train, preferring Analyzer's markers over channel detection.
+
+    Analyzer's marker train is preferred where the export carries one, because it is the
+    detection that actually drove the upstream pulse-artifact correction and it was
+    validated against the recording. ``find_ecg_events`` on the ECG channel is used only
+    where no marker train survives.
+
+    The preference is not circular. This review compares the EEG either side of *MNE's* ICA
+    exclusions; Analyzer's correction is already baked into ``raw`` and is not what is being
+    judged, so taking the beat reference from Analyzer's markers does not let the correction
+    grade itself.
+
+    The order matters on real data. On this dataset the channel detector disagrees sharply
+    with the marker train on the same runs -- reporting 8 bpm and 2 bpm where the markers
+    report 61 and 60 -- and the two sources fail on *different* runs, so neither alone
+    characterises a subject. :func:`pulse_marker_events` makes the same choice for the
+    cardiac attenuation QC.
+    """
     _validate_ecg_channel(raw, settings.ecg_channel)
+    sfreq = float(raw.info["sfreq"])
+
+    markers = _marker_beats(raw)
+    if markers.shape[0] >= MINIMUM_BEATS:
+        rate = _rate_from_beats(markers, sfreq)
+        if np.isfinite(rate) and rate > 0:
+            return EcgDetection(
+                events=markers,
+                average_pulse_bpm=rate,
+                source=ANALYZER_MARKER_SOURCE,
+            )
+
     events, _, average_pulse_bpm, _ = mne.preprocessing.find_ecg_events(
         raw,
         ch_name=settings.ecg_channel,
@@ -164,15 +286,17 @@ def detect_ecg_events(
         return_ecg=True,
         verbose="ERROR",
     )
-    if len(events) < 3:
-        raise ValueError(
-            f"Direct ECG detection found only {len(events)} R peaks; at least 3 are required."
+    if len(events) < MINIMUM_BEATS:
+        raise UnusableEcg(
+            f"No Analyzer R markers, and direct ECG detection found only {len(events)} "
+            f"R peaks; at least {MINIMUM_BEATS} are required."
         )
     if not np.isfinite(average_pulse_bpm) or average_pulse_bpm <= 0:
-        raise ValueError(f"Invalid average pulse estimate: {average_pulse_bpm!r}.")
+        raise UnusableEcg(f"Invalid average pulse estimate: {average_pulse_bpm!r}.")
     return EcgDetection(
         events=np.asarray(events, dtype=int),
         average_pulse_bpm=float(average_pulse_bpm),
+        source=ECG_CHANNEL_SOURCE,
     )
 
 
@@ -250,6 +374,45 @@ def component_cardiac_evidence_table(
     )
 
 
+def ctps_promotions(
+    review: ComponentCardiacReview,
+    *,
+    minimum_run_fraction: float,
+) -> dict[int, str]:
+    """Return the components CTPS flags in enough runs, with the evidence for each.
+
+    MNE-BIDS-Pipeline's own ECG detection builds its heartbeat epochs from the first run
+    only, cropped to ``5 minutes / n_runs`` around that run's midpoint — roughly fifty
+    seconds of one run scoring a decomposition fitted across all of them. This review
+    already runs the same CTPS test per run over every beat in every recording, so these
+    detections are what that step was meant to produce.
+
+    A component has to clear ``minimum_run_fraction`` of the runs that yielded a usable
+    beat train. A single-run flag is not enough on its own: BCG topography moves with head
+    position, so one run disagreeing with five is as likely to be a threshold crossing as
+    a cardiac component. The description names the runs so the reviewer can check the call
+    rather than take it.
+    """
+    if not 0.0 < minimum_run_fraction <= 1.0:
+        raise ValueError("minimum_run_fraction must lie in (0, 1].")
+    run_count, component_count = review.ctps_flags.shape
+    if run_count == 0:
+        return {}
+
+    required_runs = int(np.ceil(minimum_run_fraction * run_count))
+    promotions: dict[int, str] = {}
+    for component in range(component_count):
+        flagged = np.flatnonzero(review.ctps_flags[:, component])
+        if len(flagged) < required_runs:
+            continue
+        flagged_ids = ", ".join(review.run_ids[index] for index in flagged)
+        promotions[int(component)] = (
+            f"Auto-detected ECG artifact (full-recording CTPS in {len(flagged)}/{run_count} "
+            f"runs, threshold {required_runs}: {flagged_ids})"
+        )
+    return promotions
+
+
 def component_run_cardiac_evidence_table(
     review: ComponentCardiacReview,
 ) -> pd.DataFrame:
@@ -299,8 +462,23 @@ def _cardiac_locked_gfp(
     raw: mne.io.BaseRaw,
     events: np.ndarray,
     *,
+    ica: mne.preprocessing.ICA,
     settings: CardiacReviewSettings,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """R-locked evoked and GFP over the channels the decomposition actually spans.
+
+    ``picks="eeg"`` keeps bad channels, which ICA was not fitted on and ``ICA.apply``
+    restores untouched. Measuring the before/after comparison over them does two wrong
+    things at once: the evoked array no longer matches ``ica.info``, which is a hard error
+    the moment a topography is drawn from it, and every unmodifiable channel folded into
+    the GFP shrinks the apparent difference between before and after. Both are avoided by
+    measuring exactly the channel set ICA operated on.
+
+    The average reference is still computed first, on the full montage, because that is
+    the reference the decomposition was fitted under. MNE leaves bad channels out of the
+    average itself, so picking afterwards changes what is measured, not what it is
+    measured against.
+    """
     referenced = raw.copy().set_eeg_reference("average", projection=False, verbose=False)
     epochs = mne.Epochs(
         referenced,
@@ -309,13 +487,20 @@ def _cardiac_locked_gfp(
         tmin=settings.epoch_window[0],
         tmax=settings.epoch_window[1],
         baseline=settings.baseline,
-        picks="eeg",
+        picks=list(ica.ch_names),
         preload=True,
         reject_by_annotation=True,
         verbose="ERROR",
     )
     if len(epochs) == 0:
         raise ValueError("No valid directly detected R-locked EEG epochs remain.")
+    if list(epochs.ch_names) != list(ica.ch_names):
+        # Epochs orders picks by the info, not by the list given, so an ICA whose channel
+        # order differs from the recording's would silently mis-map every topography.
+        raise ValueError(
+            "R-locked epoch channels do not match the ICA channel order: "
+            f"{epochs.ch_names} vs {list(ica.ch_names)}."
+        )
     evoked_uv = epochs.average().data * 1e6
     return (
         epochs.times.copy(),
@@ -365,6 +550,7 @@ def _build_run_cardiac_review(
     before_times, before_gfp, before_evoked = _cardiac_locked_gfp(
         raw,
         detection.events,
+        ica=ica,
         settings=settings,
     )
     after = raw.copy()
@@ -375,6 +561,7 @@ def _build_run_cardiac_review(
     after_times, after_gfp, after_evoked = _cardiac_locked_gfp(
         after,
         detection.events,
+        ica=ica,
         settings=settings,
     )
     if not np.array_equal(before_times, after_times):
@@ -502,8 +689,10 @@ __all__ = [
     "ComponentCardiacReview",
     "EcgDetection",
     "RunCardiacReview",
+    "UnusableEcg",
     "component_cardiac_evidence_table",
     "component_run_cardiac_evidence_table",
+    "ctps_promotions",
     "detect_ecg_events",
     "standardize_source_epoch_runs",
 ]

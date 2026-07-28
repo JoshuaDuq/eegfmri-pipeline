@@ -17,11 +17,17 @@ from pathlib import Path
 from typing import Sequence
 
 import mne
+import numpy as np
 
 from eeg_pipeline.preprocessing.report.analyzer_qc import (
+    CardiacResidual,
+    MarkerAgreement,
     RrIntervals,
+    add_marker_agreement_section,
     add_rr_interval_section,
+    compute_cardiac_residual,
     compute_rr_intervals,
+    compute_run_marker_agreement,
 )
 from eeg_pipeline.preprocessing.report.continuity import (
     RunContinuity,
@@ -32,10 +38,15 @@ from eeg_pipeline.preprocessing.report.scanner import (
     VOLUME_MARKER_DESCRIPTION,
     CombResidual,
     VolumeLockedAverage,
+    VolumeTiming,
     add_scanner_residual_section,
     compute_comb_residual,
     compute_volume_locked_average,
     measure_volume_timing,
+)
+from eeg_pipeline.preprocessing.report.preservation import (
+    PosteriorAlpha,
+    compute_posterior_alpha,
 )
 from eeg_pipeline.preprocessing.report.settings import ReportSettings
 from eeg_pipeline.preprocessing.report.spectra import (
@@ -58,13 +69,69 @@ class RunEvidence:
     spectra: list[RunSpectra] = field(default_factory=list)
     combs: list[CombResidual] = field(default_factory=list)
     locked_averages: list[VolumeLockedAverage] = field(default_factory=list)
+    #: Volume timing per run, keyed by recording. Kept per run rather than pooled because
+    #: the repetition time sets the frequency of every comb harmonic, and a cohort that
+    #: mixed repetition times would otherwise pool different harmonics into one bin.
+    timings: dict[str, VolumeTiming] = field(default_factory=dict)
     continuity: list[RunContinuity] = field(default_factory=list)
     rr_intervals: list[RrIntervals] = field(default_factory=list)
+    #: Runs whose R-marker train was too short to build an interval series from.
+    #:
+    #: Recorded rather than discarded so the beat-detection panel can name them. A run
+    #: that silently drops out of that figure is indistinguishable from one that was
+    #: never acquired, and the two have opposite implications for the pulse correction.
+    rr_missing: list[str] = field(default_factory=list)
+    #: Analyzer's marker train measured against R peaks detected from the ECG signal.
+    #:
+    #: Empty when no run carried an ECG channel, which is the case for a montage that
+    #: recorded none: there is then one beat detector rather than two, and nothing to
+    #: reconcile.
+    marker_agreements: list[MarkerAgreement] = field(default_factory=list)
+    #: Beat-locked EEG residual per run, measured before the ICA exclusions.
+    #:
+    #: What the *upstream* pulse correction left behind. A run whose Analyzer R detection
+    #: failed carries no marker train, so no subtraction was possible and the
+    #: ballistocardiogram is still there; this is the measurement that says how much.
+    cardiac_residuals: list[CardiacResidual] = field(default_factory=list)
     gradient_fundamentals_hz: list[float] = field(default_factory=list)
+    #: Where each EEG sensor sat, in head coordinates, taken from the recording itself.
+    #:
+    #: Captured here because this is the one place the montage is already in memory. A
+    #: cohort topography needs the positions the electrodes actually had; recovering them
+    #: later from a montage name would place them plausibly and, wherever the name did not
+    #: match the cap, silently wrongly -- which is the one failure such a figure must not
+    #: have.
+    channel_positions: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    #: Channels marked bad, per run, so a cohort can take the union the sync policy implies.
+    bad_channels_by_run: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Acquisition dates seen across the runs, which index cap ageing and electrode wear.
+    #: Deliberately not the processing date, which indexes pipeline change instead.
+    measurement_dates: list[str] = field(default_factory=list)
+    #: Posterior alpha measured either side of the exclusions, per run.
+    #:
+    #: Measured here, on the continuous run, because this is the only point in the pipeline
+    #: where the same data exists both before and after the exclusions. The preservation
+    #: section's own alpha is measured on the cleaned epochs and has no counterpart: there
+    #: is no pre-ICA epochs file, so "did cleaning cost this participant their rhythm" --
+    #: the question the cohort's paired panel exists to answer -- is unanswerable from it.
+    #:
+    #: One method applied to both stages rather than two methods compared, so the pairing
+    #: is a difference between stages instead of a difference between estimators.
+    posterior_alpha_before: list[PosteriorAlpha] = field(default_factory=list)
+    posterior_alpha_after: list[PosteriorAlpha] = field(default_factory=list)
 
     @property
     def has_scanner_evidence(self) -> bool:
         return bool(self.combs or self.locked_averages)
+
+    @property
+    def acquisition_date(self) -> str | None:
+        """The earliest date any run was recorded on, or ``None`` for an anonymised set.
+
+        The earliest rather than the latest, because a session split across midnight is one
+        session and the date a study means by it is the day it started.
+        """
+        return min(self.measurement_dates) if self.measurement_dates else None
 
     @property
     def gradient_marks_hz(self) -> tuple[float, ...]:
@@ -83,12 +150,18 @@ def _measure_gradient(
     settings: ReportSettings,
     volume_description: str,
     evidence: RunEvidence,
+    timing: VolumeTiming | None,
 ) -> None:
-    """Add whichever gradient measurements this run's volume markers support."""
-    timing = measure_volume_timing(raw, description=volume_description)
+    """Add whichever gradient measurements this run's volume markers support.
+
+    ``timing`` is measured by the caller and passed in, because the aperiodic fit in the
+    spectra needs it too and measuring the marker train twice would be two chances to
+    disagree about where the comb is.
+    """
     if timing is None:
         return
     evidence.gradient_fundamentals_hz.append(timing.fundamental_hz)
+    evidence.timings[recording_id] = timing
 
     comb = compute_comb_residual(
         raw,
@@ -97,6 +170,7 @@ def _measure_gradient(
         recording_id=recording_id,
         band_hz=settings.comb_frequency_range_hz,
         welch_seconds=settings.comb_welch_seconds,
+        line_frequency=settings.spectra_line_frequency,
     )
     if comb is not None:
         evidence.combs.append(comb)
@@ -129,6 +203,12 @@ def measure_runs(
         raw = mne.io.read_raw_fif(path, preload=True, verbose="ERROR")
         cleaned = ica.apply(raw.copy(), exclude=ica.exclude, verbose="ERROR")
 
+        # Measured before the spectra, because the aperiodic fit inside them has to know
+        # where the comb is: the harmonics run through the fit range, and a line fitted
+        # across them is fitted partly to the scanner. Costs nothing extra -- the timing is
+        # measured from the marker train, which the gradient section needs anyway.
+        timing = measure_volume_timing(raw, description=volume_description)
+
         evidence.spectra.append(
             compute_run_spectra(
                 raw,
@@ -136,6 +216,7 @@ def measure_runs(
                 recording_id=recording_id,
                 fmax=settings.spectra_fmax,
                 line_frequency=settings.spectra_line_frequency,
+                gradient_fundamental_hz=None if timing is None else timing.fundamental_hz,
             )
         )
         evidence.continuity.append(
@@ -149,6 +230,20 @@ def measure_runs(
         intervals = compute_rr_intervals(raw, recording_id=recording_id)
         if intervals is not None:
             evidence.rr_intervals.append(intervals)
+        else:
+            evidence.rr_missing.append(recording_id)
+
+        agreement = compute_run_marker_agreement(raw, recording_id=recording_id)
+        if agreement is not None:
+            evidence.marker_agreements.append(agreement)
+
+        # Measured on ``raw`` rather than ``cleaned``: the question is what the upstream
+        # pulse correction left, and measuring after the exclusions would credit Analyzer
+        # for whatever MNE's decomposition removed. Costs one epoching pass over a
+        # recording already in memory.
+        evidence.cardiac_residuals.append(
+            compute_cardiac_residual(raw, recording_id=recording_id)
+        )
 
         _measure_gradient(
             raw,
@@ -157,10 +252,53 @@ def measure_runs(
             settings=settings,
             volume_description=volume_description,
             evidence=evidence,
+            timing=timing,
         )
+        # Both stages, on the same run, by the same estimator: the only paired measurement
+        # of the rhythm the pipeline can make. A stage that measured nothing contributes
+        # nothing rather than a zero, and the pair is only used where both sides exist.
+        before_alpha = compute_posterior_alpha(raw, band_hz=settings.alpha_band_hz)
+        after_alpha = compute_posterior_alpha(cleaned, band_hz=settings.alpha_band_hz)
+        if before_alpha is not None and after_alpha is not None:
+            evidence.posterior_alpha_before.append(before_alpha)
+            evidence.posterior_alpha_after.append(after_alpha)
+
+        _record_montage(raw, recording_id=recording_id, evidence=evidence)
         # Release both copies before the next run is read.
         del raw, cleaned
     return evidence
+
+
+def _record_montage(
+    raw: mne.io.BaseRaw,
+    *,
+    recording_id: str,
+    evidence: RunEvidence,
+) -> None:
+    """Note where the sensors were, which were bad, and when the run was recorded.
+
+    None of this is a measurement, and all of it is needed by a cohort. It is taken here
+    because the recording is already open: reading a gigabyte of filtered raw a second time
+    to recover a sensor position would cost more than every measurement above put together.
+
+    Positions that are absent or non-finite are skipped rather than stored as the origin.
+    A sensor recorded at (0, 0, 0) is not at the centre of the head; it is a sensor whose
+    position was never digitised, and a topography that believes otherwise draws every one
+    of them on top of each other.
+    """
+    for channel in mne.pick_types(raw.info, eeg=True, exclude=()):
+        entry = raw.info["chs"][channel]
+        position = tuple(float(value) for value in entry["loc"][:3])
+        if not all(map(np.isfinite, position)) or not any(position):
+            continue
+        evidence.channel_positions.setdefault(str(entry["ch_name"]), position)
+
+    evidence.bad_channels_by_run[recording_id] = tuple(
+        str(name) for name in raw.info.get("bads", ())
+    )
+    measured = raw.info.get("meas_date")
+    if measured is not None:
+        evidence.measurement_dates.append(measured.date().isoformat())
 
 
 def add_run_evidence_sections(
@@ -188,7 +326,16 @@ def add_run_evidence_sections(
     if evidence.continuity:
         add_continuity_section(report=report, runs=evidence.continuity)
     if evidence.rr_intervals:
-        add_rr_interval_section(report=report, series=evidence.rr_intervals)
+        add_rr_interval_section(
+            report=report,
+            series=evidence.rr_intervals,
+            missing=evidence.rr_missing,
+        )
+    if evidence.marker_agreements:
+        add_marker_agreement_section(
+            report=report,
+            agreements=evidence.marker_agreements,
+        )
 
 
 def add_run_evidence_review(

@@ -17,6 +17,63 @@ from . import io
 # Bad Channel Detection
 ###################################################################
 
+#: ``description`` this step writes for a channel PyPREP flagged in this run.
+PYPREP_BAD_DESCRIPTION = "Bad channel detected by pyprep"
+#: ``description`` written for a channel carried in from ``custom_bad_dict``.
+CUSTOM_BAD_DESCRIPTION = "Bad channel from custom bad channel list"
+#: ``description`` written by :func:`synchronize_bad_channels_across_runs`.
+SYNCHRONIZED_BAD_DESCRIPTION = "Bad channel from subject-union synchronization"
+
+#: Descriptions this pipeline writes itself, and therefore re-derives on every run.
+#:
+#: Anything else in ``description`` came from outside the pipeline — a hand-marked
+#: channel, an upstream conversion step — and is carried forward untouched when
+#: ``consider_previous_bads`` is set. The distinction is what keeps re-running the step
+#: idempotent: without it, a channel PyPREP flagged once is fed back in as an input,
+#: excluded from PyPREP's own analysis (``NoisyChannels`` drops ``info['bads']`` before it
+#: measures anything), and so can never be un-flagged. The bad-channel set would then
+#: depend on how many times the step had been run rather than on the recording.
+PIPELINE_BAD_DESCRIPTIONS = frozenset(
+    {
+        PYPREP_BAD_DESCRIPTION,
+        CUSTOM_BAD_DESCRIPTION,
+        SYNCHRONIZED_BAD_DESCRIPTION,
+    }
+)
+
+
+def _is_eeg_row(chan_file):
+    """Return a mask over ``chan_file`` rows typed as EEG."""
+    return chan_file["type"].astype(str).str.lower() == "eeg"
+
+
+def _pipeline_written_bad_mask(chan_file):
+    """Return a mask over EEG rows this pipeline marked bad on an earlier run."""
+    if "description" not in chan_file.columns:
+        # No description column means nothing can be attributed, so every previous bad is
+        # treated as curated. That is the conservative direction: it keeps a hand-marked
+        # channel rather than silently re-deriving one the pipeline cannot account for.
+        return pd.Series(False, index=chan_file.index)
+    descriptions = chan_file["description"].astype(str).str.strip()
+    return (
+        _is_eeg_row(chan_file)
+        & (chan_file["status"] == "bad")
+        & descriptions.isin(PIPELINE_BAD_DESCRIPTIONS)
+    )
+
+
+def _split_previous_bads(chan_file):
+    """Split previously marked EEG bads into curated and pipeline-derived names.
+
+    Curated bads are inputs to this step; pipeline-derived bads are outputs of a previous
+    invocation of it and must be re-measured rather than assumed.
+    """
+    is_bad_eeg = _is_eeg_row(chan_file) & (chan_file["status"] == "bad")
+    pipeline_written = _pipeline_written_bad_mask(chan_file)
+    curated = sorted(chan_file.loc[is_bad_eeg & ~pipeline_written, "name"].astype(str))
+    derived = sorted(chan_file.loc[pipeline_written, "name"].astype(str))
+    return curated, derived
+
 
 def _majority_bad_channels(repeated_bads):
     """Return channels marked bad in a strict majority of independent PyPREP runs."""
@@ -142,15 +199,23 @@ def run_bads_detection_single_file(
             if get_entities_from_fname(file).get("session") is not None:
                 bads_frame.loc[file, "session"] = get_entities_from_fname(file)["session"]
 
-            previous_bads = chan_file[
-                (chan_file["status"] == "bad") & (chan_file["type"].isin(["eeg", "EEG"]))
-            ]["name"].tolist()
+            curated_previous_bads, derived_previous_bads = _split_previous_bads(chan_file)
+            previous_bads = sorted(set(curated_previous_bads + derived_previous_bads))
 
             if previous_bads:
                 if not consider_previous_bads:
-                    msg = f"Found {len(previous_bads)} bad channels already marked. THOSE WILL BE IGNORED AND CLEARED BECAUSE consider_previous_bads=False."
+                    msg = (
+                        f"Found {len(previous_bads)} bad channels already marked. THOSE WILL BE "
+                        "IGNORED AND CLEARED BECAUSE consider_previous_bads=False."
+                    )
                 else:
-                    msg = f"Found {len(previous_bads)} bad channels already marked. THOSE WILL BE CONSIDERED BECAUSE consider_previous_bads=True."
+                    msg = (
+                        f"Found {len(previous_bads)} bad channels already marked. "
+                        f"{len(curated_previous_bads)} were marked outside this step and will be "
+                        f"CONSIDERED because consider_previous_bads=True: {curated_previous_bads}. "
+                        f"{len(derived_previous_bads)} were written by this step on an earlier run "
+                        f"and will be RE-MEASURED rather than assumed: {derived_previous_bads}."
+                    )
                 logger.info(
                     **gen_log_kwargs(
                         message=msg,
@@ -201,14 +266,33 @@ def run_bads_detection_single_file(
             if raw.get_montage() is None and raw.info.get("dig") is None:
                 raw.set_montage(montage)
 
+            # A low-pass here is off by default, and should stay off unless something in
+            # the recording demands it. PyPREP's high-frequency-noise criterion is the
+            # ratio of a channel's >50 Hz amplitude to its <50 Hz amplitude, so the band it
+            # measures is exactly the band a low-pass removes. On 1000 Hz data, cutting at
+            # 100 Hz discards 100-500 Hz — where contact and electrode noise live — and
+            # leaves the criterion reading a narrow 50-100 Hz sliver with the line notch
+            # cut out of it. The detector still runs and still reports z-scores; it is just
+            # far less sensitive than the numbers suggest.
+            #
+            # The notch is a different case and stays on: line noise is a genuine confound
+            # for the deviation criterion, and MATLAB PREP removes it before detection too.
             if l_pass:
                 raw.filter(None, l_pass, picks="eeg", verbose=False)
 
             if notch:
                 raw.notch_filter(notch, picks="eeg", verbose=False)
 
-            if consider_previous_bads:
-                raw.info["bads"] = list(set(raw.info["bads"] + previous_bads))
+            # ``read_raw_bids`` seeds ``info['bads']`` from every ``status == "bad"`` row,
+            # including the ones this step wrote last time. ``NoisyChannels`` drops
+            # ``info['bads']`` before it measures anything, so leaving those in place would
+            # exempt them from detection permanently. Only curated marks are kept.
+            raw.info["bads"] = sorted(
+                (set(raw.info["bads"]) - set(derived_previous_bads))
+                | (set(curated_previous_bads) if consider_previous_bads else set())
+            )
+            if not consider_previous_bads:
+                raw.info["bads"] = sorted(set(raw.info["bads"]) - set(previous_bads))
 
             if delete_breaks:
                 annot_breaks, removed_dur = _mark_breaks_bad(
@@ -241,6 +325,22 @@ def run_bads_detection_single_file(
             repeat_count = int(repeats)
             if repeat_count < 1:
                 raise ValueError(f"pyprep repeats must be >= 1, got {repeats!r}.")
+            if repeat_count > 1 and not ransac:
+                # Only RANSAC consumes the random state; the other detectors are
+                # deterministic, so repeating them votes on identical results at N times
+                # the cost.
+                logger.info(
+                    **gen_log_kwargs(
+                        message=(
+                            f"pyprep repeats={repeat_count} has no effect without RANSAC; "
+                            "running the deterministic detectors once."
+                        ),
+                        subject=get_entities_from_fname(file)["subject"],
+                        session=get_entities_from_fname(file)["session"],
+                        emoji="⚠️",
+                    )
+                )
+                repeat_count = 1
 
             initial_bads = sorted(set(raw.info["bads"]))
             repeated_bads = []
@@ -251,7 +351,11 @@ def run_bads_detection_single_file(
                     None if random_state is None else int(random_state) + repeat_index
                 )
                 nc = pyprep.NoisyChannels(raw=raw, random_state=repeat_random_state)
+                # Flat and NaN channels first: they are not merely noisy, and leaving them
+                # in place makes every correlation against them meaningless.
+                nc.find_bad_by_nan_flat()
                 nc.find_bad_by_deviation()
+                nc.find_bad_by_hfnoise()
                 nc.find_bad_by_correlation()
                 if ransac:
                     _find_bad_channels_by_ransac(nc)
@@ -288,28 +392,48 @@ def run_bads_detection_single_file(
             else:
                 removed_custom_bads = []
 
-            bad_chans = ", ".join(sorted(all_bads))
-            bad_chans = bad_chans.replace(" ", "").split(",")
+            bad_chans = sorted(all_bads)
 
             if "description" in chan_file.columns:
                 chan_file["description"] = chan_file["description"].astype(str)
 
+            # Rows this step wrote before are cleared whatever ``consider_previous_bads``
+            # says, so that a channel PyPREP no longer flags actually loses its mark. The
+            # flag is a measurement of this recording, and re-running the measurement has
+            # to be able to move it in both directions.
+            pipeline_written = _pipeline_written_bad_mask(chan_file)
+            chan_file.loc[pipeline_written, "status"] = "good"
+            if "description" in chan_file.columns:
+                chan_file.loc[pipeline_written, "description"] = ""
+
             if not consider_previous_bads:
-                chan_file.loc[chan_file["type"].isin(["EEG", "eeg"]), "status"] = "good"
-                chan_file.loc[chan_file["type"].isin(["EEG", "eeg"]), "description"] = ""
+                chan_file.loc[_is_eeg_row(chan_file), "status"] = "good"
+                if "description" in chan_file.columns:
+                    chan_file.loc[_is_eeg_row(chan_file), "description"] = ""
 
             task = get_entities_from_fname(file)["task"]
             sub = get_entities_from_fname(file)["subject"]
 
+            custom_bads_for_run = set()
+            if custom_bad_dict is not None:
+                custom_bads_for_run = set(custom_bad_dict.get(task, {}).get(sub, []))
+            # Only meaningful when the curated marks survived the clearing above.
+            curated_bad_set = set(curated_previous_bads) if consider_previous_bads else set()
+
             for ch in bad_chans:
-                chan_file.loc[chan_file["name"] == ch, "status"] = "bad"
-                chan_file.loc[chan_file["name"] == ch, "description"] = (
-                    "Bad channel detected by pyprep"
-                )
-                if custom_bad_dict is not None and ch in custom_bad_dict.get(task, {}).get(sub, []):
-                    chan_file.loc[chan_file["name"] == ch, "description"] = (
-                        "Bad channel from custom bad channel list"
-                    )
+                row = chan_file["name"] == ch
+                chan_file.loc[row, "status"] = "bad"
+                if "description" not in chan_file.columns:
+                    continue
+                if ch in custom_bads_for_run:
+                    chan_file.loc[row, "description"] = CUSTOM_BAD_DESCRIPTION
+                elif ch in curated_bad_set:
+                    # Leave the curator's own wording in place. Overwriting it would
+                    # re-attribute the mark to this step, and the next run would then
+                    # re-derive — and potentially drop — a channel a human had set.
+                    continue
+                else:
+                    chan_file.loc[row, "description"] = PYPREP_BAD_DESCRIPTION
 
             if overwrite_chans_tsv:
                 io.write_channels_tsv(chan_file, channels_path, index=False)
@@ -487,10 +611,23 @@ def synchronize_bad_channels_across_runs(bids_path, task, subjects="all"):
         logger.info(f"📂 Discovered {len(subjects)} subjects: {subjects}")
 
     for subject in subjects:
-        pattern = os.path.join(
-            bids_path, f"sub-{subject}", "eeg", f"sub-{subject}_task-{task}_*_channels.tsv"
+        # Recursive, and matching the task entity wherever it falls in the name. A
+        # pattern anchored at ``sub-X/eeg`` skips session-organized datasets; one
+        # demanding ``_run-`` skips single-run datasets; and one that puts ``task-``
+        # directly after the subject skips anything with a ``ses-`` entity, because that
+        # entity sits between the two. Each failure mode matches nothing rather than
+        # raising, so the sync silently does nothing at all.
+        pattern = os.path.join(bids_path, f"sub-{subject}", "**", f"sub-{subject}_*channels.tsv")
+        selector = f"_task-{task}_"
+        channel_files = sorted(
+            path
+            for path in glob.glob(pattern, recursive=True)
+            if not os.path.basename(path).startswith("._")
+            and (
+                selector in os.path.basename(path)
+                or os.path.basename(path).endswith(f"_task-{task}_channels.tsv")
+            )
         )
-        channel_files = glob.glob(pattern)
 
         if not channel_files:
             logger.warning(f"No channel files found for subject {subject}")
@@ -503,7 +640,8 @@ def synchronize_bad_channels_across_runs(bids_path, task, subjects="all"):
 
         for file_path in channel_files:
             df = io.read_channels_tsv(file_path)
-            bad_channels = df[df["status"] == "bad"]["name"].tolist()
+            is_eeg = df["type"].astype(str).str.lower() == "eeg"
+            bad_channels = df.loc[is_eeg & (df["status"] == "bad"), "name"].tolist()
             all_bad_channels.update(bad_channels)
             channel_data[file_path] = df
 
@@ -517,8 +655,25 @@ def synchronize_bad_channels_across_runs(bids_path, task, subjects="all"):
         )
 
         for file_path, df in channel_data.items():
-            df["status"] = "good"
-            df.loc[df["name"].isin(unified_bad_channels), "status"] = "bad"
+            # Only EEG statuses are the pipeline's to decide. Clearing every row would
+            # silently un-mark a hand-marked bad ECG or EOG channel.
+            is_eeg = _is_eeg_row(df)
+            # Which channels this run marked on its own, before the union widens the set.
+            # Their ``description`` says who marked them and has to survive, or the next
+            # PyPREP pass cannot tell a curated mark from one this function propagated.
+            already_bad = is_eeg & (df["status"] == "bad")
+            df.loc[is_eeg, "status"] = "good"
+            df.loc[is_eeg & df["name"].isin(unified_bad_channels), "status"] = "bad"
+
+            if "description" in df.columns:
+                df["description"] = df["description"].astype(str)
+                # Marks this run did not make itself are attributed to this function, so
+                # that re-running detection re-derives them instead of reading them back
+                # as curated input and making the union permanent.
+                propagated = is_eeg & (df["status"] == "bad") & ~already_bad
+                df.loc[propagated, "description"] = SYNCHRONIZED_BAD_DESCRIPTION
+                df.loc[is_eeg & (df["status"] != "bad"), "description"] = ""
+
             io.write_channels_tsv(df, file_path, index=False)
 
             run_info = os.path.basename(file_path).split("_")

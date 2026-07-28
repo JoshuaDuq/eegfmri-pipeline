@@ -30,6 +30,7 @@ class Command:
 
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
+from eeg_pipeline.cli.commands.cohort_report import setup_cohort_report, run_cohort_report
 from eeg_pipeline.cli.commands.component_tfr import setup_component_tfr, run_component_tfr
 from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.harmonics import setup_harmonics, run_harmonics
@@ -48,6 +49,14 @@ def _builtin_commands() -> list[Command]:
             name="behavior",
             setup=setup_behavior,
             run=run_behavior,
+        ),
+        Command(
+            name="cohort-report",
+            setup=setup_cohort_report,
+            run=run_cohort_report,
+            # The default is every participant with a QC sidecar, so a missing subject
+            # list is the ordinary case rather than a usage error.
+            requires_subjects=False,
         ),
         Command(
             name="component-tfr",

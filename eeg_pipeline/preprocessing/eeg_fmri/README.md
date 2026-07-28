@@ -21,12 +21,12 @@ The default paths are:
 | Purpose | Path |
 | --- | --- |
 | Marker-sanitized BrainVision metadata | `/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v2` |
-| Referenced original signal | `/Volumes/KINGSTON/EEG_fMRI_data/source_data/sub-*/eeg/original_5khz` |
+| Referenced original signal | `/Volumes/KINGSTON/EEG_fMRI_data/source_data/sub-*/eeg/original_untrimmed_5khz` |
 | Run-matched BOLD metadata | `/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri` |
 | Corrected 1 kHz output | `/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz` |
 
 The marker-sanitized headers preserve references to the immutable `.eeg` files in
-`original_5khz`; the pipeline does not duplicate or modify those source signals.
+`original_untrimmed_5khz`; the pipeline does not duplicate or modify those source signals.
 
 ## Run the cohort
 

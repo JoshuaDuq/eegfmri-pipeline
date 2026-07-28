@@ -124,3 +124,41 @@ def test_run_mapping_is_absent_without_a_run_column() -> None:
     summary = summarize_rejection(_drop_log(set(), total=3))
 
     assert run_of_position(summary, pd.DataFrame({"trial_type": ["a", "b", "c"]})) is None
+
+
+def test_the_retention_strip_is_a_strip_not_a_wall() -> None:
+    """One bit per epoch must not be drawn floor to ceiling.
+
+    Full-height bars in a saturated colour turned sixty-odd epochs into a block of ink
+    that dominated the figure without making the few dropped epochs any easier to find.
+    """
+    summary = summarize_rejection(_drop_log({0, 1, 7}))
+
+    figure = plot_rejection(summary)
+
+    position_axis = figure.axes[0]
+    bottom, top = position_axis.get_ylim()
+    heights = [patch.get_height() for patch in position_axis.patches]
+    assert heights, "the retention strip should draw one patch per epoch"
+    assert max(heights) < 0.5 * (top - bottom)
+
+
+def test_the_retention_strip_says_which_colour_means_dropped() -> None:
+    """The strip is the only place the drop positions appear, so it carries its own key."""
+    summary = summarize_rejection(_drop_log({0, 1, 7}))
+
+    figure = plot_rejection(summary)
+
+    legend = figure.axes[0].get_legend()
+    assert legend is not None
+    assert {text.get_text() for text in legend.get_texts()} == {"Kept", "Dropped"}
+
+
+def test_dropped_and_kept_epochs_are_drawn_in_different_colours() -> None:
+    summary = summarize_rejection(_drop_log({0, 1, 7}))
+
+    figure = plot_rejection(summary)
+
+    colours = [patch.get_facecolor() for patch in figure.axes[0].patches]
+    assert colours[0] == colours[1] == colours[7]
+    assert colours[0] != colours[2]

@@ -9,9 +9,223 @@ place rather than every module that appends content.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+from pathlib import Path
 from typing import Callable
 
 import mne
+
+from eeg_pipeline.preprocessing.report.style import apply_report_css
+
+
+#: Title MNE gives the per-epoch metadata table it renders inside an epochs section.
+_METADATA_TABLE_TITLE = "Metadata"
+
+#: Panel MNE draws for a raw recording: a butterfly of every channel over a few seconds.
+_RAW_TIME_SERIES_TITLE = "Time series"
+
+#: Panel MNE draws for a spectrum, in every section that has one.
+_SPECTRUM_TITLE = "PSD"
+
+#: Section MNE's own ICA panels land in.
+_ICA_COMPONENTS_SECTION = "ICA: components"
+
+#: The ``ICA: components`` panels the per-run cardiac review supersedes.
+#:
+#: Deliberately not the whole section. "Original and cleaned signal" overlays the raw
+#: traces either side of the exclusions, which nothing else in this report draws, so it
+#: is kept while the two ECG-specific panels beside it go.
+_REPLACED_ICA_ECG_TITLES = (
+    "Scores for matching ECG patterns",
+    "Original and cleaned ECG epochs",
+)
+
+#: Section MNE-BIDS-Pipeline puts its per-run bad-channel items in.
+#:
+#: Matched as a prefix, which also spans "Data quality over time". Nothing in that
+#: section carries one of the titles below, and a future panel there that did would be
+#: naming itself after the very evidence this removal replaces.
+_DATA_QUALITY_SECTION = "Data quality"
+
+#: Titles MNE-BIDS-Pipeline repeats once per run, each with a run entity appended.
+_REPLACED_BAD_CHANNEL_TITLES = ("Bad channels", "Bad channel detection")
+
+#: Tag MNE-BIDS-Pipeline puts on its events panel.
+#:
+#: Keyed on the tag rather than the "Events" title because a title is prose and gets
+#: reworded, while this tag is what the rest of the document already filters on.
+_EVENTS_TAG = "events"
+
+#: Section the events panel is given, which MNE-BIDS-Pipeline leaves unset.
+_EVENTS_SECTION = "Events"
+
+
+def drop_per_epoch_metadata_tables(report: mne.Report) -> None:
+    """Remove MNE's per-epoch metadata tables from the report.
+
+    One row per epoch and one column per marker type, rendered once for the ICA fitting
+    epochs and again for the task epochs. It is a data dump rather than evidence: it grows
+    with the trial count, the same frame is written beside the report as ``_events.tsv``
+    for anything that needs the numbers, and the questions a reviewer asks of it — how many
+    trials survived, and in which condition — are what the trial-retention panel answers.
+
+    Unlike the ICA panels this pipeline replaces, nothing here stands in for the table, so
+    the judgement is that a browser is the wrong place to read it rather than that it is
+    duplicated. The other panels of the epochs section are untouched.
+    """
+    if any(element.name == _METADATA_TABLE_TITLE for element in _content_elements(report)):
+        report.remove(title=_METADATA_TABLE_TITLE, remove_all=True)
+
+
+def drop_replaced_panels(
+    report: mne.Report,
+    *,
+    section_prefix: str,
+    titles: Collection[str] = (),
+    title_prefixes: Collection[str] = (),
+) -> None:
+    """Drop panels from every section whose name starts with ``section_prefix``.
+
+    ``Report.remove`` keys on title alone and searches the whole document. MNE reuses a
+    handful of titles — "Time series", "PSD", "Info" — in every section it builds, so
+    removing a raw butterfly by title would also take the spectrum out of the epochs
+    section. Scoping the match to a section is what makes the removal say what it means.
+
+    ``titles`` matches exactly. ``title_prefixes`` exists because MNE-BIDS-Pipeline
+    appends a run entity to the titles it repeats per run, so the set of titles to remove
+    is not known until the data are read.
+
+    A missing panel is not an error. Which sections exist depends on which stages ran,
+    and a stage that prunes what an earlier stage did not add has nothing to do.
+    """
+    exact = set(titles)
+    prefixes = tuple(title_prefixes)
+
+    def is_replaced(element: object) -> bool:
+        if not str(element.section or "").startswith(section_prefix):
+            return False
+        name = str(element.name or "")
+        if name in exact:
+            return True
+        return bool(prefixes) and name.startswith(prefixes)
+
+    report._content = [element for element in _content_elements(report) if not is_replaced(element)]
+
+
+def drop_replaced_raw_time_series(report: mne.Report) -> None:
+    """Drop MNE's raw butterfly panels, which the time-resolved quality section replaces.
+
+    The butterfly draws every channel unlabelled over a few seconds, with no amplitude
+    scale, repeated for a handful of arbitrary segments of the recording. It is the panel
+    a reviewer would reach for to answer "was this run clean throughout", and it cannot
+    answer that: the segments are not chosen for being informative, and a 63-channel
+    overlay hides the single misbehaving sensor that the question is about.
+
+    ``Amplitude over time by channel`` answers it directly — every channel, every second
+    of the run, relative to that channel's own median — so the butterfly is removed by
+    the section that adds the replacement rather than document-wide. Running the
+    continuity stage alone must not leave a report with neither panel.
+    """
+    drop_replaced_panels(
+        report,
+        section_prefix="Raw",
+        titles=(_RAW_TIME_SERIES_TITLE,),
+    )
+
+
+def drop_replaced_filtered_spectrum(report: mne.Report) -> None:
+    """Drop the filtered raw spectrum, which the per-run sensor spectra replace.
+
+    MNE draws the spectrum to Nyquist. On a 500 Hz recording low-passed at 100 Hz that
+    spends four fifths of the axis on filter roll-off falling into the noise floor, and
+    compresses the band anyone is reading into the left fifth. The sensor-spectra section
+    draws the same band per run over 1-100 Hz, with across-channel percentile bands, the
+    aperiodic fit, and markers on the line-noise and gradient harmonics.
+
+    Only the filtered one. The original raw spectrum is the report's single view of the
+    data before filtering, and there the full bandwidth is the point: it is where the
+    anti-alias corner and the gradient harmonics above the low-pass are visible.
+    """
+    drop_replaced_panels(
+        report,
+        section_prefix="Raw (filtered)",
+        titles=(_SPECTRUM_TITLE,),
+    )
+
+
+def drop_replaced_ica_ecg_panels(report: mne.Report) -> None:
+    """Drop the ``ICA: components`` ECG panels that the cardiac review supersedes.
+
+    MNE renders the ECG match scores and the ECG epoch overlay for one concatenated
+    recording, with no indication of whether the beats behind them were detected well.
+    The cardiac review renders both per run, beside the detected R peaks and the
+    beat-to-beat intervals that say whether to believe them, so keeping MNE's version
+    means a reviewer meets the same quantity twice and has to work out which to trust.
+    """
+    drop_replaced_panels(
+        report,
+        section_prefix=_ICA_COMPONENTS_SECTION,
+        titles=_REPLACED_ICA_ECG_TITLES,
+    )
+
+
+def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
+    """Drop the one-item-per-run bad-channel panels the coverage table replaces.
+
+    MNE-BIDS-Pipeline adds one accordion item per run, each holding a single list. A
+    six-run session therefore spends six table-of-contents entries and six clicks to say
+    "none" six times, and never puts two runs on one screen — which is the comparison
+    that matters, because a channel bad in every run is a montage fact while one bad in a
+    single run is something that happened during the session.
+    """
+    drop_replaced_panels(
+        report,
+        section_prefix=_DATA_QUALITY_SECTION,
+        title_prefixes=_REPLACED_BAD_CHANNEL_TITLES,
+    )
+
+
+def place_events_with_epochs(report: mne.Report) -> None:
+    """Give the events panel a section and move it in front of the epochs it describes.
+
+    MNE-BIDS-Pipeline adds this panel with no ``section``, and MNE only wraps sectioned
+    content in a section element. The panel therefore rendered as a bare accordion item —
+    the one item in the document with no heading around it — and, being appended last, it
+    landed behind every review section this pipeline adds. In a report carrying the
+    exploratory band ICAs that is tens of megabytes of sliders between the trial counts
+    and the panel explaining where those trials came from.
+
+    A report with no events panel is not an error. Resting-state recordings have no
+    events, and a report built from the bad-channel stage alone has no epochs section to
+    sit in front of either; in both cases the report is left as it is.
+    """
+    content = _content_elements(report)
+    events = [element for element in content if _EVENTS_TAG in element.tags]
+    if not events:
+        return
+    for element in events:
+        element.section = _EVENTS_SECTION
+    move_tagged_content_before(report, tag=_EVENTS_TAG, anchor=before_epoch_sections)
+
+
+def open_subject_report(report_path: Path | str) -> mne.Report:
+    """Open an existing subject report and apply the document-wide policies to it.
+
+    Every review stage reopens the same report to append its section, so wrapping
+    ``mne.open_report`` is the one place that cannot be forgotten when a stage is added.
+    Doing it at each call site instead left whichever stage saved last deciding whether
+    the report had a stylesheet.
+
+    Only policies that hold regardless of which stage is running belong here. Dropping
+    content this pipeline renders a *replacement* for does not: that has to happen in the
+    function adding the replacement, or a run of one stage alone removes a panel and puts
+    nothing in its place.
+    """
+    report = mne.open_report(report_path)
+    apply_report_css(report)
+    drop_per_epoch_metadata_tables(report)
+    place_events_with_epochs(report)
+    return report
 
 
 def _content_elements(report: mne.Report) -> list:
@@ -98,6 +312,14 @@ __all__ = [
     "move_tagged_content_first",
     "before_raw_sections",
     "before_ica_component_review",
+    "drop_per_epoch_metadata_tables",
+    "drop_replaced_filtered_spectrum",
+    "drop_replaced_ica_ecg_panels",
+    "drop_replaced_panels",
+    "drop_replaced_per_run_bad_channels",
+    "drop_replaced_raw_time_series",
     "move_tagged_content_before",
+    "open_subject_report",
+    "place_events_with_epochs",
     "remove_tagged_content",
 ]

@@ -15,11 +15,17 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import mne
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.preprocessing.report.style import AFTER_COLOR, FLAG_COLOR, GUIDE_COLOR
+from eeg_pipeline.preprocessing.report.style import (
+    EXCLUDED_COLOR,
+    GUIDE_COLOR,
+    RETAINED_COLOR,
+)
+from eeg_pipeline.preprocessing.report.tables import Metric, metric_table
 
 #: Grouping columns to report retention over, when the events table provides them.
 #:
@@ -153,34 +159,30 @@ def rejection_summary_html(
     group_counts: Mapping[str, pd.Series] | None = None,
 ) -> str:
     """Render trial retention and its reasons."""
-    rows = [
+    rows: list[Metric | tuple[str, object]] = [
         ("Epochs before cleaning", f"{summary.total}"),
         ("Epochs retained", f"{summary.kept}"),
-        (
-            "<strong>Epochs dropped</strong>",
-            f"<strong>{summary.dropped} ({summary.dropped_fraction:.1%})</strong>",
+        Metric(
+            "Epochs dropped",
+            f"{summary.dropped} ({summary.dropped_fraction:.1%})",
+            emphasis=True,
         ),
     ]
     for reason, count in sorted(summary.reasons.items(), key=lambda item: -item[1]):
-        rows.append((f"&nbsp;&nbsp;dropped by {html.escape(reason)}", f"{count}"))
-    body = "".join(f"<tr><td>{name}</td><td>{value}</td></tr>" for name, value in rows)
+        rows.append(Metric(f"dropped by {reason}", f"{count}", indent=True))
     document = (
         "<p>Trial counts entering and leaving epoch cleaning. Rejection is applied "
         "automatically; this is the record of what it removed.</p>"
-        f"<table><tbody>{body}</tbody></table>"
+        f"{metric_table(rows)}"
     )
     for column, counts in (group_counts or {}).items():
         if counts.size < 2:
             continue
-        cells = "".join(
-            f"<tr><td>{html.escape(str(name))}</td><td>{int(value)}</td></tr>"
-            for name, value in counts.items()
-        )
         document += (
             f"<p><strong>Retained trials by {html.escape(column)}.</strong> An uneven "
             "distribution means the surviving trials are no longer a random sample, "
             "which biases any contrast computed across these groups.</p>"
-            f"<table><tbody>{cells}</tbody></table>"
+            f"{metric_table((str(name), int(value)) for name, value in counts.items())}"
         )
     return document
 
@@ -206,34 +208,50 @@ def plot_rejection(
     position_axis = axes[0][0]
     kept = np.ones(summary.total, dtype=bool)
     kept[list(summary.dropped_positions)] = False
+    # Each epoch carries one bit — kept or dropped — so it gets a strip rather than a
+    # full-height bar. Drawn floor to ceiling in a saturated colour, sixty-odd epochs
+    # became a wall of ink that dominated the figure and made the handful of dropped
+    # ones no easier to find than a thin band does.
+    strip_bottom, strip_height = 0.44, 0.12
     position_axis.bar(
         np.arange(summary.total),
-        1.0,
+        strip_height,
+        bottom=strip_bottom,
         width=1.0,
-        color=[AFTER_COLOR if flag else FLAG_COLOR for flag in kept],
+        color=[RETAINED_COLOR if flag else EXCLUDED_COLOR for flag in kept],
     )
     if run_assignment is not None:
         # Run boundaries turn "a block of epochs was dropped" into "run N lost them".
         boundaries = np.flatnonzero(np.diff(pd.Series(run_assignment).ffill().bfill().to_numpy()))
         for boundary in boundaries:
-            position_axis.axvline(boundary + 0.5, color="black", linewidth=0.8)
+            position_axis.axvline(
+                boundary + 0.5,
+                ymin=strip_bottom,
+                ymax=strip_bottom + strip_height,
+                color="black",
+                linewidth=0.8,
+            )
         labelled = pd.Series(run_assignment).ffill().bfill().to_numpy()
         for value in np.unique(labelled):
             positions = np.flatnonzero(labelled == value)
             position_axis.annotate(
                 f"run-{int(value)}",
-                xy=(positions.mean(), 0.5),
+                xy=(positions.mean(), strip_bottom + strip_height + 0.03),
                 ha="center",
-                va="center",
+                va="bottom",
                 fontsize=6.5,
                 color="black",
-                bbox={
-                    "boxstyle": "square,pad=0.15",
-                    "facecolor": "white",
-                    "alpha": 0.75,
-                    "edgecolor": "none",
-                },
             )
+    position_axis.legend(
+        handles=[
+            Patch(facecolor=RETAINED_COLOR, label="Kept"),
+            Patch(facecolor=EXCLUDED_COLOR, label="Dropped"),
+        ],
+        frameon=False,
+        fontsize=8,
+        ncol=2,
+        loc="lower center",
+    )
     position_axis.set(
         title=f"{summary.dropped} of {summary.total} epochs dropped "
         f"({summary.dropped_fraction:.1%})",
@@ -251,7 +269,7 @@ def plot_rejection(
             color=GUIDE_COLOR,
             linestyle="--",
             linewidth=1.0,
-            label="mean",
+            label=f"mean {counts.mean():.1f}",
         )
         axis.set(
             title=f"Retained trials by {column}",

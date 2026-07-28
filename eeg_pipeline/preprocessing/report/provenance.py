@@ -9,10 +9,11 @@ against thresholds would lend invented numbers an authority they do not have.
 
 from __future__ import annotations
 
-import html
 from typing import Any
 
 import mne
+
+from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 
 #: Config keys worth recording, because changing any of them makes two reports
 #: incomparable. Kept explicit rather than dumping the whole config, which would bury
@@ -45,6 +46,10 @@ PROVENANCE_KEYS = (
 )
 
 
+#: Sentinel distinguishing "the config has no such key" from "the key is set to None".
+_ABSENT = object()
+
+
 def _format_value(value: Any) -> str:
     if value is None:
         return "not set"
@@ -58,7 +63,15 @@ def _format_value(value: Any) -> str:
 def provenance_html(
     config: Any | None, *, keys: tuple[tuple[str, str], ...] = PROVENANCE_KEYS
 ) -> str:
-    """Render the settings that determine whether two reports are comparable."""
+    """Render the settings that determine whether two reports are comparable.
+
+    A key the configuration does not contain is omitted rather than listed as "not set".
+    The list below spans every paradigm this pipeline supports, so an EEG-only dataset
+    would otherwise carry a row about scanner correction and a resting-state dataset rows
+    about epoch baselines — settings that influenced nothing, occupying the table that
+    exists to record what did. A key that is present and false is a recorded decision and
+    stays, because reproducing the report needs it.
+    """
     if config is None:
         return (
             "<p>No configuration was recorded for this report, so the settings that "
@@ -66,18 +79,28 @@ def provenance_html(
         )
     rows = []
     for key, label in keys:
-        value = config.get(key)
-        rows.append(
-            f"<tr><td>{html.escape(label)}</td>"
-            f"<td>{html.escape(_format_value(value))}</td>"
-            f"<td><code>{html.escape(key)}</code></td></tr>"
+        value = config.get(key, _ABSENT)
+        if value is _ABSENT:
+            continue
+        rows.append([label, _format_value(value), key])
+    if not rows:
+        return (
+            "<p>The configuration carried no recorded settings from the provenance list, "
+            "so the choices that produced this report cannot be reconstructed from it.</p>"
         )
     return (
         "<p>The settings below determine whether this report can be compared with "
         "another. Filter, reference, ICA and baseline choices all change the numbers "
-        "reported above, so a report without them is not reproducible.</p>"
-        "<table><thead><tr><th>Setting</th><th>Value</th><th>Config key</th></tr></thead>"
-        f"<tbody>{''.join(rows)}</tbody></table>"
+        "reported above, so a report without them is not reproducible. Settings this "
+        "dataset did not configure are omitted rather than listed as unset.</p>"
+        + grid_table(
+            (
+                Column("Setting", align=Align.TEXT),
+                Column("Value", align=Align.TEXT),
+                Column("Config key", align=Align.TEXT, code=True),
+            ),
+            rows,
+        )
     )
 
 

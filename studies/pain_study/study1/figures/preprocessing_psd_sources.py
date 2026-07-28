@@ -131,7 +131,7 @@ def discover_raw_brainvision_runs(
     file_candidates: list[tuple[Path, str]] = []
     for participant_directory in _participant_directories(source_root):
         participant_subject_id = _participant_subject_id(participant_directory)
-        raw_directory = participant_directory / "eeg" / "original_5khz"
+        raw_directory = participant_directory / "eeg" / "original_untrimmed_5khz"
         headers = tuple(raw_directory.glob("ThermalPainEEGFMRI*.vhdr"))
         file_candidates.extend((path, participant_subject_id) for path in headers)
     selected.extend(

@@ -1,7 +1,7 @@
 # Native EEG-fMRI MRI-artifact correction
 
 This is the native candidate replacement for the BrainVision Analyzer MRI-artifact stages. It reads
-the immutable original 5 kHz BrainVision signal from `source_data/sub-*/eeg/original_5khz`
+the immutable original 5 kHz BrainVision signal from `source_data/sub-*/eeg/original_untrimmed_5khz`
 through the marker-sanitized metadata derivative and writes a separate 1 kHz FIF derivative. It
 never reads `source_data/sub-*/eeg/brainvision_processed_1khz`, which contains the existing
 BrainVision Analyzer-corrected 1 kHz recordings.

@@ -10,14 +10,22 @@ from typing import Any, Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import mne
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import NullFormatter, ScalarFormatter
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.preprocessing.report.organize import remove_tagged_content
+from eeg_pipeline.preprocessing.ica_exclusions import read_ica_with_reviewed_exclusions
+from eeg_pipeline.preprocessing.report.build_record import save_subject_report
+from eeg_pipeline.preprocessing.report.organize import (
+    open_subject_report,
+    remove_tagged_content,
+)
 from eeg_pipeline.preprocessing.report.summary import (
+    DecompositionSummary,
     compute_removal_topography,
+    decomposition_measurements,
     decomposition_summary_html,
+    exclusion_ledger_html,
     plot_component_overview,
     plot_removal_topography,
     plot_run_component_variance,
@@ -27,6 +35,7 @@ from eeg_pipeline.preprocessing.report.summary import (
 )
 from eeg_pipeline.preprocessing.report.style import (
     DIVERGING_POWER_COLORMAP,
+    FLAG_COLOR,
     OKABE_ITO,
     PRIMARY_COLOR,
     REPORT_IMAGE_FORMAT,
@@ -36,6 +45,7 @@ from eeg_pipeline.preprocessing.report.style import (
     report_image_format,
     robust_symmetric_limit,
 )
+from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 
 
 @dataclass(frozen=True)
@@ -152,6 +162,15 @@ class BandIcaReportSettings:
     comparisons: tuple[ConditionComparison, ...] = ()
     run_iclabel: bool = False
     tfr_enabled: bool = True
+    #: Whether the exploratory band decompositions get a report file of their own.
+    #:
+    #: They dominate the subject report while explicitly controlling nothing in it: on
+    #: sub-0015 the five sliders were 30 MB of a 101 MB document, above a guide saying
+    #: ICLabel was not validated for narrow-band decompositions and that artifact removal
+    #: is decided on the standard ICA. Written beside the subject report and linked from
+    #: it, the evidence is one click away for the reader who wants it and free for the
+    #: many who do not. Set false for a single self-contained file.
+    exploratory_separate_file: bool = True
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> BandIcaReportSettings:
@@ -169,6 +188,9 @@ class BandIcaReportSettings:
             comparisons=_parse_comparisons(values.get("comparisons", [])),
             run_iclabel=bool(values.get("run_iclabel", cls.run_iclabel)),
             tfr_enabled=bool(tfr_values.get("enabled", cls.tfr_enabled)),
+            exploratory_separate_file=bool(
+                values.get("exploratory_separate_file", cls.exploratory_separate_file)
+            ),
         )
         if settings.fit_decim < 1:
             raise ValueError("ica.band_specific_report.fit_decim must be at least 1.")
@@ -556,25 +578,28 @@ def _comparison_configuration_html(
             "<code>ica.band_specific_report.comparisons</code> to compute provisional "
             "pre-review TFRs and finalized retained-epoch TFRs.</p>"
         )
-    rows = []
-    for comparison in settings.comparisons:
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(comparison.name)}</td>"
-            f"<td>{html.escape(comparison.column)}</td>"
-            f"<td>{html.escape(comparison.group_a.label)}: "
-            f"{html.escape(str(list(comparison.group_a.values)))}</td>"
-            f"<td>{html.escape(comparison.group_b.label)}: "
-            f"{html.escape(str(list(comparison.group_b.values)))}</td>"
-            f"<td>{html.escape(status)}</td>"
-            "</tr>"
-        )
+    columns = (
+        Column("Name", align=Align.TEXT, code=True),
+        Column("Column", align=Align.TEXT, code=True),
+        Column("Group A", align=Align.TEXT),
+        Column("Group B", align=Align.TEXT),
+        Column("Status", align=Align.TEXT),
+    )
+    rows = [
+        [
+            comparison.name,
+            comparison.column,
+            f"{comparison.group_a.label}: {list(comparison.group_a.values)}",
+            f"{comparison.group_b.label}: {list(comparison.group_b.values)}",
+            status,
+        ]
+        for comparison in settings.comparisons
+    ]
     return (
         "<p>Configured comparisons are first computed from all pre-ICA task epochs for manual "
         "component review, then replaced after rejection using retained epochs and aligned "
         "events metadata.</p>"
-        "<table><thead><tr><th>Name</th><th>Column</th><th>Group A</th><th>Group B</th>"
-        f"<th>Status</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        + grid_table(columns, rows)
     )
 
 
@@ -599,12 +624,16 @@ def _build_component_figures(
     panel_count = 3 if settings.tfr_enabled else 2
     color_limit = robust_symmetric_limit(tfr) if settings.tfr_enabled else None
     for component, label in enumerate(labels):
-        figure, axes = plt.subplots(
-            1,
-            panel_count,
-            figsize=(4.7 * panel_count, 4),
-            layout="constrained",
-        )
+        if panel_count == 3:
+            figure, mosaic = plt.subplot_mosaic(
+                [["topography", "spectrum"], ["tfr", "tfr"]],
+                figsize=(11.0, 7.6),
+                layout="constrained",
+            )
+            axes = [mosaic["topography"], mosaic["spectrum"], mosaic["tfr"]]
+        else:
+            figure, axis_array = plt.subplots(1, 2, figsize=(9.4, 4.2), layout="constrained")
+            axes = list(axis_array)
         ica.plot_components(
             picks=component,
             axes=[axes[0]],
@@ -636,12 +665,39 @@ def _build_component_figures(
             figure.colorbar(image, ax=axes[2], label=power_colorbar_label(color_limit))
         figure.suptitle(
             f"{band.title} · ICA{component:03d} · grand average · exploratory ICLabel: "
-            f"{label.label} ({label.probability:.3f})\n"
-            f"{_tfr_configuration_title(band, settings)}"
+            f"{label.label} ({label.probability:.3f})"
         )
+        _mark_exploratory(figure)
         plt.close(figure)
         figures.append(figure)
     return figures
+
+
+def _mark_exploratory(figure: plt.Figure) -> None:
+    """Stamp a figure as belonging to a band-fitted, non-authoritative decomposition.
+
+    These figures and the standard-ICA dossiers carry the same panels in the same
+    layout, and their component numbers refer to different decompositions. Only the
+    accordion heading told them apart, which put a reviewer one collapsed section away
+    from acting on a band-fitted component index as though it were an authoritative one.
+    The mark travels with the figure, including when it is exported on its own.
+    """
+    # Constrained layout does not reserve space for a bare figure text, so the axes are
+    # pulled up off the bottom of the canvas first. Without that the stamp lands on the
+    # time-axis label; moving it to a corner instead only trades that for the suptitle.
+    engine = figure.get_layout_engine()
+    if engine is not None:
+        engine.set(rect=(0.0, 0.045, 1.0, 0.955))
+    figure.text(
+        0.5,
+        0.008,
+        "EXPLORATORY · band-fitted decomposition · component numbers do not match the standard ICA",
+        ha="center",
+        va="bottom",
+        fontsize=7.5,
+        color="white",
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": FLAG_COLOR, "edgecolor": "none"},
+    )
 
 
 def _comparison_color_limits(
@@ -652,6 +708,52 @@ def _comparison_color_limits(
     condition_limit = robust_symmetric_limit(group_a_tfr, group_b_tfr)
     difference_limit = robust_symmetric_limit(group_a_tfr - group_b_tfr)
     return condition_limit, difference_limit
+
+
+@dataclass(frozen=True)
+class DossierColorLimits:
+    """Colour limits for one dossier slide.
+
+    Two scales, not one per panel. Every panel showing baseline-relative power — the
+    grand average and each condition — shares :attr:`power`, because they are the same
+    quantity and the layout puts them side by side for comparison. Scaling each to its
+    own range makes a weak condition and a strong one look alike, which is the specific
+    error this figure most invites.
+
+    Differences keep their own limits: a difference of two dB-relative maps is centred on
+    zero by construction and routinely spans a wider range than either map, so forcing it
+    onto the power scale would flatten it to the neutral colour.
+    """
+
+    #: Shared limit for every absolute-power panel, or ``None`` without time-frequency
+    #: data.
+    power: float | None
+    #: One limit per configured comparison, in the order the comparisons are rendered.
+    differences: tuple[float, ...]
+
+
+def dossier_color_limits(
+    grand_average_tfr: np.ndarray | None,
+    comparison_tfrs: Sequence[tuple[np.ndarray, np.ndarray]],
+) -> DossierColorLimits:
+    """Return the colour limits shared across one dossier slide.
+
+    The power limit is pooled over the grand average and every condition so that one
+    colour means one number everywhere on the slide.
+    """
+    if grand_average_tfr is None:
+        return DossierColorLimits(power=None, differences=())
+    pooled: list[np.ndarray] = [np.asarray(grand_average_tfr, dtype=float)]
+    for group_a_tfr, group_b_tfr in comparison_tfrs:
+        pooled.append(np.asarray(group_a_tfr, dtype=float))
+        pooled.append(np.asarray(group_b_tfr, dtype=float))
+    return DossierColorLimits(
+        power=robust_symmetric_limit(*pooled),
+        differences=tuple(
+            robust_symmetric_limit(np.asarray(group_a_tfr) - np.asarray(group_b_tfr))
+            for group_a_tfr, group_b_tfr in comparison_tfrs
+        ),
+    )
 
 
 def _plot_source_spectrum(
@@ -709,6 +811,10 @@ def _plot_source_spectrum(
             [tick for tick in (1, 2, 4, 8, 13, 20, 30, 50, 100) if band.fmin <= tick <= band.fmax]
         )
         axis.xaxis.set_major_formatter(ScalarFormatter())
+        # The log locator also labels its own minor ticks, which arrive formatted as
+        # "3 × 10⁰" and sit between the plain "2" and "4" chosen above. Silencing them
+        # leaves one labelling convention on the axis instead of two.
+        axis.xaxis.set_minor_formatter(NullFormatter())
     axis.set_xlim(band.fmin, band.fmax)
     axis.legend(frameon=False, fontsize=6)
 
@@ -735,6 +841,29 @@ def _plot_tfr(
     )
     axis.axvline(0.0, color="black", linestyle="--", linewidth=0.75)
     axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
+    # The colour scale is shared across the decomposition so that components can be
+    # compared, which means a component whose modulation is small against the strongest
+    # one renders almost entirely neutral. Stating this component's own peak turns that
+    # near-blank map from "something is wrong with the figure" into the measurement it
+    # is: the effect is this many decibels on a scale that reaches that many.
+    peak = float(np.max(np.abs(power))) if np.isfinite(power).any() else 0.0
+    axis.annotate(
+        f"peak |{peak:.1f}| dB",
+        xy=(0.0, 1.0),
+        xycoords="axes fraction",
+        xytext=(3, -3),
+        textcoords="offset points",
+        ha="left",
+        va="top",
+        fontsize=6,
+        color="0.25",
+        bbox={
+            "boxstyle": "square,pad=0.15",
+            "facecolor": "white",
+            "alpha": 0.7,
+            "edgecolor": "none",
+        },
+    )
     if resolution_groups is not None:
         _annotate_spectral_resolution(axis, resolution_groups)
     return image
@@ -836,7 +965,8 @@ def _add_iclabel_panel(axis: plt.Axes, label: ComponentLabel) -> None:
 
 
 def _component_review_status(ica: mne.preprocessing.ICA, component: int) -> str:
-    return "AUTO-MARKED BAD" if component in ica.exclude else "RETAINED"
+    """Report the status the component table currently carries for one component."""
+    return "MARKED BAD" if component in ica.exclude else "RETAINED"
 
 
 def _plot_dossier_summary(
@@ -898,8 +1028,18 @@ def _plot_dossier_comparison(
     result: ConditionTfrResult,
     review: BandReviewData,
     component: int,
-    color_limits: tuple[float, float],
+    power_limit: float,
+    difference_limit: float,
+    draw_power_colorbar: bool,
 ) -> None:
+    """Draw one comparison row: condition A, condition B, and their difference.
+
+    ``draw_power_colorbar`` is false on every row whose power scale is already shown
+    elsewhere on the slide. The scale is shared by construction — see
+    :class:`DossierColorLimits` — so a dossier with three comparisons was drawing four
+    identical power colourbars, one per row plus the grand average's. The difference
+    colourbar stays on every row, because each comparison has its own difference limit.
+    """
     difference = result.group_a_tfr - result.group_b_tfr
     images = [
         _plot_tfr(
@@ -918,18 +1058,20 @@ def _plot_dossier_comparison(
                 result.group_b_tfr[component],
                 difference[component],
             ),
-            (color_limits[0], color_limits[0], color_limits[1]),
+            (power_limit, power_limit, difference_limit),
+            strict=True,
         )
     ]
-    figure.colorbar(
-        images[0],
-        ax=axes[:2],
-        label=power_colorbar_label(color_limits[0]),
-    )
+    if draw_power_colorbar:
+        figure.colorbar(
+            images[0],
+            ax=axes[:2],
+            label=power_colorbar_label(power_limit),
+        )
     figure.colorbar(
         images[2],
         ax=axes[2],
-        label=power_colorbar_label(color_limits[1], quantity="Group difference"),
+        label=power_colorbar_label(difference_limit, quantity="Group difference"),
     )
 
 
@@ -939,47 +1081,74 @@ def _create_component_dossier(
     review: BandReviewData,
     label: ComponentLabel,
     component: int,
-    grand_average_limit: float | None,
-    comparison_limits: Sequence[tuple[float, float]],
+    color_limits: DossierColorLimits,
     settings: BandIcaReportSettings,
     analysis_status: str,
 ) -> plt.Figure:
-    row_count = 1 + len(review.comparisons)
-    column_count = 3 if review.diagnostics.has_tfr else 2
-    figure, axes = plt.subplots(
-        row_count,
-        column_count,
-        figsize=(5.3 * column_count, 3.8 * row_count),
-        squeeze=False,
-        layout="constrained",
-    )
+    if review.comparisons:
+        # Every comparison row is a triple — condition A, condition B, difference — so
+        # the grid has to be three wide and the summary row runs across the top of it.
+        row_count = 1 + len(review.comparisons)
+        figure, axes = plt.subplots(
+            row_count,
+            3,
+            figsize=(15.9, 3.8 * row_count),
+            squeeze=False,
+            layout="constrained",
+        )
+        summary_axes = axes[0]
+        for row, (result, difference_limit) in enumerate(
+            zip(review.comparisons, color_limits.differences, strict=True),
+            start=1,
+        ):
+            _plot_dossier_comparison(
+                figure=figure,
+                axes=axes[row],
+                result=result,
+                review=review,
+                component=component,
+                power_limit=color_limits.power,
+                difference_limit=difference_limit,
+                # The summary row draws the shared power scale when it has a grand
+                # average to draw it beside; the first comparison row picks it up when
+                # there is none, so the slide always carries the scale exactly once.
+                draw_power_colorbar=row == 1 and not review.diagnostics.has_tfr,
+            )
+    elif review.diagnostics.has_tfr:
+        # Without comparison rows the dossier was a single row 15.9 inches wide and 3.8
+        # tall. The browser fits that to the report column, which scales three panels
+        # down to roughly a third of the column each and takes the 6 pt annotations with
+        # them. Folding the same three panels into two rows trades width the reader does
+        # not have for height they do, and gives the time axis the wider cell.
+        figure, mosaic = plt.subplot_mosaic(
+            [["topography", "spectrum"], ["tfr", "tfr"]],
+            figsize=(11.0, 7.6),
+            layout="constrained",
+        )
+        summary_axes = [mosaic["topography"], mosaic["spectrum"], mosaic["tfr"]]
+    else:
+        figure, axes = plt.subplots(1, 2, figsize=(10.6, 4.2), squeeze=False, layout="constrained")
+        summary_axes = axes[0]
+
     _plot_dossier_summary(
         figure=figure,
-        axes=axes[0],
+        axes=summary_axes,
         ica=ica,
         review=review,
         label=label,
         component=component,
-        color_limit=grand_average_limit,
+        color_limit=color_limits.power,
         settings=settings,
     )
-    for row, (result, color_limits) in enumerate(
-        zip(review.comparisons, comparison_limits),
-        start=1,
-    ):
-        _plot_dossier_comparison(
-            figure=figure,
-            axes=axes[row],
-            result=result,
-            review=review,
-            component=component,
-            color_limits=color_limits,
-        )
+    # The title names the component and its status only. The taper, grid and baseline
+    # are identical on all sixty-odd slides and are already stated once in the review
+    # context above them, so repeating them here spent the second title line of every
+    # slide on text no reader needs twice.
     figure.suptitle(
         f"{review.band.title} · ICA{component:03d} · "
         f"{label.label} ({label.probability:.3f}) · "
         f"{_component_review_status(ica, component)}\n"
-        f"{analysis_status} · {_tfr_configuration_title(review.band, settings)}"
+        f"{analysis_status}"
     )
     plt.close(figure)
     return figure
@@ -997,13 +1166,12 @@ def _build_standard_component_dossiers(
     if len(labels) != int(ica.n_components_):
         raise ValueError("ICLabel result count does not match the standard ICA components.")
 
-    grand_average_limit = (
-        robust_symmetric_limit(review.diagnostics.tfr) if review.diagnostics.has_tfr else None
+    # Computed once for the whole set rather than per slide, so that one colour means one
+    # number across every component as well as across the panels of any one of them.
+    color_limits = dossier_color_limits(
+        review.diagnostics.tfr if review.diagnostics.has_tfr else None,
+        [(result.group_a_tfr, result.group_b_tfr) for result in review.comparisons],
     )
-    comparison_limits = [
-        _comparison_color_limits(result.group_a_tfr, result.group_b_tfr)
-        for result in review.comparisons
-    ]
 
     return [
         _create_component_dossier(
@@ -1011,8 +1179,7 @@ def _build_standard_component_dossiers(
             review=review,
             label=label,
             component=component,
-            grand_average_limit=grand_average_limit,
-            comparison_limits=comparison_limits,
+            color_limits=color_limits,
             settings=settings,
             analysis_status=analysis_status,
         )
@@ -1021,10 +1188,16 @@ def _build_standard_component_dossiers(
 
 
 def _organize_component_review(report: mne.Report) -> None:
-    """Keep authoritative review sections together before MNE's ICA components."""
+    """Keep authoritative review sections together before MNE's ICA components.
+
+    Decomposition evidence moves with the review even though it no longer carries the
+    review tag: the tags separate *what a rebuild may clear*, not where content belongs.
+    """
     content = report._content
     review_indices = [
-        index for index, element in enumerate(content) if "ica-component-review" in element.tags
+        index
+        for index, element in enumerate(content)
+        if "ica-component-review" in element.tags or _DECOMPOSITION_TAG in element.tags
     ]
     if not review_indices:
         raise ValueError("The report has no authoritative ICA component-review content.")
@@ -1154,6 +1327,23 @@ def _component_captions(
     ]
 
 
+def _exploratory_component_captions(labels: Sequence[ComponentLabel]) -> list[str]:
+    """Return one slider caption per component of an exploratory band-fitted ICA.
+
+    Distinct from :func:`_component_captions`, which appends the exclusion status. An
+    exploratory fit excludes nothing and its labels do not control artifact removal, so a
+    status in the caption would assert a decision that was never taken. A component whose
+    classifier did not run carries no label at all rather than ``unlabeled (0.000)``.
+    """
+    captions = []
+    for component, label in enumerate(labels):
+        caption = f"ICA{component:03d}"
+        if getattr(label, "label", "") not in ("", "unlabeled"):
+            caption += f" · {label.label} ({label.probability:.2f})"
+        captions.append(caption)
+    return captions
+
+
 def _review_context_html(
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
@@ -1174,9 +1364,11 @@ def _review_context_html(
         f"<p><strong>{html.escape(analysis_status)}</strong>. Each slide keeps one "
         "standard ICA component's topography, band-limited spectrum, grand-average TFR, "
         "and configured condition comparisons together.</p>"
-        f"<p>{html.escape(_tfr_configuration_title(band, settings))}. Condition A and B "
-        "share one symmetric color scale; their difference uses a separate symmetric "
-        "zero-centred scale.</p>"
+        f"<p>{html.escape(_tfr_configuration_title(band, settings))}. The grand average "
+        "and every condition share one symmetric color scale, held fixed across all "
+        "components, so a panel that looks stronger than its neighbour is stronger. Each "
+        "difference uses its own symmetric zero-centred scale, because a difference of "
+        "two baseline-relative maps routinely spans a wider range than either map.</p>"
     )
 
 
@@ -1213,7 +1405,116 @@ def _remove_legacy_condition_tfr_entries(report: mne.Report) -> None:
         )
 
 
+#: Panels MNE-BIDS-pipeline writes that this module's own sections now supersede.
+#:
+#: ``ICA component properties`` is 22 ``plot_properties`` figures, which the decomposition
+#: section renders itself with the ICLabel verdict on each slide; ``ICA component
+#: topographies`` is the grid ``plot_component_overview`` replaced; and the per-class
+#: ICLabel grids show subsets of components that the overview already shows all of, each
+#: annotated with its full class distribution. Keeping both cost 2.3 MB of duplicated
+#: pictures and gave a reviewer two places to look for one answer.
+#:
+#: Deliberately absent: MNE's ``Info`` block, its original-versus-cleaned overlays, and
+#: its score panel. Nothing here reproduces those.
+_SUPERSEDED_MNE_ICA_PANELS = (
+    "ICA component properties",
+    "ICA component topographies",
+)
+
+#: Prefix of the MNE-ICALabel panels this module supersedes.
+#:
+#: Spans the per-class topography grids and ``ICALabel: report``, the numeric table of
+#: per-class probabilities. That table was previously kept, on the reasoning that nothing
+#: else carried the numbers. Two things do: the exclusion ledger states each component's
+#: decision, its deciding detector and its variance cost, and every component dossier
+#: draws the full ICLabel class distribution as a stacked bar. What the table added was a
+#: second vocabulary for the same decision — "Excluded: Yes" against the ledger's
+#: "excluded" — in the one table in this document still carrying MNE-ICALabel's inline
+#: ``border="1"`` styling.
+_SUPERSEDED_ICLABEL_GRID_PREFIX = "ICALabel: "
+
+
+def drop_superseded_mne_ica_panels(report: mne.Report) -> None:
+    """Remove the MNE-written ICA panels this module renders a replacement for.
+
+    Called from the function that adds the replacements, so the report can never end up
+    with neither: a run that appends only the cardiac or ocular review leaves MNE's panels
+    untouched, because that run does not add anything that stands in for them.
+    """
+    titles = {
+        element.name
+        for element in report._content
+        if element.name in _SUPERSEDED_MNE_ICA_PANELS
+        or element.name.startswith(_SUPERSEDED_ICLABEL_GRID_PREFIX)
+    }
+    for title in titles:
+        report.remove(title=title, remove_all=True)
+
+
 _DECOMPOSITION_SECTION = "ICA decomposition quality"
+
+#: Tag for evidence about the decomposition as a whole, rather than about a component.
+#:
+#: Deliberately *not* ``ica-component-review``. The condition-TFR stage reopens the
+#: report, clears that tag, and rebuilds the per-component dossiers from clean epochs —
+#: but it has no filtered run files and no Analyzer-marker fallback state, so rebuilding
+#: the decomposition section from it produced a strictly poorer version: "Component
+#: variance by run" and the fallback warning were cleared and never re-added. Keying the
+#: two bodies of content to different tags makes that failure unrepresentable rather than
+#: relying on every caller to thread the same inputs through.
+_DECOMPOSITION_TAG = "ica-decomposition"
+_DECOMPOSITION_TAGS = ("ica", _DECOMPOSITION_TAG)
+
+#: Panel carrying the Analyzer-marker fallback warning, when one applies.
+#:
+#: Its own panel rather than a banner prepended to the review guide. The guide explains
+#: how to read the dossiers and is rebuilt whenever those change; this is a statement
+#: about the subject's data, and folding it into replaceable content is what let a
+#: rebuild drop it. Separating them also puts it beside the other decomposition evidence
+#: rather than inside a "how to" panel a reader may reasonably skip.
+_FALLBACK_WARNING_TITLE = "Cardiac marker fallback"
+
+_FALLBACK_WARNING_HTML = (
+    '<div style="background-color: #fff3cd; color: #856404; padding: 15px; '
+    'margin-bottom: 20px; border: 1px solid #ffeeba; border-radius: 4px;">'
+    "<strong>&#9888; DATA QUALITY WARNING:</strong> "
+    "Some runs in this subject lacked manual BrainVision R-peak markers "
+    "(Analyzer defaulted to a 0.21s delay). "
+    "Cardiac QC metrics (CTPS and attenuation) for this subject relied on "
+    "automated MNE fallback detection and may be noisier than standard."
+    "</div>"
+)
+
+
+def _should_rebuild_decomposition(
+    report: mne.Report,
+    *,
+    filtered_raw_paths: Sequence[Path] | None,
+) -> bool:
+    """Whether this pass should rebuild the whole-decomposition evidence.
+
+    Rebuild when there is something better to write — the filtered run files this pass
+    carries — or when the report has no decomposition evidence yet. Otherwise leave what
+    is already there: a pass without the run files can only produce a poorer version of
+    panels that are already correct, which is exactly how the run-variance figure and the
+    fallback warning disappeared from the delivered report.
+    """
+    if filtered_raw_paths:
+        return True
+    return not any(
+        _DECOMPOSITION_TAG in element.tags for element in getattr(report, "_content", [])
+    )
+
+
+#: Section holding every exploratory band-fitted decomposition.
+#:
+#: One section rather than one per band. MNE builds the table of contents from section
+#: names, so five bands here plus five authoritative ``ICA component review: <band>``
+#: sections produced ten entries distinguishable only by their prefix — and the five that
+#: matter for artifact removal were the ones a reader could not pick out. The band still
+#: titles its own block inside the section, which is where it belongs: a band is a figure
+#: within the exploratory analysis, not an analysis of its own.
+EXPLORATORY_BAND_SECTION = "Exploratory band-fitted ICAs"
 
 
 def _slider_title(title: str, slide_count: int) -> str:
@@ -1233,14 +1534,31 @@ def _add_decomposition_summary(
     epochs: mne.BaseEpochs,
     labels: Sequence[ComponentLabel],
     filtered_raw_paths: Sequence[Path] | None,
-) -> None:
-    """Add whole-decomposition evidence ahead of the per-component review."""
+    status_descriptions: Sequence[str] | None = None,
+    has_fallback_runs: bool = False,
+) -> DecompositionSummary:
+    """Add whole-decomposition evidence ahead of the per-component review.
+
+    ``status_descriptions`` is the ``status_description`` column of the component table
+    that decided the exclusions. Optional because a rebuild triggered by a condition-TFR
+    pass reaches this function without the paths to read it; the ledger is then left as
+    the previous pass wrote it rather than replaced by one that cannot name a detector.
+    """
+    remove_tagged_content(report, tag=_DECOMPOSITION_TAG)
+    if has_fallback_runs:
+        report.add_html(
+            html=_FALLBACK_WARNING_HTML,
+            title=_FALLBACK_WARNING_TITLE,
+            section=_DECOMPOSITION_SECTION,
+            tags=(*_DECOMPOSITION_TAGS, "ica-fallback-warning"),
+            replace=True,
+        )
     summary = summarize_decomposition(ica=ica, epochs=epochs)
     report.add_figure(
         fig=plot_component_overview(ica=ica, labels=labels),
         title="All component topographies",
         section=_DECOMPOSITION_SECTION,
-        tags=("ica", "ica-component-review", "ica-decomposition"),
+        tags=_DECOMPOSITION_TAGS,
         image_format=REPORT_RASTER_IMAGE_FORMAT,
         replace=True,
     )
@@ -1248,17 +1566,25 @@ def _add_decomposition_summary(
         html=decomposition_summary_html(summary),
         title="Decomposition summary",
         section=_DECOMPOSITION_SECTION,
-        tags=("ica", "ica-component-review", "ica-decomposition"),
+        tags=_DECOMPOSITION_TAGS,
         replace=True,
     )
     report.add_figure(
         fig=plot_variance_overview(summary),
         title="Sensor variance per component",
         section=_DECOMPOSITION_SECTION,
-        tags=("ica", "ica-component-review", "ica-decomposition"),
+        tags=_DECOMPOSITION_TAGS,
         image_format=REPORT_IMAGE_FORMAT,
         replace=True,
     )
+    if status_descriptions is not None:
+        report.add_html(
+            html=exclusion_ledger_html(summary, status_descriptions=status_descriptions),
+            title="Why each component was excluded",
+            section=_DECOMPOSITION_SECTION,
+            tags=_DECOMPOSITION_TAGS,
+            replace=True,
+        )
     # The variance figure says how much was removed; this says from where, which is what
     # separates focal artifact removal from uniform signal loss.
     topography = compute_removal_topography(ica=ica, epochs=epochs)
@@ -1266,14 +1592,14 @@ def _add_decomposition_summary(
         html=removal_topography_html(topography),
         title="Spatial signature of the removal",
         section=_DECOMPOSITION_SECTION,
-        tags=("ica", "ica-component-review", "ica-decomposition"),
+        tags=_DECOMPOSITION_TAGS,
         replace=True,
     )
     report.add_figure(
         fig=plot_removal_topography(topography),
         title="Per-channel amplitude removed by ICA",
         section=_DECOMPOSITION_SECTION,
-        tags=("ica", "ica-component-review", "ica-decomposition"),
+        tags=_DECOMPOSITION_TAGS,
         image_format=REPORT_IMAGE_FORMAT,
         replace=True,
     )
@@ -1285,10 +1611,11 @@ def _add_decomposition_summary(
             ),
             title="Component variance by run",
             section=_DECOMPOSITION_SECTION,
-            tags=("ica", "ica-component-review", "ica-decomposition"),
+            tags=_DECOMPOSITION_TAGS,
             image_format=REPORT_IMAGE_FORMAT,
             replace=True,
         )
+    return summary
 
 
 def _add_component_properties(
@@ -1335,38 +1662,39 @@ def _add_standard_component_review(
     analysis_status: str,
     has_fallback_runs: bool = False,
     filtered_raw_paths: Sequence[Path] | None = None,
-) -> None:
-    """Add authoritative, component-centred evidence before MNE's ICA section."""
+    status_descriptions: Sequence[str] | None = None,
+) -> DecompositionSummary | None:
+    """Add authoritative, component-centred evidence before MNE's ICA section.
+
+    Returns the decomposition it measured so the caller can record those numbers
+    beside the report, or ``None`` when the rebuild was skipped and the numbers on
+    the page are the previous pass's rather than this one's.
+    """
     _remove_legacy_condition_tfr_entries(report)
+    # Safe to do here and only here: this function adds the panels that replace them.
+    drop_superseded_mne_ica_panels(report)
     # Every panel this function writes carries "ica-component-review". Clearing the tag
     # first makes the rebuild idempotent: renaming a panel cannot strand the previous
     # one, because removal is keyed to the tag rather than to the title.
     remove_tagged_content(report, tag="ica-component-review")
-    _add_decomposition_summary(
-        report=report,
-        ica=ica,
-        epochs=epochs,
-        labels=labels,
-        filtered_raw_paths=filtered_raw_paths,
-    )
+    # Guarded rather than unconditional: a condition-TFR rebuild carries neither the run
+    # files nor the fallback state, so rebuilding here would replace correct panels with
+    # poorer ones. See :func:`_should_rebuild_decomposition`.
+    summary = None
+    if _should_rebuild_decomposition(report, filtered_raw_paths=filtered_raw_paths):
+        summary = _add_decomposition_summary(
+            report=report,
+            ica=ica,
+            epochs=epochs,
+            labels=labels,
+            filtered_raw_paths=filtered_raw_paths,
+            status_descriptions=status_descriptions,
+            has_fallback_runs=has_fallback_runs,
+        )
     guide_title = "How to review ICA component dossiers"
     report.remove(title=guide_title, remove_all=True)
-    guide_html = _review_guide_html(settings, analysis_status)
-    if has_fallback_runs:
-        warning_html = (
-            '<div style="background-color: #fff3cd; color: #856404; padding: 15px; '
-            'margin-bottom: 20px; border: 1px solid #ffeeba; border-radius: 4px;">'
-            "<strong>&#9888; DATA QUALITY WARNING:</strong> "
-            "Some runs in this subject lacked manual BrainVision R-peak markers "
-            "(Analyzer defaulted to a 0.21s delay). "
-            "Cardiac QC metrics (CTPS and attenuation) for this subject relied on "
-            "automated MNE fallback detection and may be noisier than standard."
-            "</div>"
-        )
-        guide_html = warning_html + guide_html
-
     report.add_html(
-        html=guide_html,
+        html=_review_guide_html(settings, analysis_status),
         title=guide_title,
         section="ICA component review guide",
         tags=("ica", "ica-component-review", "ica-review-guide"),
@@ -1411,6 +1739,7 @@ def _add_standard_component_review(
             replace=True,
         )
     _organize_component_review(report)
+    return summary
 
 
 def _write_component_table(
@@ -1503,10 +1832,10 @@ def append_condition_tfr_report(
     if len(retained_epochs) != len(clean_events):
         raise ValueError("Retained pre-ICA epochs do not align with clean events.")
 
-    standard_ica = mne.preprocessing.read_ica(standard_ica_path, verbose="ERROR")
+    standard_ica = read_ica_with_reviewed_exclusions(standard_ica_path)
     labels = _label_components(epochs=ica_fit_epochs, ica=standard_ica)
-    report = mne.open_report(report_path)
-    _add_standard_component_review(
+    report = open_subject_report(report_path)
+    summary = _add_standard_component_review(
         report=report,
         ica=standard_ica,
         epochs=retained_epochs,
@@ -1515,8 +1844,12 @@ def append_condition_tfr_report(
         settings=settings,
         analysis_status=analysis_status,
     )
-    report.save(report_path, overwrite=True, open_browser=False)
-    report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+    save_subject_report(
+        report,
+        report_path,
+        stage="ica-condition-tfr",
+        measurements=decomposition_measurements(summary) if summary else None,
+    )
 
 
 def generate_band_ica_report(
@@ -1541,21 +1874,26 @@ def generate_band_ica_report(
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report = mne.open_report(report_path)
+    report = open_subject_report(report_path)
     standard_ica_path = epochs_path.with_name(f"{output_prefix}_proc-ica_ica.fif")
     if not standard_ica_path.is_file():
         raise FileNotFoundError(f"Standard ICA does not exist: {standard_ica_path}")
-    standard_ica = mne.preprocessing.read_ica(standard_ica_path, verbose="ERROR")
+    standard_ica = read_ica_with_reviewed_exclusions(standard_ica_path)
     standard_labels = _label_components(epochs=epochs, ica=standard_ica)
 
     components_path = epochs_path.with_name(f"{output_prefix}_proc-ica_components.tsv")
     has_fallback_runs = False
+    status_descriptions = None
     if components_path.is_file():
         components = pd.read_csv(components_path, sep="\t")
         if "analyzer_marker_ctps_fallback" in components.columns:
             has_fallback_runs = bool(components["analyzer_marker_ctps_fallback"].any())
+        # Read from the table that decides the exclusions rather than from the labels, so
+        # the panel naming the detector cannot disagree with the data the pipeline built.
+        if "status_description" in components.columns:
+            status_descriptions = tuple(components["status_description"].fillna("").astype(str))
 
-    _add_standard_component_review(
+    summary = _add_standard_component_review(
         report=report,
         ica=standard_ica,
         epochs=epochs,
@@ -1565,6 +1903,45 @@ def generate_band_ica_report(
         analysis_status="Pending provisional task epochs",
         has_fallback_runs=has_fallback_runs,
         filtered_raw_paths=filtered_raw_paths,
+        status_descriptions=status_descriptions,
+    )
+    # Previous runs wrote one section per band. Those section names no longer exist, so
+    # without clearing by tag an incrementally updated report keeps both layouts at once.
+    remove_tagged_content(report, tag="band-specific-ica")
+    exploratory_path = output_dir / f"{output_prefix}_desc-exploratorybandica_report.html"
+    # Where the exploratory figures are added. Either the subject report itself, or a
+    # report of its own that is saved beside it and linked from the subject report.
+    exploratory_report = report
+    if settings.exploratory_separate_file:
+        exploratory_report = mne.Report(
+            title=f"{output_prefix} · exploratory band-fitted ICAs",
+            verbose="ERROR",
+        )
+    report.add_html(
+        title="How to read the exploratory band ICAs",
+        html=(
+            "<p><strong>Exploratory only.</strong> Each decomposition "
+            f"{'in the linked file' if settings.exploratory_separate_file else 'below'} was "
+            "fitted to one band of the same epochs. ICLabel was not validated for "
+            "narrow-band decompositions, component numbers do not correspond across bands "
+            "or to the standard ICA, and nothing here controls artifact removal. That is "
+            "decided on the standard broadband ICA, in the authoritative component review "
+            "sections.</p>"
+            + (
+                "<p>Because it decides nothing and is large, this evidence is written "
+                "beside the subject report rather than inside it: "
+                f'<a href="{html.escape(exploratory_path.name)}">'
+                f"{html.escape(exploratory_path.name)}</a>. The two files live in the same "
+                "directory, so keeping them together keeps the link working. Set "
+                "<code>ica.band_specific_report.exploratory_separate_file</code> to false "
+                "for a single self-contained report.</p>"
+                if settings.exploratory_separate_file
+                else ""
+            )
+        ),
+        section=EXPLORATORY_BAND_SECTION,
+        tags=("ica", "band-specific-ica"),
+        replace=True,
     )
     generated_paths = []
     for band in BAND_ICA_DEFINITIONS:
@@ -1597,37 +1974,31 @@ def generate_band_ica_report(
         _write_component_table(path=table_path, labels=labels)
         generated_paths.extend((ica_path, table_path))
 
-        section = f"Band-specific ICA: {band.title}"
-        report.remove(
-            title=f"{band.title}: component topomaps, spectra, and TFRs",
-            remove_all=True,
-        )
-        report.add_html(
-            title="Interpretation",
-            html=(
-                "<p><strong>Exploratory only.</strong> This ICA was fitted to "
-                f"{band.fmin:g}–{band.fmax:g} Hz data. ICLabel was not validated "
-                "for narrow-band decompositions. Component numbers do not correspond "
-                "across bands or to the standard ICA, and these labels do not control "
-                "artifact removal.</p>"
-            ),
-            section=section,
-            tags=("ica", "band-specific-ica", band.slug),
-            replace=True,
-        )
-        report.add_figure(
+        exploratory_report.add_figure(
             fig=figures,
-            title=(
+            title=_slider_title(
                 f"{band.title}: component topomaps, spectra, and grand-average "
-                f"relative TFRs · {_tfr_configuration_title(band, settings)}"
+                f"relative TFRs · {_tfr_configuration_title(band, settings)}",
+                len(figures),
             ),
-            section=section,
+            caption=_exploratory_component_captions(labels),
+            section=EXPLORATORY_BAND_SECTION,
             tags=("ica", "band-specific-ica", band.slug),
             image_format=report_image_format(
                 has_dense_image=settings.tfr_enabled, is_figure_list=True
             ),
             replace=True,
         )
-    report.save(report_path, overwrite=True, open_browser=False)
-    report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+    if settings.exploratory_separate_file:
+        # Saved as HTML alone. The .h5 archive exists so a later stage can reopen and
+        # append to a report, and nothing appends to this one: it is rebuilt from scratch
+        # whenever the band ICAs are refitted.
+        exploratory_report.save(exploratory_path, overwrite=True, open_browser=False)
+        generated_paths.append(exploratory_path)
+    save_subject_report(
+        report,
+        report_path,
+        stage="band-ica-report",
+        measurements=decomposition_measurements(summary) if summary else None,
+    )
     return generated_paths

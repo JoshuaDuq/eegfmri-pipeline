@@ -163,7 +163,8 @@ Default Directory Layout
    ├── source_data/                # Raw recordings (EEG .vhdr, fMRI DICOMs)
    │   └── sub-XXXX/
    │       ├── eeg/
-   │       │   ├── original_5khz/              # Original BrainVision triplets
+   │       │   ├── original_untrimmed_5khz/   # Original full-length 5 kHz triplets
+   │       │   ├── original_trimmed_5khz/     # Original 5 kHz triplets bounded by volume markers
    │       │   └── brainvision_processed_1khz/ # Analyzer-processed triplets
    │       └── fmri/               # DICOM series folders
    ├── bids_output/

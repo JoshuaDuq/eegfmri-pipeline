@@ -13,7 +13,7 @@ The exporter will read only the six thermal runs under:
 `/Volumes/KINGSTON/EEG_fMRI_data/source_data/sub-0015/eeg/brainvision_processed_1khz`
 
 Each run must contain a complete `*_scannerpulse_corrected.vhdr`, `.vmrk`, and `.eeg`
-BrainVision triplet. The baseline recording and the `original_5khz` directory are outside the
+BrainVision triplet. The baseline recording and the `original_untrimmed_5khz` directory are outside the
 export scope.
 
 Trial metadata will come from the six current run-level BIDS event tables under:

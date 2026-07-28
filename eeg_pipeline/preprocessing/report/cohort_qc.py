@@ -9,7 +9,6 @@ markers that actually reached the files is the only reliable measure.
 
 from __future__ import annotations
 
-import html
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -24,6 +23,7 @@ from eeg_pipeline.preprocessing.report.style import (
     GUIDE_COLOR,
     apply_report_style,
 )
+from eeg_pipeline.preprocessing.report.tables import Metric, metric_table
 
 #: Default reference ratio of R markers to scanner volumes, overridable through
 #: ``report.thresholds.min_r_markers_per_volume``. Analyzer writes one R marker per
@@ -101,12 +101,11 @@ def cohort_marker_html(qc: CohortMarkerQc) -> str:
         .agg(["sum", "count"])
         .rename(columns={"sum": "runs_without_markers", "count": "runs"})
     )
-    rows = "".join(
-        f"<tr><td>sub-{html.escape(str(subject))}</td>"
-        f"<td>{int(values['runs_without_markers'])} of {int(values['runs'])}</td></tr>"
+    affected = [
+        (f"sub-{subject}", f"{int(values['runs_without_markers'])} of {int(values['runs'])}")
         for subject, values in per_subject.iterrows()
         if values["runs_without_markers"] > 0
-    )
+    ]
     document = (
         "<p>Analyzer builds its pulse-artifact template from the R markers it writes. "
         "This counts the markers present in the exported files, which is independent of "
@@ -114,19 +113,23 @@ def cohort_marker_html(qc: CohortMarkerQc) -> str:
         "the configured reference ratio "
         "(<code>report.thresholds.min_r_markers_per_volume</code>); what a shortfall "
         "means for a given run is left to the reviewer.</p>"
-        "<table><tbody>"
-        f"<tr><td>Runs analysed</td><td>{total}</td></tr>"
-        f"<tr><td>Subjects</td><td>{subjects}</td></tr>"
-        f"<tr><td><strong>Runs below the reference ratio</strong></td>"
-        f"<td><strong>{broken} ({qc.broken_fraction:.0%})</strong></td></tr>"
-        f"<tr><td>Subjects with every run above it</td>"
-        f"<td>{len(clean_subjects)} of {subjects}</td></tr>"
-        "</tbody></table>"
+        + metric_table(
+            [
+                ("Runs analysed", total),
+                ("Subjects", subjects),
+                Metric(
+                    "Runs below the reference ratio",
+                    f"{broken} ({qc.broken_fraction:.0%})",
+                    emphasis=True,
+                ),
+                ("Subjects with every run above it", f"{len(clean_subjects)} of {subjects}"),
+            ]
+        )
     )
-    if rows:
+    if affected:
         document += (
             "<p><strong>Runs below the reference ratio, per subject.</strong></p>"
-            f"<table><tbody>{rows}</tbody></table>"
+            f"{metric_table(affected)}"
         )
     return document
 

@@ -4,15 +4,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.preprocessing.derivatives import (
+    FILTERED_RAW_SUFFIX,
+    ICA_SUFFIX,
+    clean_raw_for_filtered,
+    entity_prefix,
+    find_filtered_raw_runs,
+    find_ica_solutions,
+    resolve_subjects,
+    runs_for_prefix,
+)
+from eeg_pipeline.preprocessing.ica_exclusions import components_path_for_ica
 from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 
 PULSE_EVENT_ID = 999
+
+#: Channel the R-peak fallback and CTPS scoring read. Callers pass the configured name;
+#: this default only keeps the low-level helpers usable on their own.
+DEFAULT_ECG_CHANNEL = "ECG"
 
 
 @dataclass(frozen=True)
@@ -31,7 +46,11 @@ class CardiacAttenuationMetrics:
     is_fallback: bool = False
 
 
-def pulse_marker_events(raw: mne.io.BaseRaw) -> tuple[np.ndarray, bool]:
+def pulse_marker_events(
+    raw: mne.io.BaseRaw,
+    *,
+    ecg_channel: str = DEFAULT_ECG_CHANNEL,
+) -> tuple[np.ndarray, bool]:
     """Create MNE events from preserved BrainVision Analyzer R annotations (or fallback)."""
     try:
         events, _ = mne.events_from_annotations(
@@ -51,7 +70,7 @@ def pulse_marker_events(raw: mne.io.BaseRaw) -> tuple[np.ndarray, bool]:
     # BrainVision analyzer often uses a 0.21s static delay when R-peaks aren't found,
     # and doesn't export them. We use MNE's ecg detector to approximate them for QC.
     events, _, _, _ = mne.preprocessing.find_ecg_events(
-        raw, ch_name="ECG", event_id=PULSE_EVENT_ID, return_ecg=True, verbose="ERROR"
+        raw, ch_name=ecg_channel, event_id=PULSE_EVENT_ID, return_ecg=True, verbose="ERROR"
     )
     if len(events) == 0:
         raise ValueError(
@@ -67,6 +86,13 @@ def _marker_locked_rms(
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
 ) -> float:
+    """Measure the R-locked EEG RMS of the marker-locked average.
+
+    Restricted to EEG. ICA is fitted and applied to EEG alone, so the ECG channel is
+    bit-identical before and after — and it is both the largest-amplitude channel and the
+    one perfectly phase-locked to the marker, so including it would dominate the average
+    and drive the measured attenuation toward zero on a recording that was cleaned well.
+    """
     epochs = mne.Epochs(
         raw,
         events,
@@ -74,6 +100,7 @@ def _marker_locked_rms(
         tmin=baseline[0],
         tmax=measurement_window[1],
         baseline=baseline,
+        picks="eeg",
         preload=True,
         reject_by_annotation=True,
         verbose="ERROR",
@@ -94,6 +121,7 @@ def compute_cardiac_attenuation(
     recording_id: str,
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
+    ecg_channel: str = DEFAULT_ECG_CHANNEL,
 ) -> CardiacAttenuationMetrics:
     """Measure cardiac-locked EEG RMS before and after ICA."""
     recordings_align = (
@@ -115,7 +143,7 @@ def compute_cardiac_attenuation(
         projection=False,
         verbose=False,
     )
-    events, is_fallback = pulse_marker_events(before_referenced)
+    events, is_fallback = pulse_marker_events(before_referenced, ecg_channel=ecg_channel)
     before_rms = _marker_locked_rms(
         before_referenced,
         events,
@@ -173,12 +201,13 @@ def compute_marker_ctps_scores(
     *,
     threshold: float,
     epoch_window: tuple[float, float],
+    ecg_channel: str = DEFAULT_ECG_CHANNEL,
 ) -> tuple[np.ndarray, bool]:
     """Score ICA components using CTPS epochs anchored to Analyzer markers."""
     marker_epochs = []
     any_fallback = False
     for raw in raws:
-        events, is_fallback = pulse_marker_events(raw)
+        events, is_fallback = pulse_marker_events(raw, ecg_channel=ecg_channel)
         if is_fallback:
             any_fallback = True
         marker_epochs.append(
@@ -201,7 +230,7 @@ def compute_marker_ctps_scores(
         raise ValueError("No valid marker-locked epochs remain for CTPS QC.")
     _, scores = ica.find_bads_ecg(
         epochs,
-        ch_name="ECG",
+        ch_name=ecg_channel,
         method="ctps",
         threshold=threshold,
         verbose="ERROR",
@@ -215,8 +244,13 @@ def write_cardiac_attenuation_qc(
     output_path: Path,
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
+    ecg_channel: str = DEFAULT_ECG_CHANNEL,
 ) -> Path:
-    """Write run-level marker-locked EEG attenuation before versus after ICA."""
+    """Write run-level marker-locked EEG attenuation before versus after ICA.
+
+    ``recordings`` is consumed lazily so a cohort run holds one before/after pair in
+    memory at a time rather than every preloaded run of every subject at once.
+    """
     rows = []
     for recording_id, before, after in recordings:
         metrics = compute_cardiac_attenuation(
@@ -225,6 +259,7 @@ def write_cardiac_attenuation_qc(
             recording_id=recording_id,
             baseline=baseline,
             measurement_window=measurement_window,
+            ecg_channel=ecg_channel,
         )
         rows.append(
             {
@@ -280,30 +315,9 @@ def _write_cardiac_attenuation_figure(table: pd.DataFrame, output_path: Path) ->
     plt.close(figure)
 
 
-def _resolve_subjects(pipeline_root: Path, subjects: list[str]) -> list[str]:
-    if subjects == ["all"]:
-        resolved = sorted(
-            path.name.removeprefix("sub-") for path in pipeline_root.glob("sub-*") if path.is_dir()
-        )
-    else:
-        resolved = [subject.removeprefix("sub-") for subject in subjects]
-    if not resolved:
-        raise FileNotFoundError(f"No subject derivatives found under {pipeline_root}.")
-    return resolved
-
-
-def _visible_matches(directory: Path, pattern: str) -> list[Path]:
-    return sorted(
-        path
-        for path in directory.glob(pattern)
-        if path.is_file() and not path.name.startswith("._")
-    )
-
-
-def _require_single_path(paths: list[Path], description: str) -> Path:
-    if len(paths) != 1:
-        raise FileNotFoundError(f"Expected one {description}, found {len(paths)}: {paths}")
-    return paths[0]
+def _qc_output_path(pipeline_root: Path, task: str | None, description: str) -> Path:
+    task_entity = f"task-{task}_" if task is not None else ""
+    return pipeline_root / "qc" / f"{task_entity}{description}"
 
 
 def run_marker_ctps_qc(
@@ -313,66 +327,63 @@ def run_marker_ctps_qc(
     task: str | None,
     threshold: float,
     epoch_window: tuple[float, float],
+    ecg_channel: str = DEFAULT_ECG_CHANNEL,
 ) -> Path:
-    """Add Analyzer-marker CTPS flags to native MNE-BIDS component tables."""
-    task_selector = f"_task-{task}_" if task is not None else "_task-"
+    """Add Analyzer-marker CTPS flags to native MNE-BIDS component tables.
+
+    One decomposition per session, scored against the runs that fed it.
+    """
     summary_frames = []
-    for subject in _resolve_subjects(pipeline_root, subjects):
-        eeg_directory = pipeline_root / f"sub-{subject}" / "eeg"
-        ica_path = _require_single_path(
-            _visible_matches(eeg_directory, f"sub-{subject}_proc-icafit_ica.fif"),
-            f"sub-{subject} ICA fit",
-        )
-        components_path = _require_single_path(
-            _visible_matches(eeg_directory, f"sub-{subject}_proc-ica_components.tsv"),
-            f"sub-{subject} ICA component table",
-        )
-        filtered_paths = [
-            path
-            for path in _visible_matches(
-                eeg_directory,
-                f"sub-{subject}_task-*_run-*_proc-filt_raw.fif",
-            )
-            if task_selector in path.name
-        ]
-        if not filtered_paths:
+    for subject in resolve_subjects(pipeline_root, subjects):
+        run_paths = find_filtered_raw_runs(pipeline_root, subject=subject, task=task)
+        if not run_paths:
             raise FileNotFoundError(f"No filtered raw runs found for sub-{subject}, task={task!r}.")
+        for ica_path in find_ica_solutions(pipeline_root, subject=subject):
+            prefix = entity_prefix(ica_path, ICA_SUFFIX)
+            session_runs = runs_for_prefix(run_paths, prefix)
+            if not session_runs:
+                continue
+            components_path = components_path_for_ica(ica_path)
+            if not components_path.is_file():
+                raise FileNotFoundError(f"ICA component table does not exist: {components_path}")
 
-        ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
-        raws = [mne.io.read_raw_fif(path, preload=True, verbose="ERROR") for path in filtered_paths]
-        scores, any_fallback = compute_marker_ctps_scores(
-            raws,
-            ica,
-            threshold=threshold,
-            epoch_window=epoch_window,
-        )
-        components = pd.read_csv(components_path, sep="\t")
-        updated = add_marker_ctps_columns(
-            components,
-            scores,
-            threshold=threshold,
-            is_fallback=any_fallback,
-        )
-        updated.to_csv(components_path, sep="\t", index=False)
-
-        summary = updated[
-            [
-                "component",
-                "status",
-                "status_description",
-                "analyzer_marker_ctps_score",
-                "analyzer_marker_ctps_flag",
-                "analyzer_marker_ctps_fallback",
+            ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
+            raws = [
+                mne.io.read_raw_fif(path, preload=True, verbose="ERROR") for path in session_runs
             ]
-        ].copy()
-        summary.insert(0, "participant_id", f"sub-{subject}")
-        summary_frames.append(summary)
+            scores, any_fallback = compute_marker_ctps_scores(
+                raws,
+                ica,
+                threshold=threshold,
+                epoch_window=epoch_window,
+                ecg_channel=ecg_channel,
+            )
+            components = pd.read_csv(components_path, sep="\t")
+            updated = add_marker_ctps_columns(
+                components,
+                scores,
+                threshold=threshold,
+                is_fallback=any_fallback,
+            )
+            updated.to_csv(components_path, sep="\t", index=False)
 
-    output_path = (
-        pipeline_root
-        / "qc"
-        / f"{'task-' + task + '_' if task is not None else ''}desc-markerctps_components.tsv"
-    )
+            summary = updated[
+                [
+                    "component",
+                    "status",
+                    "status_description",
+                    "analyzer_marker_ctps_score",
+                    "analyzer_marker_ctps_flag",
+                    "analyzer_marker_ctps_fallback",
+                ]
+            ].copy()
+            summary.insert(0, "participant_id", f"sub-{subject}")
+            summary.insert(1, "decomposition_id", prefix)
+            summary_frames.append(summary)
+
+    if not summary_frames:
+        raise FileNotFoundError(f"No ICA decomposition matched any filtered run for task={task!r}.")
+    output_path = _qc_output_path(pipeline_root, task, "desc-markerctps_components.tsv")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pd.concat(summary_frames, ignore_index=True).to_csv(
         output_path,
@@ -382,6 +393,25 @@ def run_marker_ctps_qc(
     return output_path
 
 
+def _iter_before_after_runs(
+    pipeline_root: Path,
+    subjects: list[str],
+    task: str | None,
+) -> Iterator[tuple[str, mne.io.BaseRaw, mne.io.BaseRaw]]:
+    """Yield one filtered/clean pair at a time so the cohort is never all in memory."""
+    for subject in resolve_subjects(pipeline_root, subjects):
+        filtered_paths = find_filtered_raw_runs(pipeline_root, subject=subject, task=task)
+        if not filtered_paths:
+            raise FileNotFoundError(f"No filtered raw runs found for sub-{subject}, task={task!r}.")
+        for filtered_path in filtered_paths:
+            clean_path = clean_raw_for_filtered(filtered_path)
+            yield (
+                entity_prefix(filtered_path, FILTERED_RAW_SUFFIX),
+                mne.io.read_raw_fif(filtered_path, preload=True, verbose="ERROR"),
+                mne.io.read_raw_fif(clean_path, preload=True, verbose="ERROR"),
+            )
+
+
 def run_cardiac_attenuation_qc(
     *,
     pipeline_root: Path,
@@ -389,51 +419,20 @@ def run_cardiac_attenuation_qc(
     task: str | None,
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
+    ecg_channel: str = DEFAULT_ECG_CHANNEL,
 ) -> Path:
     """Pair filtered and clean runs and write marker-locked attenuation QC."""
-    task_selector = f"_task-{task}_" if task is not None else "_task-"
-    recordings = []
-    for subject in _resolve_subjects(pipeline_root, subjects):
-        eeg_directory = pipeline_root / f"sub-{subject}" / "eeg"
-        filtered_paths = [
-            path
-            for path in _visible_matches(
-                eeg_directory,
-                f"sub-{subject}_task-*_run-*_proc-filt_raw.fif",
-            )
-            if task_selector in path.name
-        ]
-        if not filtered_paths:
-            raise FileNotFoundError(f"No filtered raw runs found for sub-{subject}, task={task!r}.")
-        for filtered_path in filtered_paths:
-            clean_path = filtered_path.with_name(
-                filtered_path.name.replace("_proc-filt_raw.fif", "_proc-clean_raw.fif")
-            )
-            if not clean_path.is_file():
-                raise FileNotFoundError(f"Missing ICA-cleaned raw file: {clean_path}")
-            recording_id = filtered_path.name.removesuffix("_proc-filt_raw.fif")
-            recordings.append(
-                (
-                    recording_id,
-                    mne.io.read_raw_fif(filtered_path, preload=True, verbose="ERROR"),
-                    mne.io.read_raw_fif(clean_path, preload=True, verbose="ERROR"),
-                )
-            )
-
-    output_path = (
-        pipeline_root
-        / "qc"
-        / f"{'task-' + task + '_' if task is not None else ''}desc-cardiacattenuation_qc.tsv"
-    )
     return write_cardiac_attenuation_qc(
-        recordings,
-        output_path=output_path,
+        _iter_before_after_runs(pipeline_root, subjects, task),
+        output_path=_qc_output_path(pipeline_root, task, "desc-cardiacattenuation_qc.tsv"),
         baseline=baseline,
         measurement_window=measurement_window,
+        ecg_channel=ecg_channel,
     )
 
 
 __all__ = [
+    "DEFAULT_ECG_CHANNEL",
     "CardiacAttenuationMetrics",
     "add_marker_ctps_columns",
     "compute_cardiac_attenuation",

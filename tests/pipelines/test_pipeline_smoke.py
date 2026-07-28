@@ -124,9 +124,18 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(PreprocessingPipeline)
         pipeline.name = "preprocessing"
-        pipeline.config = DotConfig({"project": {"task": "task"}})
+        bids_root = Path(tempfile.mkdtemp())
+        deriv_root = Path(tempfile.mkdtemp())
+        pipeline.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "paths": {"bids_root": str(bids_root), "deriv_root": str(deriv_root)},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         pipeline.logger = Mock()
-        pipeline.deriv_root = Path(tempfile.mkdtemp())
+        pipeline.bids_root = bids_root
+        pipeline.deriv_root = deriv_root
         progress = _DummyProgress()
 
         with (

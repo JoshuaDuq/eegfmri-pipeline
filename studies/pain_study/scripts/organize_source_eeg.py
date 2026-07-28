@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-ORIGINAL_DIRECTORY = "original_5khz"
+ORIGINAL_DIRECTORY = "original_untrimmed_5khz"
 PROCESSED_DIRECTORY = "brainvision_processed_1khz"
 TRIPLET_SUFFIXES = (".vhdr", ".vmrk", ".eeg")
 SAMPLING_INTERVAL_PATTERN = re.compile(r"^SamplingInterval=(?P<value>[0-9.]+)$", re.MULTILINE)

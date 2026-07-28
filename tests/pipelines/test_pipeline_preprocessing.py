@@ -1,3 +1,4 @@
+import importlib
 import json
 import sys
 import tempfile
@@ -6,6 +7,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+# Derivative discovery is pure pathlib with no MNE dependency, so the stubs below hand
+# back the real module rather than a fake: these tests assert on the layouts it matches.
+_derivatives_module = importlib.import_module("eeg_pipeline.preprocessing.derivatives")
 
 
 from tests.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
@@ -107,6 +112,7 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
         ),
         "eeg_pipeline.preprocessing": _make_package("eeg_pipeline.preprocessing"),
         "eeg_pipeline.preprocessing.pipeline": _make_package("eeg_pipeline.preprocessing.pipeline"),
+        "eeg_pipeline.preprocessing.derivatives": _derivatives_module,
     }
 
 
@@ -468,6 +474,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         pipeline.deriv_root = Path("/tmp/deriv")
         pipeline.config = DotConfig(
             {
+                "eeg": {"ecg_channels": ["ECG"]},
                 "preprocessing": {
                     "brainvision_analyzer": {
                         "cardiac_artifact_qc": {
@@ -477,7 +484,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
                             "measurement_window": [-0.05, 0.4],
                         }
                     }
-                }
+                },
             }
         )
         marker_ctps = Mock(return_value=Path("/tmp/ctps.tsv"))
@@ -501,6 +508,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             task="thermalactive",
             threshold=0.1,
             epoch_window=(-0.25, 0.5),
+            ecg_channel="ECG",
         )
         attenuation.assert_called_once_with(
             pipeline_root=Path("/tmp/deriv/preprocessed/eeg"),
@@ -508,6 +516,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             task="thermalactive",
             baseline=(-0.25, -0.05),
             measurement_window=(-0.05, 0.4),
+            ecg_channel="ECG",
         )
 
     def test_detect_conditions_from_bids(self):
@@ -681,6 +690,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
                 "project": {"task": "task"},
                 "paths": {"deriv_root": "/tmp/deriv-task"},
                 "preprocessing": {"task_is_rest": False},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
             }
         )
 
@@ -866,7 +876,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
                 return_value=SimpleNamespace(returncode=0, stdout="ok", stderr=""),
             ),
         ):
-            p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain")
+            p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain", n_jobs=1)
         self.assertEqual(mock_generate.call_args.kwargs["task"], "pain")
 
         with (
@@ -877,7 +887,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             ),
         ):
             with self.assertRaises(RuntimeError):
-                p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain")
+                p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain", n_jobs=1)
 
     def test_run_mne_bids_pipeline_failure_reports_stdout_and_stderr(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -899,7 +909,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             ),
         ):
             with self.assertRaises(RuntimeError) as exc:
-                p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain")
+                p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain", n_jobs=1)
 
         error_message = str(exc.exception)
         self.assertIn(stdout, error_message)
@@ -972,8 +982,10 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             str(run_2): FakeRaw(["C4"]),
         }
 
+        preload_calls = []
+
         def fake_read_raw_fif(path, preload, verbose):
-            self.assertTrue(preload)
+            preload_calls.append(preload)
             self.assertFalse(verbose)
             return raws[str(path)]
 
@@ -982,6 +994,9 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         with patch.dict(sys.modules, {"mne": fake_mne}):
             p._harmonize_filtered_raw_bads_for_mne_concat(["0001"], "pain")
 
+        # Headers decide whether a rewrite is needed; only the runs being rewritten are
+        # then read with their samples.
+        self.assertEqual(preload_calls, [False, False, True, True])
         expected_bads = ["C3", "C4"]
         self.assertEqual(raws[str(run_1)].info["bads"], expected_bads)
         self.assertEqual(raws[str(run_2)].info["bads"], expected_bads)
@@ -1024,9 +1039,10 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             str(run_1): FakeRaw(["C3"]),
             str(run_2): FakeRaw(["C4"]),
         }
+        preload_calls = []
 
         def fake_read_raw_fif(path, preload, verbose):
-            self.assertTrue(preload)
+            preload_calls.append(preload)
             self.assertFalse(verbose)
             return raws[str(path)]
 
@@ -1038,6 +1054,9 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
 
         self.assertEqual(run_1.read_text(encoding="utf-8"), "raw-1")
         self.assertEqual(run_2.read_text(encoding="utf-8"), "raw-2")
+        # Deciding that the runs disagree needs headers only; a run that is never
+        # rewritten must never have its samples read.
+        self.assertEqual(preload_calls, [False, False])
 
     def test_find_filtered_raw_run_files_ignores_appledouble_metadata(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -1080,7 +1099,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 "_harmonize_filtered_raw_bads_for_mne_concat",
             ) as mock_harmonize,
         ):
-            p._run_ica_fitting(["0001"], "t")
+            p._run_ica_fitting(["0001"], "t", n_jobs=1)
         self.assertEqual(mock_run.call_count, 2)
         self.assertEqual(
             mock_run.call_args_list[0].args[0],
@@ -1105,7 +1124,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
             patch.object(PreprocessingPipeline, "_run_band_specific_ica_report") as report,
         ):
-            p._run_ica_fitting(["0001"], "pain")
+            p._run_ica_fitting(["0001"], "pain", n_jobs=1)
 
         report.assert_called_once_with(subjects=["0001"], task="pain")
 
@@ -1121,7 +1140,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
             patch.object(PreprocessingPipeline, "_run_band_specific_ica_report") as report,
         ):
-            p._run_ica_fitting(["0001"], "pain")
+            p._run_ica_fitting(["0001"], "pain", n_jobs=1)
 
         report.assert_not_called()
 
@@ -1145,7 +1164,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_run_ica_cardiac_review", create=True) as review,
             patch.object(PreprocessingPipeline, "_run_ica_ocular_review", create=True),
         ):
-            p._run_ica_fitting(["0001"], "pain")
+            p._run_ica_fitting(["0001"], "pain", n_jobs=1)
 
         review.assert_called_once_with(subjects=["0001"], task="pain")
 
@@ -1171,7 +1190,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 create=True,
             ) as disabled_ocular_review,
         ):
-            p._run_ica_fitting(["0001"], "pain")
+            p._run_ica_fitting(["0001"], "pain", n_jobs=1)
 
         disabled_review.assert_not_called()
         disabled_ocular_review.assert_not_called()
@@ -1322,6 +1341,171 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         assert "output_dir" not in kwargs
         assert "output_prefix" not in kwargs
 
+    def test_preservation_measurements_reach_the_landing_panel(self):
+        """Every other headline describes removal; this is the one that describes survival.
+
+        Without it the panel opens with "93.9% of sensor variance removed" and offers the
+        reader nothing to weigh that against, which is the exact asymmetry the preservation
+        section was written to close.
+        """
+        from eeg_pipeline.pipelines.preprocessing import _preservation_measurements
+
+        measurements = _preservation_measurements(
+            reliability=SimpleNamespace(
+                corrected_correlation=0.83,
+                n_trials=80,
+                response_window_s=(0.1, 0.6),
+            ),
+            alpha=SimpleNamespace(prominence_db=6.4),
+        )
+
+        assert measurements == {
+            "split_half_r": 0.83,
+            "alpha_prominence_db": 6.4,
+            # Reliability grows with test length, so the trial count and the window it was
+            # measured over travel with the correlation: a cohort cannot compare two
+            # participants' reliabilities without stepping both to a common length.
+            "split_half_n_trials": 80,
+            "split_half_window_start_s": 0.1,
+            "split_half_window_end_s": 0.6,
+        }
+
+    def test_preservation_measurements_omit_what_the_paradigm_cannot_support(self):
+        """Rest has no evoked response to split, so there is no reliability to report."""
+        from eeg_pipeline.pipelines.preprocessing import _preservation_measurements
+
+        measurements = _preservation_measurements(
+            reliability=None,
+            alpha=SimpleNamespace(prominence_db=6.4),
+        )
+
+        assert measurements == {"alpha_prominence_db": 6.4}
+        assert _preservation_measurements(reliability=None, alpha=None) == {}
+
+    def test_the_review_stage_records_its_headline_numbers_for_the_landing_panel(self):
+        """The landing panel reads the build record, so the stage has to write to it.
+
+        These four are measured by the review stage and by nothing else, so if it records
+        nothing the panel simply has no row for them and the reader is back to hunting
+        through sections for the run count.
+        """
+        from eeg_pipeline.pipelines.preprocessing import _review_stage_measurements
+
+        coverage = SimpleNamespace(n_channels=63, bad_channels=("TP9", "T7"), n_runs=6)
+        evidence = SimpleNamespace(
+            spectra=[object()] * 6,
+            marker_agreements=[
+                SimpleNamespace(matched_fraction=0.93),
+                SimpleNamespace(matched_fraction=0.0),
+                SimpleNamespace(matched_fraction=None),
+            ],
+        )
+
+        measurements = _review_stage_measurements(coverage=coverage, evidence=evidence)
+
+        assert measurements["n_runs"] == 6
+        assert measurements["n_channels"] == 63
+        assert measurements["n_bad_channels"] == 2
+        # The worst run is the one worth meeting first, and an undefined one is not a zero.
+        assert measurements["worst_marker_agreement"] == 0.0
+
+    def test_review_measurements_omit_what_this_dataset_has_no_stage_for(self):
+        """An EEG-only dataset has no marker agreement, and a key absent is a row absent."""
+        from eeg_pipeline.pipelines.preprocessing import _review_stage_measurements
+
+        measurements = _review_stage_measurements(
+            coverage=SimpleNamespace(n_channels=32, bad_channels=(), n_runs=1),
+            evidence=SimpleNamespace(
+                spectra=[object()], marker_agreements=[], cardiac_residuals=[]
+            ),
+        )
+
+        assert "worst_marker_agreement" not in measurements
+        assert measurements["n_bad_channels"] == 0
+
+    def test_review_measurements_survive_a_stage_that_produced_nothing(self):
+        """Coverage and run evidence are both optional; the record must still be writable."""
+        from eeg_pipeline.pipelines.preprocessing import _review_stage_measurements
+
+        assert _review_stage_measurements(coverage=None, evidence=None) == {}
+
+    def test_provisional_preservation_reads_the_pre_rejection_task_epochs(self):
+        """Preservation is the only counterweight at ICA review, so it runs there too.
+
+        At that point every other panel measures removal — 93.9% of sensor variance on
+        sub-0015 — and the epochs that would support a survival measurement have not been
+        cleaned yet. Reading the pre-rejection task epochs is what lets the panel exist
+        before the exclusions are approved rather than only after.
+        """
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.logger = Mock()
+        p.config = DotConfig({"preprocessing": {"task_is_rest": False}})
+        eeg_dir = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        task_epochs_path = eeg_dir / "sub-0001_task-pain_epo.fif"
+        task_epochs_path.write_text("epochs", encoding="utf-8")
+        report_path = eeg_dir / "sub-0001_report.h5"
+        epochs = object()
+        read_epochs = Mock(return_value=epochs)
+        add_task = Mock(return_value=(None, None))
+        preservation_module = _make_module(
+            "eeg_pipeline.preprocessing.report.preservation",
+            add_task_preservation_review=add_task,
+            add_rest_preservation_review=Mock(return_value=None),
+        )
+
+        with (
+            patch.dict(
+                sys.modules,
+                {"eeg_pipeline.preprocessing.report.preservation": preservation_module},
+            ),
+            patch("mne.read_epochs", read_epochs),
+        ):
+            p._append_provisional_signal_preservation(
+                report="report",
+                report_path=report_path,
+                task="pain",
+                subject="0001",
+            )
+
+        assert read_epochs.call_args.args[0] == task_epochs_path
+        kwargs = add_task.call_args.kwargs
+        assert kwargs["epochs"] is epochs
+        assert "Provisional" in kwargs["analysis_status"]
+
+    def test_provisional_preservation_is_skipped_without_pre_rejection_epochs(self):
+        """A report built from the bad-channel stage alone has no epochs to measure."""
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.logger = Mock()
+        p.config = DotConfig({"preprocessing": {"task_is_rest": False}})
+        eeg_dir = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        add_task = Mock(return_value=(None, None))
+        preservation_module = _make_module(
+            "eeg_pipeline.preprocessing.report.preservation",
+            add_task_preservation_review=add_task,
+            add_rest_preservation_review=Mock(return_value=None),
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"eeg_pipeline.preprocessing.report.preservation": preservation_module},
+        ):
+            p._append_provisional_signal_preservation(
+                report="report",
+                report_path=eeg_dir / "sub-0001_report.h5",
+                task="pain",
+                subject="0001",
+            )
+
+        add_task.assert_not_called()
+
     def test_final_component_review_uses_standard_ica_paths(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -1403,6 +1587,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                     "deriv_rest_root": "/tmp/derivatives-rest",
                 },
                 "preprocessing": {"task_is_rest": False},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
             }
         )
 
@@ -1434,7 +1619,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         p = object.__new__(PreprocessingPipeline)
         p.name = "preprocessing"
-        p.config = DotConfig({"project": {"task": "task"}})
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         p.logger = Mock()
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
@@ -1470,7 +1660,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         p = object.__new__(PreprocessingPipeline)
         p.name = "preprocessing"
-        p.config = DotConfig({"project": {"task": "task"}})
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         p.logger = Mock()
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
@@ -1502,7 +1697,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         p = object.__new__(PreprocessingPipeline)
         p.name = "preprocessing"
-        p.config = DotConfig({"project": {"task": "task"}})
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         p.logger = Mock()
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
@@ -1528,7 +1728,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         p = object.__new__(PreprocessingPipeline)
         p.name = "preprocessing"
-        p.config = DotConfig({"project": {"task": "task"}})
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         p.logger = Mock()
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
@@ -1553,7 +1758,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         p = object.__new__(PreprocessingPipeline)
-        p.config = DotConfig({"project": {"task": "task"}})
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         p.logger = Mock()
 
         fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
@@ -1602,7 +1812,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         p = object.__new__(PreprocessingPipeline)
-        p.config = DotConfig({"project": {"task": "task"}})
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
         p.logger = Mock()
         p._refresh_processing_roots_if_initialized = Mock()
 
@@ -1710,7 +1925,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_write_clean_events_tsv") as write_clean,
             patch.object(PreprocessingPipeline, "_append_epoch_rejection_review"),
         ):
-            p._run_epoch_creation(["0001"], "t", task_is_rest=False)
+            p._run_epoch_creation(["0001"], "t", task_is_rest=False, n_jobs=1)
         run_mne.assert_called_once()
         write_clean.assert_called_once()
 
@@ -1719,7 +1934,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(PreprocessingPipeline, "_write_clean_events_tsv") as write_clean,
             patch.object(PreprocessingPipeline, "_append_epoch_rejection_review"),
         ):
-            p._run_epoch_creation(["0001"], "t", task_is_rest=True)
+            p._run_epoch_creation(["0001"], "t", task_is_rest=True, n_jobs=1)
         run_mne.assert_called_once()
         write_clean.assert_not_called()
 
@@ -1981,3 +2196,232 @@ class TestPreprocessingGapfill(_PreprocessingImportMixin, unittest.TestCase):
             "trial_type\tonset\nCueA\t0\nCueB\t1\n", encoding="utf-8"
         )
         self.assertEqual(p._detect_conditions_from_bids(), ["CueA", "CueB"])
+
+
+class TestPreprocessingStepSelection(_PreprocessingImportMixin, unittest.TestCase):
+    def _pipeline(self, analyzer_enabled=True):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {"brainvision_analyzer": {"enabled": analyzer_enabled}},
+                "pyprep": {"bad_channel_sync_policy": "subject_union"},
+            }
+        )
+        return p
+
+    def test_full_mode_runs_the_same_qc_as_ica_then_epochs(self):
+        """`full` does both jobs, so it must not silently skip either job's QC."""
+        p = self._pipeline()
+
+        full = p._get_steps_for_run("full", task_is_rest=False)
+        split = p._get_steps_for_run("ica", task_is_rest=False) + p._get_steps_for_run(
+            "epochs", task_is_rest=False
+        )
+
+        for qc_step in ("ica-cardiac-qc", "cardiac-attenuation-qc", "scanner-harmonic-qc"):
+            self.assertIn(qc_step, full, f"full mode dropped {qc_step}")
+            self.assertIn(qc_step, split)
+
+    def test_resting_state_full_mode_omits_the_task_only_harmonic_qc(self):
+        p = self._pipeline()
+
+        steps = p._get_steps_for_run("full", task_is_rest=True)
+
+        self.assertIn("cardiac-attenuation-qc", steps)
+        self.assertNotIn("scanner-harmonic-qc", steps)
+
+    def test_bad_channel_mode_gets_no_ica_or_epoch_qc(self):
+        p = self._pipeline()
+
+        steps = p._get_steps_for_run("bad-channels", task_is_rest=False)
+
+        self.assertEqual(steps, ["pulse-marker-qc", "bad-channels"])
+
+    def test_per_run_policy_fails_before_any_recording_is_opened(self):
+        """The mismatch is visible in channels.tsv, so it must not wait for filtering."""
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {"brainvision_analyzer": {"enabled": False}},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
+        p.bids_root = Path(tempfile.mkdtemp())
+        eeg_dir = p.bids_root / "sub-0001" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        header = "name\ttype\tstatus\n"
+        (eeg_dir / "sub-0001_task-pain_run-1_channels.tsv").write_text(
+            header + "C3\teeg\tbad\nC4\teeg\tgood\n", encoding="utf-8"
+        )
+        (eeg_dir / "sub-0001_task-pain_run-2_channels.tsv").write_text(
+            header + "C3\teeg\tgood\nC4\teeg\tbad\n", encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(ValueError, "subject_union"):
+            p._get_steps_for_run("ica", False, ["0001"], "pain")
+
+    def test_agreeing_runs_are_accepted_under_per_run(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {"brainvision_analyzer": {"enabled": False}},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
+        p.bids_root = Path(tempfile.mkdtemp())
+        eeg_dir = p.bids_root / "sub-0001" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        header = "name\ttype\tstatus\n"
+        for run in (1, 2):
+            (eeg_dir / f"sub-0001_task-pain_run-{run}_channels.tsv").write_text(
+                # The ECG row differs, but non-EEG status is not the pipeline's concern.
+                header
+                + f"C3\teeg\tbad\nC4\teeg\tgood\nECG\tecg\t{'bad' if run == 1 else 'good'}\n",
+                encoding="utf-8",
+            )
+
+        self.assertEqual(p._get_steps_for_run("ica", False, ["0001"], "pain"), ["ica-fit"])
+
+
+class TestPreprocessingParallelism(_PreprocessingImportMixin, unittest.TestCase):
+    """``n_jobs`` must reach the MNE-BIDS-Pipeline subprocess, not just PyPREP.
+
+    MNE-BIDS-Pipeline defaults to ``n_jobs = 1``, so a config that omits the option runs
+    every subject, and every autoreject threshold search inside ``_06a1_fit_ica`` and
+    ``_09_ptp_reject``, on one core. The omission is invisible: the run still succeeds,
+    just serially. These tests pin the value end to end so it cannot be dropped again.
+    """
+
+    def _pipeline(self, config=None):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.bids_root = Path("/tmp/bids")
+        p.deriv_root = Path("/tmp/deriv")
+        p.config = DotConfig(config or {})
+        return p
+
+    def test_execute_steps_forwards_n_jobs_to_the_mne_bids_steps(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_EPOCHS,
+            STEP_ICA_FIT,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.logger = Mock()
+        pipeline._run_ica_fitting = Mock()
+        pipeline._run_epoch_creation = Mock()
+        pipeline._append_report_review_sections = Mock()
+
+        pipeline._execute_steps(
+            steps=[STEP_ICA_FIT, STEP_EPOCHS],
+            subjects=["0001"],
+            task="pain",
+            use_pyprep=True,
+            task_is_rest=False,
+            n_jobs=6,
+            progress=_NoopProgress(),
+        )
+
+        self.assertEqual(pipeline._run_ica_fitting.call_args.kwargs["n_jobs"], 6)
+        self.assertEqual(pipeline._run_epoch_creation.call_args.kwargs["n_jobs"], 6)
+
+    def test_ica_fitting_forwards_n_jobs_to_every_invocation(self):
+        """ICA fitting drives MNE-BIDS more than once; one unset call is a serial step."""
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = self._pipeline({"ica": {}})
+
+        with (
+            patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne,
+            patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+        ):
+            p._run_ica_fitting(["0001"], "pain", n_jobs=6)
+
+        self.assertEqual(run_mne.call_count, 2)
+        for call in run_mne.call_args_list:
+            self.assertEqual(call.kwargs["n_jobs"], 6)
+
+    def test_epoch_creation_forwards_n_jobs(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = self._pipeline({"preprocessing": {"write_clean_events": False}})
+
+        with (
+            patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne,
+            patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_append_epoch_rejection_review"),
+        ):
+            p._run_epoch_creation(["0001"], "pain", task_is_rest=False, n_jobs=6)
+
+        self.assertEqual(run_mne.call_args.kwargs["n_jobs"], 6)
+
+    def test_run_mne_bids_pipeline_generates_the_config_with_the_requested_n_jobs(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = self._pipeline()
+
+        with (
+            patch.object(
+                PreprocessingPipeline, "_generate_mne_bids_config", return_value="x = 1"
+            ) as generate,
+            patch(
+                "eeg_pipeline.pipelines.preprocessing.subprocess.run",
+                return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain", n_jobs=6)
+
+        self.assertEqual(generate.call_args.kwargs["n_jobs"], 6)
+
+    def test_generated_config_binds_n_jobs_to_the_requested_value(self):
+        """The emitted name must be upstream's, so assert on the executed config."""
+
+        p = self._pipeline(
+            {
+                "preprocessing": {
+                    "task_is_rest": True,
+                    "rest_epochs_duration": 12.0,
+                    "rest_epochs_overlap": 0.0,
+                },
+                "epochs": {"baseline": [-0.2, 0.0], "tmin": -7.0, "tmax": 15.0},
+            }
+        )
+
+        source = p._generate_mne_bids_config(
+            "preprocessing/_06a1_fit_ica",
+            subjects=["0001"],
+            task=None,
+            task_is_rest=True,
+            n_jobs=6,
+        )
+
+        namespace: dict = {}
+        exec(compile(source, "<generated>", "exec"), namespace)
+        self.assertEqual(namespace["n_jobs"], 6)
+
+    def test_zero_n_jobs_is_rejected_before_anything_runs(self):
+        """joblib reads 0 as an error and MNE-BIDS reads it as 0 workers; neither is 'all'."""
+
+        p = self._pipeline({"project": {"task": "pain"}, "preprocessing": {"task_is_rest": False}})
+
+        with self.assertRaisesRegex(ValueError, "n_jobs"):
+            p._extract_preprocessing_params("pain", {"n_jobs": 0})
+
+    def test_negative_n_jobs_is_accepted_as_the_all_cores_selector(self):
+        p = self._pipeline({"project": {"task": "pain"}, "preprocessing": {"task_is_rest": False}})
+
+        resolved = p._extract_preprocessing_params("pain", {"n_jobs": -1})
+
+        self.assertEqual(resolved[4], -1)

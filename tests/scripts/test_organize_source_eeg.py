@@ -40,7 +40,7 @@ def test_organize_subject_eeg_copies_5khz_and_moves_processed_1khz(
 
     result = organize_subject_eeg("0001", participant_raw, source_subject)
 
-    raw_destination = eeg_directory / "original_5khz"
+    raw_destination = eeg_directory / "original_untrimmed_5khz"
     processed_destination = eeg_directory / "brainvision_processed_1khz"
     assert (raw_destination / "task.vhdr").is_file()
     assert (participant_raw / "task.vhdr").is_file()
@@ -68,7 +68,7 @@ def test_organize_subject_eeg_rejects_nested_original_triplets(tmp_path: Path) -
 
 def test_discover_unorganized_subjects_finds_new_subjects_only(tmp_path: Path) -> None:
     source_data_root = tmp_path / "source_data"
-    (source_data_root / "sub-0001" / "eeg" / "original_5khz").mkdir(parents=True)
+    (source_data_root / "sub-0001" / "eeg" / "original_untrimmed_5khz").mkdir(parents=True)
     (source_data_root / "sub-0001" / "eeg" / "brainvision_processed_1khz").mkdir()
     (source_data_root / "sub-0016" / "eeg").mkdir(parents=True)
 
@@ -102,7 +102,7 @@ def test_organize_cohort_accepts_new_subject_without_brainvision_processed_data(
 
     assert results[0].original_triplets == 1
     assert results[0].processed_triplets == 0
-    assert (source_eeg / "original_5khz" / "task.vhdr").is_file()
+    assert (source_eeg / "original_untrimmed_5khz" / "task.vhdr").is_file()
     assert not (source_eeg / "brainvision_processed_1khz").exists()
 
 

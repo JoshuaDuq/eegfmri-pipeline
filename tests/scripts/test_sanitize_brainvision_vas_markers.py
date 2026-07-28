@@ -39,11 +39,11 @@ def _write_raw_brainvision_recording(
     return raw_dir / f"{basename}.vhdr"
 
 
-def test_discover_cohort_recordings_uses_all_original_5khz_recordings(tmp_path: Path) -> None:
+def test_discover_cohort_recordings_uses_all_original_untrimmed_5khz_recordings(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     kingston_root = tmp_path / "KINGSTON"
     source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
-    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_5khz"
+    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     source_vhdr = _write_raw_brainvision_recording(raw_dir, basename)
 
@@ -59,7 +59,7 @@ def test_discover_cohort_recordings_includes_original_and_processed_layouts(
     tmp_path: Path,
 ) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
-    original_dir = tmp_path / "sub-0001" / "eeg" / "original_5khz"
+    original_dir = tmp_path / "sub-0001" / "eeg" / "original_untrimmed_5khz"
     processed_dir = tmp_path / "sub-0001" / "eeg" / "brainvision_processed_1khz"
     original_dir.mkdir(parents=True)
     processed_dir.mkdir(parents=True)
@@ -74,7 +74,7 @@ def test_discover_cohort_recordings_includes_original_and_processed_layouts(
 
     assert [(recording.source_layout, recording.run) for recording in recordings] == [
         ("brainvision_processed_1khz", 1),
-        ("original_5khz", 1),
+        ("original_untrimmed_5khz", 1),
     ]
 
 
@@ -86,7 +86,7 @@ def test_discover_cohort_recordings_rejects_empty_inventory(tmp_path: Path) -> N
 def test_discover_cohort_recordings_filters_explicit_subjects(tmp_path: Path) -> None:
     for subject in ("0001", "0016"):
         basename = f"ThermalPainEEGFMRI_run1_sub{subject}_2026-03-02_10h55.27.564"
-        raw_dir = tmp_path / f"sub-{subject}" / "eeg" / "original_5khz"
+        raw_dir = tmp_path / f"sub-{subject}" / "eeg" / "original_untrimmed_5khz"
         raw_dir.mkdir(parents=True)
         _write_raw_brainvision_recording(raw_dir, basename)
 
@@ -97,7 +97,7 @@ def test_discover_cohort_recordings_filters_explicit_subjects(tmp_path: Path) ->
 
 def test_discover_cohort_recordings_rejects_subject_directory_mismatch(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0002_2026-03-02_10h55.27.564"
-    raw_dir = tmp_path / "sub-0001" / "eeg" / "original_5khz"
+    raw_dir = tmp_path / "sub-0001" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     _write_raw_brainvision_recording(raw_dir, basename)
 
@@ -106,7 +106,7 @@ def test_discover_cohort_recordings_rejects_subject_directory_mismatch(tmp_path:
 
 
 def test_discover_cohort_recordings_requires_selection_for_duplicate_run(tmp_path: Path) -> None:
-    raw_dir = tmp_path / "sub-0003" / "eeg" / "original_5khz"
+    raw_dir = tmp_path / "sub-0003" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     for timestamp in ("11h11.33.962", "11h30.23.962"):
         _write_raw_brainvision_recording(
@@ -114,12 +114,12 @@ def test_discover_cohort_recordings_requires_selection_for_duplicate_run(tmp_pat
             f"ThermalPainEEGFMRI_run1_sub0003_2026-03-23_{timestamp}",
         )
 
-    with pytest.raises(ValueError, match="Ambiguous original_5khz.*sub-0003 run-1"):
+    with pytest.raises(ValueError, match="Ambiguous original_untrimmed_5khz.*sub-0003 run-1"):
         discover_cohort_recordings(tmp_path)
 
 
 def test_discover_cohort_recordings_applies_explicit_run_override(tmp_path: Path) -> None:
-    raw_dir = tmp_path / "sub-0003" / "eeg" / "original_5khz"
+    raw_dir = tmp_path / "sub-0003" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     selected_name = "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.vhdr"
     for name in (
@@ -146,7 +146,7 @@ def test_discover_cohort_recordings_applies_explicit_run_override(tmp_path: Path
 
 
 def test_discover_cohort_recordings_applies_explicit_exclusion(tmp_path: Path) -> None:
-    raw_dir = tmp_path / "sub-0003" / "eeg" / "original_5khz"
+    raw_dir = tmp_path / "sub-0003" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     false_start = "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h10.39.899.vhdr"
     valid_run = "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h11.33.962.vhdr"
@@ -164,7 +164,7 @@ def test_discover_cohort_recordings_applies_explicit_exclusion(tmp_path: Path) -
 def test_stage_recording_reuses_signal_and_changes_only_vas_annotation(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     source_data_root = tmp_path / "KINGSTON" / "EEG_fMRI_data" / "source_data"
-    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_5khz"
+    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     source_vhdr = _write_raw_brainvision_recording(raw_dir, basename)
     recording = discover_cohort_recordings(source_data_root)[0]
@@ -220,7 +220,7 @@ def test_run_sanitization_publishes_final_manifest_paths(tmp_path: Path) -> None
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     kingston_root = tmp_path / "KINGSTON"
     source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
-    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_5khz"
+    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_untrimmed_5khz"
     raw_dir.mkdir(parents=True)
     _write_raw_brainvision_recording(raw_dir, basename)
     output_root = tmp_path / "brainvision_marker_sanitized-v1"
