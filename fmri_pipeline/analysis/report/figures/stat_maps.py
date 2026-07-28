@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from fmri_pipeline.analysis.report.figures._display import figure_of, label_colorbar
 from fmri_pipeline.analysis.report.style import (
     GUIDE_COLOR,
     SIGNED_CMAP,
@@ -40,26 +41,6 @@ def _resolve_vmax(
     if threshold is not None and threshold > 0:
         return suprathreshold_limit(values, threshold=float(threshold))
     return robust_symmetric_limit(values)
-
-
-def _figure_of(display: Any) -> Any:
-    figure = getattr(display, "figure", None) or getattr(display, "_fig", None)
-    if figure is None and hasattr(display, "frame_axes"):
-        figure = getattr(display.frame_axes, "figure", None)
-    if figure is None:
-        raise RuntimeError(
-            "Could not resolve a Matplotlib figure from the nilearn display."
-        )
-    return figure
-
-
-def _label_colorbar(display: Any, label: str) -> None:
-    """Name the units on the colorbar. Nilearn exposes no parameter for this."""
-    colorbar = getattr(display, "_cbar", None)
-    if colorbar is None:
-        logger.debug("Nilearn display exposed no colorbar to label.")
-        return
-    colorbar.set_label(label, rotation=90, labelpad=6)
 
 
 def _orientation_label(radiological: bool) -> str:
@@ -146,8 +127,8 @@ def stat_map_mosaic(
             annotate=True,
             radiological=radiological,
         )
-        _label_colorbar(display, cbar_label)
-        figure = _figure_of(display)
+        label_colorbar(display, cbar_label)
+        figure = figure_of(display)
         annotate_provenance(
             figure,
             _provenance(
@@ -217,8 +198,8 @@ def dual_coded_mosaic(
             annotate=True,
             radiological=radiological,
         )
-        _label_colorbar(display, cbar_label)
-        figure = _figure_of(display)
+        label_colorbar(display, cbar_label)
+        figure = figure_of(display)
         annotate_provenance(
             figure,
             [
@@ -270,14 +251,14 @@ def glass_brain(
             black_bg=False,
             radiological=radiological,
         )
-        _label_colorbar(display, cbar_label)
+        label_colorbar(display, cbar_label)
         if peak_coords:
             for index, coord in enumerate(peak_coords, start=1):
                 display.add_markers(
                     [tuple(coord)], marker_color=GUIDE_COLOR, marker_size=18, marker="o"
                 )
                 logger.debug("Annotated peak %d at %s", index, coord)
-        figure = _figure_of(display)
+        figure = figure_of(display)
         annotate_provenance(
             figure,
             _provenance(
