@@ -1468,12 +1468,20 @@ git commit -m "feat(fmri): draw z histograms on a log axis against the standard 
 - Test: `tests/fmri/report/test_volumes.py`
 
 **Interfaces:**
-- Consumes: `MAGNITUDE_CMAP`, `plot_context` from Task 1; `magnitude_histogram` from Task 4.
+- Consumes: `MAGNITUDE_CMAP`, `plot_context`, `annotate_provenance`, `robust_upper_limit`, `clipped_fraction`, `OKABE_ITO` from Task 1; `magnitude_histogram` from Task 4.
 - Produces:
-  - `tsnr_volume(tsnr_img, *, bg_img=None, mask_img=None, title="", vmax=None) -> Figure`
-  - `compute_tsnr(bold_imgs: Sequence[Any], *, mask_img=None) -> nib.Nifti1Image`
+  - `@dataclass(frozen=True) class TsnrResult` with fields `mean_img`, `per_run_median: tuple[float, ...]`, `frames_used: tuple[int, ...]`, `frames_dropped: tuple[int, ...]`
+  - `compute_tsnr(bold_imgs: Sequence[Any], *, mask_img=None, sample_masks=None) -> TsnrResult`
+  - `tsnr_volume(result, *, bg_img=None, title="", vmax=None) -> Figure`
+  - `per_run_tsnr_figure(result, *, run_labels, title="") -> Figure`
 
-`compute_tsnr` is separated from rendering so the report layer can compute once and draw twice.
+`compute_tsnr` is separated from rendering so the report layer computes once and draws twice.
+
+**Two validity errors this task fixes, both in the code being replaced.**
+
+*Non-steady-state volumes corrupt tSNR.* The first few frames of a run sit at much higher intensity because longitudinal magnetisation has not yet saturated. fMRIPrep flags them as `non_steady_state_outlier_XX` and the GLM censors them (`confounds_selection.py:155`), but the tSNR computation reads the raw 4D array and includes them. They inflate the temporal standard deviation, so **every reported tSNR value is biased low**. `sample_masks` excludes them, and the frames dropped per run are stated on the figure.
+
+*Averaging across runs hides a bad run.* `tsnr_sum / tsnr_n` in the current code reduces every run to one map. A run with severe dropout or a spike is averaged into invisibility, which is the opposite of what a QC panel is for. `TsnrResult` carries the per-run medians and `per_run_tsnr_figure` draws them, so one bad run is visible as one bad run.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1502,20 +1510,64 @@ def test_compute_tsnr_returns_mean_over_standard_deviation() -> None:
     data = np.zeros((2, 2, 2, 10), dtype=np.float32)
     data[...] = np.arange(10, dtype=np.float32)
     img = nib.Nifti1Image(data, np.eye(4))
-    tsnr = volumes.compute_tsnr([img])
+    result = volumes.compute_tsnr([img])
     expected = float(np.mean(np.arange(10)) / np.std(np.arange(10)))
-    assert np.allclose(np.asarray(tsnr.get_fdata()), expected)
+    assert np.allclose(np.asarray(result.mean_img.get_fdata()), expected)
 
 
 def test_compute_tsnr_preserves_the_source_affine() -> None:
     affine = np.diag([-2.0, 2.0, 2.0, 1.0])
-    tsnr = volumes.compute_tsnr([_bold(affine=affine)])
-    assert np.allclose(tsnr.affine, affine)
+    result = volumes.compute_tsnr([_bold(affine=affine)])
+    assert np.allclose(result.mean_img.affine, affine)
 
 
 def test_compute_tsnr_averages_across_runs() -> None:
-    tsnr = volumes.compute_tsnr([_bold(0), _bold(1)])
-    assert tsnr.shape == (8, 8, 8)
+    result = volumes.compute_tsnr([_bold(0), _bold(1)])
+    assert result.mean_img.shape == (8, 8, 8)
+    assert len(result.per_run_median) == 2
+
+
+def test_non_steady_state_frames_are_excluded_from_tsnr() -> None:
+    # The first frames of a run sit at much higher intensity before longitudinal
+    # magnetisation saturates. Including them inflates the temporal standard
+    # deviation, so every tSNR value comes out biased low.
+    rng = np.random.default_rng(0)
+    data = (100.0 + rng.standard_normal((6, 6, 6, 20))).astype(np.float32)
+    data[..., :3] *= 3.0  # dummy volumes
+    img = nib.Nifti1Image(data, np.eye(4))
+
+    keep = np.ones(20, dtype=bool)
+    keep[:3] = False
+    with_dummies = volumes.compute_tsnr([img])
+    without = volumes.compute_tsnr([img], sample_masks=[keep])
+
+    assert without.per_run_median[0] > with_dummies.per_run_median[0] * 2
+    assert without.frames_dropped == (3,)
+    assert without.frames_used == (17,)
+
+
+def test_per_run_medians_expose_a_single_bad_run() -> None:
+    # Averaging maps across runs hides exactly what a QC panel exists to show.
+    good = _bold(0)
+    bad_data = np.asanyarray(_bold(1).dataobj).copy()
+    bad_data += np.random.default_rng(2).standard_normal(bad_data.shape) * 50
+    bad = nib.Nifti1Image(bad_data.astype(np.float32), np.eye(4))
+
+    result = volumes.compute_tsnr([good, bad])
+    assert result.per_run_median[0] > result.per_run_median[1] * 2
+
+
+def test_per_run_tsnr_figure_labels_every_run() -> None:
+    result = volumes.compute_tsnr([_bold(0), _bold(1)])
+    figure = volumes.per_run_tsnr_figure(result, run_labels=["run-01", "run-02"])
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "run-01" in text and "run-02" in text
+    plt.close(figure)
+
+
+def test_sample_mask_length_must_match_the_run() -> None:
+    with pytest.raises(ValueError, match="frames"):
+        volumes.compute_tsnr([_bold()], sample_masks=[np.ones(5, dtype=bool)])
 
 
 def test_compute_tsnr_rejects_a_three_dimensional_image() -> None:
@@ -1532,22 +1584,22 @@ def test_compute_tsnr_rejects_an_empty_run_list() -> None:
 def test_tsnr_volume_renders_through_nilearn_rather_than_slicing_the_array() -> None:
     # Voxel-axis slicing labels panels by anatomy without consulting the affine,
     # which is wrong for any non-RAS-canonical image.
-    tsnr = volumes.compute_tsnr([_bold()])
+    result = volumes.compute_tsnr([_bold()])
     with patch("nilearn.plotting.plot_img") as mock_plot:
         mock_plot.return_value.figure = None
         try:
-            volumes.tsnr_volume(tsnr)
+            volumes.tsnr_volume(result)
         except Exception:
             pass
     assert mock_plot.called
 
 
 def test_tsnr_volume_uses_the_single_hue_magnitude_colormap() -> None:
-    tsnr = volumes.compute_tsnr([_bold()])
+    result = volumes.compute_tsnr([_bold()])
     with patch("nilearn.plotting.plot_img") as mock_plot:
         mock_plot.return_value.figure = None
         try:
-            volumes.tsnr_volume(tsnr)
+            volumes.tsnr_volume(result)
         except Exception:
             pass
     assert mock_plot.call_args.kwargs["cmap"] == "cividis"
@@ -1556,6 +1608,16 @@ def test_tsnr_volume_uses_the_single_hue_magnitude_colormap() -> None:
 def test_tsnr_volume_returns_a_figure() -> None:
     figure = volumes.tsnr_volume(volumes.compute_tsnr([_bold()]))
     assert figure is not None
+    plt.close(figure)
+
+
+def test_tsnr_volume_states_how_many_frames_were_censored() -> None:
+    keep = np.ones(20, dtype=bool)
+    keep[:4] = False
+    result = volumes.compute_tsnr([_bold()], sample_masks=[keep])
+    figure = volumes.tsnr_volume(result)
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "4" in text and "censored" in text
     plt.close(figure)
 ```
 
@@ -1573,13 +1635,16 @@ Expected: FAIL — `ImportError: cannot import name 'volumes'`
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Optional, Sequence, Tuple
 
+import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 
 from fmri_pipeline.analysis.report.style import (
     MAGNITUDE_CMAP,
+    OKABE_ITO,
     annotate_provenance,
     clipped_fraction,
     plot_context,
@@ -1587,14 +1652,40 @@ from fmri_pipeline.analysis.report.style import (
 )
 
 
-def compute_tsnr(bold_imgs: Sequence[Any], *, mask_img: Any = None) -> nib.Nifti1Image:
-    """Return the mean temporal SNR across runs.
+@dataclass(frozen=True)
+class TsnrResult:
+    """Mean tSNR map plus the per-run detail an average would hide."""
 
-    Separated from rendering so the report layer computes this once per subject
-    rather than once per contrast.
+    mean_img: nib.Nifti1Image
+    per_run_median: Tuple[float, ...]
+    frames_used: Tuple[int, ...]
+    frames_dropped: Tuple[int, ...]
+
+
+def compute_tsnr(
+    bold_imgs: Sequence[Any],
+    *,
+    mask_img: Any = None,
+    sample_masks: Optional[Sequence[np.ndarray]] = None,
+) -> TsnrResult:
+    """Return mean temporal SNR across runs, and each run's median separately.
+
+    ``sample_masks`` is one boolean array per run marking the frames to keep. Pass
+    the same censoring the GLM used. Non-steady-state frames in particular must be
+    excluded: they sit at much higher intensity before longitudinal magnetisation
+    saturates, and leaving them in inflates the temporal standard deviation, biasing
+    every tSNR value low. fMRIPrep flags them as ``non_steady_state_outlier_XX``.
+
+    Per-run medians are returned alongside the mean map because averaging maps
+    across runs makes a single bad run disappear, which is the one thing this
+    measurement exists to catch.
     """
     if not bold_imgs:
         raise ValueError("compute_tsnr requires at least one BOLD image.")
+    if sample_masks is not None and len(sample_masks) != len(bold_imgs):
+        raise ValueError(
+            f"Got {len(sample_masks)} sample masks for {len(bold_imgs)} runs."
+        )
 
     mask = None
     if mask_img is not None:
@@ -1602,36 +1693,102 @@ def compute_tsnr(bold_imgs: Sequence[Any], *, mask_img: Any = None) -> nib.Nifti
 
     total: Optional[np.ndarray] = None
     affine = None
-    for img in bold_imgs:
+    medians: list[float] = []
+    used: list[int] = []
+    dropped: list[int] = []
+
+    for index, img in enumerate(bold_imgs):
         data = np.asanyarray(img.dataobj)
         if data.ndim != 4:
             raise ValueError(f"compute_tsnr requires 4D images, got shape {data.shape}.")
         if affine is None:
             affine = img.affine
+
+        n_frames = data.shape[3]
+        if sample_masks is not None:
+            keep = np.asarray(sample_masks[index], dtype=bool)
+            if keep.size != n_frames:
+                raise ValueError(
+                    f"Run {index} has {n_frames} frames but its sample mask has {keep.size}."
+                )
+            data = data[..., keep]
+        used.append(int(data.shape[3]))
+        dropped.append(int(n_frames - data.shape[3]))
+        if data.shape[3] < 2:
+            raise ValueError(f"Run {index} has fewer than two frames after censoring.")
+
         mean = np.mean(data, axis=3)
         std = np.std(data, axis=3)
         # A zero-variance voxel has undefined tSNR, not infinite tSNR.
         tsnr = np.divide(mean, std, out=np.zeros_like(mean, dtype=float), where=std > 0)
         if mask is not None and mask.shape == tsnr.shape:
             tsnr = np.where(mask, tsnr, 0.0)
+
+        inside = tsnr[tsnr > 0]
+        medians.append(float(np.median(inside)) if inside.size else 0.0)
+
         if total is None:
             total = tsnr.astype(float)
         elif total.shape == tsnr.shape:
             total += tsnr
         else:
-            raise ValueError(
-                f"Runs disagree on shape: {total.shape} vs {tsnr.shape}."
-            )
+            raise ValueError(f"Runs disagree on shape: {total.shape} vs {tsnr.shape}.")
 
     assert total is not None  # guarded by the empty check above
-    return nib.Nifti1Image((total / float(len(bold_imgs))).astype("float32"), affine)
+    return TsnrResult(
+        mean_img=nib.Nifti1Image(
+            (total / float(len(bold_imgs))).astype("float32"), affine
+        ),
+        per_run_median=tuple(medians),
+        frames_used=tuple(used),
+        frames_dropped=tuple(dropped),
+    )
+
+
+def per_run_tsnr_figure(
+    result: TsnrResult,
+    *,
+    run_labels: Sequence[str],
+    title: str = "",
+) -> plt.Figure:
+    """Draw each run's median tSNR, with the frames censored from each.
+
+    Exists because the mean map cannot show that one run was bad. Drawn as bars
+    against a run axis with every run named, since the labels are what let a reader
+    act on the figure -- and the fill colour alone must not carry identity.
+    """
+    medians = np.asarray(result.per_run_median, dtype=float)
+    positions = np.arange(len(medians))
+    with plot_context():
+        figure, axis = plt.subplots(figsize=(6.5, 0.4 * len(medians) + 1.6))
+        axis.barh(positions, medians, color=OKABE_ITO["sky_blue"])
+        axis.set_yticks(positions)
+        axis.set_yticklabels(list(run_labels)[: len(medians)], fontsize=8)
+        axis.invert_yaxis()
+        axis.set_xlabel("Median tSNR (masked voxels)")
+        if title:
+            axis.set_title(title)
+        for index, (value, drop) in enumerate(
+            zip(medians, result.frames_dropped)
+        ):
+            note = f"{value:.1f}" + (f"  ({drop} frames censored)" if drop else "")
+            axis.annotate(
+                note, xy=(value, index), xytext=(4, 0), textcoords="offset points",
+                va="center", fontsize=7,
+            )
+        annotate_provenance(figure, [
+            f"{len(medians)} run(s)",
+            f"{sum(result.frames_used):,} frames used, "
+            f"{sum(result.frames_dropped):,} censored",
+        ])
+        figure.tight_layout()
+        return figure
 
 
 def tsnr_volume(
-    tsnr_img: Any,
+    result: TsnrResult,
     *,
     bg_img: Any = None,
-    mask_img: Any = None,
     title: str = "",
     vmax: Optional[float] = None,
 ) -> Any:
@@ -1643,6 +1800,7 @@ def tsnr_volume(
     """
     from nilearn import plotting
 
+    tsnr_img = result.mean_img
     data = np.asarray(tsnr_img.get_fdata())
     positive = data[np.isfinite(data) & (data > 0)]
     resolved_vmax = float(vmax) if vmax is not None else (
@@ -1672,19 +1830,21 @@ def tsnr_volume(
             annotate_provenance(figure, [
                 f"n = {positive.size:,} voxels",
                 f"median tSNR {float(np.median(positive)):.1f}",
+                f"mean of {len(result.per_run_median)} run(s); "
+                f"{sum(result.frames_dropped):,} frames censored",
                 f"colour limit {resolved_vmax:.1f} "
                 f"({clipped_fraction(positive, limit=resolved_vmax):.1%} clipped)",
             ])
         return figure
 
 
-__all__ = ["compute_tsnr", "tsnr_volume"]
+__all__ = ["TsnrResult", "compute_tsnr", "per_run_tsnr_figure", "tsnr_volume"]
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_volumes.py -v`
-Expected: PASS, 8 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1707,9 +1867,15 @@ git commit -m "fix(fmri): render tSNR through the affine instead of slicing the 
   - `TISSUE_ORDER: tuple[str, ...] = ("GM", "WM", "CSF")`
   - `resolve_tissue_codes(shape, *, assets, reference_img) -> tuple[np.ndarray | None, str]` — returns per-voxel class codes and a source label of `"probseg"`, `"dseg"`, or `"none"`
   - `subsample_rows(carpet, tissue_codes, *, max_rows=6000, min_rows_per_class=200) -> tuple[np.ndarray, np.ndarray | None]`
+  - `standardise_carpet(voxel_timeseries, *, sample_mask=None) -> np.ndarray`
+  - `FD_REFERENCE_LINES: tuple[tuple[float, str], ...]`
   - `carpet_figure(carpet, *, tissue_codes, tissue_source, tr, run_boundaries, run_labels, fd=None, dvars=None, dvars_label="DVARS", title="") -> Figure`
 
 `carpet` is `(n_voxels, n_frames)`, already standardised. `run_boundaries` are frame indices of run starts after the first. `fd` and `dvars` are per-frame arrays whose length matches the carpet's frame count; `NaN` is preserved and drawn as a gap.
+
+**The same non-steady-state problem as Task 5, in a different guise.** The carpet z-scores each voxel across all frames. Non-steady-state frames sit far above the steady-state signal, so they inflate every voxel's standard deviation and compress the rest of the carpet toward neutral — the artefact the panel exists to reveal gets flattened by the frames the GLM already censored. `standardise_carpet` computes the mean and standard deviation over the retained frames only, then applies them to all frames, so the dummy volumes stay *visible* as the outliers they are instead of setting the scale.
+
+**FD reference lines are references, not verdicts.** The motion axis carries labelled lines at 0.2 mm and 0.5 mm, cited to Power et al. This is deliberately not a pass/fail mark: the line names a published convention a reader can compare against, and the figure draws no conclusion. A threshold the pipeline invented, or a red "FAIL" badge, would be the thing to avoid.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1873,6 +2039,55 @@ def test_subsampling_is_deterministic_for_the_same_input() -> None:
     assert np.array_equal(first, second)
 
 
+def test_standardisation_takes_its_scale_from_retained_frames_only() -> None:
+    # Dummy volumes sit far above steady state. If they set the scale, every other
+    # frame is compressed toward neutral and the carpet stops showing anything.
+    series = np.tile(np.arange(20.0), (5, 1))
+    series[:, :3] += 500.0
+    keep = np.ones(20, dtype=bool)
+    keep[:3] = False
+
+    naive = carpet_mod.standardise_carpet(series)
+    corrected = carpet_mod.standardise_carpet(series, sample_mask=keep)
+    assert np.std(corrected[:, 3:]) > np.std(naive[:, 3:]) * 5
+
+
+def test_standardisation_keeps_dummy_volumes_visible_as_outliers() -> None:
+    series = np.tile(np.arange(20.0), (5, 1))
+    series[:, :3] += 500.0
+    keep = np.ones(20, dtype=bool)
+    keep[:3] = False
+    corrected = carpet_mod.standardise_carpet(series, sample_mask=keep)
+    # Excluded from the scale, but still drawn -- and far off it.
+    assert np.abs(corrected[:, :3]).min() > np.abs(corrected[:, 3:]).max()
+
+
+def test_standardisation_handles_a_zero_variance_voxel() -> None:
+    series = np.zeros((3, 10))
+    series[1] = np.arange(10.0)
+    result = carpet_mod.standardise_carpet(series)
+    assert np.all(np.isfinite(result))
+
+
+def test_carpet_draws_cited_fd_reference_lines() -> None:
+    figure = carpet_mod.carpet_figure(
+        _carpet(n_frames=40), tissue_codes=None, tissue_source="none", tr=2.0,
+        run_boundaries=[], run_labels=["run-01"], fd=np.full(40, 0.1),
+    )
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "0.5" in text and "Power" in text
+
+
+def test_carpet_draws_no_reference_lines_without_a_motion_trace() -> None:
+    figure = carpet_mod.carpet_figure(
+        _carpet(n_frames=40), tissue_codes=None, tissue_source="none", tr=2.0,
+        run_boundaries=[], run_labels=["run-01"],
+    )
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "Power" not in text
+    plt.close(figure)
+
+
 def test_carpet_states_how_many_voxels_it_actually_drew() -> None:
     figure = carpet_mod.carpet_figure(
         _carpet(n_voxels=60), tissue_codes=None, tissue_source="none", tr=2.0,
@@ -1928,6 +2143,51 @@ _ASEG_TO_CLASS = {
 }
 
 _CARPET_CLIP = 2.5
+
+#: Framewise-displacement values worth comparing against, with their source.
+#:
+#: References, not verdicts. The line names a published convention so a reader can
+#: locate the trace against it; the figure draws no conclusion, and no threshold here
+#: was invented by this pipeline.
+FD_REFERENCE_LINES: Tuple[Tuple[float, str], ...] = (
+    (0.2, "0.2 mm (Power et al. 2014)"),
+    (0.5, "0.5 mm (Power et al. 2012)"),
+)
+
+
+def standardise_carpet(
+    voxel_timeseries: np.ndarray,
+    *,
+    sample_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Z-score each voxel, taking the scale from retained frames only.
+
+    ``sample_mask`` marks the frames the GLM kept. Non-steady-state volumes sit far
+    above the steady-state signal, so including them in the mean and standard
+    deviation inflates every voxel's scale and compresses the rest of the carpet
+    toward neutral -- flattening the very structure the panel exists to show.
+
+    The excluded frames are still *drawn*. They are outliers, and a carpet that
+    silently dropped them would hide the fact that the run began unsteady.
+    """
+    series = np.asarray(voxel_timeseries, dtype=float)
+    scale_source = series
+    if sample_mask is not None:
+        keep = np.asarray(sample_mask, dtype=bool)
+        if keep.size != series.shape[1]:
+            raise ValueError(
+                f"Sample mask has {keep.size} entries for {series.shape[1]} frames."
+            )
+        if keep.sum() < 2:
+            raise ValueError("Standardisation needs at least two retained frames.")
+        scale_source = series[:, keep]
+
+    mean = np.mean(scale_source, axis=1, keepdims=True)
+    std = np.std(scale_source, axis=1, keepdims=True)
+    # A constant voxel has no meaningful z score; leave it at zero rather than
+    # dividing by zero and painting it as an extreme value.
+    std = np.where(std > 0, std, 1.0)
+    return (series - mean) / std
 
 
 def _resample_to(img: Any, reference_img: Any, *, order: int) -> Optional[np.ndarray]:
@@ -2094,9 +2354,24 @@ def carpet_figure(
 
         index = 0
         if fd is not None:
-            axes[index].plot(times, np.asarray(fd, dtype=float),
+            fd_values = np.asarray(fd, dtype=float)
+            axes[index].plot(times, fd_values,
                              color=OKABE_ITO["vermillion"], linewidth=0.8)
             axes[index].set_ylabel("FD (mm)")
+            # Published reference values, drawn only where they fall inside the data's
+            # own range -- a line far above every sample adds no comparison and costs
+            # the trace its vertical resolution.
+            ceiling = float(np.nanmax(fd_values)) if np.isfinite(fd_values).any() else 0.0
+            for level, label in FD_REFERENCE_LINES:
+                if level <= ceiling * 1.5:
+                    axes[index].axhline(
+                        level, color=GUIDE_COLOR, linestyle=":", linewidth=0.8
+                    )
+                    axes[index].annotate(
+                        label, xy=(1.0, level), xycoords=("axes fraction", "data"),
+                        xytext=(-2, 2), textcoords="offset points",
+                        ha="right", va="bottom", fontsize=6, color=GUIDE_COLOR,
+                    )
             index += 1
         if dvars is not None:
             axes[index].plot(times, np.asarray(dvars, dtype=float),
@@ -2159,10 +2434,12 @@ def carpet_figure(
 
 
 __all__ = [
+    "FD_REFERENCE_LINES",
     "TISSUE_ORDER",
     "carpet_figure",
     "order_by_tissue",
     "resolve_tissue_codes",
+    "standardise_carpet",
     "subsample_rows",
 ]
 ```
@@ -2173,7 +2450,7 @@ Add `annotate_provenance` to this module's imports from
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_carpet.py -v`
-Expected: PASS, 13 tests.
+Expected: PASS, 18 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -3134,7 +3411,36 @@ Rewrite `generate_carpet_qc_images` to build the carpet matrix as it does today,
         )
 ```
 
-Rewrite `generate_tsnr_qc_images` to call `volume_figures.compute_tsnr` and `volume_figures.tsnr_volume`, plus `distribution_figures.magnitude_histogram(values, xlabel="tSNR")`. Delete the raw-array montage entirely.
+Rewrite `generate_tsnr_qc_images` to call `volume_figures.compute_tsnr`, then `volume_figures.tsnr_volume`, `volume_figures.per_run_tsnr_figure`, and `distribution_figures.magnitude_histogram(values, xlabel="tSNR")`. Delete the raw-array montage entirely.
+
+**Both QC generators now need the per-run censoring masks**, since Tasks 5 and 6 exclude non-steady-state frames from the tSNR scale and the carpet's standardisation. Build them once from the confounds files that are already being read, using the censor-column predicate the analysis path already owns:
+
+```python
+def _sample_masks_from_confounds(paths: Sequence[Path]) -> List[np.ndarray]:
+    """One boolean keep-mask per run, matching the censoring the GLM applied.
+
+    Reuses ``_is_censor_column`` so the report censors exactly what the model
+    censored -- motion outliers, explicit outliers, and non-steady-state volumes.
+    A report that censored differently from the model would be describing a
+    different analysis.
+    """
+    import pandas as pd
+
+    from fmri_pipeline.utils.bold_discovery import _is_censor_column
+
+    masks: List[np.ndarray] = []
+    for path in paths:
+        frame = pd.read_csv(str(path), sep="\t")
+        censor = [c for c in frame.columns if _is_censor_column(c)]
+        if not censor:
+            masks.append(np.ones(len(frame), dtype=bool))
+            continue
+        flagged = frame[censor].to_numpy(dtype=float) > 0
+        masks.append(~flagged.any(axis=1))
+    return masks
+```
+
+Pass the result as `sample_masks=` to `compute_tsnr`, and the concatenated mask as `sample_mask=` to `carpet_figures.standardise_carpet`. Also pass `fd=df["framewise_displacement"].to_numpy()` **without** `fillna`, so the undefined first frame of each run stays a gap.
 
 Delete the standalone motion QC block (lines 1371-1415): FD and DVARS now come from the confounds files into `generate_carpet_qc_images` and are drawn on the carpet's shared axis. Read them with `pd.read_csv(path, sep="\t")` and pass `df["framewise_displacement"].to_numpy()` **without** `fillna`, and set `dvars_label` to `"DVARS"` or `"std DVARS"` to match whichever column was found.
 
@@ -3184,6 +3490,7 @@ Deferred to plans 2 and 3, by design: the per-subject document and `html.py`, th
 - **`plot_abs` default.** Confirmed `True` in the installed nilearn 0.14.0, which is what makes Task 3's fix necessary rather than defensive.
 - **Smoothness estimator.** Validated against Gaussian-filtered noise: within 4% of true FWHM at 2.35, 4.71, and 7.06 mm, exact scaling with voxel size, floors at one voxel for sub-voxel smoothness.
 - **Dual coding is available and works.** `transparency` and `transparency_range` exist on `plot_stat_map` in the installed nilearn 0.14.0 (added in 0.12.0), and a dual-coded figure was rendered successfully before this plan was written. It is not a hypothetical capability.
+- **The censoring predicate already exists.** `_is_censor_column` in `bold_discovery.py:415` matches `motion_outlier*`, `non_steady_state_outlier*`, and `outlier*`, and `confounds_selection.py:152` uses the same rule to build the GLM's spike regressors. The report reuses it rather than defining a second notion of "censored", so the QC panels describe the analysis that actually ran.
 - **`radiological` is a real parameter,** defaulting to `False`, so the current figures are neurological convention — they simply never said so.
 - **Crameri diverging maps were evaluated and rejected, with numbers.** Matplotlib 3.11 ships `berlin`, `managua`, `vanimo`. Measured midpoint CIE L*: 4.4, 24.0, 7.1 respectively, versus 97.1 for `RdBu_r`. All three are dark-centred and built for a dark canvas; on this report's white surface they would make "no effect" the heaviest ink on the page. `RdBu_r` was confirmed monotonic in lightness across each half, which is the property a diverging scale actually needs. Newer is not automatically better, and the measurement is why.
 
@@ -3195,3 +3502,6 @@ Deferred to plans 2 and 3, by design: the per-subject document and `html.py`, th
 - **The z histogram's null overlay is scaled to the total voxel count,** which assumes most voxels are null. That is the conventional display and is close to true for a typical contrast, but it is an assumption, and it will understate the null for a map where a large fraction of the brain is genuinely active.
 - **Surface rendering is not in this plan.** Cortical results are best read on an inflated surface, and `plot_img_on_surf` exists in the installed nilearn. It is excluded here for two reasons: it needs a `fsaverage` fetch over the network, which a pipeline that must run on an unmounted external drive cannot depend on; and projecting a volume-space GLM result onto a surface introduces interpolation the analysis never performed, which needs its own caveat on every such figure. Revisit if fMRIPrep is configured to emit `fsaverage`/`fsLR` surface outputs directly, in which case the projection is the preprocessing's, not the figure's.
 - **`cluster_min_voxels` remains a display filter.** This plan makes the report stop implying otherwise, but it does not add valid cluster-level inference. Doing that properly means permutation — which is what Eklund et al. recommend — and belongs in the analysis layer, not the plotting layer. Worth raising as separate work.
+- **The carpet still shows data before confound regression.** It is drawn from the preprocessed BOLD, so it shows what went *into* the model, not what the model was left with. The most informative version is a before/after pair, which demonstrates whether the confound model actually removed the artefact it was configured for. That needs the cleaned timeseries, which the report layer does not have until plan 2's manifest carries it. Until then the panel is labelled "before confound regression" so the distinction is not left to the reader.
+- **Design efficiency is not plotted.** `1 / (c' (X'X)⁻¹ c)` is the standard companion to VIF and answers whether a contrast is estimable at all, not merely whether its regressors are collinear. It is cheap, but it is per-contrast, and the per-contrast layout belongs to plan 2's report structure. Add it there rather than bolting a single number onto the design section here.
+- **Figure widths are not set to journal column sizes.** Fixing figure widths at 85 mm and 180 mm would make panels directly usable in a manuscript without rescaling text. Deferred because the report's own layout should drive sizing first, and retrofitting is cheap.

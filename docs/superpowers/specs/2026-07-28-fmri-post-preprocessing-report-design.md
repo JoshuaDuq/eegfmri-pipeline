@@ -303,6 +303,11 @@ regression test to each.
 | `reporting.py:1083` | `ax.legend()` called unconditionally though a label is added only when a threshold exists; emits a warning and an empty legend under `threshold_mode=none`. |
 | carpet/tSNR/histogram paths | `plt.close(fig)` sits after `savefig` inside the `try`, so any failure leaks the figure. Unbounded growth across a cohort. |
 | `reporting.py:219` | Carpet voxels are ordered by raw mask index, so the banding that makes a carpet diagnostic is not present. |
+| `reporting.py:222`–`:226` | The carpet z-scores every voxel over *all* frames, including non-steady-state volumes. Those sit far above steady state, so they inflate each voxel's standard deviation and compress the rest of the carpet toward neutral, flattening the artefacts the panel exists to show. The GLM already censors these frames (`confounds_selection.py:152`). |
+| `reporting.py:339`–`:343` | tSNR is computed over all frames for the same reason. The inflated standard deviation biases **every reported tSNR value low** — a quantitative error in a reported metric, not a display issue. |
+| `reporting.py:351`–`:357` | tSNR is averaged across runs into one map, so a run with severe dropout or a spike is averaged into invisibility. That is the opposite of what a QC panel is for. |
+| `reporting.py:1120` | The cluster table's caption runs the height threshold and the extent filter together, reading as though extent were inferential. The pipeline performs no cluster-level familywise correction; Eklund, Nichols & Knutsson (2016) measured false-positive rates up to 70% for parametric cluster inference. |
+| all volume panels | Orientation convention is never stated. `radiological` defaults to `False`, so the figures are neurological — but a reader cannot know that, and a left/right error is invisible in the image. |
 | `second_level.py:819`, `contrast_builder.py:975` | Design-matrix dpi differs (200 vs 150) and neither matches the 300 used elsewhere; `dpi=300` is also passed on SVG saves, where it has no meaning. |
 
 ### Architectural defects
