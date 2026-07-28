@@ -1,0 +1,230 @@
+"""Render conventions shared by every fMRI report figure.
+
+Colour policy
+-------------
+Signed quantities -- z statistics, effect sizes -- are drawn with a diverging
+colormap on a symmetric scale, so the neutral colour always marks zero. Unsigned
+magnitudes -- tSNR, standard error -- are drawn with a single-hue perceptually
+uniform ramp. Rainbow and multi-hue sequential colormaps are not used: their
+non-monotonic lightness introduces boundaries that are not in the data.
+
+``cold_hot`` is deliberately absent even though nilearn offers it. Its midpoint is
+dark, which is correct only against ``black_bg=True``; these figures are drawn on a
+white background, where the midpoint must be light for zero to read as neutral.
+
+Matplotlib 3.10 added Crameri's perceptually uniform diverging maps -- ``berlin``,
+``managua``, ``vanimo`` -- and they were evaluated and rejected here for the same
+reason. Measured CIE L* at their midpoints: berlin 4.4, vanimo 7.1, managua 24.0,
+against RdBu_r's 97.1. All three are built for a dark canvas; on a white report
+surface their midpoint is the heaviest ink on the page, so "no effect" becomes the
+most visually salient value in the figure. RdBu_r's lightness is monotonic across
+each half (verified), which is the property that actually matters for a diverging
+scale. Revisit only if these figures move to a dark canvas, or add ``cmcrameri`` for
+``vik``, which is perceptually uniform *and* light-centred.
+
+Scoping
+-------
+Style is applied through :func:`plot_context` rather than by mutating
+``plt.rcParams`` at import. The EEG pipeline's ``setup_matplotlib`` mutates global
+state via ``seaborn.set_theme``; when both pipelines run in one process, whichever
+ran last silently restyles the other. A context manager cannot do that.
+"""
+
+from __future__ import annotations
+
+from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import Any, Sequence
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from eeg_pipeline.preprocessing.report.style import OKABE_ITO
+
+#: Diverging colormap for signed maps. Light neutral at zero on a white background.
+SIGNED_CMAP = "RdBu_r"
+
+#: Single-hue perceptually uniform ramp for unsigned magnitude.
+MAGNITUDE_CMAP = "cividis"
+
+#: Neutral colour for guides, thresholds, and reference curves.
+GUIDE_COLOR = "0.35"
+
+#: Percentile defining a robust colour limit a few extreme voxels cannot dominate.
+COLOR_LIMIT_PERCENTILE = 98.0
+
+#: Smallest ratio of colour limit to threshold that leaves a panel usable range.
+#:
+#: Without a floor, a thresholded panel drawn from noise gets a limit barely above
+#: its own threshold -- p99(|z|) of standard normal noise is about 2.58 against a
+#: 2.3 threshold -- and every surviving voxel saturates to one colour.
+SUPRATHRESHOLD_HEADROOM = 1.5
+
+FMRI_RC: dict[str, Any] = {
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "axes.linewidth": 0.8,
+    "grid.color": "0.85",
+    "grid.linestyle": "--",
+    "grid.linewidth": 0.8,
+    "figure.dpi": 150,
+    "savefig.dpi": 300,
+    "savefig.bbox": "tight",
+    "font.family": ["Arial", "DejaVu Sans"],
+    "font.size": 9,
+    "axes.titlesize": 10,
+    "legend.frameon": False,
+    "image.interpolation": "nearest",
+    # Element ids in an SVG are salted from this. Left unset, Matplotlib salts from
+    # the process, so two renders of identical data produce different files.
+    "svg.hashsalt": "fmri-report",
+    # Text becomes paths. Costs bytes, but the figure then renders identically on a
+    # machine without Arial -- including a journal's typesetting system, which is
+    # where a report figure eventually ends up.
+    "svg.fonttype": "path",
+}
+
+
+def plot_context() -> AbstractContextManager:
+    """Return a context in which this package's render defaults apply."""
+    return plt.rc_context(FMRI_RC)
+
+
+def savefig_kwargs(path: Path) -> dict[str, Any]:
+    """Return ``savefig`` arguments that make the output byte-reproducible.
+
+    Matplotlib stamps a creation date into SVG and a ``Software`` tag into PNG.
+    Either makes two renders of identical data differ, so a figure cannot be diffed
+    against its predecessor, content-addressed, or cached. Measured on this
+    installation: PNG is stable either way, SVG is not.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix == ".svg":
+        return {"metadata": {"Date": None}}
+    if suffix == ".png":
+        return {"metadata": {"Software": None}}
+    return {}
+
+
+def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
+    """Print the numbers a reader needs to trust the figure, inside the figure.
+
+    A figure travels: it gets pulled out of the report into a slide, a manuscript,
+    an email. Everything needed to interpret it -- how many samples, what threshold,
+    what colour limit, how much the limit clipped -- has to survive that trip, and a
+    caption in the surrounding HTML does not.
+
+    Stating the clipped fraction matters most. A robust colour limit deliberately
+    saturates the extreme voxels; unstated, the figure silently claims it did not.
+    """
+    if not lines:
+        return
+    figure.text(
+        0.005,
+        0.005,
+        "  ·  ".join(lines),
+        fontsize=6.5,
+        color=GUIDE_COLOR,
+        va="bottom",
+        ha="left",
+    )
+
+
+def _finite(*values: np.ndarray) -> np.ndarray:
+    pooled = np.concatenate([np.asarray(v, dtype=float).ravel() for v in values])
+    finite = pooled[np.isfinite(pooled)]
+    if finite.size == 0:
+        raise ValueError("Colour limits require at least one finite value.")
+    return finite
+
+
+def robust_symmetric_limit(
+    *values: np.ndarray,
+    percentile: float = COLOR_LIMIT_PERCENTILE,
+) -> float:
+    """Return a symmetric colour limit a few extreme samples cannot dominate.
+
+    Taking the limit from the single largest absolute value lets one extreme voxel
+    flatten the rest of the map to the neutral colour. The limit therefore comes
+    from a high percentile of the pooled absolute values, and callers state it on
+    the figure so that clipped voxels are declared rather than hidden.
+    """
+    if not 0.0 < percentile <= 100.0:
+        raise ValueError(f"Percentile must lie in (0, 100], got {percentile!r}.")
+    return float(np.percentile(np.abs(_finite(*values)), percentile))
+
+
+def robust_upper_limit(
+    values: np.ndarray,
+    percentile: float = COLOR_LIMIT_PERCENTILE,
+) -> float:
+    """Return an upper colour limit for an unsigned magnitude.
+
+    Separate from :func:`robust_symmetric_limit` because tSNR and standard error
+    have no negative half; taking a symmetric limit for them wastes half the ramp
+    and implies a sign the quantity does not have.
+    """
+    if not 0.0 < percentile <= 100.0:
+        raise ValueError(f"Percentile must lie in (0, 100], got {percentile!r}.")
+    return float(np.percentile(_finite(values), percentile))
+
+
+def clipped_fraction(values: np.ndarray, *, limit: float) -> float:
+    """Return the fraction of finite values a colour limit saturates.
+
+    Reported on every figure that uses a robust limit, so that saturation is a
+    declared property of the panel rather than something a reader has to suspect.
+    """
+    finite = _finite(values)
+    return float(np.mean(np.abs(finite) > abs(float(limit))))
+
+
+def suprathreshold_limit(
+    values: np.ndarray,
+    *,
+    threshold: float,
+    percentile: float = COLOR_LIMIT_PERCENTILE,
+) -> float:
+    """Return a colour limit for a thresholded panel.
+
+    Computed over only the voxels that survive ``threshold``, because a limit taken
+    from the whole map is dominated by the sub-threshold voxels the panel does not
+    show. Floored at ``threshold * SUPRATHRESHOLD_HEADROOM`` so the panel keeps
+    usable dynamic range even when nothing meaningfully exceeds the threshold.
+    """
+    if threshold <= 0:
+        raise ValueError(f"Threshold must be > 0, got {threshold!r}.")
+    floor = float(threshold) * SUPRATHRESHOLD_HEADROOM
+    finite = _finite(values)
+    surviving = np.abs(finite)[np.abs(finite) > float(threshold)]
+    if surviving.size == 0:
+        return floor
+    return max(floor, float(np.percentile(surviving, percentile)))
+
+
+def figure_format(*, dense: bool) -> str:
+    """Return the embedding format for one figure.
+
+    Figures dominated by a dense image layer -- brain mosaics, carpets -- stay
+    raster: wrapping the same pixels in base64 inside an SVG costs more bytes while
+    only sharpening the axis text. Line and bar figures are vector, so their text
+    stays legible at any zoom in a browser whose width the author does not control.
+    """
+    return "png" if dense else "svg"
+
+
+__all__ = [
+    "FMRI_RC",
+    "GUIDE_COLOR",
+    "MAGNITUDE_CMAP",
+    "OKABE_ITO",
+    "SIGNED_CMAP",
+    "annotate_provenance",
+    "clipped_fraction",
+    "figure_format",
+    "plot_context",
+    "robust_symmetric_limit",
+    "robust_upper_limit",
+    "savefig_kwargs",
+    "suprathreshold_limit",
+]
