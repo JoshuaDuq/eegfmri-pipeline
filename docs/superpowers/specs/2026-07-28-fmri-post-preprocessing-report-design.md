@@ -68,6 +68,20 @@ case.
 full MNI refit) move to the analysis config, where their cost is visible. What remains is a
 report config that only decides rendering. No rendering setting may cause a GLM to be fit.
 
+This is a breaking config change and is taken cleanly, with no deprecated aliases: the
+project is pre-publication, and aliases that silently accept a rendering flag which fits a
+GLM would preserve exactly the confusion the split exists to remove. Study YAMLs and the
+affected CLI flags are updated in the same change, and loading a config that still carries
+a moved key fails with a message naming its new location.
+
+**A degenerate ROI is a measurement, not a fault.** `_validate_roi_timeseries`
+(`resting_state.py:210`) currently raises when an ROI has no usable signal, which aborts the
+subject. Atlas/BOLD overlap failure is precisely what the ROI coverage panel exists to show,
+and it cannot show it if the subject never completes. Degenerate and empty ROIs are recorded
+per ROI, excluded from the connectivity computation, and rendered in the coverage panel.
+Only the case where *no* ROI yields usable signal remains an error, because there is then no
+analysis to report.
+
 **Two report profiles, one QC section.** The task profile carries model and contrast
 sections; the rest profile carries connectivity sections. Both share the header,
 the as-modelled QC section, and methods. The profile is selected by `task_is_rest`.
@@ -301,7 +315,7 @@ regression test to each.
 | `fmri_analysis.py:343`–`:351` | `include_effect_size` and `include_standard_error`, both fields of the *plotting* config, drive `compute_contrast` calls. |
 | `fmri_analysis.py:72` vs `reporting.py:728`, `:762` | Two independent discovery paths for background and mask images. |
 | `resting_state.py` (whole module) | Produces no figures, and no report exists for the rest profile despite `task_is_rest` being first-class config. |
-| `resting_state.py:210` | `_validate_roi_timeseries` raises on a degenerate ROI. Atlas/BOLD overlap failure is a measurement the coverage panel should display, not a fault that aborts the subject. **Pending scope confirmation** — analysis code, not plotting. |
+| `resting_state.py:210` | `_validate_roi_timeseries` raises on a degenerate ROI. Atlas/BOLD overlap failure is a measurement the coverage panel should display, not a fault that aborts the subject. In scope. |
 
 ## Error handling
 
@@ -337,6 +351,12 @@ Architecture and profile tests:
   carries no grouping column.
 - A subject with both a rest and a task acquisition yields two reports whose QC sections
   have the same shape.
+- A degenerate ROI is excluded from connectivity, recorded, and rendered in the coverage
+  panel rather than aborting the subject; a run in which *every* ROI is degenerate still
+  raises.
+- Loading a config carrying a moved key (`plotting.include_effect_size`,
+  `plotting.include_standard_error`, `plotting.space`) fails with a message naming the new
+  location.
 
 Per the project convention, verification runs targeted subsets rather than the full suite.
 
@@ -346,6 +366,7 @@ Per the project convention, verification runs targeted subsets rather than the f
 - fMRIPrep-domain QC: registration, susceptibility distortion, surface reconstruction.
 - Any change to GLM estimation, contrast construction, or confound selection — except the
   mechanical move of the compute-triggering fields off `FmriPlottingConfig`, which changes
-  where they are configured and not what they compute.
+  where they are configured and not what they compute, and the ROI degeneracy handling
+  above.
 - Connectivity kinds beyond `correlation`, which is all `resting_state.py` currently
   supports.
