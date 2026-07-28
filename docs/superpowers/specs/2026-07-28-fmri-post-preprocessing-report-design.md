@@ -24,18 +24,53 @@ Separately, the pipeline has no per-subject report of the kind fMRIPrep and the 
 pipeline both provide. Today's `report.html` is scoped to a single contrast, so the QC
 panels are recomputed and duplicated for every contrast of the same subject.
 
+Two structural problems sit underneath the figure defects.
+
+**Report generation is welded to model fitting.** `run_fmri_plotting_and_report` is called
+from inside the per-contrast GLM path (`fmri_analysis.py:353`), and one CLI invocation fits
+one contrast. Subject-level QC therefore runs once per contrast: `generate_carpet_qc_images`
+loads every 4D BOLD volume, then `generate_tsnr_qc_images` loads every 4D BOLD volume again,
+and both produce byte-identical output for every contrast of the same subject. A plotting
+setting also triggers statistical work — `space` including `mni` refits the whole model
+(`fmri_analysis.py:312`), and `include_effect_size` / `include_standard_error`, both fields
+of `FmriPlottingConfig`, drive `compute_contrast` calls (`fmri_analysis.py:343`). There is
+no path that regenerates a report from existing derivatives, so iterating on figure design
+means re-running GLMs.
+
+**The resting-state arm produces no figures at all.** `resting_state.py` writes ROI
+timeseries, a connectivity matrix, Fisher-z, ROI labels, and `provenance.json`, and not one
+image. `task_is_rest` is first-class config across four sections, so rest-only studies are
+explicitly supported and currently have nothing to look at.
+
 ## Scope
 
-This spec covers the **per-subject** post-preprocessing report and the plotting layer
-underneath it. A cohort/group report is a follow-on that reuses the same style and figure
-modules; it is named here only where it constrains an interface, and is not built in this
-pass.
+This spec covers the **per-subject** post-preprocessing report — for both task and
+resting-state/baseline acquisitions — and the plotting layer underneath it. A cohort/group
+report is a follow-on that reuses the same style and figure modules; it is named here only
+where it constrains an interface, and is not built in this pass.
 
 ## Decisions taken
 
-**Report scope is per subject.** One `sub-XXXX_task-YYYY_report.html` covers the shared QC
-once and then every first-level contrast as a section. This replaces the per-contrast
-`report.html`.
+**Report scope is per subject and task.** One `sub-XXXX_task-YYYY_report.html` covers the
+shared QC once and then every result of that task. This replaces the per-contrast
+`report.html`. Task is part of the identity because a study may acquire both rest and task,
+and the two need different result sections.
+
+**Report generation is decoupled from model fitting.** The analysis pipeline's job ends at
+writing stat maps plus a machine-readable manifest describing what was fit. A separate
+report builder reads a subject's derivatives and manifests and renders the document. This
+is what makes subject-level QC computable once rather than once per contrast, lets figures
+be regenerated without refitting, and makes the group report a peer rather than a special
+case.
+
+**`FmriPlottingConfig` splits in two.** Fields that cause statistics to be computed
+(`include_effect_size`, `include_standard_error`, and `space`, which currently triggers a
+full MNI refit) move to the analysis config, where their cost is visible. What remains is a
+report config that only decides rendering. No rendering setting may cause a GLM to be fit.
+
+**Two report profiles, one QC section.** The task profile carries model and contrast
+sections; the rest profile carries connectivity sections. Both share the header,
+the as-modelled QC section, and methods. The profile is selected by `task_is_rest`.
 
 **QC is analysis-relevant only.** The report does not restate fMRIPrep's preprocessing QC.
 Every QC panel is computed on what actually entered the GLM — the included runs, after
@@ -65,8 +100,10 @@ fmri_pipeline/analysis/report/
     volumes.py       # tSNR volume rendering
     design.py        # design matrix, contrast strip, VIF, regressor correlation
     signatures.py    # signature expression dot plot
+    connectivity.py  # connectivity matrix, edge distribution, ROI coverage (rest profile)
+  assets.py      # single discovery path for background, mask, and tissue images
   html.py        # Document / Section / Figure / Table primitives, TOC, sticky nav
-  subject.py     # assembles the per-subject report
+  subject.py     # assembles the per-subject report; selects task or rest profile
 ```
 
 The load-bearing rule: **every function in `figures/` accepts arrays or nibabel images and
@@ -74,11 +111,26 @@ returns a `matplotlib.figure.Figure`. It knows nothing about HTML, output paths,
 `FmriPlottingConfig`.** Saving, formats, and configuration belong to `subject.py`. This is
 what makes panels testable in isolation.
 
-`reporting.py` retains `run_fmri_plotting_and_report` as the public entry point and
-delegates, so callers under `fmri_pipeline/pipelines/` do not move. Its figure-drawing code
-is deleted, not ported.
+`assets.py` replaces two competing discovery paths for the same inputs: `_discover_plot_assets`
+on the pipeline class, and `_build_mean_bold_background_from_run_meta` /
+`_load_mni_template_background` in `reporting.py`. One job, one implementation.
 
 A later `report/group.py` reuses `style.py` and `figures/` unchanged.
+
+### Decoupling from model fitting
+
+The analysis pipeline writes, alongside each contrast's stat maps, a `report_manifest.json`
+naming the stat map paths, the design matrices, the included and excluded runs with reasons,
+the confound model, TR, smoothing, and the threshold criteria in force. It no longer calls
+into plotting.
+
+`subject.py` is driven by a new `fmri report` command that takes a subject and task,
+discovers that subject's manifests, computes the shared QC once, and renders one document
+covering every contrast found. Re-rendering never refits.
+
+This removes the two full passes over every 4D BOLD volume per contrast (carpet and tSNR
+currently load the data separately, and both re-run for each contrast of the same subject).
+Under the new structure each is computed once per subject-task and both read the data once.
 
 ### Style layer
 
@@ -165,20 +217,59 @@ dropout-driven false negative. Neither belongs at top level competing with the r
 - **Signature expression dot plot.** Signature expression is currently a five-column table;
   the comparison across signatures is the point and a table does not show it.
 
+### Added — resting-state / baseline profile
+
+This arm currently renders nothing. All of the following are computed from artefacts
+`resting_state.py` already writes.
+
+- **Connectivity matrix.** Fisher-z, diverging and symmetric about zero, with ROIs ordered
+  by network or anatomical grouping from the atlas label TSV rather than by atlas index —
+  index order scatters each network across the matrix and destroys the block structure that
+  is the entire readable content of the figure. Falls back to index order, labelled, when
+  the label TSV carries no grouping column.
+- **Edge weight distribution.** Histogram of the off-diagonal Fisher-z values, with the
+  median marked. Reveals a global-signal or motion-driven shift that the matrix hides.
+- **ROI timeseries carpet.** The ROI × time matrix from the concatenated timeseries TSV,
+  standardised, sharing the run-boundary and time-axis treatment of the voxel carpet.
+- **Retained frames per run.** Censoring is the dominant quality determinant in rest, and
+  the retained-frame count currently reaches only `provenance.json` and the aggregation
+  weights. Drawn as retained versus censored frames per run, using the neutral light-to-dark
+  ramp the EEG conventions reserve for pipeline decisions rather than a hue.
+- **ROI coverage.** Which ROIs yielded usable signal, and which were degenerate or empty.
+  This is how an atlas/BOLD overlap failure becomes visible.
+
 ## Report structure
+
+Shared by both profiles:
 
 ```
 Header      subject, task, spaces, runs included/excluded with reasons,
             TR, volumes, smoothing kernel, confound model
 TOC         sticky
+QC          carpet with aligned motion; tSNR          (all labelled as-modelled)
+Methods     provenance payload (existing, retained)
+```
+
+Task profile inserts, between QC and Methods:
+
+```
 1 Model     design matrix + contrast strip; VIF and regressor correlation
-2 QC        carpet with aligned motion; tSNR          (all labelled as-modelled)
-3 Results   one subsection per contrast x space:
+2 Results   one subsection per contrast x space:
               thresholded mosaic, glass brain with numbered peaks, cluster table
               collapsed diagnostics: unthresholded, effect, standard error, z histogram
-4 Signatures  expression dot plot and table
-5 Methods   provenance payload (existing, retained)
+3 Signatures  expression dot plot and table
 ```
+
+Rest profile inserts instead:
+
+```
+1 Censoring     retained vs censored frames per run; filter band and confound strategy
+2 Connectivity  Fisher-z matrix (network-ordered); edge weight distribution
+3 ROIs          ROI timeseries carpet; ROI coverage
+```
+
+The profile is selected by `task_is_rest`. A study acquiring both produces one report per
+task, and the QC and Methods sections are identical in shape across them.
 
 ## Correctness fixes carried by this work
 
@@ -199,6 +290,18 @@ regression test to each.
 | carpet/tSNR/histogram paths | `plt.close(fig)` sits after `savefig` inside the `try`, so any failure leaks the figure. Unbounded growth across a cohort. |
 | `reporting.py:219` | Carpet voxels are ordered by raw mask index, so the banding that makes a carpet diagnostic is not present. |
 | `second_level.py:819`, `contrast_builder.py:975` | Design-matrix dpi differs (200 vs 150) and neither matches the 300 used elsewhere; `dpi=300` is also passed on SVG saves, where it has no meaning. |
+
+### Architectural defects
+
+| Location | Defect |
+|---|---|
+| `fmri_analysis.py:353` | Reporting is invoked inside the per-contrast GLM path, so subject-level QC is regenerated identically for every contrast. |
+| `reporting.py:138`, `:265` | Carpet and tSNR each load every 4D BOLD volume independently — two full passes over the dataset per invocation, multiplied by the contrast count. |
+| `fmri_analysis.py:312` | A rendering setting (`space` including `mni`) triggers a complete second GLM fit. |
+| `fmri_analysis.py:343`–`:351` | `include_effect_size` and `include_standard_error`, both fields of the *plotting* config, drive `compute_contrast` calls. |
+| `fmri_analysis.py:72` vs `reporting.py:728`, `:762` | Two independent discovery paths for background and mask images. |
+| `resting_state.py` (whole module) | Produces no figures, and no report exists for the rest profile despite `task_is_rest` being first-class config. |
+| `resting_state.py:210` | `_validate_roi_timeseries` raises on a degenerate ROI. Atlas/BOLD overlap failure is a measurement the coverage panel should display, not a fault that aborts the subject. **Pending scope confirmation** — analysis code, not plotting. |
 
 ## Error handling
 
@@ -223,10 +326,26 @@ above:
 - The carpet falls back to mask order, and says so, when no segmentation is discoverable.
 - The tSNR figure's orientation is correct for a non-RAS affine.
 
+Architecture and profile tests:
+
+- Rendering a report never fits a GLM: the report entry point runs to completion against a
+  fixture of on-disk derivatives with the model-fitting modules unimported.
+- Subject-level QC is computed once for a subject-task carrying several contrasts.
+- A rest manifest selects the rest profile and produces no design-matrix or contrast
+  section; a task manifest produces no connectivity section.
+- The connectivity matrix falls back to index order, labelled, when the atlas label TSV
+  carries no grouping column.
+- A subject with both a rest and a task acquisition yields two reports whose QC sections
+  have the same shape.
+
 Per the project convention, verification runs targeted subsets rather than the full suite.
 
 ## Out of scope
 
 - The cohort/group report (follow-on pass, reusing `style.py` and `figures/`).
 - fMRIPrep-domain QC: registration, susceptibility distortion, surface reconstruction.
-- Any change to GLM estimation, contrast construction, or confound selection.
+- Any change to GLM estimation, contrast construction, or confound selection — except the
+  mechanical move of the compute-triggering fields off `FmriPlottingConfig`, which changes
+  where they are configured and not what they compute.
+- Connectivity kinds beyond `correlation`, which is all `resting_state.py` currently
+  supports.
