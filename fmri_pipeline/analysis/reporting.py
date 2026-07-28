@@ -24,6 +24,9 @@ from fmri_pipeline.analysis.report.figures import (
     stat_maps as stat_map_figures,
     volumes as volume_figures,
 )
+from fmri_pipeline.analysis.report.manifest import (
+    sample_masks_from_confounds as _sample_masks_from_confounds,
+)
 from fmri_pipeline.analysis.report.figures.design import (
     vif_from_design as _vif_from_design,
 )
@@ -179,97 +182,6 @@ def _effect_units(run_meta: Optional[Dict[str, Any]]) -> str:
     """
     scaling = (run_meta or {}).get("signal_scaling")
     return "% signal change" if scaling else "effect (arbitrary BOLD units)"
-
-
-def _sample_masks_from_confounds(paths: Sequence[Any]) -> List["np.ndarray"]:
-    """One boolean keep-mask per run, matching the censoring the GLM applied.
-
-    Reuses ``_is_censor_column`` so the report censors exactly what the model
-    censored -- motion outliers, explicit outliers, and non-steady-state volumes.
-    A report that censored differently from the model would be describing a
-    different analysis.
-    """
-    import pandas as pd
-
-    from fmri_pipeline.utils.bold_discovery import _is_censor_column
-
-    masks: List[np.ndarray] = []
-    for path in paths:
-        frame = pd.read_csv(str(path), sep="\t")
-        censor = [c for c in frame.columns if _is_censor_column(c)]
-        if not censor:
-            masks.append(np.ones(len(frame), dtype=bool))
-            continue
-        flagged = frame[censor].to_numpy(dtype=float) > 0
-        masks.append(~flagged.any(axis=1))
-    return masks
-
-
-def _load_run_series(
-    bold_paths: Sequence[Any],
-    mask_img_path: Optional[Path],
-) -> Tuple[List["np.ndarray"], List[Any], Optional[Any], List[str]]:
-    """Load the included runs once, returning masked voxel series and the images.
-
-    One pass over the BOLD data. Carpet and tSNR previously loaded every 4D volume
-    independently, so a single contrast read the whole dataset twice.
-    """
-    nib = _maybe_import_nibabel()
-    if nib is None:
-        return [], [], None, []
-
-    mask_img = None
-    if mask_img_path and mask_img_path.exists():
-        with suppress(Exception):
-            mask_img = nib.load(str(mask_img_path))
-
-    series: List[np.ndarray] = []
-    images: List[Any] = []
-    labels: List[str] = []
-    reference = None
-
-    for index, raw in enumerate(bold_paths):
-        if not raw:
-            continue
-        path = Path(str(raw))
-        if not path.exists():
-            continue
-        img = nib.load(str(path))
-        data = np.asanyarray(img.dataobj)
-        if data.ndim != 4:
-            continue
-
-        voxel_mask = None
-        if mask_img is not None:
-            with suppress(Exception):
-                mask_data = np.asanyarray(mask_img.dataobj).astype(bool)
-                if mask_data.shape != data.shape[:3]:
-                    from nibabel.processing import resample_from_to  # type: ignore
-
-                    resampled = resample_from_to(
-                        mask_img, (data.shape[:3], img.affine), order=0
-                    )
-                    mask_data = np.asanyarray(resampled.dataobj).astype(bool)
-                if mask_data.shape == data.shape[:3]:
-                    voxel_mask = mask_data
-        if voxel_mask is None:
-            mean_volume = np.mean(data, axis=3)
-            voxel_mask = np.isfinite(mean_volume) & (mean_volume != 0)
-
-        voxels = data[voxel_mask]
-        if voxels.size == 0:
-            continue
-        series.append(voxels)
-        images.append(img)
-        if reference is None:
-            reference = img
-        token = next(
-            (part for part in path.name.split("_") if part.startswith("run-")),
-            f"run-{index + 1:02d}",
-        )
-        labels.append(token)
-
-    return series, images, mask_img, labels
 
 
 def generate_carpet_qc_images(
