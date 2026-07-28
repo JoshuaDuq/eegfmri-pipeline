@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -2861,33 +2862,38 @@ def test_generate_fmri_space_section_requires_plotting_dependencies(tmp_path: Pa
             )
 
 
-def test_generate_fmri_space_section_surfaces_slice_plot_failures(tmp_path: Path) -> None:
-    stat_img = SimpleNamespace(
-        get_fdata=lambda: np.ones((2, 2, 2), dtype=np.float32),
-        affine=np.eye(4),
-        header=None,
-    )
+def test_generate_fmri_space_section_records_slice_plot_failures_without_aborting(
+    tmp_path: Path, caplog
+) -> None:
+    """A panel that cannot be drawn is a gap in the report, not a lost contrast.
 
-    def fail_plot(*_args, **_kwargs):
-        raise RuntimeError("slice plot failed")
+    This previously raised, so one failed panel cost every other panel in the
+    section -- while the QC blocks in the same module caught and continued. The
+    policy is now uniform: log the failure and keep building.
+    """
+    import nibabel as nib
 
-    plotting = SimpleNamespace(plot_stat_map=fail_plot)
+    stat_img = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.float32), np.eye(4))
 
     with patch(
-        "fmri_pipeline.analysis.reporting._maybe_import_nilearn_plotting",
-        return_value=plotting,
+        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic",
+        side_effect=RuntimeError("slice plot failed"),
     ):
-        with pytest.raises(RuntimeError, match="slice plot failed"):
-            generate_fmri_space_section(
+        with caplog.at_level(logging.WARNING):
+            section = generate_fmri_space_section(
                 space="native",
                 stat_img=stat_img,
                 out_base_dir=tmp_path,
                 formats=("png",),
                 z_threshold=2.3,
                 include_unthresholded=True,
-                plot_types=("slices",),
+                plot_types=("slices", "hist"),
                 cfg=FmriPlottingConfig(enabled=True, threshold_mode="none"),
             )
+
+    assert "slice plot failed" in caplog.text
+    # The histogram was still produced despite the mosaic failing.
+    assert any("histogram" in image.title.lower() for image in section.images)
 
 
 def test_run_fmri_plotting_and_report_rejects_non_z_stat_maps(tmp_path: Path) -> None:
