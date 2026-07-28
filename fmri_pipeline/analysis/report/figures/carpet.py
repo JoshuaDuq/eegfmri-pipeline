@@ -298,18 +298,30 @@ def carpet_figure(
         # Grayscale, not a diverging map: the tissue block labels and the motion
         # traces above already carry this figure's colour, and a second colour
         # scale competing with them makes neither readable.
+        #
+        # Out-of-range values are coloured rather than left to saturate. Clipped to
+        # the top of a grey ramp they render white on a white page and read as
+        # missing data -- which is the opposite of the truth, since those are the
+        # most extreme voxels in the run. Non-steady-state volumes land here by
+        # design, so this is the common case, not an edge case.
+        colormap = plt.get_cmap("gray").with_extremes(
+            over=OKABE_ITO["vermillion"], under=OKABE_ITO["blue"]
+        )
         image = carpet_axis.imshow(
-            np.clip(ordered, -_CARPET_CLIP, _CARPET_CLIP),
+            ordered,
             aspect="auto",
-            cmap="gray",
+            cmap=colormap,
             vmin=-_CARPET_CLIP,
             vmax=_CARPET_CLIP,
             extent=(0.0, float(times[-1] if n_frames else 0.0), ordered.shape[0], 0),
             rasterized=True,
+            interpolation="nearest",
         )
         carpet_axis.set_xlabel("Time (seconds, concatenated runs)")
-        bar = figure.colorbar(image, ax=carpet_axis, fraction=0.015, pad=0.01)
-        bar.set_label(f"z (per voxel, clipped at ±{_CARPET_CLIP})")
+        bar = figure.colorbar(
+            image, ax=carpet_axis, fraction=0.015, pad=0.01, extend="both"
+        )
+        bar.set_label(f"z (per voxel; beyond ±{_CARPET_CLIP} coloured)")
 
         if blocks:
             carpet_axis.set_yticks([0.5 * (start + stop) for _, start, stop in blocks])

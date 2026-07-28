@@ -162,6 +162,41 @@ def test_carpet_carries_a_colorbar_naming_its_units() -> None:
     plt.close(figure)
 
 
+def test_out_of_range_voxels_are_coloured_not_saturated_to_the_background() -> None:
+    # Clipped to the top of a grey ramp, an extreme voxel renders white on a white
+    # page and reads as missing data -- the opposite of the truth. Non-steady-state
+    # volumes land out of range by design, so this is the common case.
+    figure = carpet_mod.carpet_figure(
+        _carpet(),
+        tissue_codes=None,
+        tissue_source="none",
+        tr=2.0,
+        run_boundaries=[],
+        run_labels=["run-01"],
+    )
+    images = [im for ax in figure.axes for im in ax.get_images()]
+    assert images, "carpet drew no image"
+    colormap = images[0].get_cmap()
+    background = (1.0, 1.0, 1.0, 1.0)
+    assert tuple(colormap.get_over()) != background
+    assert tuple(colormap.get_under()) != tuple(colormap.get_over())
+    plt.close(figure)
+
+
+def test_carpet_colorbar_declares_that_extremes_are_coloured() -> None:
+    figure = carpet_mod.carpet_figure(
+        _carpet(),
+        tissue_codes=None,
+        tissue_source="none",
+        tr=2.0,
+        run_boundaries=[],
+        run_labels=["run-01"],
+    )
+    labels = [axis.get_ylabel() for axis in figure.axes]
+    assert any("coloured" in label for label in labels)
+    plt.close(figure)
+
+
 def test_subsampling_keeps_a_small_tissue_class_visible() -> None:
     # CSF is a few percent of voxels. Strictly proportional sampling can reduce it
     # to a handful of rows that vanish at figure resolution.
