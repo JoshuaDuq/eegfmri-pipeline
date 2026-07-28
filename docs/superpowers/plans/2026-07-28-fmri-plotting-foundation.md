@@ -13,6 +13,9 @@ This is plan 1 of 3 from `docs/superpowers/specs/2026-07-28-fmri-post-preprocess
 ## Global Constraints
 
 - Signed maps (z, effect size) use `RdBu_r` with symmetric limits. Unsigned magnitude (tSNR, standard error) uses `cividis`. Categorical series use Okabe-Ito from `eeg_pipeline/preprocessing/report/style.py`. No rainbow colormaps, no `cold_hot`.
+- **Results are dual-coded, not merely thresholded.** The primary results panel encodes effect magnitude in hue and statistical evidence in opacity (Allen, Erhardt & Calhoun 2012), so sub-threshold structure fades rather than vanishing. A hard-thresholded panel is kept alongside it, because the threshold is what the cluster table refers to. Binary thresholding alone discards most of the map and is the single most criticised convention in fMRI figures.
+- **Orientation convention is declared, never inferred.** `radiological` is passed explicitly to every volume plotter and named in the figure's provenance line. Left/right ambiguity is a recurring source of published errors, and a figure that does not state its convention cannot be checked.
+- **Cluster extent is a display filter, not an inference.** `cluster_min_voxels` removes small clusters after height thresholding; it is not familywise-error-corrected cluster-level inference. Eklund, Nichols & Knutsson (2016) measured false-positive rates up to 70% for parametric cluster inference in SPM, FSL, and AFNI. No figure, caption, or table in this report may describe a cluster as significant by extent. The caption states the height threshold and the extent filter as two separate facts.
 - Figures render inside `plt.rc_context`, never by mutating global rcParams. The Agg backend is the one exception and is set once at package import.
 - Every function in `figures/` returns a `matplotlib.figure.Figure` and takes no `Path` and no `FmriPlottingConfig`.
 - A panel that cannot be drawn raises a normal exception; it never calls `sys.exit`, and it never silently returns a blank figure. Callers decide the failure policy.
@@ -227,6 +230,16 @@ non-monotonic lightness introduces boundaries that are not in the data.
 ``cold_hot`` is deliberately absent even though nilearn offers it. Its midpoint is
 dark, which is correct only against ``black_bg=True``; these figures are drawn on a
 white background, where the midpoint must be light for zero to read as neutral.
+
+Matplotlib 3.10 added Crameri's perceptually uniform diverging maps -- ``berlin``,
+``managua``, ``vanimo`` -- and they were evaluated and rejected here for the same
+reason. Measured CIE L* at their midpoints: berlin 4.4, vanimo 7.1, managua 24.0,
+against RdBu_r's 97.1. All three are built for a dark canvas; on a white report
+surface their midpoint is the heaviest ink on the page, so "no effect" becomes the
+most visually salient value in the figure. RdBu_r's lightness is monotonic across
+each half (verified), which is the property that actually matters for a diverging
+scale. Revisit only if these figures move to a dark canvas, or add ``cmcrameri`` for
+``vik``, which is perceptually uniform *and* light-centred.
 
 Scoping
 -------
@@ -724,12 +737,19 @@ git commit -m "feat(fmri): unify report background, mask, and tissue discovery"
 - Consumes: `SIGNED_CMAP`, `plot_context`, `suprathreshold_limit`, `robust_symmetric_limit`, `clipped_fraction`, `annotate_provenance` from Task 1.
 - Produces:
   - `apply_sidedness(stat_img, *, two_sided: bool) -> Any`
-  - `stat_map_mosaic(stat_img, *, bg_img=None, threshold=None, vmax=None, two_sided=True, title="", cbar_label="z", cmap=SIGNED_CMAP) -> Figure`
+  - `stat_map_mosaic(stat_img, *, bg_img=None, threshold=None, vmax=None, two_sided=True, radiological=False, title="", cbar_label="z", cmap=SIGNED_CMAP) -> Figure`
+  - `dual_coded_mosaic(effect_img, *, stat_img, bg_img=None, threshold, vmax=None, two_sided=True, radiological=False, title="", cbar_label="effect") -> Figure`
   - `glass_brain(stat_img, *, threshold=None, vmax=None, two_sided=True, title="", cbar_label="z", peak_coords=None) -> Figure`
 
 `peak_coords` is a sequence of `(x, y, z)` MNI coordinates; when given, each is annotated with its 1-based index so a reader can key the map to the cluster table.
 
 **A correctness issue this task fixes.** `plot_stat_map` and `plot_glass_brain` threshold on `|value|`, so both always display two-sided regardless of what inference was declared. Under `two_sided=False` the current code still renders negative clusters, and the figure then contradicts the one-sided test the cluster table reports. `apply_sidedness` zeroes the negative half before plotting so the panel shows what was actually tested.
+
+**Why `dual_coded_mosaic` becomes the primary results panel.** A binary threshold discards everything below it and presents what survives as though the threshold were a property of the brain rather than a choice the analyst made. Allen, Erhardt & Calhoun (2012) established the alternative: encode effect magnitude in hue and statistical evidence in opacity, so sub-threshold structure fades instead of disappearing and a reader can tell whether a "null" region is genuinely empty or merely just under the line. Nilearn gained native support in 0.12.0 through `transparency` and `transparency_range`; the installed 0.14.0 has both, and a dual-coded render was confirmed working before this plan was written.
+
+The hard-thresholded mosaic is kept alongside it, because the cluster table refers to that exact threshold and the two panels have to agree. Dual-coded leads, thresholded follows.
+
+**Orientation is declared, not inferred.** `radiological` is an explicit parameter on `plot_stat_map` (default `False`, meaning neurological convention). This task passes it through and prints the resulting convention in the provenance line. A brain figure that does not state whether left is left cannot be checked by a reader, and the error is invisible in the image itself.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -855,6 +875,70 @@ def test_mosaic_states_the_voxel_count_it_summarised() -> None:
     text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
     assert "1,728" in text  # 12 * 12 * 12
     plt.close(figure)
+
+
+def test_mosaic_states_its_orientation_convention() -> None:
+    figure = stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3, radiological=False)
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "neurological" in text.lower()
+    plt.close(figure)
+
+
+def test_radiological_convention_is_passed_through_and_stated() -> None:
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.stat_map_mosaic(_noise_img(), radiological=True)
+        except Exception:
+            pass
+    assert mock_plot.call_args.kwargs["radiological"] is True
+
+
+def test_dual_coding_drives_opacity_from_the_statistic_map() -> None:
+    # Hue carries effect magnitude; opacity carries statistical evidence.
+    effect = _noise_img(1)
+    stat = _noise_img(2)
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.dual_coded_mosaic(effect, stat_img=stat, threshold=2.3)
+        except Exception:
+            pass
+    kwargs = mock_plot.call_args.kwargs
+    assert kwargs["transparency"] is not None
+    # The map being coloured is the effect map, not the statistic map.
+    assert mock_plot.call_args.args[0] is not stat
+
+
+def test_dual_coding_fades_below_the_threshold_and_is_opaque_above_it() -> None:
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.dual_coded_mosaic(
+                _noise_img(1), stat_img=_noise_img(2), threshold=2.3
+            )
+        except Exception:
+            pass
+    low, high = mock_plot.call_args.kwargs["transparency_range"]
+    assert low < 2.3 <= high
+
+
+def test_dual_coding_is_not_thresholded_so_subthreshold_structure_survives() -> None:
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.dual_coded_mosaic(
+                _noise_img(1), stat_img=_noise_img(2), threshold=2.3
+            )
+        except Exception:
+            pass
+    assert not mock_plot.call_args.kwargs["threshold"]
+
+
+def test_dual_coding_requires_matching_geometry() -> None:
+    small = nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.float32), np.eye(4))
+    with pytest.raises(ValueError, match="shape"):
+        stat_maps.dual_coded_mosaic(_noise_img(), stat_img=small, threshold=2.3)
 ```
 
 Add `import matplotlib.pyplot as plt` to this test module's imports.
@@ -951,6 +1035,7 @@ def _provenance(
     threshold: Optional[float],
     limit: float,
     two_sided: bool,
+    radiological: bool = False,
 ) -> list[str]:
     """Build the self-description line for a map panel."""
     lines = [f"n = {values.size:,} voxels"]
@@ -961,7 +1046,77 @@ def _provenance(
         lines.append("unthresholded")
     fraction = clipped_fraction(values, limit=limit)
     lines.append(f"colour limit ±{limit:.2f} ({fraction:.1%} clipped)")
+    # A brain figure that does not state its convention cannot be checked, and a
+    # left/right error is not visible in the image.
+    lines.append("radiological (R on left)" if radiological else "neurological (L on left)")
     return lines
+
+
+def dual_coded_mosaic(
+    effect_img: Any,
+    *,
+    stat_img: Any,
+    bg_img: Any = None,
+    threshold: float,
+    vmax: Optional[float] = None,
+    two_sided: bool = True,
+    radiological: bool = False,
+    title: str = "",
+    cbar_label: str = "effect",
+) -> Any:
+    """Draw effect magnitude in hue and statistical evidence in opacity.
+
+    A binary threshold discards everything beneath it and shows the survivors as
+    though the cut-off were a fact about the brain rather than a choice. Dual coding
+    (Allen, Erhardt & Calhoun 2012) keeps the whole map: colour carries the effect,
+    opacity carries the evidence, and a region just under the threshold fades rather
+    than vanishing. A reader can then distinguish "nothing there" from "nearly
+    there", which a thresholded panel makes impossible.
+
+    Deliberately passes no ``threshold`` to nilearn: thresholding here would undo
+    the point. The opacity ramp runs from half the threshold (fully transparent) to
+    the threshold itself (fully opaque), so the boundary the cluster table uses is
+    still legible as the point where the map becomes solid.
+    """
+    from nilearn import plotting
+
+    effect_data = np.asarray(effect_img.get_fdata())
+    if np.asarray(stat_img.get_fdata()).shape != effect_data.shape:
+        raise ValueError(
+            "Dual coding requires the effect and statistic maps to share a shape; got "
+            f"{effect_data.shape} and {np.asarray(stat_img.get_fdata()).shape}."
+        )
+
+    values = effect_data[np.isfinite(effect_data)]
+    resolved_vmax = float(vmax) if vmax is not None else robust_symmetric_limit(values)
+    with plot_context():
+        display = plotting.plot_stat_map(
+            apply_sidedness(effect_img, two_sided=two_sided),
+            bg_img=bg_img,
+            title=title or None,
+            display_mode="mosaic",
+            threshold=None,
+            transparency=stat_img,
+            transparency_range=[0.5 * float(threshold), float(threshold)],
+            colorbar=True,
+            vmax=resolved_vmax,
+            cmap=SIGNED_CMAP,
+            dim=0,
+            black_bg=False,
+            symmetric_cbar=True,
+            annotate=True,
+            radiological=radiological,
+        )
+        _label_colorbar(display, cbar_label)
+        figure = _figure_of(display)
+        annotate_provenance(figure, [
+            f"n = {values.size:,} voxels",
+            f"hue: effect · opacity: |z| ramped {0.5 * threshold:.2f}–{threshold:.2f}",
+            f"colour limit ±{resolved_vmax:.3g} "
+            f"({clipped_fraction(values, limit=resolved_vmax):.1%} clipped)",
+            "radiological (R on left)" if radiological else "neurological (L on left)",
+        ])
+        return figure
 
 
 def stat_map_mosaic(
@@ -971,6 +1126,7 @@ def stat_map_mosaic(
     threshold: Optional[float] = None,
     vmax: Optional[float] = None,
     two_sided: bool = True,
+    radiological: bool = False,
     title: str = "",
     cbar_label: str = "z",
     cmap: str = SIGNED_CMAP,
@@ -1000,13 +1156,15 @@ def stat_map_mosaic(
             black_bg=False,
             symmetric_cbar=True,
             annotate=True,
+            radiological=radiological,
         )
         _label_colorbar(display, cbar_label)
         figure = _figure_of(display)
         annotate_provenance(
             figure,
             _provenance(
-                values, threshold=threshold, limit=resolved_vmax, two_sided=two_sided
+                values, threshold=threshold, limit=resolved_vmax,
+                two_sided=two_sided, radiological=radiological,
             ),
         )
         return figure
@@ -1065,7 +1223,7 @@ def glass_brain(
         return figure
 
 
-__all__ = ["apply_sidedness", "glass_brain", "stat_map_mosaic"]
+__all__ = ["apply_sidedness", "dual_coded_mosaic", "glass_brain", "stat_map_mosaic"]
 ```
 
 Update the imports at the top of this module to include `annotate_provenance` and
@@ -1074,7 +1232,7 @@ Update the imports at the top of this module to include `annotate_provenance` an
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_stat_maps.py -v`
-Expected: PASS, 11 tests.
+Expected: PASS, 18 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2798,6 +2956,29 @@ In `generate_fmri_space_section`, replace the bodies of the `slices`, `glass`, a
 
 ```python
     two_sided = bool(cfg_obj.two_sided)
+    radiological = bool(getattr(cfg_obj, "radiological", False))
+
+    # Dual-coded panel leads the results: hue carries the effect, opacity carries the
+    # evidence, so sub-threshold structure fades instead of vanishing. Needs both an
+    # effect map and a statistic map, so it is skipped when only one is available.
+    if "slices" in plot_types and effect_img is not None and thr_val is not None:
+        with _panel("dual-coded stat map"):
+            figure = stat_map_figures.dual_coded_mosaic(
+                effect_img, stat_img=stat_img, bg_img=bg_img,
+                threshold=float(thr_val), two_sided=two_sided,
+                radiological=radiological,
+                cbar_label=_effect_units(run_meta),
+                title=f"{title_prefix}Effect, opacity-coded by evidence".strip(),
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="dual_coded", formats=formats,
+                title="Effect map · dual-coded",
+                caption=(
+                    "Colour is effect magnitude; opacity is statistical evidence, "
+                    f"ramped from |z| {0.5 * float(thr_val):.2f} to {float(thr_val):.2f}. "
+                    "No voxels are hidden."
+                ),
+            ))
 
     if "slices" in plot_types:
         if include_unthresholded:
@@ -2858,7 +3039,20 @@ In `generate_fmri_space_section`, replace the bodies of the `slices`, `glass`, a
 
 Delete the `_add_image` helper (lines 962-966) and the effect-size and standard-error blocks (lines 1137-1198), replacing the latter with the same `_panel` + `_save_figure` pattern using `stat_map_figures.stat_map_mosaic` for the effect map and `cmap=MAGNITUDE_CMAP` for the standard error.
 
-The effect map's colorbar label is derived, not hardcoded. A GLM effect size is in arbitrary BOLD units unless the model applied signal scaling, so label it `"% signal change"` when `run_meta.get("signal_scaling")` indicates scaling was applied and `"effect (arbitrary BOLD units)"` otherwise. Naming units the model did not produce is worse than naming none.
+The effect map's colorbar label is derived, not hardcoded, via a small helper placed beside `_save_figure`:
+
+```python
+def _effect_units(run_meta: Optional[Dict[str, Any]]) -> str:
+    """Name the units of a GLM effect size, or decline to.
+
+    A contrast effect is in arbitrary BOLD units unless the model applied signal
+    scaling. Printing "% signal change" on a map that is not in those units is worse
+    than printing nothing, because it invites a quantitative reading the number
+    cannot support.
+    """
+    scaling = (run_meta or {}).get("signal_scaling")
+    return "% signal change" if scaling else "effect (arbitrary BOLD units)"
+```
 
 Then add the coverage panel and the smoothness line:
 
@@ -2887,6 +3081,37 @@ Then add the coverage panel and the smoothness line:
 ```
 
 `summary` is built later in the function today; move its construction above these blocks so the smoothness entry can be added to it.
+
+- [ ] **Step 5b: Separate the extent filter from the inference claim**
+
+The cluster table's caption is currently built at line 1120 as `f"{'two-sided' if ... }, {thr_label}"`, which runs the height threshold and the extent filter together and reads as though extent were inferential. Eklund, Nichols & Knutsson (2016) measured false-positive rates up to 70% for parametric cluster-extent inference; this pipeline does not perform cluster-level FWE correction at all — `cluster_min_voxels` removes small clusters after height thresholding, and nothing corrects for the size distribution. Replace the caption with:
+
+```python
+            caption_parts = [
+                "two-sided" if cfg_obj.two_sided else "one-sided",
+                f"height threshold: {thr_label}",
+            ]
+            if cfg_obj.cluster_min_voxels > 0:
+                caption_parts.append(
+                    f"clusters smaller than {cfg_obj.cluster_min_voxels} voxels removed "
+                    "for display; this is an extent filter, not familywise-error-"
+                    "corrected cluster-level inference"
+                )
+```
+
+Add a test to `test_reporting_integration.py`:
+
+```python
+def test_cluster_extent_is_not_described_as_inference(tmp_path: Path) -> None:
+    section = generate_fmri_space_section(
+        space="mni", stat_img=_stat_img(), out_base_dir=tmp_path,
+        formats=("png",), z_threshold=2.3, include_unthresholded=False,
+        plot_types=("clusters",), cfg=_cfg(cluster_min_voxels=20),
+    )
+    caption = " ".join(table.caption for table in section.tables).lower()
+    assert "not familywise-error-corrected" in caption.replace("-\n", "")
+    assert "cluster-level significan" not in caption
+```
 
 - [ ] **Step 5: Replace the QC generators**
 
@@ -2945,12 +3170,22 @@ Deferred to plans 2 and 3, by design: the per-subject document and `html.py`, th
 
 **Type consistency.** `plot_context`, `robust_symmetric_limit`, `robust_upper_limit`, `suprathreshold_limit`, `clipped_fraction`, `annotate_provenance`, `savefig_kwargs`, `figure_format`, `SIGNED_CMAP`, `MAGNITUDE_CMAP`, `GUIDE_COLOR` are defined in Task 1 and used under those exact names in Tasks 3-9. `PlotAssets` / `discover_plot_assets` (Task 2) are consumed in Task 6. `vif_from_design` (Task 7) is imported under an alias by `reporting.py` in the same task. `compute_tsnr` / `tsnr_volume` (Task 5), `carpet_figure` / `resolve_tissue_codes` / `subsample_rows` (Task 6), and `coverage_figure` / `estimate_fwhm` (Task 8) are called in Task 9 with the signatures declared.
 
+### Literature the design answers to
+
+- **Allen, Erhardt & Calhoun (2012), *Neuron*** — dual-coded visualisation. Motivates `dual_coded_mosaic` as the primary results panel: hue for effect, opacity for evidence, nothing hidden.
+- **Eklund, Nichols & Knutsson (2016), *PNAS*** — parametric cluster-extent inference showed familywise false-positive rates up to 70% in SPM, FSL, and AFNI. This pipeline does not perform cluster-level correction, so no caption, figure, or table may imply cluster-level significance. Enforced by a test.
+- **COBIDAS (Nichols et al., 2017), *Nature Neuroscience*** — reporting standards. The report already retains unthresholded maps, states exact thresholds, and carries a provenance payload; the demoted-not-deleted policy for unthresholded panels follows directly from it.
+- **Crameri, Shephard & Heron (2020), *Nature Communications*** — the misuse of colour. Drives the no-rainbow rule and the perceptual-uniformity requirement, and prompted the measured evaluation of matplotlib's Crameri diverging maps recorded below.
+
 ### Verified before writing, not assumed
 
 - **Palette.** The Okabe-Ito subset was run through the dataviz validator against the light report surface: all checks pass, with one contrast WARN on `#E69F00`, `#CC79A7`, `#56B4E9`. The obligation that WARN creates — those three never carry identity alone — is in Global Constraints and is satisfied by the direct labels every panel using them already has.
 - **Determinism.** Measured on this installation: PNG is byte-stable across renders; SVG is not, and becomes stable with `metadata={"Date": None}` plus a fixed `svg.hashsalt`. Both byte-stability tests sleep 1.1 s so a passing result cannot be luck.
 - **`plot_abs` default.** Confirmed `True` in the installed nilearn 0.14.0, which is what makes Task 3's fix necessary rather than defensive.
 - **Smoothness estimator.** Validated against Gaussian-filtered noise: within 4% of true FWHM at 2.35, 4.71, and 7.06 mm, exact scaling with voxel size, floors at one voxel for sub-voxel smoothness.
+- **Dual coding is available and works.** `transparency` and `transparency_range` exist on `plot_stat_map` in the installed nilearn 0.14.0 (added in 0.12.0), and a dual-coded figure was rendered successfully before this plan was written. It is not a hypothetical capability.
+- **`radiological` is a real parameter,** defaulting to `False`, so the current figures are neurological convention — they simply never said so.
+- **Crameri diverging maps were evaluated and rejected, with numbers.** Matplotlib 3.11 ships `berlin`, `managua`, `vanimo`. Measured midpoint CIE L*: 4.4, 24.0, 7.1 respectively, versus 97.1 for `RdBu_r`. All three are dark-centred and built for a dark canvas; on this report's white surface they would make "no effect" the heaviest ink on the page. `RdBu_r` was confirmed monotonic in lightness across each half, which is the property a diverging scale actually needs. Newer is not automatically better, and the measurement is why.
 
 ### Known gaps, stated rather than hidden
 
@@ -2958,3 +3193,5 @@ Deferred to plans 2 and 3, by design: the per-subject document and `html.py`, th
 - **Smoothness is estimated from the z map, not model residuals,** because plan 1's report layer has no access to the fitted model. This overestimates wherever real signal is present, and the summary line says so. Plan 2 should carry residuals in the manifest and pass them instead.
 - **The per-class row floor in `subsample_rows` distorts block heights.** Once a floor is applied, a tissue block's height no longer represents its share of the brain. The figure states the per-class row counts so a reader is not misled by the geometry; the alternative — dropping CSF below visibility — is worse.
 - **The z histogram's null overlay is scaled to the total voxel count,** which assumes most voxels are null. That is the conventional display and is close to true for a typical contrast, but it is an assumption, and it will understate the null for a map where a large fraction of the brain is genuinely active.
+- **Surface rendering is not in this plan.** Cortical results are best read on an inflated surface, and `plot_img_on_surf` exists in the installed nilearn. It is excluded here for two reasons: it needs a `fsaverage` fetch over the network, which a pipeline that must run on an unmounted external drive cannot depend on; and projecting a volume-space GLM result onto a surface introduces interpolation the analysis never performed, which needs its own caveat on every such figure. Revisit if fMRIPrep is configured to emit `fsaverage`/`fsLR` surface outputs directly, in which case the projection is the preprocessing's, not the figure's.
+- **`cluster_min_voxels` remains a display filter.** This plan makes the report stop implying otherwise, but it does not add valid cluster-level inference. Doing that properly means permutation — which is what Eklund et al. recommend — and belongs in the analysis layer, not the plotting layer. Worth raising as separate work.
