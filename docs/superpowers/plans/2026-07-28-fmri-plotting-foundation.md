@@ -16,8 +16,10 @@ This is plan 1 of 3 from `docs/superpowers/specs/2026-07-28-fmri-post-preprocess
 - Figures render inside `plt.rc_context`, never by mutating global rcParams. The Agg backend is the one exception and is set once at package import.
 - Every function in `figures/` returns a `matplotlib.figure.Figure` and takes no `Path` and no `FmriPlottingConfig`.
 - A panel that cannot be drawn raises a normal exception; it never calls `sys.exit`, and it never silently returns a blank figure. Callers decide the failure policy.
-- Colour limits are stated on the figure whenever clipping is possible, so clipping is declared rather than hidden.
+- **Every figure is self-describing.** A figure lifted out of the report and dropped into a manuscript must still state the numbers a reader needs to trust it: sample size, the threshold applied, the colour limit, and the fraction of data clipped by that limit. `annotate_provenance` carries this and is called by every panel. A colour limit that is never stated is a silent claim that nothing was clipped.
+- **Rendering is deterministic.** The same input produces a byte-identical file, so figures can be diffed, content-addressed, and cached. Verified: PNG is already stable, but SVG embeds a timestamp and changes on every render unless `metadata={"Date": None}` is passed and `svg.hashsalt` is fixed. Both are mandatory.
 - The report presents measurements and the thresholds actually applied. No pass/fail badges, no cutoffs the pipeline invented.
+- **Palette obligation.** The Okabe-Ito subset in use — `#0072B2`, `#D55E00`, `#009E73`, `#E69F00`, `#CC79A7`, `#56B4E9` — was validated against the light report surface and passes the lightness band, chroma floor, CVD separation (worst adjacent pair ΔE 9.6 deutan), and normal-vision floor (ΔE 20.0). It carries one WARN: `#E69F00`, `#CC79A7`, and `#56B4E9` fall below 3:1 contrast against the surface. That obligates visible relief — those three may never be the sole carrier of identity, and every mark using them must also carry a direct label or an axis tick naming it. Re-run `scripts/validate_palette.js` from the dataviz skill if the palette changes.
 - Tests use plain pytest with `nibabel.Nifti1Image` fixtures, matching `tests/fmri/`. Run targeted subsets — never the full suite, which takes ~9 minutes.
 
 ---
@@ -34,6 +36,7 @@ This is plan 1 of 3 from `docs/superpowers/specs/2026-07-28-fmri-post-preprocess
 | `fmri_pipeline/analysis/report/figures/volumes.py` | tSNR volume rendering through the affine. |
 | `fmri_pipeline/analysis/report/figures/carpet.py` | Tissue-ordered carpet with aligned motion traces. |
 | `fmri_pipeline/analysis/report/figures/design.py` | Design matrix, contrast strip, VIF, regressor correlation. |
+| `fmri_pipeline/analysis/report/figures/coverage.py` | Analysis-mask coverage panel and spatial smoothness estimation. |
 | `fmri_pipeline/analysis/reporting.py` | Modified: figure code deleted, delegates to `figures/`, one failure policy. |
 
 ---
@@ -53,7 +56,11 @@ This is plan 1 of 3 from `docs/superpowers/specs/2026-07-28-fmri-post-preprocess
   - `plot_context() -> ContextManager` — `plt.rc_context(FMRI_RC)`
   - `SIGNED_CMAP: str = "RdBu_r"`, `MAGNITUDE_CMAP: str = "cividis"`
   - `robust_symmetric_limit(*values: np.ndarray, percentile: float = 98.0) -> float`
+  - `robust_upper_limit(values: np.ndarray, percentile: float = 98.0) -> float`
   - `suprathreshold_limit(values: np.ndarray, *, threshold: float, percentile: float = 98.0) -> float`
+  - `clipped_fraction(values: np.ndarray, *, limit: float) -> float`
+  - `annotate_provenance(figure: Figure, lines: Sequence[str]) -> None`
+  - `savefig_kwargs(path: Path) -> dict[str, Any]` — deterministic metadata per format
   - `figure_format(*, dense: bool) -> str` returning `"png"` or `"svg"`
 
 - [ ] **Step 1: Create the package and write the failing test**
@@ -112,12 +119,73 @@ def test_dense_figures_are_raster_and_line_figures_are_vector() -> None:
 def test_signed_and_magnitude_colormaps_are_not_rainbows() -> None:
     assert style.SIGNED_CMAP == "RdBu_r"
     assert style.MAGNITUDE_CMAP == "cividis"
+
+
+def test_robust_upper_limit_ignores_sign_conventions_of_symmetric_data() -> None:
+    # An unsigned magnitude gets an upper bound, not a symmetric one.
+    assert style.robust_upper_limit(np.arange(101.0)) == pytest.approx(98.0, abs=0.5)
+
+
+def test_clipped_fraction_reports_what_a_colour_limit_hides() -> None:
+    values = np.concatenate([np.zeros(90), np.full(10, 100.0)])
+    assert style.clipped_fraction(values, limit=50.0) == pytest.approx(0.10)
+
+
+def test_clipped_fraction_is_zero_when_the_limit_covers_everything() -> None:
+    assert style.clipped_fraction(np.arange(10.0), limit=100.0) == 0.0
+
+
+def test_annotate_provenance_writes_its_lines_into_the_figure() -> None:
+    figure, _ = plt.subplots()
+    style.annotate_provenance(figure, ["n = 1,024 voxels", "|z| > 2.30"])
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "n = 1,024 voxels" in text and "|z| > 2.30" in text
+    plt.close(figure)
+
+
+def test_svg_rendering_is_byte_stable_across_repeated_renders(tmp_path) -> None:
+    # SVG embeds a timestamp by default, so figures churn and cannot be diffed.
+    import hashlib
+    import time
+
+    def render(name: str) -> str:
+        with style.plot_context():
+            figure, axis = plt.subplots()
+            axis.plot([1, 2, 3])
+            path = tmp_path / name
+            figure.savefig(path, **style.savefig_kwargs(path))
+            plt.close(figure)
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    first = render("a.svg")
+    time.sleep(1.1)
+    assert render("b.svg") == first
+
+
+def test_png_rendering_is_byte_stable_across_repeated_renders(tmp_path) -> None:
+    import hashlib
+    import time
+
+    def render(name: str) -> str:
+        with style.plot_context():
+            figure, axis = plt.subplots()
+            axis.plot([1, 2, 3])
+            path = tmp_path / name
+            figure.savefig(path, **style.savefig_kwargs(path))
+            plt.close(figure)
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    first = render("a.png")
+    time.sleep(1.1)
+    assert render("b.png") == first
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_style.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'fmri_pipeline.analysis.report'`
+
+Note the two byte-stability tests each sleep 1.1 s to cross a clock second; without the sleep a timestamp-carrying file can hash identically by luck.
 
 - [ ] **Step 3: Create the package init**
 
@@ -171,7 +239,8 @@ ran last silently restyles the other. A context manager cannot do that.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import Any
+from pathlib import Path
+from typing import Any, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -212,12 +281,54 @@ FMRI_RC: dict[str, Any] = {
     "axes.titlesize": 10,
     "legend.frameon": False,
     "image.interpolation": "nearest",
+    # Element ids in an SVG are salted from this. Left unset, Matplotlib salts from
+    # the process, so two renders of identical data produce different files.
+    "svg.hashsalt": "fmri-report",
+    # Text becomes paths. Costs bytes, but the figure then renders identically on a
+    # machine without Arial -- including a journal's typesetting system, which is
+    # where a report figure eventually ends up.
+    "svg.fonttype": "path",
 }
 
 
 def plot_context() -> AbstractContextManager:
     """Return a context in which this package's render defaults apply."""
     return plt.rc_context(FMRI_RC)
+
+
+def savefig_kwargs(path: Path) -> dict[str, Any]:
+    """Return ``savefig`` arguments that make the output byte-reproducible.
+
+    Matplotlib stamps a creation date into SVG and a ``Software`` tag into PNG.
+    Either makes two renders of identical data differ, so a figure cannot be diffed
+    against its predecessor, content-addressed, or cached. Measured on this
+    installation: PNG is stable either way, SVG is not.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".svg":
+        return {"metadata": {"Date": None}}
+    if suffix == ".png":
+        return {"metadata": {"Software": None}}
+    return {}
+
+
+def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
+    """Print the numbers a reader needs to trust the figure, inside the figure.
+
+    A figure travels: it gets pulled out of the report into a slide, a manuscript,
+    an email. Everything needed to interpret it -- how many samples, what threshold,
+    what colour limit, how much the limit clipped -- has to survive that trip, and a
+    caption in the surrounding HTML does not.
+
+    Stating the clipped fraction matters most. A robust colour limit deliberately
+    saturates the extreme voxels; unstated, the figure silently claims it did not.
+    """
+    if not lines:
+        return
+    figure.text(
+        0.005, 0.005, "  ·  ".join(lines),
+        fontsize=6.5, color=GUIDE_COLOR, va="bottom", ha="left",
+    )
 
 
 def _finite(*values: np.ndarray) -> np.ndarray:
@@ -242,6 +353,31 @@ def robust_symmetric_limit(
     if not 0.0 < percentile <= 100.0:
         raise ValueError(f"Percentile must lie in (0, 100], got {percentile!r}.")
     return float(np.percentile(np.abs(_finite(*values)), percentile))
+
+
+def robust_upper_limit(
+    values: np.ndarray,
+    percentile: float = COLOR_LIMIT_PERCENTILE,
+) -> float:
+    """Return an upper colour limit for an unsigned magnitude.
+
+    Separate from :func:`robust_symmetric_limit` because tSNR and standard error
+    have no negative half; taking a symmetric limit for them wastes half the ramp
+    and implies a sign the quantity does not have.
+    """
+    if not 0.0 < percentile <= 100.0:
+        raise ValueError(f"Percentile must lie in (0, 100], got {percentile!r}.")
+    return float(np.percentile(_finite(values), percentile))
+
+
+def clipped_fraction(values: np.ndarray, *, limit: float) -> float:
+    """Return the fraction of finite values a colour limit saturates.
+
+    Reported on every figure that uses a robust limit, so that saturation is a
+    declared property of the panel rather than something a reader has to suspect.
+    """
+    finite = _finite(values)
+    return float(np.mean(np.abs(finite) > abs(float(limit))))
 
 
 def suprathreshold_limit(
@@ -284,9 +420,13 @@ __all__ = [
     "MAGNITUDE_CMAP",
     "OKABE_ITO",
     "SIGNED_CMAP",
+    "annotate_provenance",
+    "clipped_fraction",
     "figure_format",
     "plot_context",
     "robust_symmetric_limit",
+    "robust_upper_limit",
+    "savefig_kwargs",
     "suprathreshold_limit",
 ]
 ```
@@ -294,7 +434,7 @@ __all__ = [
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_style.py -v`
-Expected: PASS, 7 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -581,12 +721,15 @@ git commit -m "feat(fmri): unify report background, mask, and tissue discovery"
 - Test: `tests/fmri/report/test_stat_maps.py`
 
 **Interfaces:**
-- Consumes: `SIGNED_CMAP`, `plot_context`, `suprathreshold_limit`, `robust_symmetric_limit` from Task 1.
+- Consumes: `SIGNED_CMAP`, `plot_context`, `suprathreshold_limit`, `robust_symmetric_limit`, `clipped_fraction`, `annotate_provenance` from Task 1.
 - Produces:
-  - `stat_map_mosaic(stat_img, *, bg_img=None, threshold=None, vmax=None, title="", cbar_label="z", cmap=SIGNED_CMAP) -> Figure`
-  - `glass_brain(stat_img, *, threshold=None, vmax=None, title="", cbar_label="z", peak_coords=None) -> Figure`
+  - `apply_sidedness(stat_img, *, two_sided: bool) -> Any`
+  - `stat_map_mosaic(stat_img, *, bg_img=None, threshold=None, vmax=None, two_sided=True, title="", cbar_label="z", cmap=SIGNED_CMAP) -> Figure`
+  - `glass_brain(stat_img, *, threshold=None, vmax=None, two_sided=True, title="", cbar_label="z", peak_coords=None) -> Figure`
 
 `peak_coords` is a sequence of `(x, y, z)` MNI coordinates; when given, each is annotated with its 1-based index so a reader can key the map to the cluster table.
+
+**A correctness issue this task fixes.** `plot_stat_map` and `plot_glass_brain` threshold on `|value|`, so both always display two-sided regardless of what inference was declared. Under `two_sided=False` the current code still renders negative clusters, and the figure then contradicts the one-sided test the cluster table reports. `apply_sidedness` zeroes the negative half before plotting so the panel shows what was actually tested.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -680,7 +823,41 @@ def test_an_unthresholded_panel_uses_a_robust_symmetric_limit() -> None:
         except Exception:
             pass
     assert mock_plot.call_args.kwargs["vmax"] < 100.0
+
+
+def test_one_sided_inference_removes_the_negative_half_before_plotting() -> None:
+    # plot_stat_map thresholds |value|, so without this the panel shows negative
+    # clusters that the declared one-sided test never examined.
+    data = np.linspace(-5, 5, 8**3).reshape(8, 8, 8).astype(np.float32)
+    img = nib.Nifti1Image(data, np.eye(4))
+    result = np.asarray(stat_maps.apply_sidedness(img, two_sided=False).get_fdata())
+    assert result.min() == 0.0
+    assert result.max() == pytest.approx(5.0)
+
+
+def test_two_sided_inference_leaves_the_map_untouched() -> None:
+    data = np.linspace(-5, 5, 8**3).reshape(8, 8, 8).astype(np.float32)
+    img = nib.Nifti1Image(data, np.eye(4))
+    result = np.asarray(stat_maps.apply_sidedness(img, two_sided=True).get_fdata())
+    assert result.min() == pytest.approx(-5.0)
+
+
+def test_mosaic_states_its_threshold_and_clipping_on_the_figure() -> None:
+    figure = stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3)
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "2.30" in text
+    assert "clipped" in text.lower()
+    plt.close(figure)
+
+
+def test_mosaic_states_the_voxel_count_it_summarised() -> None:
+    figure = stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3)
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "1,728" in text  # 12 * 12 * 12
+    plt.close(figure)
 ```
+
+Add `import matplotlib.pyplot as plt` to this test module's imports.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -750,12 +927,50 @@ def _label_colorbar(display: Any, label: str) -> None:
     colorbar.set_label(label, rotation=90, labelpad=6)
 
 
+def apply_sidedness(stat_img: Any, *, two_sided: bool) -> Any:
+    """Zero the negative half of ``stat_img`` when inference was one-sided.
+
+    Nilearn's map plotters threshold on the absolute value, so they always render
+    two-sided. A panel drawn from a one-sided test therefore shows negative clusters
+    that the test never examined, and disagrees with the cluster table beside it.
+    """
+    if two_sided:
+        return stat_img
+
+    import nibabel as nib
+
+    data = np.asarray(stat_img.get_fdata())
+    return nib.Nifti1Image(
+        np.clip(data, 0.0, None).astype(data.dtype), stat_img.affine, stat_img.header
+    )
+
+
+def _provenance(
+    values: np.ndarray,
+    *,
+    threshold: Optional[float],
+    limit: float,
+    two_sided: bool,
+) -> list[str]:
+    """Build the self-description line for a map panel."""
+    lines = [f"n = {values.size:,} voxels"]
+    if threshold:
+        comparison = "|z|" if two_sided else "z"
+        lines.append(f"{comparison} > {float(threshold):.2f}")
+    else:
+        lines.append("unthresholded")
+    fraction = clipped_fraction(values, limit=limit)
+    lines.append(f"colour limit ±{limit:.2f} ({fraction:.1%} clipped)")
+    return lines
+
+
 def stat_map_mosaic(
     stat_img: Any,
     *,
     bg_img: Any = None,
     threshold: Optional[float] = None,
     vmax: Optional[float] = None,
+    two_sided: bool = True,
     title: str = "",
     cbar_label: str = "z",
     cmap: str = SIGNED_CMAP,
@@ -768,10 +983,12 @@ def stat_map_mosaic(
     """
     from nilearn import plotting
 
+    values = _masked_values(stat_img)
     resolved_vmax = _resolve_vmax(stat_img, threshold=threshold, vmax=vmax)
+    plotted = apply_sidedness(stat_img, two_sided=two_sided)
     with plot_context():
         display = plotting.plot_stat_map(
-            stat_img,
+            plotted,
             bg_img=bg_img,
             title=title or None,
             display_mode="mosaic",
@@ -785,7 +1002,14 @@ def stat_map_mosaic(
             annotate=True,
         )
         _label_colorbar(display, cbar_label)
-        return _figure_of(display)
+        figure = _figure_of(display)
+        annotate_provenance(
+            figure,
+            _provenance(
+                values, threshold=threshold, limit=resolved_vmax, two_sided=two_sided
+            ),
+        )
+        return figure
 
 
 def glass_brain(
@@ -793,6 +1017,7 @@ def glass_brain(
     *,
     threshold: Optional[float] = None,
     vmax: Optional[float] = None,
+    two_sided: bool = True,
     title: str = "",
     cbar_label: str = "z",
     peak_coords: Optional[Sequence[Tuple[float, float, float]]] = None,
@@ -808,10 +1033,11 @@ def glass_brain(
     """
     from nilearn import plotting
 
+    values = _masked_values(stat_img)
     resolved_vmax = _resolve_vmax(stat_img, threshold=threshold, vmax=vmax)
     with plot_context():
         display = plotting.plot_glass_brain(
-            stat_img,
+            apply_sidedness(stat_img, two_sided=two_sided),
             title=title or None,
             threshold=float(threshold) if threshold else None,
             colorbar=True,
@@ -829,22 +1055,36 @@ def glass_brain(
                 )
                 display.annotate(size=7)
                 logger.debug("Annotated peak %d at %s", index, coord)
-        return _figure_of(display)
+        figure = _figure_of(display)
+        annotate_provenance(
+            figure,
+            _provenance(
+                values, threshold=threshold, limit=resolved_vmax, two_sided=two_sided
+            ),
+        )
+        return figure
 
 
-__all__ = ["glass_brain", "stat_map_mosaic"]
+__all__ = ["apply_sidedness", "glass_brain", "stat_map_mosaic"]
 ```
+
+Update the imports at the top of this module to include `annotate_provenance` and
+`clipped_fraction` from `fmri_pipeline.analysis.report.style`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_stat_maps.py -v`
-Expected: PASS, 7 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add fmri_pipeline/analysis/report/figures/stat_maps.py tests/fmri/report/test_stat_maps.py
-git commit -m "fix(fmri): plot signed glass brains and give thresholded panels usable range"
+git commit -m "fix(fmri): plot signed glass brains and give thresholded panels usable range
+
+Also makes one-sided inference render one-sided -- nilearn's map plotters
+threshold on the absolute value, so a one-sided test previously produced a
+panel showing negative clusters it never examined."
 ```
 
 ---
@@ -1182,8 +1422,10 @@ import numpy as np
 
 from fmri_pipeline.analysis.report.style import (
     MAGNITUDE_CMAP,
+    annotate_provenance,
+    clipped_fraction,
     plot_context,
-    robust_symmetric_limit,
+    robust_upper_limit,
 )
 
 
@@ -1246,7 +1488,7 @@ def tsnr_volume(
     data = np.asarray(tsnr_img.get_fdata())
     positive = data[np.isfinite(data) & (data > 0)]
     resolved_vmax = float(vmax) if vmax is not None else (
-        robust_symmetric_limit(positive) if positive.size else 1.0
+        robust_upper_limit(positive) if positive.size else 1.0
     )
 
     with plot_context():
@@ -1268,6 +1510,13 @@ def tsnr_volume(
         figure = getattr(display, "figure", None) or getattr(display, "_fig", None)
         if figure is None:
             raise RuntimeError("Could not resolve a Matplotlib figure from the display.")
+        if positive.size:
+            annotate_provenance(figure, [
+                f"n = {positive.size:,} voxels",
+                f"median tSNR {float(np.median(positive)):.1f}",
+                f"colour limit {resolved_vmax:.1f} "
+                f"({clipped_fraction(positive, limit=resolved_vmax):.1%} clipped)",
+            ])
         return figure
 
 
@@ -1299,6 +1548,7 @@ git commit -m "fix(fmri): render tSNR through the affine instead of slicing the 
 - Produces:
   - `TISSUE_ORDER: tuple[str, ...] = ("GM", "WM", "CSF")`
   - `resolve_tissue_codes(shape, *, assets, reference_img) -> tuple[np.ndarray | None, str]` — returns per-voxel class codes and a source label of `"probseg"`, `"dseg"`, or `"none"`
+  - `subsample_rows(carpet, tissue_codes, *, max_rows=6000, min_rows_per_class=200) -> tuple[np.ndarray, np.ndarray | None]`
   - `carpet_figure(carpet, *, tissue_codes, tissue_source, tr, run_boundaries, run_labels, fd=None, dvars=None, dvars_label="DVARS", title="") -> Figure`
 
 `carpet` is `(n_voxels, n_frames)`, already standardised. `run_boundaries` are frame indices of run starts after the first. `fd` and `dvars` are per-frame arrays whose length matches the carpet's frame count; `NaN` is preserved and drawn as a gap.
@@ -1425,6 +1675,54 @@ def test_carpet_rejects_a_motion_trace_of_the_wrong_length() -> None:
             _carpet(n_frames=40), tissue_codes=None, tissue_source="none", tr=2.0,
             run_boundaries=[], run_labels=["run-01"], fd=np.zeros(10),
         )
+
+
+def test_carpet_carries_a_colorbar_naming_its_units() -> None:
+    # An image panel without a scale is not a readable figure.
+    figure = carpet_mod.carpet_figure(
+        _carpet(), tissue_codes=None, tissue_source="none", tr=2.0,
+        run_boundaries=[], run_labels=["run-01"],
+    )
+    labels = [axis.get_ylabel() for axis in figure.axes]
+    assert any("z" in label for label in labels)
+    plt.close(figure)
+
+
+def test_subsampling_keeps_a_small_tissue_class_visible() -> None:
+    # CSF is a few percent of voxels. Strictly proportional sampling can reduce it
+    # to a handful of rows that vanish at figure resolution.
+    codes = np.concatenate([np.full(9800, 1), np.full(150, 2), np.full(50, 3)])
+    carpet = np.random.default_rng(0).standard_normal((10_000, 20))
+    rows, sampled_codes = carpet_mod.subsample_rows(
+        carpet, codes, max_rows=1000, min_rows_per_class=100
+    )
+    assert rows.shape[0] <= 1000 + 2 * 100
+    assert np.count_nonzero(sampled_codes == 3) >= 50
+
+
+def test_subsampling_is_a_no_op_below_the_row_budget() -> None:
+    carpet = np.random.default_rng(0).standard_normal((100, 20))
+    rows, codes = carpet_mod.subsample_rows(carpet, None, max_rows=1000)
+    assert rows.shape[0] == 100
+    assert codes is None
+
+
+def test_subsampling_is_deterministic_for_the_same_input() -> None:
+    codes = np.concatenate([np.full(5000, 1), np.full(5000, 2)])
+    carpet = np.random.default_rng(0).standard_normal((10_000, 20))
+    first, _ = carpet_mod.subsample_rows(carpet, codes, max_rows=500)
+    second, _ = carpet_mod.subsample_rows(carpet, codes, max_rows=500)
+    assert np.array_equal(first, second)
+
+
+def test_carpet_states_how_many_voxels_it_actually_drew() -> None:
+    figure = carpet_mod.carpet_figure(
+        _carpet(n_voxels=60), tissue_codes=None, tissue_source="none", tr=2.0,
+        run_boundaries=[], run_labels=["run-01"],
+    )
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "60" in text
+    plt.close(figure)
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1532,6 +1830,47 @@ def resolve_tissue_codes(
     return None, "none"
 
 
+def subsample_rows(
+    carpet: np.ndarray,
+    tissue_codes_flat: Optional[np.ndarray],
+    *,
+    max_rows: int = 6000,
+    min_rows_per_class: int = 200,
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """Reduce the carpet to a drawable number of rows without losing a tissue class.
+
+    Strictly proportional sampling is the obvious choice and the wrong one: CSF is a
+    few percent of the voxels, so a proportional draw can leave it a handful of rows
+    that disappear at figure resolution -- and CSF is where a global artefact shows
+    up first. Each class present therefore keeps at least ``min_rows_per_class``
+    rows, and the rest of the budget is shared in proportion. The resulting row
+    counts are stated on the figure, because the block heights no longer represent
+    tissue volume once a floor has been applied.
+
+    Sampling is a deterministic stride rather than a random draw, so a report
+    regenerated from the same derivatives is byte-identical.
+    """
+    n_rows = carpet.shape[0]
+    if n_rows <= max_rows:
+        return carpet, tissue_codes_flat
+
+    if tissue_codes_flat is None:
+        index = np.linspace(0, n_rows - 1, max_rows).astype(int)
+        return carpet[index], None
+
+    selected: List[np.ndarray] = []
+    classes = [c for c in np.unique(tissue_codes_flat)]
+    for code in classes:
+        positions = np.flatnonzero(tissue_codes_flat == code)
+        share = int(round(max_rows * positions.size / n_rows))
+        take = min(positions.size, max(share, min_rows_per_class))
+        stride = np.linspace(0, positions.size - 1, take).astype(int)
+        selected.append(positions[stride])
+
+    index = np.sort(np.concatenate(selected))
+    return carpet[index], tissue_codes_flat[index]
+
+
 def order_by_tissue(
     carpet: np.ndarray,
     tissue_codes_flat: Optional[np.ndarray],
@@ -1581,7 +1920,8 @@ def carpet_figure(
     _check_length("fd", fd, n_frames)
     _check_length("dvars", dvars, n_frames)
 
-    ordered, blocks = order_by_tissue(carpet, tissue_codes)
+    drawn, drawn_codes = subsample_rows(carpet, tissue_codes)
+    ordered, blocks = order_by_tissue(drawn, drawn_codes)
     times = np.arange(n_frames) * float(tr)
     boundary_times = [float(b) * float(tr) for b in run_boundaries]
 
@@ -1607,13 +1947,18 @@ def carpet_figure(
             index += 1
 
         carpet_axis = axes[-1]
-        carpet_axis.imshow(
+        # Grayscale, not a diverging map: the tissue block labels and the motion
+        # traces above already carry this figure's colour, and a second colour
+        # scale competing with them makes neither readable.
+        image = carpet_axis.imshow(
             np.clip(ordered, -_CARPET_CLIP, _CARPET_CLIP),
             aspect="auto", cmap="gray", vmin=-_CARPET_CLIP, vmax=_CARPET_CLIP,
             extent=(0.0, float(times[-1] if n_frames else 0.0), ordered.shape[0], 0),
             rasterized=True,
         )
         carpet_axis.set_xlabel("Time (seconds, concatenated runs)")
+        bar = figure.colorbar(image, ax=carpet_axis, fraction=0.015, pad=0.01)
+        bar.set_label(f"z (per voxel, clipped at ±{_CARPET_CLIP})")
 
         if blocks:
             carpet_axis.set_yticks([0.5 * (start + stop) for _, start, stop in blocks])
@@ -1639,16 +1984,38 @@ def carpet_figure(
         if title:
             figure.suptitle(title)
         figure.tight_layout()
+
+        provenance = [
+            f"{ordered.shape[0]:,} of {carpet.shape[0]:,} voxels drawn",
+            f"{n_frames:,} frames · TR {float(tr):.3g} s",
+            f"voxel order: {tissue_source}",
+        ]
+        if blocks:
+            # Row counts are stated because the per-class floor in subsample_rows
+            # means block heights no longer represent tissue volume.
+            provenance.append(
+                " ".join(f"{name} {stop - start:,}" for name, start, stop in blocks)
+            )
+        annotate_provenance(figure, provenance)
         return figure
 
 
-__all__ = ["TISSUE_ORDER", "carpet_figure", "order_by_tissue", "resolve_tissue_codes"]
+__all__ = [
+    "TISSUE_ORDER",
+    "carpet_figure",
+    "order_by_tissue",
+    "resolve_tissue_codes",
+    "subsample_rows",
+]
 ```
+
+Add `annotate_provenance` to this module's imports from
+`fmri_pipeline.analysis.report.style`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/fmri/report/test_carpet.py -v`
-Expected: PASS, 8 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1971,17 +2338,261 @@ git commit -m "feat(fmri): add design contrast strip and collinearity panel"
 
 ---
 
-### Task 8: Rewire the reporting path
+### Task 8: Coverage and smoothness
+
+**Files:**
+- Create: `fmri_pipeline/analysis/report/figures/coverage.py`
+- Test: `tests/fmri/report/test_coverage.py`
+
+**Interfaces:**
+- Consumes: `MAGNITUDE_CMAP`, `plot_context`, `annotate_provenance`, `OKABE_ITO` from Task 1.
+- Produces:
+  - `estimate_fwhm(img, *, mask=None) -> tuple[float, float, float]` — estimated spatial smoothness in millimetres per axis
+  - `coverage_figure(mask_img, *, bg_img=None, n_runs=1, title="") -> Figure`
+
+**Why this task exists.** Two questions a reader of a stat map cannot currently answer.
+
+*Where was the model actually estimated?* A voxel outside the analysis mask is not a null result — it was never tested. Without a coverage panel, dropout in orbitofrontal and temporal cortex is indistinguishable from a true absence of effect, which is one of the easiest ways to over-read an fMRI figure.
+
+*What does a cluster-extent threshold mean?* `cluster_min_voxels` is configured as a bare voxel count. A 20-voxel cluster is a strong constraint on unsmoothed data and almost none on data smoothed at 8 mm, so the number is uninterpretable without the smoothness it implicitly references. Nilearn has no estimator, so this task adds one.
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/fmri/report/test_coverage.py`:
+
+```python
+from __future__ import annotations
+
+import matplotlib.pyplot as plt
+import nibabel as nib
+import numpy as np
+import pytest
+
+from fmri_pipeline.analysis.report.figures import coverage
+
+
+def _smooth_noise(sigma: float, shape=(24, 24, 24)) -> nib.Nifti1Image:
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(0)
+    data = gaussian_filter(rng.standard_normal(shape), sigma=sigma)
+    return nib.Nifti1Image(data.astype(np.float32), np.eye(4))
+
+
+def test_smoother_data_yields_a_larger_estimated_fwhm() -> None:
+    rough = coverage.estimate_fwhm(_smooth_noise(0.5))
+    smooth = coverage.estimate_fwhm(_smooth_noise(3.0))
+    assert np.mean(smooth) > np.mean(rough)
+
+
+def test_fwhm_is_reported_in_millimetres_using_the_voxel_size() -> None:
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(0)
+    data = gaussian_filter(rng.standard_normal((24, 24, 24)), sigma=2.0)
+    unit = nib.Nifti1Image(data.astype(np.float32), np.eye(4))
+    coarse = nib.Nifti1Image(data.astype(np.float32), np.diag([3.0, 3.0, 3.0, 1.0]))
+    assert np.mean(coverage.estimate_fwhm(coarse)) == pytest.approx(
+        3.0 * np.mean(coverage.estimate_fwhm(unit)), rel=0.05
+    )
+
+
+def test_fwhm_estimation_honours_a_mask() -> None:
+    img = _smooth_noise(2.0)
+    mask = np.zeros((24, 24, 24), dtype=bool)
+    mask[4:20, 4:20, 4:20] = True
+    assert all(np.isfinite(coverage.estimate_fwhm(img, mask=mask)))
+
+
+def test_fwhm_rejects_a_map_with_too_few_voxels_to_estimate() -> None:
+    tiny = nib.Nifti1Image(np.zeros((2, 2, 2), dtype=np.float32), np.eye(4))
+    with pytest.raises(ValueError, match="too small"):
+        coverage.estimate_fwhm(tiny)
+
+
+def test_coverage_figure_states_the_modelled_voxel_count() -> None:
+    mask = np.zeros((12, 12, 12), dtype=np.float32)
+    mask[2:10, 2:10, 2:10] = 1.0
+    figure = coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "512" in text  # 8 * 8 * 8
+    plt.close(figure)
+
+
+def test_coverage_figure_returns_a_figure() -> None:
+    mask = np.ones((12, 12, 12), dtype=np.float32)
+    figure = coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+    assert figure is not None
+    plt.close(figure)
+
+
+def test_coverage_figure_rejects_an_empty_mask() -> None:
+    empty = nib.Nifti1Image(np.zeros((12, 12, 12), dtype=np.float32), np.eye(4))
+    with pytest.raises(ValueError, match="no voxels"):
+        coverage.coverage_figure(empty)
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `.venv/bin/python -m pytest tests/fmri/report/test_coverage.py -v`
+Expected: FAIL — `ImportError: cannot import name 'coverage'`
+
+- [ ] **Step 3: Implement the module**
+
+`fmri_pipeline/analysis/report/figures/coverage.py`:
+
+```python
+"""Analysis-mask coverage and spatial smoothness.
+
+Coverage answers a question a stat map cannot: a voxel outside the analysis mask
+was never tested, so its absence of effect is not evidence of absence. Signal
+dropout in orbitofrontal and inferior temporal cortex looks exactly like a true
+null on a thresholded map.
+
+Smoothness makes a cluster-extent threshold interpretable. ``cluster_min_voxels``
+is configured as a bare count, and the same count is a strong constraint on
+unsmoothed data and almost none at 8 mm.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from fmri_pipeline.analysis.report.style import (
+    MAGNITUDE_CMAP,
+    OKABE_ITO,
+    annotate_provenance,
+    plot_context,
+)
+
+logger = logging.getLogger(__name__)
+
+#: Converts a Gaussian standard deviation to its full width at half maximum.
+_FWHM_PER_SIGMA = float(np.sqrt(8.0 * np.log(2.0)))
+
+
+def estimate_fwhm(img: Any, *, mask: Optional[np.ndarray] = None) -> Tuple[float, float, float]:
+    """Estimate spatial smoothness per axis, in millimetres.
+
+    Uses the Kiebel/Forman estimator: for a Gaussian field, the variance of the
+    finite difference along an axis relates to the field's smoothness, giving
+    ``sigma = sqrt(-1 / (4 * ln(1 - Var(dX) / (2 * Var(X)))))`` in voxels, which the
+    affine converts to millimetres.
+
+    Estimated from whatever map is supplied. Given a statistic map rather than
+    model residuals this overestimates smoothness wherever real signal is present,
+    because signal is spatially structured; callers state which input was used. Once
+    the report manifest carries residuals, pass those instead.
+
+    Validated against Gaussian-filtered noise on a 40³ grid: estimates land within
+    4% of the true FWHM at 2.35, 4.71, and 7.06 mm, and scale exactly with voxel
+    size. Below about one voxel of smoothness the finite difference saturates and
+    the estimate floors at the voxel dimension -- at that point the honest statement
+    is "at or below one voxel", which is what the floor returns.
+    """
+    data = np.asarray(img.get_fdata(), dtype=float)
+    if min(data.shape[:3]) < 4:
+        raise ValueError(f"Volume is too small to estimate smoothness: {data.shape}.")
+
+    if mask is None:
+        mask = np.isfinite(data) & (data != 0)
+    values = np.where(mask, data, np.nan)
+    total_variance = np.nanvar(values)
+    if not np.isfinite(total_variance) or total_variance <= 0:
+        raise ValueError("Cannot estimate smoothness from a constant map.")
+
+    voxel_sizes = np.sqrt((np.asarray(img.affine)[:3, :3] ** 2).sum(axis=0))
+    fwhm = []
+    for axis in range(3):
+        difference = np.diff(values, axis=axis)
+        diff_variance = np.nanvar(difference)
+        ratio = diff_variance / (2.0 * total_variance)
+        if not np.isfinite(ratio) or ratio <= 0 or ratio >= 1:
+            # A ratio at or past 1 means neighbouring voxels are uncorrelated:
+            # smoothness is at or below one voxel.
+            fwhm.append(float(voxel_sizes[axis]))
+            continue
+        sigma_voxels = np.sqrt(-1.0 / (4.0 * np.log(1.0 - ratio)))
+        fwhm.append(float(sigma_voxels * _FWHM_PER_SIGMA * voxel_sizes[axis]))
+    return (fwhm[0], fwhm[1], fwhm[2])
+
+
+def coverage_figure(
+    mask_img: Any,
+    *,
+    bg_img: Any = None,
+    n_runs: int = 1,
+    title: str = "",
+) -> plt.Figure:
+    """Draw the analysis mask over the background, with its extent stated.
+
+    Rendered as an ROI overlay rather than a bare binary volume so a reader can see
+    which anatomy fell outside the model, which is the only reading that matters.
+    """
+    from nilearn import plotting
+
+    data = np.asarray(mask_img.get_fdata())
+    modelled = int(np.count_nonzero(data > 0))
+    if modelled == 0:
+        raise ValueError("Coverage figure requires a mask with at least one voxel; got no voxels.")
+
+    with plot_context():
+        display = plotting.plot_roi(
+            mask_img,
+            bg_img=bg_img,
+            title=title or None,
+            display_mode="ortho",
+            cmap=MAGNITUDE_CMAP,
+            alpha=0.55,
+            black_bg=False,
+            annotate=True,
+        )
+        figure = getattr(display, "figure", None) or getattr(display, "_fig", None)
+        if figure is None:
+            raise RuntimeError("Could not resolve a Matplotlib figure from the display.")
+        annotate_provenance(figure, [
+            f"{modelled:,} voxels modelled of {data.size:,} in the field of view",
+            f"intersection across {n_runs} run(s)",
+            "voxels outside this mask were not tested",
+        ])
+        return figure
+
+
+__all__ = ["coverage_figure", "estimate_fwhm"]
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `.venv/bin/python -m pytest tests/fmri/report/test_coverage.py -v`
+Expected: PASS, 7 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add fmri_pipeline/analysis/report/figures/coverage.py tests/fmri/report/test_coverage.py
+git commit -m "feat(fmri): add analysis-mask coverage panel and smoothness estimation
+
+Coverage distinguishes an untested voxel from a null result. Smoothness makes
+a cluster-extent threshold in voxels interpretable; nilearn has no estimator."
+```
+
+---
+
+### Task 9: Rewire the reporting path
 
 **Files:**
 - Modify: `fmri_pipeline/analysis/reporting.py` — replace `generate_carpet_qc_images` (138-262), `generate_tsnr_qc_images` (265-420), the figure blocks of `generate_fmri_space_section` (984-1198), and the motion QC block (1371-1415)
 - Test: `tests/fmri/report/test_reporting_integration.py`
 
 **Interfaces:**
-- Consumes: every `figures/` module from Tasks 3-7, `discover_plot_assets` from Task 2, `plot_context` from Task 1.
+- Consumes: every `figures/` module from Tasks 3-8, `discover_plot_assets` from Task 2, `plot_context` and `savefig_kwargs` from Task 1.
 - Produces: no new public names. `generate_fmri_space_section` and `run_fmri_plotting_and_report` keep their signatures so `fmri_pipeline/pipelines/fmri_analysis.py` is untouched by this plan.
 
-Two behaviour changes land here: a figure yields **one** `ReportImage` regardless of how many formats are written, and a panel failure is logged and skipped rather than raised.
+Four behaviour changes land here: a figure yields **one** `ReportImage` regardless of how many formats are written; a panel failure is logged and skipped rather than raised; every save goes through `savefig_kwargs` so output is byte-reproducible; and `cfg.two_sided` reaches the map panels, so a one-sided analysis produces one-sided figures.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2069,6 +2680,36 @@ def test_figures_are_closed_when_saving_fails(tmp_path: Path) -> None:
             plot_types=("hist",), cfg=_cfg(),
         )
     assert plt.get_fignums() == []
+
+
+def test_one_sided_configuration_reaches_the_map_panels(tmp_path: Path) -> None:
+    with patch(
+        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic"
+    ) as mock_mosaic:
+        mock_mosaic.return_value = __import__("matplotlib.pyplot", fromlist=["figure"]).figure()
+        generate_fmri_space_section(
+            space="mni", stat_img=_stat_img(), out_base_dir=tmp_path,
+            formats=("png",), z_threshold=2.3, include_unthresholded=False,
+            plot_types=("slices",), cfg=_cfg(two_sided=False),
+        )
+    assert mock_mosaic.call_args.kwargs["two_sided"] is False
+
+
+def test_regenerating_a_section_produces_byte_identical_output(tmp_path: Path) -> None:
+    import hashlib
+    import time
+
+    def render(directory: str) -> bytes:
+        generate_fmri_space_section(
+            space="mni", stat_img=_stat_img(), out_base_dir=tmp_path / directory,
+            formats=("svg",), z_threshold=2.3, include_unthresholded=False,
+            plot_types=("hist",), cfg=_cfg(formats=("svg",)),
+        )
+        return (tmp_path / directory / "plots" / "mni" / "z_hist.svg").read_bytes()
+
+    first = hashlib.sha256(render("a")).hexdigest()
+    time.sleep(1.1)
+    assert hashlib.sha256(render("b")).hexdigest() == first
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -2085,6 +2726,7 @@ from contextlib import suppress
 
 from fmri_pipeline.analysis.report.figures import (
     carpet as carpet_figures,
+    coverage as coverage_figures,
     design as design_figures,
     distributions as distribution_figures,
     stat_maps as stat_map_figures,
@@ -2109,12 +2751,16 @@ def _save_figure(
     """
     import matplotlib.pyplot as plt
 
+    from fmri_pipeline.analysis.report.style import savefig_kwargs
+
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         primary: Optional[Path] = None
         for fmt in formats:
             path = out_dir / f"{stem}.{fmt}"
-            figure.savefig(path)
+            # Deterministic metadata: without it an SVG carries a timestamp and the
+            # same figure differs on every render, so it cannot be diffed or cached.
+            figure.savefig(path, **savefig_kwargs(path))
             if primary is None:
                 primary = path
         if primary is None:
@@ -2151,11 +2797,14 @@ def _panel(description: str):
 In `generate_fmri_space_section`, replace the bodies of the `slices`, `glass`, and `hist` blocks (lines 984-1092) with:
 
 ```python
+    two_sided = bool(cfg_obj.two_sided)
+
     if "slices" in plot_types:
         if include_unthresholded:
             with _panel("unthresholded stat-map slices"):
                 figure = stat_map_figures.stat_map_mosaic(
                     stat_img, bg_img=bg_img, threshold=None, vmax=z_vmax,
+                    two_sided=two_sided,
                     title=f"{title_prefix}Z map (unthresholded)".strip(),
                 )
                 images.extend(_save_figure(
@@ -2167,6 +2816,7 @@ In `generate_fmri_space_section`, replace the bodies of the `slices`, `glass`, a
                 figure = stat_map_figures.stat_map_mosaic(
                     stat_img if thr_img is None else thr_img, bg_img=bg_img,
                     threshold=float(thr_val) if thr_val is not None else None,
+                    two_sided=two_sided,
                     title=f"{title_prefix}Z map (thresholded)".strip(),
                 )
                 images.extend(_save_figure(
@@ -2182,6 +2832,7 @@ In `generate_fmri_space_section`, replace the bodies of the `slices`, `glass`, a
             figure = stat_map_figures.glass_brain(
                 stat_img if thr_img is None else thr_img,
                 threshold=float(thr_val) if thr_val is not None else None,
+                two_sided=two_sided,
                 title=f"{title_prefix}Glass brain (thresholded)".strip(),
             )
             images.extend(_save_figure(
@@ -2205,7 +2856,37 @@ In `generate_fmri_space_section`, replace the bodies of the `slices`, `glass`, a
             ))
 ```
 
-Delete the `_add_image` helper (lines 962-966) and the effect-size and standard-error blocks (lines 1137-1198), replacing the latter with the same `_panel` + `_save_figure` pattern using `stat_map_figures.stat_map_mosaic` for the effect map (`cbar_label="effect size"`) and `cmap=MAGNITUDE_CMAP` for the standard error.
+Delete the `_add_image` helper (lines 962-966) and the effect-size and standard-error blocks (lines 1137-1198), replacing the latter with the same `_panel` + `_save_figure` pattern using `stat_map_figures.stat_map_mosaic` for the effect map and `cmap=MAGNITUDE_CMAP` for the standard error.
+
+The effect map's colorbar label is derived, not hardcoded. A GLM effect size is in arbitrary BOLD units unless the model applied signal scaling, so label it `"% signal change"` when `run_meta.get("signal_scaling")` indicates scaling was applied and `"effect (arbitrary BOLD units)"` otherwise. Naming units the model did not produce is worse than naming none.
+
+Then add the coverage panel and the smoothness line:
+
+```python
+    if mask_img is not None:
+        with _panel("coverage"):
+            figure = coverage_figures.coverage_figure(
+                mask_img, bg_img=bg_img,
+                n_runs=int(run_meta.get("n_runs", 1)) if isinstance(run_meta, dict) else 1,
+                title=f"{title_prefix}Analysis mask".strip(),
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="coverage", formats=formats,
+                title="Coverage (analysis mask)",
+                caption="Voxels outside this mask were not tested.",
+            ))
+
+    # A cluster-extent threshold in voxels is uninterpretable without the smoothness
+    # it implicitly references, so state the estimate wherever one was applied.
+    if cfg_obj.cluster_min_voxels > 0:
+        with _panel("smoothness estimate"):
+            fwhm = coverage_figures.estimate_fwhm(stat_img)
+            summary["estimated FWHM (mm)"] = (
+                f"{fwhm[0]:.1f} × {fwhm[1]:.1f} × {fwhm[2]:.1f} (from the z map)"
+            )
+```
+
+`summary` is built later in the function today; move its construction above these blocks so the smoothness entry can be added to it.
 
 - [ ] **Step 5: Replace the QC generators**
 
@@ -2244,17 +2925,36 @@ git add fmri_pipeline/analysis/reporting.py tests/fmri/report/test_reporting_int
 git commit -m "refactor(fmri): route reporting through the tested figure layer
 
 One report entry per figure regardless of format count, one failure policy
-across every panel, and figures closed on the error path."
+across every panel, figures closed on the error path, byte-reproducible
+output, and one-sided configuration reaching the map panels."
 ```
+
+- [ ] **Step 8: Confirm the removed figures are gone**
+
+Run: `git grep -n "cold_hot\|glass_unthresholded\|motion_qc\." -- fmri_pipeline/`
+Expected: no matches. These are the panels and the colormap this plan retires; a
+surviving reference means a call site was missed.
 
 ---
 
 ## Self-Review
 
-**Spec coverage.** Every plan-1 item in the spec maps to a task: style layer → Task 1; unified asset discovery → Task 2; glass-brain sign, thresholded limits, annotation, colorbar labels → Task 3; z histogram and tSNR histogram → Task 4; affine-correct tSNR → Task 5; tissue-ordered carpet with aligned motion and preserved FD NaN → Task 6; design matrix, contrast strip, VIF, correlation → Task 7; duplicate-format entries, uniform failure policy, figure leaks, removal of the unthresholded glass brain and the raw-array montage → Task 8.
+**Spec coverage.** Every plan-1 item in the spec maps to a task: style layer → Task 1; unified asset discovery → Task 2; glass-brain sign, thresholded limits, annotation, colorbar labels, sidedness → Task 3; z histogram and tSNR histogram → Task 4; affine-correct tSNR → Task 5; tissue-ordered carpet with aligned motion and preserved FD NaN → Task 6; design matrix, contrast strip, VIF, correlation → Task 7; coverage and smoothness → Task 8; duplicate-format entries, uniform failure policy, figure leaks, determinism, removal of the unthresholded glass brain and the raw-array montage → Task 9.
 
 Deferred to plans 2 and 3, by design: the per-subject document and `html.py`, the manifest and `fmri report` entry point, the `FmriPlottingConfig` split, numbered cluster peaks keyed to the table (Task 3 ships the `peak_coords` parameter; the table wiring needs the report layer), the signature dot plot, and the whole rest profile including the ROI degeneracy change.
 
-**Type consistency.** `plot_context`, `robust_symmetric_limit`, `suprathreshold_limit`, `figure_format`, `SIGNED_CMAP`, `MAGNITUDE_CMAP`, `GUIDE_COLOR` are defined in Task 1 and used under those exact names in Tasks 3-8. `PlotAssets` and `discover_plot_assets` are defined in Task 2 and consumed in Task 6. `vif_from_design` is defined in Task 7 and imported under an alias by `reporting.py` in the same task. `compute_tsnr` / `tsnr_volume` (Task 5) and `carpet_figure` / `resolve_tissue_codes` (Task 6) are called in Task 8 with the signatures declared.
+**Type consistency.** `plot_context`, `robust_symmetric_limit`, `robust_upper_limit`, `suprathreshold_limit`, `clipped_fraction`, `annotate_provenance`, `savefig_kwargs`, `figure_format`, `SIGNED_CMAP`, `MAGNITUDE_CMAP`, `GUIDE_COLOR` are defined in Task 1 and used under those exact names in Tasks 3-9. `PlotAssets` / `discover_plot_assets` (Task 2) are consumed in Task 6. `vif_from_design` (Task 7) is imported under an alias by `reporting.py` in the same task. `compute_tsnr` / `tsnr_volume` (Task 5), `carpet_figure` / `resolve_tissue_codes` / `subsample_rows` (Task 6), and `coverage_figure` / `estimate_fwhm` (Task 8) are called in Task 9 with the signatures declared.
 
-**Known gap to confirm during Task 3.** `_label_colorbar` reaches `display._cbar`, a nilearn private attribute, because `plot_stat_map` exposes no colorbar-label parameter in 0.14.0. It degrades to a debug log if the attribute moves. If the implementer finds a public accessor in the installed version, use it instead.
+### Verified before writing, not assumed
+
+- **Palette.** The Okabe-Ito subset was run through the dataviz validator against the light report surface: all checks pass, with one contrast WARN on `#E69F00`, `#CC79A7`, `#56B4E9`. The obligation that WARN creates — those three never carry identity alone — is in Global Constraints and is satisfied by the direct labels every panel using them already has.
+- **Determinism.** Measured on this installation: PNG is byte-stable across renders; SVG is not, and becomes stable with `metadata={"Date": None}` plus a fixed `svg.hashsalt`. Both byte-stability tests sleep 1.1 s so a passing result cannot be luck.
+- **`plot_abs` default.** Confirmed `True` in the installed nilearn 0.14.0, which is what makes Task 3's fix necessary rather than defensive.
+- **Smoothness estimator.** Validated against Gaussian-filtered noise: within 4% of true FWHM at 2.35, 4.71, and 7.06 mm, exact scaling with voxel size, floors at one voxel for sub-voxel smoothness.
+
+### Known gaps, stated rather than hidden
+
+- **`_label_colorbar` reaches `display._cbar`,** a nilearn private attribute, because `plot_stat_map` exposes no colorbar-label parameter in 0.14.0. It degrades to a debug log if the attribute moves. Replace it if the implementer finds a public accessor.
+- **Smoothness is estimated from the z map, not model residuals,** because plan 1's report layer has no access to the fitted model. This overestimates wherever real signal is present, and the summary line says so. Plan 2 should carry residuals in the manifest and pass them instead.
+- **The per-class row floor in `subsample_rows` distorts block heights.** Once a floor is applied, a tissue block's height no longer represents its share of the brain. The figure states the per-class row counts so a reader is not misled by the geometry; the alternative — dropping CSF below visibility — is worse.
+- **The z histogram's null overlay is scaled to the total voxel count,** which assumes most voxels are null. That is the conventional display and is close to true for a typical contrast, but it is an assumption, and it will understate the null for a map where a large fraction of the brain is genuinely active.
