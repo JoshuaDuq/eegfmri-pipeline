@@ -114,11 +114,33 @@ def test_mask_volume_scales_with_the_voxel_size() -> None:
 def test_an_extent_threshold_in_resels_falls_as_smoothness_rises() -> None:
     # The same voxel count is a strong constraint on unsmoothed data and almost none
     # at 8 mm, which is exactly what a bare count fails to say.
-    mask = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.uint8), np.eye(4))
-    rough = coverage.extent_in_resels(50, mask_img=mask, fwhm=(2.0, 2.0, 2.0))
-    smooth = coverage.extent_in_resels(50, mask_img=mask, fwhm=(8.0, 8.0, 8.0))
+    reference = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.uint8), np.eye(4))
+    rough = coverage.extent_in_resels(50, reference_img=reference, fwhm=(2.0, 2.0, 2.0))
+    smooth = coverage.extent_in_resels(50, reference_img=reference, fwhm=(8.0, 8.0, 8.0))
     assert rough > smooth
     assert smooth == pytest.approx(50.0 / 8.0**3)
+
+
+def test_the_search_volume_in_resels_counts_independent_tests_not_voxels() -> None:
+    # The gap this exists to show: smoothing makes neighbouring voxels one
+    # measurement, while every corrected height in the report divides alpha across
+    # the voxel count.
+    mask = np.zeros((20, 20, 20), dtype=np.uint8)
+    mask[2:18, 2:18, 2:18] = 1
+    img = nib.Nifti1Image(mask, np.diag([3.0, 3.0, 3.0, 1.0]))
+    voxels, _volume = coverage.mask_volume_mm3(img)
+    resels = coverage.search_volume_resels(img, fwhm=(6.0, 6.0, 6.0))
+    assert resels < voxels
+    # 16^3 voxels of 27 mm^3 in resels of 216 mm^3.
+    assert resels == pytest.approx(16**3 * 27.0 / 216.0)
+
+
+def test_the_search_volume_in_resels_equals_the_voxel_count_at_one_voxel_smoothness() -> None:
+    # The degenerate case that fixes the scale: with no smoothing every voxel is its
+    # own resel, so the two counts must coincide.
+    mask = np.ones((8, 8, 8), dtype=np.uint8)
+    img = nib.Nifti1Image(mask, np.diag([2.0, 2.0, 2.0, 1.0]))
+    assert coverage.search_volume_resels(img, fwhm=(2.0, 2.0, 2.0)) == pytest.approx(8**3)
 
 
 def test_the_smoothness_note_names_where_the_estimate_came_from() -> None:

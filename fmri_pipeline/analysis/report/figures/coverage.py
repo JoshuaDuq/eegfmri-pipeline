@@ -185,8 +185,13 @@ def smoothness_note(fwhm: Tuple[float, float, float], *, source: str) -> str:
     return f"smoothness {x:.1f} × {y:.1f} × {z:.1f} mm FWHM (estimated from the {source})"
 
 
+def _resel_volume_mm3(fwhm: Tuple[float, float, float]) -> float:
+    """Volume of one resolution element: the box a single smoothing kernel occupies."""
+    return float(np.prod([max(f, 1e-9) for f in fwhm]))
+
+
 def extent_in_resels(
-    voxels: int, *, mask_img: Any, fwhm: Tuple[float, float, float]
+    voxels: int, *, reference_img: Any, fwhm: Tuple[float, float, float]
 ) -> float:
     """Convert a cluster-extent threshold in voxels to resolution elements.
 
@@ -194,10 +199,31 @@ def extent_in_resels(
     strong constraint on unsmoothed 3 mm data and almost none at 8 mm FWHM. One resel
     is the volume of a single smoothing kernel, so an extent in resels says how many
     independent bumps of noise a surviving cluster has to span.
+
+    ``reference_img`` supplies the voxel geometry through its affine. It was named
+    ``mask_img`` while every caller passed the statistic map, which is the right image
+    -- only the name was wrong.
     """
+    voxel_sizes = np.sqrt((np.asarray(reference_img.affine)[:3, :3] ** 2).sum(axis=0))
+    return float(voxels) * float(np.prod(voxel_sizes)) / _resel_volume_mm3(fwhm)
+
+
+def search_volume_resels(mask_img: Any, *, fwhm: Tuple[float, float, float]) -> float:
+    """How many independent resolution elements the analysis mask contains.
+
+    The effective number of tests, as distinct from the voxel count. Smoothing makes
+    neighbouring voxels the same measurement, so a mask of 50,626 voxels at 6.5 mm FWHM
+    on a 3 mm grid holds about 5,000 independent ones -- and the Bonferroni threshold
+    the report states beside it is computed over the larger number.
+
+    Reported so that the gap between the two is visible rather than left as the reason
+    a stated threshold is "known to be conservative". It is a measurement, not a
+    substitute threshold: random field theory relates resels to a familywise-corrected
+    height, and this pipeline performs no such correction.
+    """
+    voxels, _volume = mask_volume_mm3(mask_img)
     voxel_sizes = np.sqrt((np.asarray(mask_img.affine)[:3, :3] ** 2).sum(axis=0))
-    resel_volume = float(np.prod([max(f, 1e-9) for f in fwhm]))
-    return float(voxels) * float(np.prod(voxel_sizes)) / resel_volume
+    return float(voxels) * float(np.prod(voxel_sizes)) / _resel_volume_mm3(fwhm)
 
 
 __all__ = [
@@ -205,5 +231,6 @@ __all__ = [
     "estimate_fwhm",
     "extent_in_resels",
     "mask_volume_mm3",
+    "search_volume_resels",
     "smoothness_note",
 ]
