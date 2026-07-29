@@ -20,7 +20,6 @@ import numpy as np
 
 from fmri_pipeline.analysis.report.figures._display import figure_of
 from fmri_pipeline.analysis.report.style import (
-    MAGNITUDE_CMAP,
     annotate_provenance,
     plot_context,
 )
@@ -29,6 +28,21 @@ logger = logging.getLogger(__name__)
 
 #: Converts a Gaussian standard deviation to its full width at half maximum.
 _FWHM_PER_SIGMA = float(np.sqrt(8.0 * np.log(2.0)))
+
+
+def _mask_colormap():
+    """Two colours for a binary mask: transparent outside, one hue inside.
+
+    A mask has two states, so it gets two colours. A continuous ramp would imply a
+    gradient the data does not have, and its low end is a visible colour rather than
+    nothing -- which is what made the panel paint its own field of view.
+    """
+    from matplotlib.colors import ListedColormap
+
+    return ListedColormap([(0.0, 0.0, 0.0, 0.0), (0.16, 0.33, 0.55, 0.6)])
+
+
+_MASK_CMAP = _mask_colormap()
 
 
 def estimate_fwhm(
@@ -125,10 +139,25 @@ def coverage_figure(
             bg_img=bg_img,
             title=title or None,
             display_mode="ortho",
-            cmap=MAGNITUDE_CMAP,
-            alpha=0.55,
+            # Two entries, the first fully transparent. Handed a continuous colormap,
+            # nilearn maps the mask's zeros to its low colour and paints them, so the
+            # panel drew a solid block over the whole field-of-view box -- covering
+            # the anatomy that shows which regions fell outside the model, which is
+            # the only thing this panel is read for.
+            cmap=_MASK_CMAP,
+            vmin=0,
+            vmax=1,
+            # dim=0 like every other volume panel. Left at nilearn's "auto", the
+            # background is brightened until air outside the head sits at mid grey and
+            # the anatomy loses the contrast this panel is read for. The translucency
+            # is carried by the colormap rather than a scalar `alpha`, which would
+            # override the per-colour alpha and paint the transparent entry too.
+            dim=0,
             black_bg=False,
             annotate=True,
+            # A mask is in or out. A 0-to-1 colour scale beside it invites a reading
+            # of degree that the two states do not carry.
+            colorbar=False,
         )
         figure = figure_of(display)
         # The old first line was "N voxels modelled of M in the field of view". M

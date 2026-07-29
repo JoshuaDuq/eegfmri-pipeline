@@ -160,3 +160,61 @@ def test_the_coverage_panel_makes_no_extent_claim_by_default() -> None:
     text = " ".join(artist.get_text() for artist in figure.texts)
     assert "intersection" not in text
     plt.close(figure)
+
+
+def test_the_coverage_panel_leaves_voxels_outside_the_mask_transparent() -> None:
+    # Handed a continuous colormap, nilearn maps the mask's zeros to its low colour
+    # and paints them, so the panel drew a solid block over the whole field-of-view
+    # box -- covering the anatomy that shows which regions fell outside the model,
+    # which is the only thing this panel is read for.
+    from unittest.mock import patch
+
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    with patch("nilearn.plotting.plot_roi") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+        except Exception:
+            pass
+    kwargs = mock_plot.call_args.kwargs
+    cmap = kwargs["cmap"]
+    assert cmap(0.0)[3] == 0.0, "the zero colour must be fully transparent"
+    assert cmap(1.0)[3] > 0.0, "the mask colour must be visible"
+    assert kwargs["vmin"] == 0
+    assert kwargs["vmax"] == 1
+    # A scalar alpha overrides the colormap's per-colour alpha and would paint the
+    # transparent entry too.
+    assert "alpha" not in kwargs
+
+
+def test_the_coverage_panel_does_not_let_nilearn_brighten_the_background() -> None:
+    # At nilearn's "auto" dimming, air outside the head is lifted to mid grey and the
+    # anatomy loses the contrast that shows which regions fell outside the model.
+    from unittest.mock import patch
+
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    with patch("nilearn.plotting.plot_roi") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+        except Exception:
+            pass
+    assert mock_plot.call_args.kwargs["dim"] == 0
+
+
+def test_a_binary_mask_gets_no_colour_scale() -> None:
+    # A mask is in or out. A 0-to-1 scale beside it invites a reading of degree that
+    # the two states do not carry.
+    from unittest.mock import patch
+
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    with patch("nilearn.plotting.plot_roi") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+        except Exception:
+            pass
+    assert mock_plot.call_args.kwargs["colorbar"] is False
