@@ -316,3 +316,29 @@ def test_the_coordinate_space_label_distinguishes_mni_from_everything_else() -> 
     assert "MNI152" in subject.coordinate_space_label("mni")
     assert "not MNI" in subject.coordinate_space_label("native")
     assert "not MNI" in subject.coordinate_space_label("T1w")
+
+
+def test_the_analysis_mask_reaches_the_colour_limit(tmp_path: Path) -> None:
+    """Wiring test: the mask is only useful if the panels actually receive it.
+
+    A stat map is mostly background, so a limit computed without the mask lands too
+    low and the panel saturates. The figure-level fix is inert unless the mask is
+    threaded through from the manifest.
+    """
+    mask_path = tmp_path / "mask.nii.gz"
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    nib.save(nib.Nifti1Image(mask, np.eye(4)), str(mask_path))
+
+    manifest = _manifest(tmp_path, mask=mask_path)
+    with patch(
+        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic"
+    ) as mosaic:
+        mosaic.return_value = None
+        subject.build_contrast_section(
+            manifest=manifest, out_dir=tmp_path, cfg=_cfg()
+        )
+
+    assert mosaic.called
+    passed = [call.kwargs.get("mask_img") for call in mosaic.call_args_list]
+    assert any(m is not None for m in passed), "no panel received the analysis mask"

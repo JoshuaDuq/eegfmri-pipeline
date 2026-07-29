@@ -341,6 +341,26 @@ def _carpet_blocks(
     ]
 
 
+def _load_mask(manifest: ContrastManifest) -> Any:
+    """Load the analysis mask, or None when the manifest records none.
+
+    Best-effort: a missing or unreadable mask leaves the colour-limit helpers to
+    fall back on excluding exact zeros, which they state on the figure.
+    """
+    if not manifest.mask:
+        return None
+    path = Path(manifest.mask)
+    if not path.exists():
+        return None
+    try:
+        import nibabel as nib
+
+        return nib.load(str(path))
+    except Exception as exc:  # pragma: no cover - depends on a corrupt file
+        logger.warning("Could not load analysis mask %s (%s)", path, exc)
+        return None
+
+
 def supports_glass_brain(space: str) -> bool:
     """Whether a glass-brain projection is defined for ``space``.
 
@@ -451,6 +471,9 @@ def build_contrast_section(
 
     plots_dir = out_dir / "plots" / _slug(manifest)
     stat_img = nib.load(str(manifest.stat_map))
+    # Colour limits are computed inside this mask. Without it a percentile is taken
+    # over a volume that is mostly background zeros and lands far too low.
+    mask_img = _load_mask(manifest)
     threshold = manifest.z_threshold if manifest.threshold_mode == "z" else None
     blocks: List[html.Block] = []
 
@@ -491,6 +514,7 @@ def build_contrast_section(
             path = _save(
                 stat_map_figures.stat_map_mosaic(
                     stat_img,
+                    mask_img=mask_img,
                     threshold=float(threshold),
                     two_sided=manifest.two_sided,
                     radiological=manifest.radiological,
@@ -508,6 +532,7 @@ def build_contrast_section(
                 path = _save(
                     stat_map_figures.glass_brain(
                         stat_img,
+                        mask_img=mask_img,
                         threshold=float(threshold),
                         two_sided=manifest.two_sided,
                         radiological=manifest.radiological,
@@ -571,6 +596,7 @@ def build_diagnostics_section(
 
     plots_dir = out_dir / "plots" / _slug(manifest)
     stat_img = nib.load(str(manifest.stat_map))
+    mask_img = _load_mask(manifest)
     blocks: List[html.Block] = []
 
     if cfg.include_unthresholded:
@@ -578,6 +604,7 @@ def build_diagnostics_section(
             path = _save(
                 stat_map_figures.stat_map_mosaic(
                     stat_img,
+                    mask_img=mask_img,
                     threshold=None,
                     two_sided=manifest.two_sided,
                     radiological=manifest.radiological,
@@ -604,6 +631,7 @@ def build_diagnostics_section(
             path = _save(
                 stat_map_figures.stat_map_mosaic(
                     se_img,
+                    mask_img=mask_img,
                     threshold=None,
                     two_sided=True,
                     radiological=manifest.radiological,

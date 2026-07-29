@@ -207,3 +207,75 @@ def test_dual_coded_mosaic_returns_a_figure() -> None:
     )
     assert figure is not None
     plt.close(figure)
+
+
+# --- colour limits are computed inside the brain ---------------------------
+
+
+def _map_with_background(brain_fraction_shape=(40, 48, 40)) -> "nib.Nifti1Image":
+    """A stat map whose background is exactly zero, as a real one's is."""
+    rng = np.random.default_rng(0)
+    data = np.zeros(brain_fraction_shape)
+    brain = np.zeros(brain_fraction_shape, bool)
+    brain[8:32, 10:38, 8:32] = True
+    data[brain] = rng.standard_normal(int(brain.sum()))
+    data[16:20, 20:24, 16:20] = 5.0
+    return nib.Nifti1Image(data.astype(np.float32), np.eye(4)), brain
+
+
+def test_the_colour_limit_ignores_the_zero_background() -> None:
+    """Background zeros dominate the percentile and drag the limit far too low.
+
+    A stat map is mostly background. Taking a robust limit over the whole volume
+    computes a percentile of a distribution that is largely zeros, so the limit
+    lands below the real one and every voxel above it saturates.
+    """
+    img, brain = _map_with_background()
+    data = np.asarray(img.get_fdata())
+
+    masked = stat_maps._resolve_vmax(
+        img,
+        threshold=None,
+        vmax=None,
+        mask_img=nib.Nifti1Image(brain.astype(np.uint8), np.eye(4)),
+    )
+
+    inside = float(np.percentile(np.abs(data[brain]), 98.0))
+    whole_volume = float(np.percentile(np.abs(data), 98.0))
+
+    assert masked == pytest.approx(inside, rel=0.01)
+    # The defect this guards against: a limit taken over the whole volume is
+    # substantially lower, so the panel saturates everything above it.
+    assert masked > whole_volume * 1.2
+
+
+def test_without_a_mask_the_limit_falls_back_to_nonzero_voxels() -> None:
+    """An explicit mask is best, but an exact-zero background is still detectable."""
+    img, brain = _map_with_background()
+    data = np.asarray(img.get_fdata())
+
+    resolved = stat_maps._resolve_vmax(img, threshold=None, vmax=None)
+    nonzero = float(np.percentile(np.abs(data[data != 0]), 98.0))
+    assert resolved == pytest.approx(nonzero, rel=0.01)
+
+
+def test_a_map_with_no_background_is_unaffected_by_the_fallback() -> None:
+    """Every voxel nonzero: the fallback must not change a well-behaved map."""
+    rng = np.random.default_rng(1)
+    data = rng.standard_normal((10, 10, 10)) + 10.0
+    img = nib.Nifti1Image(data.astype(np.float32), np.eye(4))
+    assert stat_maps._resolve_vmax(img, threshold=None, vmax=None) == pytest.approx(
+        float(np.percentile(np.abs(data), 98.0)), rel=0.01
+    )
+
+
+def test_the_mosaic_states_which_voxels_its_limit_came_from() -> None:
+    img, brain = _map_with_background()
+    figure = stat_maps.stat_map_mosaic(
+        img, mask_img=nib.Nifti1Image(brain.astype(np.uint8), np.eye(4))
+    )
+    try:
+        text = " ".join(t.get_text() for t in figure.texts)
+        assert "mask" in text.lower()
+    finally:
+        plt.close(figure)
