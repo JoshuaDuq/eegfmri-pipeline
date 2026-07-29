@@ -526,6 +526,7 @@ class FmriAnalysisPipeline(PipelineBase):
             cluster_min_voxels=getattr(plot_cfg_for_manifest, "cluster_min_voxels", 0),
             two_sided=getattr(plot_cfg_for_manifest, "two_sided", True),
             radiological=getattr(plot_cfg_for_manifest, "radiological", False),
+            contrast_cfg=contrast_cfg,
         )
         if manifest_path is not None:
             self.logger.info("Wrote report manifest: %s", manifest_path.name)

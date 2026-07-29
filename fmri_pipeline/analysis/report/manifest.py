@@ -80,6 +80,21 @@ class ContrastManifest:
     #: loads -- and loads as the conservative answer.
     mask_is_analysis_mask: bool = False
 
+    #: Every model setting that shaped this contrast, as ordered label/value pairs.
+    #:
+    #: A report that shows a result without the settings that produced it cannot be
+    #: reproduced from, and cannot be compared against another study whose HRF or
+    #: high-pass differed. Pairs rather than typed fields because the set grows with
+    #: the model options and the report only ever renders them in order.
+    model_settings: Tuple[Tuple[str, str], ...] = ()
+
+    #: The confound columns actually regressed out, by name.
+    #:
+    #: A strategy name is not the same fact: "auto" resolves to a different column set
+    #: per run depending on what fMRIPrep wrote, and the difference decides what the
+    #: residuals contain.
+    confound_columns: Tuple[str, ...] = ()
+
 
 def _encode(value: Any) -> Any:
     if isinstance(value, Path):
@@ -121,6 +136,10 @@ def read_manifest(path: Path) -> ContrastManifest:
     )
     data["contrast_columns"] = tuple(data.get("contrast_columns") or ())
     data["included_runs"] = tuple(data.get("included_runs") or ())
+    data["confound_columns"] = tuple(str(c) for c in (data.get("confound_columns") or ()))
+    data["model_settings"] = tuple(
+        (str(label), str(value)) for label, value in (data.get("model_settings") or ())
+    )
     data["excluded_runs"] = tuple(
         (str(run), str(reason)) for run, reason in (data.get("excluded_runs") or ())
     )
@@ -216,6 +235,52 @@ def _report_space(analysis_space: Any) -> str:
     return "mni" if text.startswith("mni") else "native"
 
 
+#: Model settings worth recording, as ``(attribute, label, formatter)``.
+#:
+#: Only settings that change the numbers. A report that shows a result without these
+#: cannot be reproduced from and cannot be compared against a study whose HRF basis or
+#: high-pass cutoff differed -- and neither difference is visible in any map.
+_MODEL_SETTINGS: Tuple[Tuple[str, str, Any], ...] = (
+    ("hrf_model", "HRF model", str),
+    ("drift_model", "Drift model", lambda v: str(v) if v else "none"),
+    ("high_pass_hz", "High-pass cutoff", lambda v: f"{float(v):.4g} Hz ({1.0 / float(v):.0f} s)" if v else "none"),
+    ("low_pass_hz", "Low-pass cutoff", lambda v: f"{float(v):.4g} Hz" if v else "none"),
+    ("confounds_strategy", "Confound strategy", str),
+    ("auto_compcor_n", "CompCor components", lambda v: str(int(v))),
+    ("output_type", "Statistic requested", str),
+    ("fmriprep_space", "Fit in space", str),
+    ("resample_to_freesurfer", "Resampled to FreeSurfer", lambda v: "yes" if v else "no"),
+    ("contrast_type", "Contrast type", str),
+    ("formula", "Contrast formula", lambda v: str(v) if v else "not a formula contrast"),
+)
+
+
+def model_settings_from_config(contrast_cfg: Any) -> Tuple[Tuple[str, str], ...]:
+    """Extract the settings that shaped a fit, as ordered label/value pairs.
+
+    Reads whatever the config object actually carries and skips the rest, so a config
+    that gains or loses an option does not break the manifest. An unreadable setting
+    is omitted rather than guessed: a wrong value here would be worse than a missing
+    one, because a reader has no way to check it against the maps.
+    """
+    if contrast_cfg is None:
+        return ()
+    missing = object()
+    pairs: List[Tuple[str, str]] = []
+    for attribute, label, formatter in _MODEL_SETTINGS:
+        # The read is inside the guard, not before it. `hasattr` only swallows
+        # AttributeError, so probing a property that raises anything else propagates
+        # and costs the whole configuration rather than the one setting.
+        try:
+            value = getattr(contrast_cfg, attribute, missing)
+            if value is missing:
+                continue
+            pairs.append((label, formatter(value)))
+        except Exception:
+            continue
+    return tuple(pairs)
+
+
 def write_report_manifest(
     *,
     contrast_dir: Path,
@@ -239,6 +304,7 @@ def write_report_manifest(
     smoothing_fwhm: Optional[float] = None,
     signal_scaling: bool = False,
     mask_is_analysis_mask: bool = False,
+    contrast_cfg: Any = None,
 ) -> Optional[Path]:
     """Record what was fit, beside what was fit.
 
@@ -310,6 +376,13 @@ def write_report_manifest(
             # A mask discovered from the preprocessing derivatives is a single run's,
             # and the report's coverage panel makes a claim only the fitted one earns.
             mask_is_analysis_mask=bool(mask_is_analysis_mask and mask is not None),
+            model_settings=model_settings_from_config(contrast_cfg),
+            # The resolved column names, not just the strategy that chose them:
+            # "auto" lands on a different set per run depending on what fMRIPrep
+            # wrote, and that difference decides what the residuals contain.
+            confound_columns=tuple(
+                str(column) for column in (meta.get("confound_columns") or [])
+            ),
         )
         return write_manifest(manifest, Path(contrast_dir) / MANIFEST_FILENAME)
     except Exception as exc:
@@ -327,6 +400,7 @@ __all__ = [
     "MANIFEST_FILENAME",
     "ContrastManifest",
     "discover_manifests",
+    "model_settings_from_config",
     "read_manifest",
     "sample_masks_from_confounds",
     "write_manifest",

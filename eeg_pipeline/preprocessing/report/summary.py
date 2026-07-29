@@ -10,6 +10,7 @@ are properties of the fitted ICA that the pipeline already computes and then dis
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -669,6 +670,14 @@ def removal_topography_html(topography: RemovalTopography) -> str:
     )
 
 
+#: Largest number of channel names drawn on the ranked panel before they are thinned.
+#:
+#: A 64-channel montage at every tick needs 5 pt type, which is a texture rather than a
+#: set of names. Matches the component strip's own limit in
+#: :mod:`eeg_pipeline.preprocessing.report.style`.
+_MAX_CHANNEL_TICKS = 32
+
+
 def plot_removal_topography(topography: RemovalTopography) -> plt.Figure:
     """Plot per-channel amplitude change as a topography and as a ranked distribution."""
     figure, (map_axis, rank_axis) = plt.subplots(
@@ -690,11 +699,20 @@ def plot_removal_topography(topography: RemovalTopography) -> plt.Figure:
         vlim=(-limit, 0.0),
         contours=0,
     )
-    # The colourbar carries no label of its own. Constrained layout places it hard
-    # against the ranked panel, whose y-axis measures the same quantity in the same
-    # units, so labelling both printed "Amplitude change (dB)" twice, side by side and
-    # overlapping. The ranked panel's label serves both.
-    figure.colorbar(image, ax=map_axis, shrink=0.7)
+    # Horizontal, under the map it belongs to. A vertical colourbar between the two panels
+    # sat hard against the ranked panel's y-axis label, which measures the same quantity
+    # in the same units, so labelling both printed "Amplitude change (dB)" twice and
+    # overlapping — and dropping the label left the topography, the panel a reader looks
+    # at first, with a colour scale carrying no unit at all. Below the map the two labels
+    # are far apart and each scale can name itself.
+    figure.colorbar(
+        image,
+        ax=map_axis,
+        orientation="horizontal",
+        shrink=0.8,
+        pad=0.04,
+        label="Amplitude change (dB)",
+    )
     map_axis.set_title("Where the amplitude was removed", fontsize=9)
 
     order = np.argsort(topography.change_db)
@@ -707,17 +725,44 @@ def plot_removal_topography(topography: RemovalTopography) -> plt.Figure:
         linewidth=1.0,
         label=f"median ({topography.median_change_db:.1f} dB)",
     )
+    # The percentiles the spread in the title is taken between. Quoting a spread while
+    # drawing neither end of it asks the reader to take the panel's own headline on trust.
+    low_percentile, high_percentile = (
+        float(np.percentile(topography.change_db, percentile)) for percentile in (10.0, 90.0)
+    )
+    for level in (low_percentile, high_percentile):
+        rank_axis.axhline(level, color=GUIDE_COLOR, linestyle=":", linewidth=0.9)
+    rank_axis.annotate(
+        "10th–90th",
+        xy=(0.995, high_percentile),
+        xycoords=("axes fraction", "data"),
+        xytext=(0, 2),
+        textcoords="offset points",
+        ha="right",
+        va="bottom",
+        fontsize=7,
+        color=GUIDE_COLOR,
+    )
+    # Short enough to stay over its own panel. The long form overflowed to the left and
+    # printed across the colourbar's tick labels; the percentiles it described are now
+    # drawn on the axis, so the title only has to name the number.
+    rank_axis.set_title(
+        f"Per-channel change, ranked · 10th–90th spread "
+        f"{topography.spatial_spread_db:.1f} dB",
+        fontsize=9,
+    )
     rank_axis.set(
-        title=(
-            f"Per-channel change, ranked · spread "
-            f"{topography.spatial_spread_db:.1f} dB between the 10th and 90th percentile"
-        ),
         ylabel="Amplitude change (dB)",
         xlabel="EEG channel, ordered by how much was removed",
-        xticks=positions,
-        xticklabels=[topography.channel_names[index] for index in order],
     )
-    rank_axis.tick_params(axis="x", labelrotation=90, labelsize=5)
+    # Named channels only where a name can be read. A full montage put sixty-odd labels at
+    # 5 pt, which is a grey smear rather than an axis; the panel is about the shape of the
+    # distribution and its extremes, so the ends are labelled and the middle is thinned.
+    step = max(1, math.ceil(len(order) / _MAX_CHANNEL_TICKS))
+    shown = positions[::step]
+    rank_axis.set_xticks(shown)
+    rank_axis.set_xticklabels([topography.channel_names[order[index]] for index in shown])
+    rank_axis.tick_params(axis="x", labelrotation=90, labelsize=7)
     rank_axis.legend(frameon=False, fontsize=8)
     rank_axis.grid(axis="y", alpha=0.2)
     rank_axis.spines[["top", "right"]].set_visible(False)

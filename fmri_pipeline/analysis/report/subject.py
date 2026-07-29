@@ -1276,6 +1276,106 @@ def build_methods_section(manifests: Sequence[ContrastManifest]) -> html.Section
     )
 
 
+def build_configuration_section(
+    manifests: Sequence[ContrastManifest],
+) -> html.Section:
+    """Record the full configuration every contrast in this document was fit under.
+
+    A result shown without the settings that produced it cannot be reproduced from and
+    cannot be compared against another study: an HRF basis, a high-pass cutoff, or a
+    different resolved confound set changes the numbers, and none of those differences
+    is visible in any map. The Methods section states the few settings a reader needs
+    to interpret the figures; this states everything needed to run it again.
+
+    Per contrast rather than once, because contrasts of one subject need not share a
+    model -- a different formula, a different confound strategy, a different space are
+    all configurable per contrast, and collapsing them onto the first would be a
+    quiet misreport for the rest.
+    """
+    blocks: List[html.Block] = []
+    for manifest in manifests:
+        items: List[Tuple[str, str]] = list(manifest.model_settings)
+        items.append(("Smoothing", f"{manifest.smoothing_fwhm:.3g} mm FWHM" if manifest.smoothing_fwhm else "none"))
+        items.append(("Signal scaling", "yes" if manifest.signal_scaling else "no"))
+        items.append(("TR", f"{manifest.t_r:.4g} s" if manifest.t_r else "unknown"))
+        items.append(
+            (
+                "Confound columns",
+                # Named in full. A count would not let a reader tell one "auto"
+                # resolution from another, which is the whole reason for recording it.
+                ", ".join(manifest.confound_columns)
+                if manifest.confound_columns
+                else "none recorded",
+            )
+        )
+        if not items:
+            continue
+        blocks.append(
+            html.KeyValues(title=f"Model · {manifest.contrast_name}", items=tuple(items))
+        )
+
+    if not blocks:
+        blocks.append(
+            html.Note(
+                text=(
+                    "No model configuration was recorded for these contrasts. Manifests "
+                    "written before the configuration was captured carry none; re-run "
+                    "the first-level analysis to record it."
+                )
+            )
+        )
+    return html.Section(
+        slug="configuration",
+        title="Configuration",
+        blocks=tuple(blocks),
+        collapsed=True,
+    )
+
+
+def write_configuration_json(
+    manifests: Sequence[ContrastManifest], *, out_path: Path
+) -> Path:
+    """Write the same configuration as machine-readable JSON beside the report.
+
+    The HTML section is for reading; this is for a script that has to check a cohort
+    was fit under one configuration, which is not a question anyone should answer by
+    opening ninety reports.
+    """
+    import json
+
+    payload = {
+        "subject": manifests[0].subject,
+        "task": manifests[0].task,
+        "contrasts": [
+            {
+                "contrast_name": manifest.contrast_name,
+                "space": manifest.space,
+                "model_settings": {
+                    label: value for label, value in manifest.model_settings
+                },
+                "confound_columns": list(manifest.confound_columns),
+                "smoothing_fwhm_mm": manifest.smoothing_fwhm,
+                "signal_scaling": manifest.signal_scaling,
+                "t_r_seconds": manifest.t_r,
+                "threshold_mode": manifest.threshold_mode,
+                "z_threshold": manifest.z_threshold,
+                "fdr_q": manifest.fdr_q,
+                "cluster_min_voxels": manifest.cluster_min_voxels,
+                "two_sided": manifest.two_sided,
+                "radiological": manifest.radiological,
+                "included_runs": list(manifest.included_runs),
+                "excluded_runs": [list(pair) for pair in manifest.excluded_runs],
+                "mask_is_analysis_mask": manifest.mask_is_analysis_mask,
+            }
+            for manifest in manifests
+        ],
+    }
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return out_path
+
+
 def build_subject_report(
     *,
     manifests: Sequence[ContrastManifest],
@@ -1330,6 +1430,10 @@ def build_subject_report(
             )
         )
     sections.append(build_methods_section(manifests))
+    sections.append(build_configuration_section(manifests))
+
+    with _panel("configuration sidecar"):
+        write_configuration_json(manifests, out_path=out_dir / "config.json")
 
     document = html.Document(
         title=f"{first.subject} · task-{first.task}",
@@ -1346,6 +1450,7 @@ def build_subject_report(
 
 __all__ = [
     "build_cluster_table",
+    "build_configuration_section",
     "build_contrast_section",
     "build_design_section",
     "build_diagnostics_section",
@@ -1360,4 +1465,5 @@ __all__ = [
     "resolve_threshold",
     "smoothness_facts",
     "supports_glass_brain",
+    "write_configuration_json",
 ]

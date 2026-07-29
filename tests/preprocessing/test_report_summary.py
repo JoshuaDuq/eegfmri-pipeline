@@ -615,6 +615,17 @@ def _removal_topography():
     return RemovalTopography(channel_names=tuple(names), change_db=change_db, info=info)
 
 
+def _rank_axis(figure):
+    """The ranked-distribution panel, named rather than indexed.
+
+    ``figure.axes[-1]`` is the colourbar: adding one appends an axis, so positional
+    lookup silently reads the wrong panel and the assertions pass against nothing.
+    """
+    return next(
+        axis for axis in figure.axes if "EEG channel" in axis.get_xlabel()
+    )
+
+
 def test_the_removal_figure_labels_both_of_its_scales_without_collision() -> None:
     """The colourbar and the ranked panel measure the same thing in the same units.
 
@@ -655,7 +666,7 @@ def test_the_removal_figure_draws_the_spread_its_title_quotes() -> None:
     topography = _removal_topography()
 
     figure = plot_removal_topography(topography)
-    rank_axis = figure.axes[-1]
+    rank_axis = _rank_axis(figure)
 
     levels = [
         line.get_ydata()[0]
@@ -694,10 +705,14 @@ def test_a_full_montage_does_not_crowd_its_channel_labels() -> None:
         info=info,
     )
 
-    rank_axis = plot_removal_topography(topography).axes[-1]
+    figure = plot_removal_topography(topography)
+    rank_axis = _rank_axis(figure)
 
     drawn = [label for label in rank_axis.get_xticklabels() if label.get_text()]
-    assert len(drawn) < len(names) / 2
+    assert 0 < len(drawn) <= len(names) / 2
+    # Thinned so that what remains can be set at a readable size, not merely thinned.
+    assert min(label.get_fontsize() for label in drawn) >= 7.0
+    assert colliding_text(figure) == []
 
 
 def _ledger(**overrides) -> str:
