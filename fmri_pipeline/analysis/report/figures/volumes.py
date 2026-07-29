@@ -301,52 +301,38 @@ def tsnr_volume(
 
     The orientation convention is passed explicitly and stated on the figure, like
     every other volume panel: a left/right error leaves no trace in the image.
+
+    Drawn through the shared magnitude path, which leaves non-positive voxels
+    transparent. Rendered without that, the zeros outside the analysis mask took the
+    low end of the ramp and painted a solid block across the field-of-view box --
+    hiding the anatomy the background exists for, and reading as a tSNR of nearly
+    zero where in fact nothing was measured.
     """
-    from nilearn import plotting
+    from fmri_pipeline.analysis.report.figures.stat_maps import magnitude_mosaic
 
-    tsnr_img = result.mean_img
-    data = np.asarray(tsnr_img.get_fdata())
+    data = np.asarray(result.mean_img.get_fdata())
     positive = data[np.isfinite(data) & (data > 0)]
-    resolved_vmax = (
-        float(vmax)
-        if vmax is not None
-        else (robust_upper_limit(positive) if positive.size else 1.0)
-    )
+    if positive.size == 0:
+        raise ValueError("A tSNR panel requires at least one positive voxel.")
 
-    with plot_context():
-        display = plotting.plot_img(
-            tsnr_img,
-            bg_img=bg_img,
-            title=title or None,
-            display_mode="ortho",
-            cmap=MAGNITUDE_CMAP,
-            vmin=0.0,
-            vmax=resolved_vmax,
-            colorbar=True,
-            black_bg=False,
-            annotate=True,
-            radiological=radiological,
-        )
-        label_colorbar(display, "tSNR")
-        figure = figure_of(display)
-        if positive.size:
-            annotate_provenance(
-                figure,
-                [
-                    f"n = {positive.size:,} voxels",
-                    f"median tSNR {float(np.median(positive)):.1f}",
-                    f"mean of {len(result.per_run_median)} run(s); "
-                    f"{sum(result.frames_dropped):,} frames censored",
-                    # Named so this tSNR can be compared against one computed
-                    # elsewhere. Two pipelines differing only in drift handling
-                    # report visibly different numbers for identical data.
-                    "cubic drift removed before the temporal SD",
-                    f"colour limit {resolved_vmax:.1f} "
-                    f"({clipped_fraction(positive, limit=resolved_vmax):.1%} clipped)",
-                    orientation_label(radiological),
-                ],
-            )
-        return figure
+    return magnitude_mosaic(
+        result.mean_img,
+        bg_img=bg_img,
+        vmax=vmax,
+        radiological=radiological,
+        title=title,
+        cbar_label="tSNR",
+        display_mode="ortho",
+        extra_provenance=[
+            f"median tSNR {float(np.median(positive)):.1f}",
+            f"mean of {len(result.per_run_median)} run(s); "
+            f"{sum(result.frames_dropped):,} frames censored",
+            # Named so this tSNR can be compared against one computed elsewhere. Two
+            # pipelines differing only in drift handling report visibly different
+            # numbers for identical data.
+            "cubic drift removed before the temporal SD",
+        ],
+    )
 
 
 __all__ = [

@@ -110,28 +110,49 @@ def test_compute_tsnr_rejects_an_empty_run_list() -> None:
         volumes.compute_tsnr([])
 
 
+def _tsnr_plot_kwargs():
+    """Capture the arguments tSNR hands nilearn."""
+    result = volumes.compute_tsnr([_bold()])
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            volumes.tsnr_volume(result)
+        except Exception:
+            pass
+    assert mock_plot.called, "tSNR did not render through nilearn"
+    return mock_plot.call_args.kwargs
+
+
 def test_tsnr_volume_renders_through_nilearn_rather_than_slicing_the_array() -> None:
     # Voxel-axis slicing labels panels by anatomy without consulting the affine,
     # which is wrong for any non-RAS-canonical image.
-    result = volumes.compute_tsnr([_bold()])
-    with patch("nilearn.plotting.plot_img") as mock_plot:
-        mock_plot.return_value.figure = None
-        try:
-            volumes.tsnr_volume(result)
-        except Exception:
-            pass
-    assert mock_plot.called
+    assert _tsnr_plot_kwargs()["display_mode"] == "ortho"
 
 
 def test_tsnr_volume_uses_the_single_hue_magnitude_colormap() -> None:
-    result = volumes.compute_tsnr([_bold()])
-    with patch("nilearn.plotting.plot_img") as mock_plot:
-        mock_plot.return_value.figure = None
-        try:
-            volumes.tsnr_volume(result)
-        except Exception:
-            pass
-    assert mock_plot.call_args.kwargs["cmap"] == "cividis"
+    assert _tsnr_plot_kwargs()["cmap"] == "cividis"
+
+
+def test_tsnr_volume_leaves_unmeasured_voxels_transparent() -> None:
+    # Zeros outside the analysis mask otherwise take the low end of the ramp and
+    # paint a solid block across the field-of-view box: it hides the anatomy the
+    # background exists for, and reads as a tSNR of nearly zero where in fact
+    # nothing was measured.
+    kwargs = _tsnr_plot_kwargs()
+    assert 0 < kwargs["threshold"] < 1e-30
+    assert kwargs["vmin"] == 0.0
+    assert kwargs["symmetric_cbar"] is False
+
+
+def test_tsnr_volume_refuses_a_map_with_nothing_positive() -> None:
+    empty = volumes.TsnrResult(
+        mean_img=nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.float32), np.eye(4)),
+        per_run_median=(0.0,),
+        frames_used=(10,),
+        frames_dropped=(0,),
+    )
+    with pytest.raises(ValueError, match="positive"):
+        volumes.tsnr_volume(empty)
 
 
 def test_tsnr_volume_returns_a_figure() -> None:

@@ -210,6 +210,8 @@ def magnitude_mosaic(
     title: str = "",
     cbar_label: str = "",
     cmap: str = MAGNITUDE_CMAP,
+    display_mode: str = "mosaic",
+    extra_provenance: Sequence[str] = (),
 ) -> Any:
     """Draw a slice mosaic of an unsigned magnitude -- a standard error, a tSNR.
 
@@ -238,10 +240,11 @@ def magnitude_mosaic(
             img,
             bg_img=bg_img,
             title=title or None,
-            display_mode="mosaic",
+            display_mode=display_mode,
             # Just above zero: hides the background without hiding any measurement,
             # since a magnitude of exactly zero is an absent voxel rather than a small
-            # one.
+            # one. Left unthresholded, those voxels take the ramp's low colour and
+            # paint a solid block over the anatomy that reads as a measured value.
             threshold=float(np.finfo(np.float32).tiny),
             colorbar=True,
             vmin=0.0,
@@ -259,6 +262,7 @@ def magnitude_mosaic(
             figure,
             [
                 f"n = {positive.size:,} voxels",
+                *extra_provenance,
                 f"scale 0–{resolved_vmax:.3g} "
                 f"({float(np.mean(positive > resolved_vmax)):.1%} clipped)"
                 + (f", from {limit_source}" if limit_source else ""),
