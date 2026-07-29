@@ -65,20 +65,42 @@ preprocessing:
     enabled: false
   clean_events_qc:
     ecg_coupling:
-      # Correlates EEG against a recorded ECG lead. These montages carry none.
+      # Off because no ECG channel is named below, not because there is no scanner.
       enabled: false
 
 alignment:
   # No scanner volume markers to trim to.
   trim_to_volume_bounds: false
 
+# ---------------------------------------------------------------------------
+# DO YOU HAVE AN ECG LEAD? A separate question from whether you were in a scanner.
+# ---------------------------------------------------------------------------
+# Assumed no here, because a montage without one is the common out-of-scanner case and
+# naming a channel that does not exist fails at the recording rather than in the config.
+#
+# If you do record ECG outside the scanner — which is ordinary, and useful — name it and
+# switch the two stages back on. Neither depends on there being a scanner:
+#
+#     eeg:
+#       ecg_channels: ["ECG"]        # exactly as the channel is named in channels.tsv
+#     ica:
+#       cardiac_review:
+#         enabled: true              # detects R peaks in the lead; reviews ICA components
+#     preprocessing:
+#       clean_events_qc:
+#         ecg_coupling:
+#           enabled: true            # correlates EEG against the lead
+#
+# The cardiac review prefers BrainVision Analyzer's R markers where a recording carries
+# them and otherwise detects R peaks from the channel directly, so outside a scanner it
+# reviews ordinary cardiac artifact rather than a ballistocardiogram. ICLabel labels
+# cardiac components either way, and the ocular review is unaffected by all of this.
 eeg:
   ecg_channels: []
 
 ica:
   cardiac_review:
-    # There is no ballistocardiogram outside the scanner. ICLabel still labels ordinary
-    # cardiac components, and the ocular review below is unaffected.
+    # Off because no ECG channel is named above, not because there is no scanner.
     enabled: false
   band_specific_report:
     # The inherited comparison is on stimulus_temp, a column of the thermal study.
