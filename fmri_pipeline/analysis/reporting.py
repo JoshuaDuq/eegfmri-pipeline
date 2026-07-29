@@ -28,7 +28,7 @@ from fmri_pipeline.analysis.report.manifest import (
     sample_masks_from_confounds as _sample_masks_from_confounds,
 )
 from fmri_pipeline.analysis.report.figures.design import (
-    vif_from_design as _vif_from_design,
+    variance_inflation_factors as _vif_from_design,
 )
 from fmri_pipeline.analysis.report.style import (
     MAGNITUDE_CMAP,

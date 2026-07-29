@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -615,6 +615,58 @@ def build_diagnostics_section(
     )
 
 
+def _contrast_for_run(
+    manifest: ContrastManifest, columns: Sequence[str]
+) -> Tuple[Optional[Dict[str, float]], List[str]]:
+    """Map the recorded contrast onto one run's design columns.
+
+    Matching by name rather than position, because runs need not share a column
+    order -- or even a column set, once a run lacks a condition. Returns the weights
+    that landed, and the names of any *non-zero* weight that did not: those are
+    reported on the figure, since a contrast quietly missing one of its regressors
+    is not the contrast the section claims to show.
+    """
+    if manifest.contrast_vector is None or not manifest.contrast_columns:
+        return None, []
+
+    available = set(columns)
+    weights: Dict[str, float] = {}
+    dropped: List[str] = []
+    for name, weight in zip(manifest.contrast_columns, manifest.contrast_vector):
+        if name in available:
+            weights[str(name)] = float(weight)
+        elif float(weight) != 0.0:
+            dropped.append(str(name))
+    return (weights or None), dropped
+
+
+def _design_summary_items(summary: Any) -> Tuple[Tuple[str, str], ...]:
+    """Render a DesignSummary as label/value pairs.
+
+    Efficiency is stated without a threshold: it is comparable between designs for
+    the same contrast and meaningless as an absolute number, so a cutoff here would
+    be a verdict the pipeline invented.
+    """
+
+    def _number(value: Optional[float]) -> str:
+        if value is None:
+            return "not estimable"
+        if not np.isfinite(value):
+            return "∞ (exactly collinear)"
+        return f"{value:.3g}"
+
+    items = [
+        ("Scans", f"{summary.n_scans:,}"),
+        ("Regressors", str(summary.n_regressors)),
+        ("Condition number", _number(summary.condition_number)),
+        ("Largest VIF", _number(summary.max_vif)),
+    ]
+    if summary.max_vif_regressor:
+        items.append(("Most inflated regressor", summary.max_vif_regressor))
+    items.append(("Contrast efficiency", _number(summary.efficiency)))
+    return tuple(items)
+
+
 def build_design_section(
     *,
     manifest: ContrastManifest,
@@ -638,47 +690,84 @@ def build_design_section(
         with _panel(f"design matrix for {run_label}"):
             frame = pd.read_csv(path, sep="\t")
             frame = frame.drop(columns=[c for c in ("frame",) if c in frame.columns])
-            contrast = (
-                np.asarray(manifest.contrast_vector, dtype=float)
-                if manifest.contrast_vector is not None
-                and len(manifest.contrast_vector) == len(frame.columns)
-                else None
-            )
+            contrast, dropped = _contrast_for_run(manifest, list(frame.columns))
+
             saved = _save(
                 design_figures.design_matrix_figure(
                     frame,
                     contrast=contrast,
-                    contrast_name=manifest.contrast_name,
-                    title=f"Design matrix · {run_label}",
+                    tr_seconds=manifest.t_r,
+                    run_label=f"{manifest.contrast_name} · {run_label}",
                 ),
                 out_dir=plots_dir,
                 stem=f"design_{run_label}",
                 formats=cfg.formats,
             )
             if saved:
-                blocks.append(html.Figure(title=f"Design matrix · {run_label}", path=saved))
+                caption = (
+                    "Columns grouped by role and scaled individually; the contrast "
+                    "actually tested is drawn beneath, on the same axis."
+                )
+                if dropped:
+                    # Silently dropping a weighted regressor would misrepresent the
+                    # contrast this run contributed to.
+                    caption += (
+                        f" Weighted regressors absent from this run's design: "
+                        f"{', '.join(dropped)}."
+                    )
+                blocks.append(
+                    html.Figure(
+                        title=f"Design matrix · {run_label}",
+                        path=saved,
+                        caption=caption,
+                    )
+                )
 
             saved = _save(
-                design_figures.collinearity_figure(
-                    frame, title=f"Collinearity · {run_label}"
-                ),
+                design_figures.regressor_correlation_figure(frame, run_label=run_label),
                 out_dir=plots_dir,
-                stem=f"collinearity_{run_label}",
+                stem=f"design_correlation_{run_label}",
                 formats=cfg.formats,
             )
             if saved:
                 blocks.append(
                     html.Figure(
-                        title=f"Collinearity · {run_label}",
+                        title=f"Regressor correlation · {run_label}",
                         path=saved,
                         dense=False,
                         caption=(
-                            "Variance inflation and regressor correlation: whether "
-                            "this contrast is estimable, not merely whether its "
-                            "regressors are correlated."
+                            "Correlation between design columns. Strong off-diagonal "
+                            "structure means the contrast's regressors share variance."
                         ),
                     )
                 )
+
+            saved = _save(
+                design_figures.variance_inflation_figure(frame, run_label=run_label),
+                out_dir=plots_dir,
+                stem=f"design_vif_{run_label}",
+                formats=cfg.formats,
+            )
+            if saved:
+                blocks.append(
+                    html.Figure(
+                        title=f"Variance inflation · {run_label}",
+                        path=saved,
+                        dense=False,
+                        caption=(
+                            "Variance inflation factor per regressor, reported as a "
+                            "measurement. No cutoff is applied."
+                        ),
+                    )
+                )
+
+            summary = design_figures.summarize_design(frame, contrast=contrast)
+            blocks.append(
+                html.KeyValues(
+                    title=f"Design summary · {run_label}",
+                    items=_design_summary_items(summary),
+                )
+            )
 
     if not blocks:
         return None
