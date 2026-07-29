@@ -6,9 +6,11 @@ from typing import Any, Dict, Iterable, Tuple
 
 import numpy as np
 
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import (
+    REST_INCOMPATIBLE_FEATURE_CATEGORIES,
+    get_config_value,
+)
 
-REST_INCOMPATIBLE_FEATURE_CATEGORIES = frozenset({"erp", "erds", "itpc", "phase"})
 _MISSING = object()
 
 

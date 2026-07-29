@@ -83,9 +83,17 @@ def test_a_rest_config_without_the_task_only_keys_is_clean() -> None:
     assert check_config_coherence(config).errors == ()
 
 
-def test_rest_mode_does_not_demand_a_task_label() -> None:
-    """A resting-state recording has no task to name, and requiring one is how a
-    baseline-only study got told to invent a label for its single condition."""
+def test_rest_mode_asks_for_the_task_label_too() -> None:
+    """This check previously exempted rest mode, on the reasoning that a resting-state
+    recording has no task to name. But the label is not a name for a condition — BIDS
+    puts a 'task-' entity on every EEG file, resting-state ones included, and it is how
+    both the raw recording and the cleaned epochs are found. So a rest study is not being
+    asked to invent anything; it is being asked which of its own files to read.
+
+    Exempting it meant a rest study that left the key unset passed validation, ran
+    preprocessing to completion, and then failed at feature extraction, where the epochs
+    are located by globbing 'sub-<id>_task-<label>*_epo.fif' and 'None' matched nothing.
+    """
     config = _config(
         preprocessing__task_is_rest=True,
         feature_engineering__task_is_rest=True,
@@ -93,7 +101,7 @@ def test_rest_mode_does_not_demand_a_task_label() -> None:
     )
     config["project.task"] = None
 
-    assert "project.task" not in _keys(check_config_coherence(config).errors)
+    assert "project.task" in _keys(check_config_coherence(config).errors)
 
 
 def test_a_task_run_without_a_task_label_is_reported() -> None:

@@ -400,7 +400,7 @@ def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
     """
     config = _load_config_layers(config_path)
     config = _apply_config_overrides(config, config_path)
-    _apply_paradigm(config)
+    _apply_paradigm(config, declared=_keys_declared_by_the_study(config_path))
     return config
 
 
@@ -415,8 +415,65 @@ _PARADIGM_REST_FLAGS = (
     "fmri_resting_state.task_is_rest",
 )
 
+#: Feature families defined by their relationship to an event. A fixed-length
+#: resting-state segment has no event, so these are not merely unset but unavailable.
+#: :func:`eeg_pipeline.analysis.features.rest.validate_rest_feature_categories` raises on
+#: them; it imports this name rather than restating it.
+REST_INCOMPATIBLE_FEATURE_CATEGORIES = frozenset({"erp", "erds", "itpc", "phase"})
 
-def _apply_paradigm(config: Dict[str, Any]) -> None:
+#: Keys a base config written for task epochs sets to values a resting-state run cannot
+#: satisfy, with what ``paradigm: rest`` reduces each to. Every one of these was already
+#: an error — from :mod:`eeg_pipeline.utils.config.coherence` for the band report, from
+#: feature extraction for the families — which made adapting a task config to rest a
+#: matter of clearing errors the user did not choose and could not have known to expect.
+_REST_NEUTRALIZED_KEYS = (
+    "feature_engineering.feature_categories",
+    "ica.band_specific_report.tfr.enabled",
+    "ica.band_specific_report.comparisons",
+)
+
+
+def _keys_declared_by_the_study(config_path: Path) -> frozenset:
+    """The neutralizable keys the study's own file sets, as opposed to inheriting.
+
+    Provenance is what separates "this base was written for someone else's acquisition"
+    from "this study asked for this". The merged config cannot tell them apart, so the
+    top layer is re-read on its own here — the same two sources
+    :func:`_load_config_from_file` layers, minus everything ``extends`` brought in.
+    """
+    sources = [_parse_config_yaml(config_path.resolve())]
+    overrides_path = _get_overrides_path(config_path)
+    if overrides_path.exists():
+        try:
+            with open(overrides_path, "r", encoding="utf-8") as handle:
+                overrides = json.load(handle) or {}
+        except (OSError, json.JSONDecodeError):
+            # _apply_config_overrides reads the same file and reports these properly.
+            overrides = {}
+        if isinstance(overrides, dict):
+            sources.append(overrides)
+
+    return frozenset(
+        dotted_key
+        for dotted_key in _REST_NEUTRALIZED_KEYS
+        if any(get_nested_value(source, dotted_key, _MISSING) is not _MISSING for source in sources)
+    )
+
+
+def _set_nested_value(config: Dict[str, Any], dotted_key: str, value: Any) -> None:
+    """Assign a dotted key, creating the sections along the way."""
+    *sections, leaf = dotted_key.split(".")
+    target = config
+    for section_name in sections:
+        section = target.get(section_name)
+        if not isinstance(section, dict):
+            section = {}
+            target[section_name] = section
+        target = section
+    target[leaf] = value
+
+
+def _apply_paradigm(config: Dict[str, Any], *, declared: frozenset = frozenset()) -> None:
     """Derive the ``task_is_rest`` flags from ``project.paradigm`` when it is set.
 
     The paradigm wins over any individual flag it covers, including one inherited
@@ -439,12 +496,51 @@ def _apply_paradigm(config: Dict[str, Any]) -> None:
 
     task_is_rest = normalized == "rest"
     for dotted_key in _PARADIGM_REST_FLAGS:
-        section_name, _, leaf = dotted_key.partition(".")
-        section = config.get(section_name)
-        if not isinstance(section, dict):
-            section = {}
-            config[section_name] = section
-        section[leaf] = task_is_rest
+        _set_nested_value(config, dotted_key, task_is_rest)
+
+    if task_is_rest:
+        _neutralize_task_only_settings(config, declared)
+
+
+def _neutralize_task_only_settings(config: Dict[str, Any], declared: frozenset) -> None:
+    """Reduce inherited task-epoch settings to what a fixed-length segment supports.
+
+    Only what arrived through ``extends`` is touched. A key the study's own config names
+    is an instruction, and the answer to an impossible instruction is to say so — the
+    coherence report and the feature-category validator both name it against the
+    paradigm — not to quietly do something else. That distinction is the whole reason
+    this takes a provenance set rather than rewriting whatever it finds.
+    """
+    for dotted_key in _REST_NEUTRALIZED_KEYS:
+        if dotted_key in declared:
+            continue
+
+        current = get_nested_value(config, dotted_key, _MISSING)
+        if current is _MISSING:
+            continue
+
+        if dotted_key == "feature_engineering.feature_categories":
+            if not current:
+                continue
+            kept = [
+                category
+                for category in current
+                if str(category) not in REST_INCOMPATIBLE_FEATURE_CATEGORIES
+            ]
+            if not kept:
+                dropped = ", ".join(sorted(str(category) for category in current))
+                raise ConfigError(
+                    f"project.paradigm is 'rest', which leaves "
+                    f"feature_engineering.feature_categories empty: every family it "
+                    f"inherits ({dropped}) is defined relative to an event, and a "
+                    f"fixed-length resting-state segment has none. Name the families "
+                    f"this study wants, or set project.paradigm to 'task'."
+                )
+            _set_nested_value(config, dotted_key, kept)
+        elif dotted_key == "ica.band_specific_report.tfr.enabled":
+            _set_nested_value(config, dotted_key, False)
+        elif dotted_key == "ica.band_specific_report.comparisons":
+            _set_nested_value(config, dotted_key, [])
 
 
 def _apply_thread_limits(config: Dict[str, Any]) -> None:

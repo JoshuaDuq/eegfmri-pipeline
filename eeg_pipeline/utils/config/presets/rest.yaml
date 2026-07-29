@@ -1,23 +1,35 @@
-# Resting-state / baseline-only acquisition.
+# Resting-state acquisition recorded INSIDE an MR scanner.
 #
-# Use as:
+# This preset inherits the scanner assumptions of the packaged eeg_config.yaml —
+# preprocessing.eeg_fmri, BrainVision Analyzer gradient/pulse correction, a recorded ECG
+# lead, and trimming to scanner volume markers. That is what makes it the in-scanner
+# preset rather than the resting-state one.
+#
+# FOR RESTING-STATE EEG RECORDED OUTSIDE A SCANNER, USE eeg_only INSTEAD:
+#
+#     # my_baseline.yaml
+#     extends: "eeg_only"
+#     project:
+#       paradigm: "rest"
+#       task: "rest"
+#     paths:
+#       bids_root: "/data/my_study/bids"
+#       deriv_root: "/data/my_study/derivatives"
+#
+# That is the whole configuration. Two knobs: eeg_only says "no scanner", paradigm says
+# "no events". Nothing else has to be restated.
+#
+# Use this preset as:
 #
 #     # my_baseline.yaml
 #     extends: "rest"
+#     project:
+#       task: "rest"
 #     paths:
 #       bids_root: "/data/my_study/bids"
 #       deriv_root: "/data/my_study/derivatives"
 #
 #     eeg-pipeline --config my_baseline.yaml preprocessing full --all-subjects
-#
-# For resting-state EEG recorded *outside* a scanner, combine the two:
-#
-#     extends: "eeg_only"
-#     project:
-#       paradigm: "rest"
-#
-# project.paradigm wins over the individual task_is_rest flags it covers, so that is all
-# it takes.
 #
 # WHAT CHANGES IN REST MODE
 # -------------------------
@@ -26,6 +38,11 @@
 # defined relative to a stimulus is unavailable rather than merely unset. Clean-events
 # export is skipped, and the subject report measures preservation on the posterior alpha
 # rhythm rather than on split-half evoked reliability.
+#
+# project.paradigm removes the inherited settings that depend on an event — the
+# event-locked feature families, and the baseline-relative component TFR and its
+# condition contrasts — so they are not restated here. A family this study *names* is
+# left alone and reported against the paradigm instead.
 #
 # paths.bids_rest_root and paths.deriv_rest_root are only needed by a study that acquires
 # *both* task and rest and keeps them in separate trees. A rest-only study leaves them
@@ -37,6 +54,10 @@ project:
   # Sets preprocessing.task_is_rest, feature_engineering.task_is_rest and both fMRI
   # equivalents together, so they cannot disagree.
   paradigm: "rest"
+  # Deliberately unset: rest epochs are still written and found under the BIDS task
+  # label, so inheriting another study's selected recordings that are not there.
+  # validate --config-only names this key until you set it.
+  task: null
 
 preprocessing:
   # Length of each fixed-length segment. 10 s is a common choice for spectral estimates;
@@ -45,11 +66,3 @@ preprocessing:
   # Overlap is not supported: overlapping segments would be carried downstream as
   # independent trial rows.
   rest_epochs_overlap: 0.0
-
-ica:
-  band_specific_report:
-    tfr:
-      # Baseline-relative component TFR needs an event to be relative to.
-      enabled: false
-    # Condition contrasts need event-related epochs.
-    comparisons: []

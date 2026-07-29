@@ -109,6 +109,14 @@ def _check_rest_settings(config: Any, errors: List[ConfigIssue]) -> None:
     config needing three changes reports three, once, instead of stopping at the first
     and re-running ICA to find the second.
     """
+    _check_task_label(
+        config,
+        errors,
+        "resting-state feature extraction finds the cleaned epochs by their 'task-' "
+        "entity, so it needs the BIDS task label even though there is no task. Set it "
+        "to whatever the recordings are named, commonly 'rest'.",
+    )
+
     if bool(get_config_value(config, "ica.band_specific_report.enabled", False)):
         if bool(get_config_value(config, "ica.band_specific_report.tfr.enabled", True)):
             errors.append(
@@ -165,16 +173,23 @@ def _check_rest_settings(config: Any, errors: List[ConfigIssue]) -> None:
         )
 
 
-def _check_task_settings(config: Any, errors: List[ConfigIssue]) -> None:
+def _check_task_label(config: Any, errors: List[ConfigIssue], reason: str) -> None:
+    """Require the BIDS task label, for the reason the active paradigm needs it.
+
+    Both paradigms need it and neither can supply a default, but they need it for
+    different things, so each states its own reason.
+    """
     task = get_config_value(config, "project.task", None)
     if task is None or not str(task).strip():
-        errors.append(
-            ConfigIssue(
-                "project.task",
-                "event-related preprocessing needs the BIDS task label to select "
-                "recordings. Set it, or set project.paradigm to 'rest'.",
-            )
-        )
+        errors.append(ConfigIssue("project.task", reason))
+
+
+def _check_task_settings(config: Any, errors: List[ConfigIssue]) -> None:
+    _check_task_label(
+        config,
+        errors,
+        "event-related preprocessing needs the BIDS task label to select recordings.",
+    )
 
 
 def _check_scanner_settings(config: Any, warnings: List[ConfigIssue]) -> None:

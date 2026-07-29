@@ -241,11 +241,20 @@ All pipeline behavior is controlled by ``eeg_pipeline/utils/config/eeg_config.ya
       # my_study.yaml
       extends: "eeg_only"      # EEG recorded outside a scanner
       project:
-        task: "oddball"
+        task: "oddball"        # the BIDS task- entity on your files
         paradigm: "task"       # or "rest" for baseline-only acquisitions
       paths:
         bids_root: "/data/my_study/bids"
         deriv_root: "/data/my_study/derivatives"
+
+   Those two keys are the only choices most studies make: ``eeg_only`` says
+   there was no scanner, ``paradigm`` says whether there were events. Set
+   ``paradigm: "rest"`` and the recording is cut into fixed-length segments,
+   and the inherited settings that need an event — the ``erp``, ``erds`` and
+   ``itpc`` feature families, and the baseline-relative component TFR — are
+   dropped for you. ``project.task`` is still required in rest mode: it names
+   the ``task-`` entity your files carry (usually ``rest``), which is how the
+   epochs are found.
 
    .. code-block:: bash
 

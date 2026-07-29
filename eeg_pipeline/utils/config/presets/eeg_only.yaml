@@ -1,4 +1,4 @@
-# EEG recorded outside an MR scanner.
+# EEG recorded outside an MR scanner. The starting point for both paradigms.
 #
 # Use as:
 #
@@ -11,6 +11,23 @@
 #       deriv_root: "/data/my_study/derivatives"
 #
 #     eeg-pipeline --config my_study.yaml preprocessing full --all-subjects
+#
+# RESTING-STATE OR BASELINE-ONLY: add the second knob.
+#
+#     extends: "eeg_only"
+#     project:
+#       paradigm: "rest"
+#       task: "rest"
+#
+# project.paradigm is 'task' here. Setting it to 'rest' cuts the recording into
+# fixed-length segments instead of epoching around events, and removes the inherited
+# settings that depend on an event having happened — the event-locked feature families
+# (erp, erds, itpc), and the baseline-relative component TFR and its condition
+# contrasts. Nothing else has to be restated. project.task is still required: rest
+# epochs are written and found under the BIDS task label like any other.
+#
+# The 'rest' preset is for resting-state recorded *inside* a scanner, which is a
+# different thing — it keeps the gradient/pulse correction and volume-marker handling.
 #
 # Everything not named below is inherited from the packaged eeg_config.yaml, so
 # corrections to the scientific defaults reach this preset without being copied.

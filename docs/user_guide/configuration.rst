@@ -151,14 +151,18 @@ a cycle is reported rather than recursed.
    * - Preset
      - Purpose
    * - ``eeg_only``
-     - EEG recorded outside an MR scanner. Turns off every scanner-only stage:
-       Analyzer pulse QC, cardiac attenuation QC, scanner-harmonic QC, the ECG
-       coupling metric, the ICA cardiac review, and volume-bound trimming.
+     - EEG recorded outside an MR scanner, in **either** paradigm. Turns off
+       every scanner-only stage: Analyzer pulse QC, cardiac attenuation QC,
+       scanner-harmonic QC, the ECG coupling metric, the ICA cardiac review,
+       and volume-bound trimming.
    * - ``rest``
-     - Resting-state or baseline-only acquisition. Fixed-length segments
-       instead of event-locked epochs.
+     - Resting-state acquired **inside** a scanner. Keeps the gradient and
+       pulse-artifact handling; only the paradigm differs from the packaged
+       config.
 
-Combine them by extending one and setting the other's switch:
+Most studies want ``eeg_only`` and the paradigm switch. These are the two
+independent choices — scanner or not, events or not — and setting both is the
+whole configuration:
 
 .. code-block:: yaml
 
@@ -166,6 +170,18 @@ Combine them by extending one and setting the other's switch:
    extends: "eeg_only"
    project:
      paradigm: "rest"
+     task: "rest"        # the BIDS task- entity on your files, not a condition
+
+``project.task`` is required in both paradigms. BIDS puts a ``task-`` entity on
+every EEG file, resting-state ones included, and it is how both the recordings
+and the cleaned epochs are located; ``task-rest`` is the usual label.
+
+Setting ``paradigm: rest`` also removes the inherited settings that only mean
+something when an event happened — the event-locked feature families (``erp``,
+``erds``, ``itpc``) and the baseline-relative component TFR with its condition
+contrasts. A family your own config **names** is left in place and reported
+against the paradigm instead, so an explicit request is answered rather than
+quietly dropped.
 
 .. _configuration-paradigm:
 
