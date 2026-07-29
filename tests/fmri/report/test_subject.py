@@ -246,3 +246,73 @@ def test_methods_names_an_extent_filter_as_a_display_filter(tmp_path: Path) -> N
     manifest = replace(_manifest(tmp_path), cluster_min_voxels=20)
     text = str(subject.build_methods_section([manifest]))
     assert "not familywise-error-corrected" in text
+
+
+# --- glass brain is only defined against the MNI schematic -----------------
+
+
+def test_a_native_space_contrast_gets_no_glass_brain(tmp_path: Path) -> None:
+    """The projection is drawn on a fixed MNI schematic.
+
+    A native-space map projected onto it lands on anatomy it does not correspond
+    to, which is an error rather than an approximation.
+    """
+    section = subject.build_contrast_section(
+        manifest=_manifest(tmp_path, space="native"), out_dir=tmp_path, cfg=_cfg()
+    )
+    titles = [getattr(b, "title", "") for b in section.blocks]
+    assert not any("Glass brain" in t for t in titles)
+
+
+def test_the_missing_glass_brain_is_explained_rather_than_silent(tmp_path: Path) -> None:
+    """A panel that vanishes without a word reads as a rendering failure."""
+    section = subject.build_contrast_section(
+        manifest=_manifest(tmp_path, space="native"), out_dir=tmp_path, cfg=_cfg()
+    )
+    text = " ".join(getattr(b, "text", "") for b in section.blocks)
+    assert "glass brain" in text.lower()
+    assert "mni" in text.lower()
+
+
+def test_an_mni_contrast_still_gets_a_glass_brain(tmp_path: Path) -> None:
+    section = subject.build_contrast_section(
+        manifest=_manifest(tmp_path, space="mni"), out_dir=tmp_path, cfg=_cfg()
+    )
+    titles = [getattr(b, "title", "") for b in section.blocks]
+    assert any("Glass brain" in t for t in titles)
+
+
+def test_the_space_guard_is_case_and_whitespace_tolerant() -> None:
+    assert subject.supports_glass_brain("MNI")
+    assert subject.supports_glass_brain(" mni ")
+    assert not subject.supports_glass_brain("T1w")
+    assert not subject.supports_glass_brain("")
+
+
+# --- cluster coordinates name their space ----------------------------------
+
+
+def test_native_space_cluster_coordinates_are_not_left_to_read_as_mni(
+    tmp_path: Path,
+) -> None:
+    """An unlabelled X/Y/Z column in an fMRI cluster table reads as MNI by convention."""
+    table, _peaks = subject.build_cluster_table(
+        manifest=_manifest(tmp_path, space="native"), out_dir=tmp_path
+    )
+    assert table is not None
+    assert "not MNI" in table.caption
+    assert "native" in table.caption.lower()
+
+
+def test_mni_cluster_coordinates_say_so(tmp_path: Path) -> None:
+    table, _peaks = subject.build_cluster_table(
+        manifest=_manifest(tmp_path, space="mni"), out_dir=tmp_path
+    )
+    assert table is not None
+    assert "MNI152" in table.caption
+
+
+def test_the_coordinate_space_label_distinguishes_mni_from_everything_else() -> None:
+    assert "MNI152" in subject.coordinate_space_label("mni")
+    assert "not MNI" in subject.coordinate_space_label("native")
+    assert "not MNI" in subject.coordinate_space_label("T1w")

@@ -341,6 +341,29 @@ def _carpet_blocks(
     ]
 
 
+def supports_glass_brain(space: str) -> bool:
+    """Whether a glass-brain projection is defined for ``space``.
+
+    The projection is drawn against a fixed MNI schematic. A map in native or T1w
+    space projected onto it lands on anatomy it does not correspond to, which is an
+    error rather than an approximation -- and one that is invisible in the result,
+    since the output looks like a perfectly ordinary glass brain either way.
+    """
+    return str(space or "").strip().lower() == "mni"
+
+
+def coordinate_space_label(space: str) -> str:
+    """Name the space a cluster table's coordinates are actually in.
+
+    An unlabelled X/Y/Z column in an fMRI cluster table reads as MNI, because that
+    is the overwhelming convention. For a native-space contrast that is a silent
+    misreport, and nothing in the table lets a reader detect it.
+    """
+    if str(space or "").strip().lower() == "mni":
+        return "coordinates: MNI152 (mm)"
+    return f"coordinates: {space} scanner-native (mm), not MNI"
+
+
 def build_cluster_table(
     *,
     manifest: ContrastManifest,
@@ -391,6 +414,7 @@ def build_cluster_table(
     caption_parts = [
         "two-sided" if manifest.two_sided else "one-sided",
         f"height threshold: |z| > {threshold:.2f}",
+        coordinate_space_label(manifest.space),
     ]
     if manifest.cluster_min_voxels > 0:
         caption_parts.append(
@@ -479,32 +503,45 @@ def build_contrast_section(
             if path:
                 blocks.append(html.Figure(title="Stat map · thresholded", path=path))
 
-        with _panel(f"glass brain for {manifest.contrast_name}"):
-            path = _save(
-                stat_map_figures.glass_brain(
-                    stat_img,
-                    threshold=float(threshold),
-                    two_sided=manifest.two_sided,
-                    radiological=manifest.radiological,
-                    peak_coords=peaks or None,
-                    title=f"{manifest.contrast_name}: glass brain",
-                ),
-                out_dir=plots_dir,
-                stem="glass",
-                formats=cfg.formats,
-            )
-            if path:
-                blocks.append(
-                    html.Figure(
-                        title="Glass brain · thresholded",
-                        path=path,
-                        caption=(
-                            "Markers number the peaks in the cluster table below."
-                            if peaks
-                            else ""
-                        ),
+        if supports_glass_brain(manifest.space):
+            with _panel(f"glass brain for {manifest.contrast_name}"):
+                path = _save(
+                    stat_map_figures.glass_brain(
+                        stat_img,
+                        threshold=float(threshold),
+                        two_sided=manifest.two_sided,
+                        radiological=manifest.radiological,
+                        peak_coords=peaks or None,
+                        title=f"{manifest.contrast_name}: glass brain",
+                    ),
+                    out_dir=plots_dir,
+                    stem="glass",
+                    formats=cfg.formats,
+                )
+                if path:
+                    blocks.append(
+                        html.Figure(
+                            title="Glass brain · thresholded",
+                            path=path,
+                            caption=(
+                                "Markers number the peaks in the cluster table below."
+                                if peaks
+                                else ""
+                            ),
+                        )
+                    )
+        else:
+            # Stated rather than simply absent: a panel that vanishes without
+            # explanation is indistinguishable from one that failed to render.
+            blocks.append(
+                html.Note(
+                    text=(
+                        f"No glass brain for this contrast: the projection is defined "
+                        f"only against the MNI schematic, and these results are in "
+                        f"{manifest.space} space."
                     )
                 )
+            )
 
     if table is not None:
         blocks.append(table)
@@ -878,4 +915,6 @@ __all__ = [
     "build_methods_section",
     "build_qc_sections",
     "build_subject_report",
+    "coordinate_space_label",
+    "supports_glass_brain",
 ]
