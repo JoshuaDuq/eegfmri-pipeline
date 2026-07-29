@@ -747,6 +747,7 @@ def build_contrast_section(
                     nib.load(str(manifest.effect_map)),
                     stat_img=stat_img,
                     bg_img=background,
+                    mask_img=mask_img,
                     threshold=float(threshold),
                     two_sided=manifest.two_sided,
                     radiological=manifest.radiological,

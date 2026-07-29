@@ -278,6 +278,7 @@ def dual_coded_mosaic(
     *,
     stat_img: Any,
     bg_img: Any = None,
+    mask_img: Any = None,
     threshold: float,
     vmax: Optional[float] = None,
     two_sided: bool = True,
@@ -309,7 +310,12 @@ def dual_coded_mosaic(
             f"{effect_data.shape} and {stat_shape}."
         )
 
-    values = effect_data[np.isfinite(effect_data)]
+    # Inside the analysis mask, for the same reason stat_map_mosaic is: a percentile
+    # over the whole volume is a percentile of a distribution dominated by background
+    # zeros. Measured on this study's own effect map, the whole-volume limit was 1.53x
+    # too low, so 5.4% of in-brain voxels saturated while the figure reported 2.0%
+    # clipped -- a number computed over voxels the panel does not draw.
+    values, limit_source = _masked_values(effect_img, mask_img)
     resolved_vmax = float(vmax) if vmax is not None else robust_symmetric_limit(values)
     with plot_context():
         display = plotting.plot_stat_map(
@@ -338,7 +344,8 @@ def dual_coded_mosaic(
                 f"hue: effect · opacity: |z| ramped "
                 f"{0.5 * float(threshold):.2f}–{float(threshold):.2f}",
                 f"colour limit ±{resolved_vmax:.3g} "
-                f"({clipped_fraction(values, limit=resolved_vmax):.1%} clipped)",
+                f"({clipped_fraction(values, limit=resolved_vmax):.1%} clipped)"
+                + (f", from {limit_source}" if limit_source else ""),
                 orientation_label(radiological),
             ],
         )

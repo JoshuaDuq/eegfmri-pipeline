@@ -173,3 +173,47 @@ def test_the_magnitude_limit_comes_from_the_positive_values_only() -> None:
     reported = float(_provenance(figure).split("0–")[1].split(" ")[0])
     assert reported == pytest.approx(expected, rel=0.01)
     plt.close(figure)
+
+
+# --- the dual-coded panel scales inside the mask too ----------------------
+
+
+def test_dual_coding_takes_its_colour_limit_from_the_mask() -> None:
+    # A percentile over the whole volume is a percentile of a distribution dominated
+    # by background zeros. Measured on real data the whole-volume limit was 1.53x too
+    # low, so 5.4% of in-brain voxels saturated while the figure reported 2.0%.
+    from fmri_pipeline.analysis.report import style as style_mod
+
+    stat_img, mask_img = _map_with_background(seed=5)
+    effect = np.asarray(stat_img.get_fdata()) * 0.1
+    effect_img = nib.Nifti1Image(effect.astype(np.float32), np.eye(4))
+    mask = np.asanyarray(mask_img.dataobj).astype(bool)
+
+    whole = style_mod.robust_symmetric_limit(effect[np.isfinite(effect)])
+    inside = style_mod.robust_symmetric_limit(effect[mask])
+    assert inside > whole, "fixture does not reproduce the background dilution"
+
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.dual_coded_mosaic(
+                effect_img, stat_img=stat_img, mask_img=mask_img, threshold=1.5
+            )
+        except Exception:
+            pass
+    assert mock_plot.call_args.kwargs["vmax"] == pytest.approx(inside)
+
+
+def test_dual_coding_names_where_its_limit_came_from() -> None:
+    stat_img, mask_img = _map_with_background(seed=6)
+    effect_img = nib.Nifti1Image(
+        (np.asarray(stat_img.get_fdata()) * 0.1).astype(np.float32), np.eye(4)
+    )
+    figure = stat_maps.dual_coded_mosaic(
+        effect_img, stat_img=stat_img, mask_img=mask_img, threshold=1.5
+    )
+    text = _provenance(figure)
+    assert "analysis mask" in text
+    # And the voxel count is the mask's, not the field of view's.
+    assert f"{int(np.asanyarray(mask_img.dataobj).sum()):,} voxels" in text
+    plt.close(figure)
