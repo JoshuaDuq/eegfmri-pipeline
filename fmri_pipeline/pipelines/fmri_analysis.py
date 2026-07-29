@@ -117,6 +117,7 @@ class FmriAnalysisPipeline(PipelineBase):
         ]
 
         anat_bg: Optional[Path] = None
+        anat_mask: Optional[Path] = None
         for d in search_dirs:
             if not d.exists():
                 continue
@@ -127,6 +128,9 @@ class FmriAnalysisPipeline(PipelineBase):
                         d / f"{sub_label}_space-MNI152NLin6Asym_desc-preproc_T1w.nii.gz",
                     ]
                 )
+                anat_mask = _first_existing(
+                    [d / f"{sub_label}_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"]
+                )
             else:
                 anat_bg = _first_existing(
                     [
@@ -134,12 +138,71 @@ class FmriAnalysisPipeline(PipelineBase):
                         d / f"{sub_label}_space-T1w_desc-preproc_T1w.nii.gz",
                     ]
                 )
+                anat_mask = _first_existing([d / f"{sub_label}_desc-brain_mask.nii.gz"])
             if anat_bg is not None:
                 break
+
+        # fMRIPrep's native-space T1w is a whole head: using it directly puts the
+        # subject's face and neck into a report meant to be shared, and shrinks the
+        # brain to a fraction of each panel. Skull-strip it with the brain mask that
+        # sits beside it.
+        if anat_bg is not None and anat_mask is not None:
+            anat_bg = self._write_skull_stripped_background(
+                anat_bg, anat_mask, sub_label=sub_label, space=space
+            )
 
         bg_out = anat_bg or func_bg
         mask_out = func_mask
         return bg_out, mask_out
+
+    def _write_skull_stripped_background(
+        self,
+        anat_path: Path,
+        mask_path: Path,
+        *,
+        sub_label: str,
+        space: str,
+    ) -> Path:
+        """Cache a brain-extracted copy of the anatomical background."""
+        import nibabel as nib
+        import numpy as np
+
+        cache_dir = self.deriv_root / "logs" / "fmri_report_backgrounds"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        out_path = cache_dir / f"{sub_label}_space-{space}_desc-brain_T1w.nii.gz"
+        if out_path.exists():
+            return out_path
+
+        anat = nib.load(str(anat_path))
+        mask = nib.load(str(mask_path))
+        anat_data = np.asanyarray(anat.dataobj)
+        mask_data = np.asanyarray(mask.dataobj).astype(bool)
+        if mask_data.shape != anat_data.shape:
+            return anat_path
+
+        nib.save(
+            nib.Nifti1Image(np.where(mask_data, anat_data, 0), anat.affine, anat.header),
+            str(out_path),
+        )
+        return out_path
+
+    def _discover_tissue_segmentation(self, *, sub_label: str, space: str) -> Optional[Path]:
+        """Discrete GM/WM/CSF segmentation used to order carpet-plot rows."""
+        deriv_root = self.deriv_root
+        search_dirs = [
+            deriv_root / "preprocessed" / "fmri" / sub_label / "anat",
+            deriv_root / "preprocessed" / "fmri" / "fmriprep" / sub_label / "anat",
+            deriv_root / "fmriprep" / sub_label / "anat",
+        ]
+        if str(space or "").strip().lower().startswith("mni"):
+            name = f"{sub_label}_space-MNI152NLin2009cAsym_dseg.nii.gz"
+        else:
+            name = f"{sub_label}_dseg.nii.gz"
+        for directory in search_dirs:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate
+        return None
 
     def process_subject(
         self,
@@ -256,6 +319,48 @@ class FmriAnalysisPipeline(PipelineBase):
         nib.save(contrast_img, str(nifti_path))
         self.logger.info("Saved contrast map: %s", nifti_path.name)
 
+        # Record what was fit, beside what was fit. This is what lets `fmri-analysis
+        # report` render from the derivatives tree without touching the model.
+        from fmri_pipeline.analysis.contrast_builder import (
+            _coerce_optional_float,
+            write_report_manifest,
+        )
+
+        plot_cfg_for_manifest = plotting_cfg.normalized() if hasattr(plotting_cfg, "normalized") else None
+        # The mask the report scales colour inside. Discovered in the space the
+        # contrast was actually fit in, so it matches the stat map's grid.
+        manifest_space = (
+            "mni"
+            if str(run_meta.get("analysis_space", "") if isinstance(run_meta, dict) else "")
+            .lower()
+            .startswith("mni")
+            else "native"
+        )
+        _bg_for_manifest, mask_for_manifest = self._discover_plot_assets(
+            sub_label=sub_label, task=task, space=manifest_space
+        )
+        manifest_path = write_report_manifest(
+            contrast_dir=out_dir,
+            subject=sub_label,
+            task=task,
+            contrast_name=contrast_name,
+            stat_map=nifti_path,
+            run_meta=run_meta,
+            mask=mask_for_manifest,
+            smoothing_fwhm=_coerce_optional_float(
+                getattr(contrast_cfg, "smoothing_fwhm", None)
+            ),
+            signal_scaling=bool(getattr(contrast_cfg, "signal_scaling", False)),
+            threshold_mode=getattr(plot_cfg_for_manifest, "threshold_mode", "z"),
+            z_threshold=getattr(plot_cfg_for_manifest, "z_threshold", 2.3),
+            fdr_q=getattr(plot_cfg_for_manifest, "fdr_q", 0.05),
+            cluster_min_voxels=getattr(plot_cfg_for_manifest, "cluster_min_voxels", 0),
+            two_sided=getattr(plot_cfg_for_manifest, "two_sided", True),
+            radiological=getattr(plot_cfg_for_manifest, "radiological", False),
+        )
+        if manifest_path is not None:
+            self.logger.info("Wrote report manifest: %s", manifest_path.name)
+
         plotting_meta: Optional[dict[str, Any]] = None
         from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
         from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
@@ -336,6 +441,10 @@ class FmriAnalysisPipeline(PipelineBase):
 
             native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
             mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")
+            tissue_seg = self._discover_tissue_segmentation(
+                sub_label=sub_label,
+                space=str(getattr(contrast_cfg, "fmriprep_space", "T1w") or "T1w"),
+            )
             sig_root, sig_specs = self._discover_signature_root_and_specs()
 
             native_effect = None
@@ -368,6 +477,7 @@ class FmriAnalysisPipeline(PipelineBase):
                 mni_bg_img_path=mni_bg,
                 native_mask_img_path=native_mask,
                 mni_mask_img_path=mni_mask,
+                tissue_seg_path=tissue_seg,
                 signature_root=sig_root,
                 signature_specs=sig_specs,
             )

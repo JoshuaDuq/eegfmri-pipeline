@@ -22,6 +22,7 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
     discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
+    prepare_confounds_for_first_level_model as _prepare_confounds_for_first_level_model,
     select_confounds_for_glm_from_path as _select_confounds_for_glm,
     select_consistent_run_source,
     validate_design_matrices as _validate_design_matrices,
@@ -29,63 +30,6 @@ from fmri_pipeline.utils.bold_discovery import (
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
 
 logger = logging.getLogger(__name__)
-
-
-def _prepare_confounds_for_first_level_model(
-    confounds: Optional[Any],
-    sample_mask: Optional[Any],
-) -> Optional[Any]:
-    if confounds is None:
-        return None
-
-    import numpy as np  # type: ignore
-
-    values = confounds.to_numpy(dtype=float)
-    nonfinite = ~np.isfinite(values)
-    if not nonfinite.any():
-        return confounds
-
-    retained = np.zeros(values.shape[0], dtype=bool)
-    if sample_mask is None:
-        retained[:] = True
-    else:
-        retained[np.asarray(sample_mask, dtype=int)] = True
-    if np.any(nonfinite & retained[:, None]):
-        raise ValueError("First-level confounds contain non-finite values in retained volumes.")
-
-    prepared = confounds.copy()
-    for column in prepared.columns:
-        column_values = prepared[column].to_numpy(dtype=float).copy()
-        missing_rows = ~np.isfinite(column_values)
-        if not missing_rows.any():
-            continue
-        retained_values = column_values[retained]
-        finite_retained = retained_values[np.isfinite(retained_values)]
-        if finite_retained.size == 0:
-            raise ValueError(
-                "First-level confounds cannot be prepared because retained volumes contain "
-                f"no finite values for {column!r}."
-            )
-        column_values[missing_rows] = float(finite_retained.mean())
-        prepared[column] = column_values
-
-    values = prepared.to_numpy(dtype=float)
-    retained_values = values[retained, :]
-    means = retained_values.mean(axis=0)
-    scales = retained_values.std(axis=0)
-    invalid_scales = [
-        str(prepared.columns[index])
-        for index, scale in enumerate(scales)
-        if not math.isfinite(float(scale)) or float(scale) <= 0.0
-    ]
-    if invalid_scales:
-        raise ValueError(
-            "First-level confounds must vary across retained volumes before GLM fitting. "
-            f"Constant columns: {invalid_scales}."
-        )
-
-    scaled = (values - means) / scales
-    return type(prepared)(scaled, columns=prepared.columns, index=prepared.index)
 
 
 def _normalize_input_source(input_source: str) -> str:

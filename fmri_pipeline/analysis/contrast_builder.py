@@ -33,8 +33,9 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
     discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
+    prepare_confounds_for_first_level_model as _prepare_confounds_for_first_level_model,
+    select_confounds_for_glm as _select_confounds_for_glm,
     select_consistent_run_source,
-    select_confound_columns as _select_confound_columns,
     validate_design_matrices as _validate_design_matrices,
 )
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
@@ -940,10 +941,12 @@ def _write_design_matrices(
     prefix: str,
 ) -> Dict[str, Any]:
     """
-    Write per-run design matrices to disk for QC/debugging.
+    Write per-run design matrices to disk as machine-readable source data.
 
-    - Always writes TSVs when possible.
-    - Attempts to write PNGs when nilearn plotting is available.
+    TSVs only. The design matrix is rendered in the report, which draws it grouped by
+    regressor role with the contrast beneath it; writing a second, plainer rendition
+    here produced a figure that lived outside the report, carried none of its caption or
+    provenance, and drifted from it silently.
     """
     design_mats = getattr(flm, "design_matrices_", None)
     if not isinstance(design_mats, list) or len(design_mats) == 0:
@@ -953,7 +956,6 @@ def _write_design_matrices(
     qc_dir.mkdir(parents=True, exist_ok=True)
 
     tsv_paths: List[str] = []
-    png_paths: List[str] = []
 
     for idx, dm in enumerate(design_mats):
         run_label = (
@@ -966,26 +968,9 @@ def _write_design_matrices(
         dm.to_csv(tsv_path, sep="\t", index=True, index_label="frame", encoding="utf-8")
         tsv_paths.append(str(tsv_path))
 
-        from nilearn.plotting import plot_design_matrix
-
-        ax = plot_design_matrix(dm)
-        fig = getattr(ax, "figure", None) or getattr(ax, "get_figure", lambda: None)()
-        if fig is not None:
-            png_path = qc_dir / f"{prefix}_{run_label}_design_matrix.png"
-            fig.savefig(png_path, dpi=150, bbox_inches="tight")
-            png_paths.append(str(png_path))
-            try:
-                import matplotlib.pyplot as plt
-
-                plt.close(fig)
-            except Exception as exc:
-                logger.debug("Failed to close design matrix figure for %s: %s", run_label, exc)
-
     out: Dict[str, Any] = {}
     if tsv_paths:
         out["design_matrix_tsv_paths"] = tsv_paths
-    if png_paths:
-        out["design_matrix_png_paths"] = png_paths
     return out
 
 
@@ -1202,6 +1187,7 @@ def fit_first_level_glm(
     synthetic_labels = remap_result.synthetic_labels
 
     confounds = None
+    sample_mask = None
     confounds_strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
     if confounds_strategy in {"", "default"}:
         confounds_strategy = "auto"
@@ -1212,7 +1198,7 @@ def fit_first_level_glm(
                 f"Missing confounds for {bold_path.name}."
             )
         confounds_df = pd.read_csv(confounds_path, sep="\t")
-        confounds = _select_confound_columns(
+        confounds, _conf_cols, sample_mask = _select_confounds_for_glm(
             confounds_df,
             confounds_strategy,
             auto_compcor_n=int(getattr(cfg, "auto_compcor_n", 5)),
@@ -1222,14 +1208,21 @@ def fit_first_level_glm(
                 "No confound regressors were selected for the single-run first-level GLM. "
                 f"Strategy={confounds_strategy!r}, file={confounds_path}."
             )
+        confounds = _prepare_confounds_for_first_level_model(confounds, sample_mask)
         logger.info("Using %d confound regressors", confounds.shape[1])
+        if sample_mask is not None:
+            logger.info(
+                "Censoring %d of %d volumes flagged by confound censor columns",
+                len(confounds_df) - len(sample_mask),
+                len(confounds_df),
+            )
 
     # First-level inference requires an explicit fMRIPrep analysis mask.
     mask_img = _load_matching_brain_mask_for_bold(bold_path)
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
-    flm.fit(bold_path, events=events_df, confounds=confounds)
+    flm.fit(bold_path, events=events_df, confounds=confounds, sample_masks=sample_mask)
     _validate_design_matrices(
         flm,
         context=f"First-level GLM ({bold_path.name})",
@@ -1253,6 +1246,15 @@ class MultiRunGLMResult:
     skipped_runs: List[Tuple[int, str]]  # (run_idx, reason)
     total_cond_a_events: int
     total_cond_b_events: int
+
+
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    """Float when the value is a usable positive number, else None."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _validate_consistent_trs(bold_paths: List[Path]) -> float:
@@ -1303,6 +1305,7 @@ def fit_first_level_glm_multi_run(
     valid_events_list: List[pd.DataFrame] = []
     valid_events_paths: List[Path] = []
     valid_confounds_list: List[Optional[pd.DataFrame]] = []
+    valid_sample_masks: List[Optional[np.ndarray]] = []
     valid_confounds_paths: List[Optional[Path]] = []
 
     all_conditions: set[str] = set()
@@ -1371,17 +1374,27 @@ def fit_first_level_glm_multi_run(
 
         # Handle confounds
         confounds = None
+        sample_mask = None
         if confounds_path is not None and confounds_path.exists():
             confounds_df = pd.read_csv(confounds_path, sep="\t")
-            confounds = _select_confound_columns(
+            confounds, _conf_cols, sample_mask = _select_confounds_for_glm(
                 confounds_df,
                 getattr(cfg, "confounds_strategy", "auto"),
                 auto_compcor_n=int(getattr(cfg, "auto_compcor_n", 5)),
             )
             if confounds is not None:
+                confounds = _prepare_confounds_for_first_level_model(confounds, sample_mask)
                 confound_columns.update(list(confounds.columns))
                 logger.info("Run %d: using %d confound regressors", run_idx, confounds.shape[1])
+            if sample_mask is not None:
+                logger.info(
+                    "Run %d: censoring %d of %d volumes flagged by confound censor columns",
+                    run_idx,
+                    len(confounds_df) - len(sample_mask),
+                    len(confounds_df),
+                )
         valid_confounds_list.append(confounds)
+        valid_sample_masks.append(sample_mask)
         valid_confounds_paths.append(confounds_path)
 
     tr = _validate_consistent_trs(valid_bold_paths)
@@ -1420,7 +1433,21 @@ def fit_first_level_glm_multi_run(
     else:
         confounds_arg = valid_confounds_list
 
-    flm.fit(valid_bold_paths, events=valid_events_list, confounds=confounds_arg)
+    # nilearn takes one sample mask per run, or none at all. Runs with nothing to
+    # censor get an explicit full index so the per-run lists stay aligned.
+    sample_masks_arg: Optional[List[np.ndarray]] = None
+    if confounds_arg is not None and any(m is not None for m in valid_sample_masks):
+        sample_masks_arg = [
+            mask if mask is not None else np.arange(len(confounds), dtype=int)
+            for mask, confounds in zip(valid_sample_masks, valid_confounds_list)
+        ]
+
+    flm.fit(
+        valid_bold_paths,
+        events=valid_events_list,
+        confounds=confounds_arg,
+        sample_masks=sample_masks_arg,
+    )
     _validate_design_matrices(
         flm,
         context="Multi-run first-level GLM",
@@ -1629,6 +1656,12 @@ def build_contrast_from_runs_detailed(
         "confounds_strategy": str(getattr(cfg, "confounds_strategy", "auto")),
         "contrast_def": contrast_def,
         "output_type": output_type,
+        # The space the BOLD above lives in. QC panels read those files directly and
+        # need the brain mask from the matching space to avoid masking across spaces.
+        "analysis_space": cfg.fmriprep_space,
+        # Recorded so QC panels can put their time axes in seconds, which is what makes
+        # them comparable across runs, subjects, and acquisitions.
+        "tr": _coerce_optional_float(getattr(glm_result.flm, "t_r", None)),
     }
     meta.update(qc_meta)
     return contrast_map, meta, glm_result, str(contrast_def), str(output_type)
@@ -2058,3 +2091,131 @@ def ensure_fmri_stats_map(
     if resolved_path is not None:
         return resolved_path
     return built_path
+
+
+def _run_label(path: Any, fallback_index: int) -> str:
+    """Name a run from its BIDS filename, or by position when it carries no entity."""
+    text = str(path)
+    for part in Path(text).name.split("_"):
+        if part.startswith("run-"):
+            return part
+    return f"run-{fallback_index:02d}"
+
+
+def _report_space(analysis_space: Any) -> str:
+    """Collapse an fMRIPrep space label to what the report reasons about.
+
+    The report only asks one question of a space: whether the glass-brain
+    projection is defined for it. Everything that is not MNI is native as far as
+    that question goes.
+    """
+    text = str(analysis_space or "").strip().lower()
+    return "mni" if text.startswith("mni") else "native"
+
+
+def write_report_manifest(
+    *,
+    contrast_dir: Path,
+    subject: str,
+    task: str,
+    contrast_name: str,
+    stat_map: Path,
+    run_meta: Any,
+    effect_map: Optional[Path] = None,
+    variance_map: Optional[Path] = None,
+    mask: Optional[Path] = None,
+    design_matrices: Sequence[Path] = (),
+    contrast_vector: Optional[Sequence[float]] = None,
+    contrast_columns: Sequence[str] = (),
+    threshold_mode: str = "z",
+    z_threshold: float = 2.3,
+    fdr_q: float = 0.05,
+    cluster_min_voxels: int = 0,
+    two_sided: bool = True,
+    radiological: bool = False,
+    smoothing_fwhm: Optional[float] = None,
+    signal_scaling: bool = False,
+) -> Optional[Path]:
+    """Record what was fit, beside what was fit.
+
+    This is the seam that lets a report be rendered from a derivatives tree without
+    the model. The report reads manifests and nothing else, so anything it needs
+    about a contrast has to be written here.
+
+    Returns ``None`` and logs rather than raising: by the time this runs the GLM has
+    already been fitted and its maps are on disk, and losing that to a problem with
+    reporting metadata would be the most expensive failure available.
+    """
+    from fmri_pipeline.analysis.report.manifest import (
+        MANIFEST_FILENAME,
+        ContrastManifest,
+        write_manifest,
+    )
+
+    try:
+        meta: Dict[str, Any] = run_meta if isinstance(run_meta, dict) else {}
+        if not isinstance(run_meta, dict):
+            raise TypeError(f"run_meta must be a mapping, got {type(run_meta).__name__}")
+
+        bold_paths = [Path(str(p)) for p in meta.get("included_bold_paths", []) or []]
+        confounds_paths = [
+            Path(str(p))
+            for p in (meta.get("included_confounds_paths", []) or [])
+            if p is not None
+        ]
+        included_runs = tuple(
+            _run_label(path, index) for index, path in enumerate(bold_paths, start=1)
+        )
+        excluded_runs = tuple(
+            (
+                f"run-{int(entry.get('run_index', 0)):02d}",
+                str(entry.get("reason", "unspecified")),
+            )
+            for entry in (meta.get("skipped_runs", []) or [])
+            if isinstance(entry, dict)
+        )
+
+        t_r = meta.get("tr")
+        manifest = ContrastManifest(
+            subject=subject,
+            task=task,
+            contrast_name=contrast_name,
+            space=_report_space(meta.get("analysis_space")),
+            stat_map=Path(stat_map),
+            effect_map=Path(effect_map) if effect_map else None,
+            variance_map=Path(variance_map) if variance_map else None,
+            mask=Path(mask) if mask else None,
+            threshold_mode=threshold_mode,
+            z_threshold=float(z_threshold),
+            fdr_q=float(fdr_q),
+            cluster_min_voxels=int(cluster_min_voxels),
+            two_sided=bool(two_sided),
+            radiological=bool(radiological),
+            design_matrices=tuple(Path(p) for p in design_matrices),
+            contrast_vector=(
+                tuple(float(v) for v in contrast_vector)
+                if contrast_vector is not None
+                else None
+            ),
+            contrast_columns=tuple(str(c) for c in contrast_columns),
+            included_runs=included_runs,
+            excluded_runs=excluded_runs,
+            bold_paths=tuple(bold_paths),
+            confounds_paths=tuple(confounds_paths),
+            t_r=None if t_r is None else float(t_r),
+            smoothing_fwhm=(
+                None if smoothing_fwhm is None else float(smoothing_fwhm)
+            ),
+            signal_scaling=bool(signal_scaling),
+            confound_strategy=str(meta.get("confounds_strategy", "unspecified")),
+        )
+        return write_manifest(manifest, Path(contrast_dir) / MANIFEST_FILENAME)
+    except Exception as exc:
+        logger.warning(
+            "Could not write the report manifest for %s/%s (%s). The contrast's "
+            "maps are unaffected; the report will not cover this contrast.",
+            subject,
+            contrast_name,
+            exc,
+        )
+        return None

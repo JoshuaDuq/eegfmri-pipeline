@@ -536,6 +536,68 @@ def select_confounds_for_glm_from_path(
     )
 
 
+def prepare_confounds_for_first_level_model(
+    confounds: Optional[pd.DataFrame],
+    sample_mask: Optional[np.ndarray],
+) -> Optional[pd.DataFrame]:
+    """Standardize confounds over retained volumes for a nilearn first-level GLM.
+
+    Non-finite entries are permitted only in volumes that ``sample_mask`` censors;
+    nilearn requires a finite array, so those censored entries are filled with the
+    retained-volume mean of their own column. That fill never reaches the fit,
+    because nilearn drops the censored rows via ``sample_masks``.
+    """
+    if confounds is None:
+        return None
+
+    values = confounds.to_numpy(dtype=float)
+    nonfinite = ~np.isfinite(values)
+    if not nonfinite.any():
+        return confounds
+
+    retained = np.zeros(values.shape[0], dtype=bool)
+    if sample_mask is None:
+        retained[:] = True
+    else:
+        retained[np.asarray(sample_mask, dtype=int)] = True
+    if np.any(nonfinite & retained[:, None]):
+        raise ValueError("First-level confounds contain non-finite values in retained volumes.")
+
+    prepared = confounds.copy()
+    for column in prepared.columns:
+        column_values = prepared[column].to_numpy(dtype=float).copy()
+        missing_rows = ~np.isfinite(column_values)
+        if not missing_rows.any():
+            continue
+        retained_values = column_values[retained]
+        finite_retained = retained_values[np.isfinite(retained_values)]
+        if finite_retained.size == 0:
+            raise ValueError(
+                "First-level confounds cannot be prepared because retained volumes contain "
+                f"no finite values for {column!r}."
+            )
+        column_values[missing_rows] = float(finite_retained.mean())
+        prepared[column] = column_values
+
+    values = prepared.to_numpy(dtype=float)
+    retained_values = values[retained, :]
+    means = retained_values.mean(axis=0)
+    scales = retained_values.std(axis=0)
+    invalid_scales = [
+        str(prepared.columns[index])
+        for index, scale in enumerate(scales)
+        if not math.isfinite(float(scale)) or float(scale) <= 0.0
+    ]
+    if invalid_scales:
+        raise ValueError(
+            "First-level confounds must vary across retained volumes before GLM fitting. "
+            f"Constant columns: {invalid_scales}."
+        )
+
+    scaled = (values - means) / scales
+    return type(prepared)(scaled, columns=prepared.columns, index=prepared.index)
+
+
 def select_confound_columns(
     confounds_df: pd.DataFrame,
     strategy: str,
