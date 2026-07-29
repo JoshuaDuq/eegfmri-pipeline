@@ -13,6 +13,7 @@ from fmri_pipeline.analysis.report.style import (
     SIGNED_CMAP,
     annotate_provenance,
     clipped_fraction,
+    orientation_label,
     plot_context,
     robust_symmetric_limit,
     suprathreshold_limit,
@@ -41,10 +42,6 @@ def _resolve_vmax(
     if threshold is not None and threshold > 0:
         return suprathreshold_limit(values, threshold=float(threshold))
     return robust_symmetric_limit(values)
-
-
-def _orientation_label(radiological: bool) -> str:
-    return "radiological (R on left)" if radiological else "neurological (L on left)"
 
 
 def apply_sidedness(stat_img: Any, *, two_sided: bool) -> Any:
@@ -84,7 +81,7 @@ def _provenance(
     lines.append(f"colour limit ±{limit:.2f} ({fraction:.1%} clipped)")
     # A brain figure that does not state its convention cannot be checked, and a
     # left/right error is not visible in the image.
-    lines.append(_orientation_label(radiological))
+    lines.append(orientation_label(radiological))
     return lines
 
 
@@ -208,7 +205,7 @@ def dual_coded_mosaic(
                 f"{0.5 * float(threshold):.2f}–{float(threshold):.2f}",
                 f"colour limit ±{resolved_vmax:.3g} "
                 f"({clipped_fraction(values, limit=resolved_vmax):.1%} clipped)",
-                _orientation_label(radiological),
+                orientation_label(radiological),
             ],
         )
         return figure

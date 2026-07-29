@@ -47,8 +47,42 @@ SIGNED_CMAP = "RdBu_r"
 #: Single-hue perceptually uniform ramp for unsigned magnitude.
 MAGNITUDE_CMAP = "cividis"
 
+#: Pipeline decisions -- retained versus censored frames, ROI usable versus not --
+#: get a neutral ramp. A hue would imply the quantity was measured rather than chosen.
+SEQUENTIAL_DECISION_CMAP = "Greys"
+
 #: Neutral colour for guides, thresholds, and reference curves.
 GUIDE_COLOR = "0.35"
+
+#: False is the neurological convention: subject left on the viewer's left.
+#:
+#: Passed explicitly to every volume plotter and named in every figure's provenance
+#: line. Nilearn's own default happens to agree, but a figure that relies on a
+#: library default states nothing, and a left/right error is invisible in the image.
+RADIOLOGICAL = False
+
+
+def orientation_label(radiological: bool = RADIOLOGICAL) -> str:
+    """Name the convention a panel was actually drawn with.
+
+    Takes an argument rather than only reading :data:`RADIOLOGICAL`, so a panel drawn
+    against a non-default convention still describes itself truthfully.
+    """
+    return (
+        "radiological (R on viewer left)"
+        if radiological
+        else "neurological (L on viewer left)"
+    )
+
+
+ORIENTATION_LABEL = orientation_label()
+
+#: Figures embedded in the HTML report. The report lays out around 1180 px wide, so
+#: 300 dpi produces resolution no reader sees while base64-encoding megabytes into
+#: every document.
+HTML_FIGURE_DPI = 150
+#: Figures written to disk for manuscript use, where the resolution is wanted.
+PRINT_FIGURE_DPI = 300
 
 #: Percentile defining a robust colour limit a few extreme voxels cannot dominate.
 COLOR_LIMIT_PERCENTILE = 98.0
@@ -67,8 +101,8 @@ FMRI_RC: dict[str, Any] = {
     "grid.color": "0.85",
     "grid.linestyle": "--",
     "grid.linewidth": 0.8,
-    "figure.dpi": 150,
-    "savefig.dpi": 300,
+    "figure.dpi": HTML_FIGURE_DPI,
+    "savefig.dpi": HTML_FIGURE_DPI,
     "savefig.bbox": "tight",
     "font.family": ["Arial", "DejaVu Sans"],
     "font.size": 9,
@@ -127,6 +161,29 @@ def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
         color=GUIDE_COLOR,
         va="bottom",
         ha="left",
+    )
+
+
+def colour_limit_note(limit: float, clipped: float) -> str:
+    """One-line description of a colour limit and how much of the data it hid.
+
+    A robust colour limit deliberately saturates the extreme values. Left unstated,
+    the figure silently claims it did not.
+    """
+    return f"colour limit ±{limit:.2f} · {clipped * 100:.2f}% clipped"
+
+
+def panel_label(ax: Any, letter: str) -> None:
+    """Put a bold panel letter above the top-left corner of an axes, journal style."""
+    ax.text(
+        -0.02,
+        1.06,
+        letter,
+        transform=ax.transAxes,
+        fontsize=11,
+        fontweight="bold",
+        va="bottom",
+        ha="right",
     )
 
 
@@ -214,14 +271,23 @@ def figure_format(*, dense: bool) -> str:
 
 
 __all__ = [
+    "COLOR_LIMIT_PERCENTILE",
     "FMRI_RC",
     "GUIDE_COLOR",
+    "HTML_FIGURE_DPI",
     "MAGNITUDE_CMAP",
     "OKABE_ITO",
+    "ORIENTATION_LABEL",
+    "PRINT_FIGURE_DPI",
+    "RADIOLOGICAL",
+    "SEQUENTIAL_DECISION_CMAP",
     "SIGNED_CMAP",
     "annotate_provenance",
     "clipped_fraction",
+    "colour_limit_note",
     "figure_format",
+    "orientation_label",
+    "panel_label",
     "plot_context",
     "robust_symmetric_limit",
     "robust_upper_limit",
