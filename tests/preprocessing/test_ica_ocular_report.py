@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pytest
+from matplotlib.collections import PolyCollection
 
 from eeg_pipeline.preprocessing.ica_ocular_report import (
     OcularReviewSettings,
@@ -152,7 +153,7 @@ def test_the_panel_shows_where_the_detector_drew_its_line() -> None:
     spans = [
         collection
         for collection in figure.axes[0].collections
-        if type(collection).__name__ == "PolyCollection"
+        if isinstance(collection, PolyCollection)
     ]
     assert spans, "the decision boundary is not drawn"
     low, high = figure.axes[0]._eog_threshold_band

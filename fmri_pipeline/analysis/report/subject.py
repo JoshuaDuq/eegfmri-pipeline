@@ -1104,7 +1104,9 @@ def build_design_section(
                 )
 
             saved = _save(
-                design_figures.variance_inflation_figure(frame, run_label=run_label),
+                design_figures.variance_inflation_figure(
+                    frame, contrast=contrast, run_label=run_label
+                ),
                 out_dir=plots_dir,
                 stem=f"design_vif_{run_label}",
                 formats=cfg.formats,
@@ -1117,7 +1119,9 @@ def build_design_section(
                         dense=False,
                         caption=(
                             "Variance inflation factor per regressor, reported as a "
-                            "measurement. No cutoff is applied."
+                            "measurement. No cutoff is applied. The regressors this "
+                            "contrast weights are marked, since inflation on those is "
+                            "what costs the comparison above its precision."
                         ),
                     )
                 )

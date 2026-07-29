@@ -410,3 +410,78 @@ def test_a_contrast_over_many_regressors_is_left_to_its_colour() -> None:
     figure = design.design_matrix_figure(frame, contrast=contrast)
     assert not figure.axes[1].texts
     plt.close(figure)
+
+
+# --- naming which regressor is the problem --------------------------------
+
+
+def _wide_frame(n_task: int = 3, n_confound: int = 30, n: int = 60) -> pd.DataFrame:
+    rng = np.random.default_rng(0)
+    columns = {f"task_{i}": rng.standard_normal(n) for i in range(n_task)}
+    columns.update({f"trans_{i}": rng.standard_normal(n) for i in range(n_confound)})
+    columns["constant"] = np.ones(n)
+    return pd.DataFrame(columns)
+
+
+def _provenance(figure) -> str:
+    return " ".join(artist.get_text() for artist in figure.texts)
+
+
+def test_the_vif_panel_names_its_worst_regressor() -> None:
+    # Unlabelled bars reduce the panel to "some regressor is inflated", which is not
+    # actionable: whether it matters depends entirely on which.
+    frame = _wide_frame()
+    frame["trans_7"] = frame["trans_3"] * 2.0 + 1e-9 * np.arange(len(frame))
+    figure = design.variance_inflation_figure(frame)
+    assert "largest VIF:" in _provenance(figure)
+    assert "trans_" in _provenance(figure)
+    plt.close(figure)
+
+
+def test_the_vif_panel_bands_a_wide_design_by_role() -> None:
+    # A VIF of 130 on a motion derivative's square is ordinary; the same number on a
+    # task regressor is not.
+    figure = design.variance_inflation_figure(_wide_frame())
+    labels = " ".join(t.get_text() for t in figure.axes[0].texts)
+    assert "Task" in labels and "Confound" in labels
+    plt.close(figure)
+
+
+def test_the_vif_panel_marks_the_regressors_this_contrast_weights() -> None:
+    frame = _wide_frame()
+    figure = design.variance_inflation_figure(
+        frame, contrast={"task_0": 1.0, "task_1": -1.0}
+    )
+    assert "weighted by this contrast" in " ".join(
+        t.get_text() for t in figure.axes[0].texts
+    )
+    plt.close(figure)
+
+
+def test_the_vif_panel_reports_the_worst_among_the_weighted_regressors() -> None:
+    # The one that actually costs this contrast its precision.
+    frame = _wide_frame()
+    frame["task_1"] = frame["task_0"] * 3.0 + 1e-9 * np.arange(len(frame))
+    figure = design.variance_inflation_figure(
+        frame, contrast={"task_0": 1.0, "task_1": -1.0}
+    )
+    assert "largest among weighted:" in _provenance(figure)
+    plt.close(figure)
+
+
+def test_the_vif_panel_makes_no_contrast_claim_without_a_contrast() -> None:
+    figure = design.variance_inflation_figure(_wide_frame())
+    assert "weighted" not in _provenance(figure)
+    plt.close(figure)
+
+
+def test_the_correlation_panel_names_the_pair_behind_its_worst_r() -> None:
+    # "Largest |r| off the diagonal: 0.98" says two columns duplicate each other but
+    # not which two, and a design too wide to label has nowhere else to say it.
+    frame = _wide_frame()
+    frame["trans_9"] = frame["trans_2"] * -1.0
+    figure = design.regressor_correlation_figure(frame)
+    text = _provenance(figure)
+    assert "1.00" in text
+    assert "trans_2" in text and "trans_9" in text
+    plt.close(figure)

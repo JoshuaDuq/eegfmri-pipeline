@@ -421,8 +421,17 @@ def regressor_correlation_figure(
     with np.errstate(invalid="ignore"):
         correlation = np.nan_to_num(np.corrcoef(values, rowvar=False), nan=0.0)
 
-    off_diagonal = correlation[~np.eye(len(modelled), dtype=bool)] if len(modelled) > 1 else np.array([0.0])
-    worst = float(np.max(np.abs(off_diagonal))) if off_diagonal.size else 0.0
+    # The worst pair, named. "Largest |r| off the diagonal: 0.98" tells a reader that
+    # two columns duplicate each other but not which two, and on a design too wide to
+    # label there is nowhere else to find out.
+    worst, worst_pair = 0.0, ""
+    if len(modelled) > 1:
+        magnitude = np.abs(correlation).copy()
+        np.fill_diagonal(magnitude, 0.0)
+        flat = int(np.argmax(magnitude))
+        row, column = divmod(flat, magnitude.shape[1])
+        worst = float(magnitude[row, column])
+        worst_pair = f"{modelled[row]} / {modelled[column]}"
 
     with style.plot_context():
         figure, ax = plt.subplots(figsize=(6.0, 5.4), constrained_layout=True)
@@ -445,27 +454,51 @@ def regressor_correlation_figure(
             figure,
             [
                 run_label,
-                f"largest |r| off the diagonal: {worst:.2f}",
+                f"largest |r| off the diagonal: {worst:.2f}"
+                + (f" ({worst_pair})" if worst_pair else ""),
                 "constant term excluded",
             ],
         )
     return figure
 
 
+def _role_spans(names: Sequence[str]) -> List[RegressorGroup]:
+    """Contiguous role blocks over an already role-ordered list of columns."""
+    spans: List[RegressorGroup] = []
+    for index, name in enumerate(names):
+        role = _role(name)
+        if spans and spans[-1].name == role:
+            spans[-1] = RegressorGroup(role, spans[-1].start, index + 1)
+        else:
+            spans.append(RegressorGroup(role, index, index + 1))
+    return spans
+
+
 def variance_inflation_figure(
     design_matrix: "pd.DataFrame",
     *,
+    contrast: Optional[Dict[str, float]] = None,
     run_label: str = "",
     max_labelled: int = 30,
 ) -> Figure:
-    """Variance inflation per regressor: how much collinearity costs each estimate."""
+    """Variance inflation per regressor: how much collinearity costs each estimate.
+
+    A wide design cannot label every bar, and unlabelled bars reduce the panel to
+    "some regressor is inflated" -- which is not actionable, because the answer
+    depends entirely on *which*. A variance inflation of 130 on a motion derivative's
+    square is ordinary; the same number on a regressor the contrast weights means the
+    comparison in the section above rests on almost no independent variance.
+
+    So the panel names the roles, names the worst regressor outright, and marks the
+    columns this contrast actually weights.
+    """
     import matplotlib.pyplot as plt
 
-    frame, _ordered, _groups, modelled, _vector = _prepare(design_matrix, None)
+    frame, _ordered, _groups, modelled, _vector = _prepare(design_matrix, contrast)
     vifs = variance_inflation_factors(frame[modelled].to_numpy(dtype=float))
 
     with style.plot_context():
-        figure, ax = plt.subplots(figsize=(6.0, 4.2), constrained_layout=True)
+        figure, ax = plt.subplots(figsize=(7.0, 4.4), constrained_layout=True)
         if not vifs.size:
             ax.set_axis_off()
             return figure
@@ -474,31 +507,88 @@ def variance_inflation_figure(
         ceiling = float(np.nanmax(vifs[finite])) if finite.any() else 1.0
         plotted = np.where(finite, vifs, ceiling)
         positions = np.arange(vifs.size)
-        ax.bar(
-            positions,
-            plotted,
-            color=[style.OKABE_ITO["blue"] if ok else style.OKABE_ITO["vermillion"] for ok in finite],
-            width=0.85,
-        )
+        weighted = {
+            name for name, weight in (contrast or {}).items() if float(weight) != 0.0
+        }
+
+        colours = []
+        for name, ok in zip(modelled, finite):
+            if not ok:
+                colours.append(style.OKABE_ITO["vermillion"])
+            elif name in weighted:
+                colours.append(style.OKABE_ITO["orange"])
+            else:
+                colours.append(style.OKABE_ITO["blue"])
+        ax.bar(positions, plotted, color=colours, width=0.85)
+
         ax.set_yscale("log")
         ax.set_ylabel("VIF (log)")
-        ax.set_title("Variance inflation per regressor")
+        # Padded when the role bands are drawn: they sit at the top of the axes and
+        # an unpadded title lands on them.
+        ax.set_title(
+            "Variance inflation per regressor",
+            pad=20 if len(modelled) > max_labelled else None,
+        )
+
         if len(modelled) <= max_labelled:
             ax.set_xticks(positions)
             ax.set_xticklabels(modelled, rotation=90, fontsize=6.0)
         else:
+            # Role bands instead of names. Which role carries the inflation is the
+            # distinction that decides whether it matters.
             ax.set_xticks([])
-            ax.set_xlabel(f"{len(modelled)} modelled regressors, grouped order")
+            ax.set_xlabel(f"{len(modelled)} modelled regressors, grouped by role")
+            spans = _role_spans(modelled)
+            for span in spans[:-1]:
+                ax.axvline(span.stop - 0.5, color="0.6", linewidth=0.8)
+            for span in spans:
+                ax.annotate(
+                    f"{span.name} ({span.size})",
+                    xy=((span.start + span.stop - 1) / 2.0, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
+
+        # The worst regressor by name, always -- it is the single fact a reader takes
+        # away, and on a wide design no tick label carries it.
+        worst_index = int(np.argmax(~finite)) if not finite.all() else int(np.argmax(vifs))
+        worst_name = modelled[worst_index]
+        worst_value = "∞" if not finite[worst_index] else f"{vifs[worst_index]:.3g}"
+        notes = [f"largest VIF: {worst_name} ({worst_value})"]
+        if weighted:
+            in_contrast = [i for i, name in enumerate(modelled) if name in weighted]
+            if in_contrast:
+                top = max(in_contrast, key=lambda i: (not finite[i], vifs[i]))
+                value = "∞" if not finite[top] else f"{vifs[top]:.3g}"
+                notes.append(f"largest among weighted: {modelled[top]} ({value})")
+
+        legend = []
+        if weighted:
+            legend.append(("orange", "weighted by this contrast"))
         if not finite.all():
+            legend.append(("vermillion", "perfectly collinear (VIF ∞)"))
+        for offset, (colour, text) in enumerate(legend):
             ax.text(
-                0.99, 0.95, "vermillion = perfectly collinear (VIF ∞)",
-                transform=ax.transAxes, ha="right", va="top", fontsize=7,
-                color=style.OKABE_ITO["vermillion"],
+                0.99,
+                0.96 - 0.06 * offset,
+                text,
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=7,
+                color=style.OKABE_ITO[colour],
             )
+
         style.annotate_provenance(
             figure,
             [
                 run_label,
+                *notes,
                 "VIF = 1/(1 - R²) of each regressor on the others",
                 "constant term excluded",
             ],

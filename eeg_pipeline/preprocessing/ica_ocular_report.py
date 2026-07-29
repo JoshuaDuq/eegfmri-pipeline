@@ -244,6 +244,38 @@ def _plot_run_overlay(
     return figure, len(eog_epochs)
 
 
+def _threshold_band(run_reviews: Sequence[RunOcularReview]) -> tuple[float, float] | None:
+    """Bracket the correlation at which ``find_bads_eog`` separated flagged from kept.
+
+    MNE thresholds an adaptive z-score of the scores, so the cutoff is a property of each
+    run's own distribution and no single correlation describes it. The decisions bracket
+    it exactly, though: within one run the cutoff lies above every component left
+    unflagged and at or below the lowest one flagged.
+
+    Runs disagree about where that falls, so the returned band spans every run's bracket
+    and is a statement about the session rather than about one run.
+
+    ``None`` when no run flagged anything: the cutoff is then above every score the run
+    produced and is unbounded above, and drawing a band there would put a threshold on the
+    figure that no decision supports.
+    """
+    lows: list[float] = []
+    highs: list[float] = []
+    for review in run_reviews:
+        flagged = set(review.flagged_components)
+        if not flagged:
+            continue
+        scores = np.asarray(review.absolute_scores, dtype=float)
+        kept = [score for index, score in enumerate(scores) if index not in flagged]
+        highs.append(float(min(scores[index] for index in flagged)))
+        # A run that flagged every component leaves no unflagged score to bound from
+        # below; the bracket then starts at the lowest flagged score itself.
+        lows.append(float(max(kept)) if kept else highs[-1])
+    if not highs:
+        return None
+    return min(lows), max(highs)
+
+
 def _plot_component_scores(
     run_reviews: list[RunOcularReview],
     *,
@@ -267,6 +299,7 @@ def _plot_component_scores(
         sharex=True,
         layout="constrained",
     )
+
 
     scores = np.stack([review.absolute_scores for review in run_reviews])
     medians = np.median(scores, axis=0)
@@ -317,6 +350,33 @@ def _plot_component_scores(
             zorder=4,
             label="Flagged by MNE find_bads_eog",
         )
+
+    # Where the detector drew its line, measured from the decisions it made.
+    #
+    # ``find_bads_eog`` thresholds an adaptive z-score, so there is no fixed correlation
+    # to draw and reimplementing the rule here would let the line drift away from the
+    # crosses beside it. The decisions bracket it instead: within a run the cutoff sits
+    # above every component left unflagged and no higher than the lowest one flagged.
+    # Runs disagree about where that is, so the band spans every run's bracket.
+    band = _threshold_band(run_reviews)
+    if band is not None:
+        low, high = band
+        # ``fill_between`` rather than ``axhspan``: this axis draws no patches on purpose,
+        # so that "there are no bars here" stays a checkable property of it. A shaded
+        # region is a collection and leaves that intact.
+        axis.fill_between(
+            [-0.7, component_count - 0.3],
+            low,
+            high,
+            color=FLAG_COLOR,
+            alpha=0.10,
+            linewidth=0,
+            zorder=0,
+            label="where find_bads_eog drew its line",
+        )
+        # Kept for the test that pins the bracket to the decisions it came from; the
+        # drawn span alone cannot say which scores defined it.
+        axis._eog_threshold_band = (low, high)
     axis.set(
         title=f"Absolute EOG correlation per component ({len(run_reviews)} runs)",
         ylabel="Absolute correlation",

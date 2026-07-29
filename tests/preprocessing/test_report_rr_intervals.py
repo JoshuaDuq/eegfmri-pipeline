@@ -152,7 +152,7 @@ def test_a_collapsed_run_does_not_flatten_the_readable_ones() -> None:
     is a fixed plausible range instead, so what the panels resolve does not depend on
     which runs happen to share the figure.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import PLAUSIBLE_RR_RANGE_S
+    from eeg_pipeline.preprocessing.report.analyzer_qc import DRAWN_RR_RANGE_S
 
     series = _series_for(3)
     collapsed = compute_rr_intervals(
@@ -165,7 +165,56 @@ def test_a_collapsed_run_does_not_flatten_the_readable_ones() -> None:
 
     assert with_collapsed.axes[0].get_ylim() == without_collapsed.axes[0].get_ylim()
     lower, upper = with_collapsed.axes[0].get_ylim()
-    assert (lower, upper) == pytest.approx(PLAUSIBLE_RR_RANGE_S)
+    assert (lower, upper) == pytest.approx(DRAWN_RR_RANGE_S)
+
+
+def test_a_long_interval_is_drawn_where_it_falls_rather_than_on_the_rail() -> None:
+    """A linear 0.3-2 s window censored the magnitude of every interval above it.
+
+    The count survived in the title, but the value did not: on sub-0012 run-1, 82 of 84
+    long intervals were drawn stacked on the 2 s boundary, so a 2.1 s gap and a 60 s one
+    were the same mark. That is the measurement the panel exists to show.
+
+    A logarithmic axis over a wider window keeps ordinary beat-to-beat variation legible
+    -- 0.3-2 s still occupies more than half the height -- while putting a collapsed
+    detector's intervals at a readable position instead of against the rail.
+    """
+    from eeg_pipeline.preprocessing.report.analyzer_qc import DRAWN_RR_RANGE_S
+
+    # Intervals of 5 s: far above any plausible rhythm, well inside the drawn window.
+    lapsed = compute_rr_intervals(
+        _raw_with_beats(np.array([1.0, 6.0, 11.0, 16.0])),
+        recording_id="sub-01_task-x_run-1",
+    )
+
+    figure = plot_rr_intervals([lapsed])
+    axis = figure.axes[0]
+
+    assert axis.get_yscale() == "log"
+    assert DRAWN_RR_RANGE_S[1] > 5.0
+    drawn = np.concatenate([np.asarray(line.get_ydata(), dtype=float) for line in axis.lines])
+    finite = drawn[np.isfinite(drawn)]
+    # The 5 s intervals are plotted at 5 s, not flattened onto the top of the window.
+    assert np.any(np.isclose(finite, 5.0))
+    assert "outside" not in axis.get_title().lower()
+
+
+def test_the_physiological_band_stays_visible_on_the_widened_axis() -> None:
+    """Widening the window must not cost the ordinary rhythm its resolution.
+
+    The whole point of the fixed window was that beat-to-beat variation stays readable.
+    On a log axis the plausible band still has to own most of the panel, or the change
+    has traded one censoring for another.
+    """
+    from eeg_pipeline.preprocessing.report.analyzer_qc import (
+        DRAWN_RR_RANGE_S,
+        PLAUSIBLE_RR_RANGE_S,
+    )
+
+    drawn_span = np.log10(DRAWN_RR_RANGE_S[1]) - np.log10(DRAWN_RR_RANGE_S[0])
+    plausible_span = np.log10(PLAUSIBLE_RR_RANGE_S[1]) - np.log10(PLAUSIBLE_RR_RANGE_S[0])
+
+    assert plausible_span / drawn_span > 0.5
 
 
 def test_intervals_outside_the_window_are_counted_on_the_panel() -> None:
