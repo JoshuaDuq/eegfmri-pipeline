@@ -96,7 +96,17 @@ class _FakeModel:
 
 
 def _pipeline() -> FmriAnalysisPipeline:
-    return FmriAnalysisPipeline(config={})
+    """A pipeline with no study config behind it.
+
+    Bypasses ``__init__`` deliberately. The real constructor resolves ``deriv_root``
+    from the study configuration, which on this project points at an external drive;
+    these tests exercise two pure helpers and must not fail when it is unplugged.
+    """
+    import logging
+
+    pipeline = object.__new__(FmriAnalysisPipeline)
+    pipeline.logger = logging.getLogger("test-manifest-helpers")
+    return pipeline
 
 
 def test_the_effect_and_variance_maps_come_off_the_already_fitted_model() -> None:
