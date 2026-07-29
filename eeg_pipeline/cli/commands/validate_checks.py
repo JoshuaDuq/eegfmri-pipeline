@@ -6,9 +6,6 @@ import json as json_module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import mne
-import pandas as pd
-
 _MAX_SUBJECTS_TO_VALIDATE = 10
 _MAX_ISSUES_TO_DISPLAY = 10
 _MAX_WARNINGS_TO_DISPLAY = 10
@@ -43,6 +40,8 @@ def _validate_table_schema(
     any_of: Optional[List[str]] = None,
 ) -> Optional[str]:
     """Validate table has required columns (TSV or parquet)."""
+    import pandas as pd
+
     try:
         if path.suffix == ".parquet":
             from eeg_pipeline.infra.tsv import read_parquet
@@ -102,6 +101,8 @@ def _validate_epochs(
     passed: List[str],
 ) -> None:
     """Validate epoch files for subjects."""
+    import mne
+
     subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
 
     for subject in subjects_to_check:
@@ -151,6 +152,8 @@ def _validate_features(
     passed: List[str],
 ) -> None:
     """Validate feature files for subjects."""
+    import pandas as pd
+
     from eeg_pipeline.infra.paths import deriv_features_path
 
     subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
