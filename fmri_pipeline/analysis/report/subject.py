@@ -21,6 +21,7 @@ from fmri_pipeline.analysis.report import html
 from fmri_pipeline.analysis.report.figures import carpet as carpet_figures
 from fmri_pipeline.analysis.report.figures import coverage as coverage_figures
 from fmri_pipeline.analysis.report.figures import distributions as distribution_figures
+from fmri_pipeline.analysis.report.figures import motion as motion_figures
 from fmri_pipeline.analysis.report.figures import stat_maps as stat_map_figures
 from fmri_pipeline.analysis.report.figures import volumes as volume_figures
 from fmri_pipeline.analysis.report.manifest import (
@@ -75,28 +76,53 @@ def _slug(manifest: ContrastManifest) -> str:
     return "contrast-" + cleaned.strip("-").lower()
 
 
-def _effect_units(manifest: ContrastManifest) -> str:
-    """Name the units of an effect size, or decline to.
+#: What each recorded signal-scaling mode makes an effect a percentage *of*.
+#:
+#: Only ``voxel-mean`` divides a voxel by its own temporal mean, which is what percent
+#: signal change means. The others are percentages of a different denominator, and a
+#: colourbar reading "% signal change" over either of them would name a quantity the
+#: map does not carry.
+_SCALED_EFFECT_UNITS = {
+    "voxel-mean": "% signal change",
+    "grand-mean": "% of the grand mean signal",
+    "timepoint-mean": "% of the per-volume mean signal",
+}
+
+
+def _unit_name(manifest: ContrastManifest) -> str:
+    """Name the units the effect and its standard error are both measured in.
 
     A contrast effect is in arbitrary BOLD units unless the model applied signal
     scaling. Printing "% signal change" on a map that is not in those units invites
-    a quantitative reading the number cannot support.
+    a quantitative reading the number cannot support -- and declining to print it on a
+    map that *is* in those units throws the reading away, which is the error this
+    pipeline was actually making: the model scales unconditionally, and the manifest
+    recorded otherwise.
+
+    A scaled map whose mode is unrecognised gets the neutral label rather than a
+    guessed denominator.
     """
-    return "% signal change" if manifest.signal_scaling else "effect (arbitrary BOLD units)"
+    if not manifest.signal_scaling:
+        return "arbitrary BOLD units"
+    return _SCALED_EFFECT_UNITS.get(
+        str(manifest.signal_scaling_mode or ""), "scaled BOLD units"
+    )
+
+
+def _effect_units(manifest: ContrastManifest) -> str:
+    """Label for an effect map's colourbar."""
+    units = _unit_name(manifest)
+    return units if units.startswith("%") else f"effect ({units})"
 
 
 def _error_units(manifest: ContrastManifest) -> str:
-    """Name the units of a standard error.
+    """Label for a standard-error colourbar.
 
     The same units as the effect, but the quantity is not the effect. Reusing
     :func:`_effect_units` verbatim labelled the standard-error colourbar "effect",
     which names the wrong map.
     """
-    return (
-        "standard error (% signal change)"
-        if manifest.signal_scaling
-        else "standard error (arbitrary BOLD units)"
-    )
+    return f"standard error ({_unit_name(manifest)})"
 
 
 def build_header_section(
@@ -218,12 +244,29 @@ def build_qc_sections(
         nib.load(str(path)) for path in first.bold_paths if Path(path).exists()
     ]
 
-    sample_masks = None
-    if first.confounds_paths and bold_imgs:
+    # Read from the confounds alone. The imaging panels additionally need one mask per
+    # loaded run, which is checked separately below: gating the masks themselves on the
+    # BOLD being readable would cost the motion table its censored counts whenever the
+    # 4D data is not to hand, even though those counts come from the confounds.
+    censoring: Optional[List[np.ndarray]] = None
+    if first.confounds_paths:
         with _panel("censoring masks"):
-            candidate = sample_masks_from_confounds(first.confounds_paths)
-            if len(candidate) == len(bold_imgs):
-                sample_masks = candidate
+            censoring = sample_masks_from_confounds(first.confounds_paths)
+
+    sample_masks = (
+        censoring if censoring is not None and len(censoring) == len(bold_imgs) else None
+    )
+
+    if first.confounds_paths and cfg.include_motion_qc:
+        with _panel("motion summary"):
+            blocks.extend(
+                _motion_blocks(
+                    manifest=first,
+                    sample_masks=censoring,
+                    qc_dir=qc_dir,
+                    cfg=cfg,
+                )
+            )
 
     if bold_imgs and cfg.include_carpet_qc:
         with _panel("carpet"):
@@ -319,6 +362,73 @@ def build_qc_sections(
             or (html.Note(text="No QC panels could be generated."),),
         )
     ]
+
+
+def _motion_blocks(
+    *,
+    manifest: ContrastManifest,
+    sample_masks: Optional[Sequence[np.ndarray]],
+    qc_dir: Path,
+    cfg: FmriReportConfig,
+) -> List[html.Block]:
+    """Build the per-run motion panel and the table of numbers behind it.
+
+    Both, because they are read for different things. The panel answers "is one run
+    unlike the others", which is a shape; the table carries the values a methods
+    section quotes, which a dot plot cannot be read to three decimals.
+    """
+    summaries = motion_figures.summarise_run_motion(
+        manifest.confounds_paths,
+        run_labels=manifest.included_runs,
+        sample_masks=sample_masks,
+    )
+    if not summaries:
+        return []
+
+    blocks: List[html.Block] = []
+    with _panel("motion figure"):
+        path = _save(
+            motion_figures.run_motion_figure(
+                summaries, title="Head motion by run (as modelled)"
+            ),
+            out_dir=qc_dir,
+            stem="motion_by_run",
+            formats=cfg.formats,
+        )
+        if path:
+            blocks.append(
+                html.Figure(
+                    title="Head motion by run",
+                    path=path,
+                    dense=False,
+                    caption=(
+                        "Dot: median framewise displacement. Bar: interquartile "
+                        "range. Open marker: the single worst frame, which motion's "
+                        "spikiness makes a different measurement from the typical "
+                        "one. Reference levels are published conventions; no run is "
+                        "scored against them here."
+                    ),
+                )
+            )
+
+    table_html, _rows = motion_figures.motion_table(summaries)
+    tsv_path = motion_figures.write_motion_tsv(summaries, path=qc_dir / "motion.tsv")
+    censored = sum(run.n_censored for run in summaries)
+    blocks.append(
+        html.Table(
+            title="Motion and censoring by run",
+            html=table_html,
+            tsv_path=tsv_path,
+            caption=(
+                f"{sum(run.n_frames for run in summaries):,} frames acquired, "
+                f"{censored:,} censored, "
+                f"{sum(run.n_retained for run in summaries):,} entered the model. "
+                "Censoring is the model's own, read from the confound columns the GLM "
+                "used, so these counts describe the analysis that ran."
+            ),
+        )
+    )
+    return blocks
 
 
 def _carpet_blocks(
@@ -538,11 +648,19 @@ def coordinate_space_label(space: str) -> str:
 
     An unlabelled X/Y/Z column in an fMRI cluster table reads as MNI, because that
     is the overwhelming convention. For a native-space contrast that is a silent
-    misreport, and nothing in the table lets a reader detect it.
+    misreport, and nothing in the table lets a reader detect it -- so the label says
+    outright that the coordinates are not MNI and cannot be looked up in an atlas.
+
+    The manifest records the space as ``native`` for everything that is not MNI, which
+    made the interpolated form read "native scanner-native". Named spaces keep their
+    name; the generic one does not repeat itself.
     """
-    if str(space or "").strip().lower() == "mni":
+    text = str(space or "").strip()
+    if text.lower() == "mni":
         return "coordinates: MNI152 (mm)"
-    return f"coordinates: {space} scanner-native (mm), not MNI"
+    if text.lower() in {"", "native"}:
+        return "coordinates: scanner-native (mm), not MNI; not atlas-referable"
+    return f"coordinates: {text} (mm), not MNI; not atlas-referable"
 
 
 def _cluster_peaks(frame: Any) -> Tuple[Tuple[str, Tuple[float, float, float]], ...]:
@@ -595,15 +713,63 @@ def _cluster_identifier(value: Any) -> Optional[str]:
     return str(int(number))
 
 
+def noise_mask(
+    stat_img: Any, *, mask_img: Any, threshold: Optional[float]
+) -> Tuple[Optional[np.ndarray], str]:
+    """The in-mask voxels a smoothness estimator may treat as noise, and their name.
+
+    Smoothness is a property of the residual field, and this pipeline saves no
+    residuals -- so it is estimated from the statistic map, where real activation
+    inflates it: signal is spatially structured, and the estimator cannot tell that
+    structure from smoothing. Measured on this study's own contrast the whole-map
+    estimate is 8.8 mm against 6.5 mm from the sub-threshold voxels, where 6 mm of
+    smoothing was applied to a 3 mm grid and the theoretical answer is 6.7 mm. The
+    36% error propagates into every quantity expressed in resels, which scale as the
+    inverse cube of the estimate.
+
+    Excluding the voxels above the display threshold is what removes it. Under
+    ``threshold_mode: none`` there is no height to exclude by, and the whole mask is
+    returned with a name that says the result is an upper bound rather than an
+    estimate.
+    """
+    in_mask: Optional[np.ndarray] = None
+    data = np.asarray(stat_img.get_fdata())
+    if mask_img is not None:
+        candidate = np.asanyarray(mask_img.dataobj).astype(bool)
+        if candidate.shape == data.shape:
+            in_mask = candidate
+
+    if threshold is None or threshold <= 0:
+        return in_mask, "statistic map, including suprathreshold voxels (upper bound)"
+
+    below = np.isfinite(data) & (np.abs(data) <= float(threshold))
+    combined = below if in_mask is None else (below & in_mask)
+    if not combined.any():
+        # Every voxel is suprathreshold. Excluding them all leaves nothing to
+        # estimate from, so the honest fallback is the whole mask, named as such.
+        return in_mask, "statistic map, including suprathreshold voxels (upper bound)"
+    return combined, "sub-threshold voxels of the statistic map"
+
+
 def smoothness_facts(
-    stat_img: Any, *, mask_img: Any, cluster_min_voxels: int
+    stat_img: Any,
+    *,
+    mask_img: Any,
+    cluster_min_voxels: int,
+    threshold: Optional[float] = None,
 ) -> List[str]:
-    """Describe the map's spatial smoothness and what it makes an extent filter mean.
+    """Describe the map's spatial smoothness and what it makes a voxel count mean.
 
     ``cluster_min_voxels`` is configured as a bare count, and a bare count is not
     comparable to anything: the same twenty voxels is a strong constraint on
     unsmoothed 3 mm data and almost none at 8 mm FWHM. Expressing it in resolution
     elements says how many independent bumps of noise a surviving cluster spans.
+
+    The search volume gets the same treatment, and for a sharper reason: every
+    corrected threshold in this report divides alpha across the *voxel* count, while
+    smoothing has already made neighbouring voxels the same measurement. Stating both
+    numbers is what lets a reader see how far a Bonferroni height over 50,626 voxels
+    overshoots a family of roughly 5,000 independent ones.
 
     Best-effort. A smoothness that cannot be estimated costs these lines and nothing
     else -- an unresolved measurement is not a reason to lose the cluster table.
@@ -611,20 +777,23 @@ def smoothness_facts(
     from fmri_pipeline.analysis.report.figures import coverage as coverage_figures
 
     try:
-        mask = None
-        if mask_img is not None:
-            candidate = np.asanyarray(mask_img.dataobj).astype(bool)
-            data_shape = np.asarray(stat_img.get_fdata()).shape
-            mask = candidate if candidate.shape == data_shape else None
+        mask, source = noise_mask(stat_img, mask_img=mask_img, threshold=threshold)
         fwhm = coverage_figures.estimate_fwhm(stat_img, mask=mask)
     except Exception as exc:
         logger.info("Could not estimate smoothness (%s)", exc)
         return []
 
-    facts = [coverage_figures.smoothness_note(fwhm, source="statistic map")]
+    facts = [coverage_figures.smoothness_note(fwhm, source=source)]
+    if mask_img is not None:
+        with _panel("search volume in resels"):
+            resels = coverage_figures.search_volume_resels(mask_img, fwhm=fwhm)
+            facts.append(
+                f"the search volume is {resels:,.0f} resels; the corrected heights "
+                f"above divide alpha across voxels, not resels"
+            )
     if cluster_min_voxels > 0:
         resels = coverage_figures.extent_in_resels(
-            cluster_min_voxels, mask_img=stat_img, fwhm=fwhm
+            cluster_min_voxels, reference_img=stat_img, fwhm=fwhm
         )
         facts.append(f"the {cluster_min_voxels}-voxel extent filter is {resels:.2f} resels")
     return facts
@@ -773,7 +942,10 @@ def build_contrast_section(
     table, peaks = (None, ())
     if threshold:
         facts = smoothness_facts(
-            stat_img, mask_img=mask_img, cluster_min_voxels=manifest.cluster_min_voxels
+            stat_img,
+            mask_img=mask_img,
+            cluster_min_voxels=manifest.cluster_min_voxels,
+            threshold=threshold,
         )
         with _panel(f"cluster table for {manifest.contrast_name}"):
             table, peaks = build_cluster_table(
@@ -886,8 +1058,11 @@ def build_contrast_section(
                     caption=(
                         "The applied height beside the corrected ones, and the map's "
                         "own fitted null beside the theoretical N(0, 1) the threshold "
-                        "assumes. A null wider than 1 means the applied threshold is "
-                        "weaker than its nominal p value."
+                        "assumes. Every survivor count is stated against both nulls: "
+                        "the count expected under N(0, 1) is what an over-dispersed "
+                        "map makes look like enrichment, and the count expected under "
+                        "the fitted null is what the observed survivors have to exceed "
+                        "to be a finding."
                     ),
                 )
             )
@@ -1031,7 +1206,21 @@ def _design_summary_items(summary: Any) -> Tuple[Tuple[str, str], ...]:
 
     items = [
         ("Scans", f"{summary.n_scans:,}"),
-        ("Regressors", str(summary.n_regressors)),
+        (
+            "Regressors",
+            # Rank beside the count, and only when they differ. A design whose columns
+            # are linearly dependent carries fewer parameters than it appears to, and
+            # no other line in the report says so.
+            str(summary.n_regressors)
+            if summary.rank == summary.n_regressors
+            else f"{summary.n_regressors} ({summary.rank} independent; design is rank deficient)",
+        ),
+        (
+            "Residual degrees of freedom",
+            # The denominator of every t this design produces. A map can look decisive
+            # on very few, and nothing else here would reveal it.
+            f"{summary.residual_dof:,}",
+        ),
         ("Condition number", _number(summary.condition_number)),
         ("Largest VIF", _number(summary.max_vif)),
     ]
@@ -1297,7 +1486,19 @@ def build_configuration_section(
     for manifest in manifests:
         items: List[Tuple[str, str]] = list(manifest.model_settings)
         items.append(("Smoothing", f"{manifest.smoothing_fwhm:.3g} mm FWHM" if manifest.smoothing_fwhm else "none"))
-        items.append(("Signal scaling", "yes" if manifest.signal_scaling else "no"))
+        items.append(
+            (
+                "Signal scaling",
+                # The mode, not a yes. Voxel-mean and grand-mean scaling both answer
+                # "yes" and produce different numbers from the same data, so a bare
+                # yes does not let a reader reproduce or compare the effect sizes.
+                f"{manifest.signal_scaling_mode} ({_unit_name(manifest)})"
+                if manifest.signal_scaling and manifest.signal_scaling_mode
+                else "yes, mode not recorded"
+                if manifest.signal_scaling
+                else "none",
+            )
+        )
         items.append(("TR", f"{manifest.t_r:.4g} s" if manifest.t_r else "unknown"))
         items.append(
             (
@@ -1357,6 +1558,7 @@ def write_configuration_json(
                 "confound_columns": list(manifest.confound_columns),
                 "smoothing_fwhm_mm": manifest.smoothing_fwhm,
                 "signal_scaling": manifest.signal_scaling,
+                "signal_scaling_mode": manifest.signal_scaling_mode,
                 "t_r_seconds": manifest.t_r,
                 "threshold_mode": manifest.threshold_mode,
                 "z_threshold": manifest.z_threshold,
@@ -1397,6 +1599,15 @@ def build_subject_report(
     background, background_source = load_background(
         deriv_root=Path(deriv_root), manifest=first
     )
+
+    # Trimmed to what was modelled. Nilearn chooses slice positions across the
+    # underlay's extent, so an untrimmed whole-head T1w put the vertex and the neck in
+    # every mosaic and left the brain occupying about half of each tile. The analysis
+    # mask is a property of the subject-task rather than of one contrast -- it is the
+    # intersection across the runs they all share -- so it is applied once here.
+    from fmri_pipeline.analysis.report.figures._display import crop_to_mask
+
+    background = crop_to_mask(background, _load_mask(first))
 
     sections = [build_header_section(manifests, background_source=background_source)]
     sections.extend(
@@ -1463,6 +1674,7 @@ __all__ = [
     "coordinate_space_label",
     "load_background",
     "masked_stat_values",
+    "noise_mask",
     "resolve_threshold",
     "smoothness_facts",
     "supports_glass_brain",

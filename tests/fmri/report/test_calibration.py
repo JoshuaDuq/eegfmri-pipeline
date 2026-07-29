@@ -171,12 +171,80 @@ def test_the_panel_names_the_voxels_it_was_given() -> None:
     plt.close(figure)
 
 
-def test_the_panel_reports_the_threshold_in_empirical_null_units() -> None:
-    # 2.3 against a null of width 1.5 is 1.53 sigma, and that is the number a reader
-    # cannot get from anywhere else in the document.
+def test_the_panel_reports_what_the_applied_height_is_worth_against_the_fitted_null() -> None:
+    # The number a reader cannot get anywhere else. A width of 1.5 puts |z| > 2.3 at
+    # p = 0.06 in each tail against a nominal 0.021.
     values = 1.5 * np.random.default_rng(4).standard_normal(50_000)
-    figure = _figure(values)
-    assert "1.5" in _figure_text(figure)
+    text = _figure_text(_figure(values))
+    assert "fitted null" in text
+    assert "0.06" in text
+
+
+def test_the_panel_separates_the_two_tails_on_a_shifted_null() -> None:
+    # A symmetric cut on a shifted null buys different evidence in each direction, and
+    # the negative clusters on the map are then the weaker half. One number hides that.
+    values = -0.6 + 1.5 * np.random.default_rng(5).standard_normal(100_000)
+    text = _figure_text(_figure(values))
+    assert "upward" in text and "downward" in text
+
+
+def test_the_panel_states_the_nominal_p_the_applied_height_claims() -> None:
+    # Without it the reader has the corrected figure but not the one it corrects.
+    assert "nominal p" in _figure_text(_figure(_values()))
+
+
+def test_a_one_sided_panel_reports_only_the_tail_it_examined() -> None:
+    text = _figure_text(_figure(_values(), two_sided=False))
+    assert "fitted null" in text
+    assert "downward" not in text
+
+
+# --- the fitted null carried into every count -----------------------------
+
+
+def test_the_legend_states_survivors_expected_under_the_fitted_null() -> None:
+    # The comparison the panel exists for: an observed count that its own map's noise
+    # fully explains must not read as enrichment over N(0, 1).
+    values = 1.5 * np.random.default_rng(6).standard_normal(100_000)
+    context = _context(values)
+    text = _legend_text(_figure(values))
+    assert "under the fitted null" in text
+    assert f"{context.calibration.expected_survivors:,.0f}" in text
+
+
+def test_the_legend_draws_the_empirical_null_fdr_beside_the_theoretical_one() -> None:
+    # Efron's correction, reported rather than only implied by the fitted curve.
+    values = 1.5 * np.random.default_rng(7).standard_normal(100_000)
+    text = _legend_text(_figure(values))
+    assert "vs N(0, 1)" in text
+    assert "vs the fitted null" in text
+
+
+def test_the_empirical_null_fdr_bounds_are_drawn_on_the_axis() -> None:
+    rng = np.random.default_rng(8)
+    values = np.concatenate(
+        [-0.6 + 1.5 * rng.standard_normal(100_000), 12.0 + rng.standard_normal(500)]
+    )
+    context = _context(values)
+    positions = _vertical_positions(_figure(values))
+    for bound in (context.calibration.fdr_upper, context.calibration.fdr_lower):
+        assert bound is not None
+        assert any(abs(p - bound) < 1e-6 for p in positions)
+
+
+def test_the_panel_says_so_when_the_empirical_null_fdr_rejects_nothing() -> None:
+    # Pure noise, however wide. A missing line would read as a rendering failure.
+    values = 1.5 * np.random.default_rng(9).standard_normal(50_000)
+    text = _legend_text(_figure(values))
+    assert "vs the fitted null: no voxel survives correction" in text
+
+
+def test_a_panel_without_a_fitted_null_omits_its_fdr_rather_than_guessing() -> None:
+    values = np.concatenate([np.zeros(4_000), np.array([9.0])])
+    figure = distributions.null_calibration_figure(
+        values, context=_context(values), mask_source="analysis mask"
+    )
+    assert "fitted null" not in _legend_text(figure)
     plt.close(figure)
 
 

@@ -167,20 +167,115 @@ def test_the_summary_carries_the_empirical_null() -> None:
     assert summary.null.scale == pytest.approx(1.5, abs=0.05)
 
 
-def test_the_summary_reports_the_applied_threshold_in_empirical_null_units() -> None:
-    # The whole point: |z| > 2.3 against a null of width 1.5 is not 2.3 sigma.
-    values = 1.5 * np.random.default_rng(10).standard_normal(50_000)
-    summary = _summary(values)
-    assert summary.applied_in_null_units == pytest.approx(2.3 / 1.5, abs=0.05)
-
-
 def test_the_summary_tolerates_a_null_it_cannot_fit() -> None:
     # An all-constant map has no spread to fit. The corrected thresholds are still
     # well defined, so the summary must not be lost with the null.
     summary = _summary(np.concatenate([np.zeros(999), np.array([9.0])]))
     assert summary.null is None
-    assert summary.applied_in_null_units is None
+    assert summary.calibration is None
     assert summary.bonferroni > 0
+
+
+# --- the map's own null, applied ------------------------------------------
+
+
+def test_expected_false_positives_under_a_wide_null_exceed_the_theoretical_count() -> None:
+    # The single most consequential number in the panel. A null of width 1.5 puts far
+    # more voxels past 2.3 than N(0, 1) does, and it is the larger count the observed
+    # survivors have to be judged against.
+    null = inference.EmpiricalNull(centre=0.0, scale=1.5, n=50_000)
+    theoretical = inference.expected_false_positives(
+        n=50_000, threshold=2.3, two_sided=True
+    )
+    empirical = inference.expected_false_positives_under(
+        n=50_000, threshold=2.3, null=null, two_sided=True
+    )
+    assert empirical > 4 * theoretical
+
+
+def test_expected_false_positives_under_a_standard_null_match_the_theoretical_count() -> None:
+    null = inference.EmpiricalNull(centre=0.0, scale=1.0, n=1_000)
+    assert inference.expected_false_positives_under(
+        n=1_000, threshold=2.3, null=null, two_sided=True
+    ) == pytest.approx(
+        inference.expected_false_positives(n=1_000, threshold=2.3, two_sided=True)
+    )
+
+
+def test_expected_false_positives_under_a_shifted_null_count_both_tails() -> None:
+    # A shifted null loads one tail and empties the other; the total is what the
+    # observed survivor count is compared against, so both have to be in it.
+    null = inference.EmpiricalNull(centre=-0.6, scale=1.5, n=50_000)
+    total = inference.expected_false_positives_under(
+        n=50_000, threshold=2.3, null=null, two_sided=True
+    )
+    upper_only = 50_000 * stats.norm.sf((2.3 + 0.6) / 1.5)
+    assert total > upper_only
+
+
+def test_a_shifted_null_makes_a_symmetric_threshold_asymmetric_in_evidence() -> None:
+    # The finding this replaced "N x the null's width" to express: on a null centred
+    # below zero, |z| > 2.3 is a far weaker claim downward than upward.
+    values = -0.6 + 1.5 * np.random.default_rng(20).standard_normal(200_000)
+    calibration = _summary(values).calibration
+    assert calibration is not None
+    assert calibration.lower_tail_p > 3 * calibration.upper_tail_p
+
+
+def test_a_centred_null_makes_the_two_tails_agree() -> None:
+    values = 1.5 * np.random.default_rng(21).standard_normal(200_000)
+    calibration = _summary(values).calibration
+    assert calibration.lower_tail_p == pytest.approx(calibration.upper_tail_p, rel=0.05)
+
+
+def test_one_sided_inference_reports_no_lower_tail() -> None:
+    # The lower tail was never examined, so a probability for it would describe a test
+    # that did not run.
+    values = 1.5 * np.random.default_rng(22).standard_normal(50_000)
+    calibration = _summary(values, two_sided=False).calibration
+    assert calibration.upper_tail_p is not None
+    assert calibration.lower_tail_p is None
+    assert calibration.fdr_lower is None
+
+
+def test_the_empirical_null_fdr_is_stricter_than_the_theoretical_one_on_a_wide_null() -> None:
+    # Efron's correction, applied. Under an over-dispersed null the theoretical-null
+    # FDR rejects voxels that are ordinary noise for this map; the empirical-null FDR
+    # is what does not.
+    values = 1.5 * np.random.default_rng(23).standard_normal(100_000)
+    summary = _summary(values)
+    assert summary.fdr_survivors > summary.calibration.fdr_survivors
+
+
+def test_the_empirical_null_fdr_rejects_essentially_nothing_under_pure_noise() -> None:
+    # Whatever the null's width, a map with no signal has no discoveries in it. That is
+    # exactly the guarantee the theoretical-null FDR loses when the null is misfitted.
+    values = -0.6 + 1.5 * np.random.default_rng(24).standard_normal(100_000)
+    calibration = _summary(values).calibration
+    assert calibration.fdr_survivors <= 0.05 * 100_000 * 0.01
+
+
+def test_the_empirical_null_fdr_still_finds_a_real_signal() -> None:
+    # Strictness must not become blindness: a genuine tail well past the fitted null
+    # has to survive, or the correction would only ever remove findings.
+    rng = np.random.default_rng(25)
+    values = np.concatenate(
+        [1.5 * rng.standard_normal(100_000), 12.0 + rng.standard_normal(500)]
+    )
+    calibration = _summary(values).calibration
+    assert calibration.fdr_survivors > 400
+
+
+def test_the_empirical_null_fdr_region_is_asymmetric_on_a_shifted_null() -> None:
+    # It is a rejection region in raw z, not a height: the two bounds sit at different
+    # distances from zero, which is precisely what a single "|z| >" figure cannot say.
+    rng = np.random.default_rng(26)
+    values = np.concatenate(
+        [-0.6 + 1.5 * rng.standard_normal(100_000), 12.0 + rng.standard_normal(500)]
+    )
+    calibration = _summary(values).calibration
+    assert calibration.fdr_upper is not None and calibration.fdr_lower is not None
+    assert abs(calibration.fdr_lower) > abs(calibration.fdr_upper)
 
 
 # --- an unthresholded report still needs the corrected heights ------------
@@ -194,6 +289,10 @@ def test_the_summary_accepts_no_applied_threshold() -> None:
     assert summary.applied is None
     assert summary.applied_survivors is None
     assert summary.expected_null_survivors is None
-    assert summary.applied_in_null_units is None
     assert summary.bonferroni > 0
     assert summary.null is not None
+    # The empirical-null FDR does not depend on an applied height, and an
+    # unthresholded report is the one whose reader most needs it.
+    assert summary.calibration is not None
+    assert summary.calibration.expected_survivors is None
+    assert summary.calibration.upper_tail_p is None

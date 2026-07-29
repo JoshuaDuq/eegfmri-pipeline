@@ -13,8 +13,17 @@ comparisons, so they are computed here and stated beside the applied one.
 N(0, 1) under the null, but a single-subject GLM with unmodelled autocorrelation and
 physiological noise is routinely over-dispersed. Measured on this study's own data,
 the empirical null is centred at -0.61 with a width of 1.51: |z| > 2.3 reads as
-p < 0.021 and is worth closer to p ~ 0.13. Efron (2004) is the reference; the robust
-quantile form used here is what survives a map with a real signal tail.
+p < 0.021 and is worth p = 0.027 upward and p = 0.13 downward. Efron (2004) is the
+reference; the robust quantile form used here is what survives a map with a real
+signal tail.
+
+The correction is *applied*, not only noted. Every theoretical-null quantity has an
+empirical-null counterpart -- expected survivors, tail probabilities, an FDR rejection
+region -- because on real data they disagree by nearly an order of magnitude in both
+directions, and the theoretical figures alone let a reader conclude the opposite of
+what the map shows. Stating a fitted null beside a threshold while continuing to
+report only what the threshold is worth under N(0, 1) leaves the reader to integrate
+a normal tail by eye off a log axis.
 
 Everything is computed from a saved map. Nothing here fits a model, which is what
 lets it live in the report package.
@@ -52,6 +61,36 @@ class EmpiricalNull:
 
 
 @dataclass(frozen=True)
+class EmpiricalCalibration:
+    """What the applied height and an FDR correction are worth against a fitted null.
+
+    Every number here has a counterpart computed under N(0, 1), and the pair is the
+    point: on this study's own data the two differ by nearly an order of magnitude in
+    both directions, and nothing in a thresholded map or in the theoretical numbers
+    alone reveals it.
+    """
+
+    #: Voxels expected to clear the applied height if every voxel were drawn from the
+    #: *fitted* null. Compare against ``ThresholdContext.expected_null_survivors``,
+    #: which assumes N(0, 1). ``None`` when no height was applied.
+    expected_survivors: Optional[float]
+    #: Tail probability of the applied height under the fitted null, upper and lower.
+    #: A shifted null makes a symmetric ``|z| > c`` cut asymmetric in evidence, and one
+    #: number cannot say so. ``lower_tail_p`` is ``None`` under one-sided inference,
+    #: where the lower tail was never examined; both are ``None`` when no height was
+    #: applied.
+    upper_tail_p: Optional[float]
+    lower_tail_p: Optional[float]
+    #: Raw-z heights at which Benjamini-Hochberg controls the FDR when p values are
+    #: computed under the fitted null rather than N(0, 1) -- Efron's (2004) correction.
+    #: Asymmetric whenever the null is shifted, hence two bounds rather than one
+    #: height. Either is ``None`` when that tail rejects nothing.
+    fdr_upper: Optional[float]
+    fdr_lower: Optional[float]
+    fdr_survivors: int
+
+
+@dataclass(frozen=True)
 class ThresholdContext:
     """The applied threshold beside the corrected ones, with survivor counts.
 
@@ -76,10 +115,14 @@ class ThresholdContext:
     alpha: float
     bonferroni_survivors: int
     null: Optional[EmpiricalNull]
-    #: The applied threshold expressed in the empirical null's own units. This is the
-    #: number a reader wants and cannot get anywhere else: 2.3 against a null of width
-    #: 1.5 is 1.5 sigma, not 2.3.
-    applied_in_null_units: Optional[float]
+    #: Every threshold re-read against the map's own null, or ``None`` when no null
+    #: could be fitted.
+    #:
+    #: This replaced a single "applied threshold is N x the null's width" figure, which
+    #: was true and useless: it divides by the null's scale and ignores its centre, so
+    #: on a null centred at -0.61 it reads as a sigma count that neither tail actually
+    #: has. The tail probabilities below are what that number was reaching for.
+    calibration: Optional[EmpiricalCalibration]
 
 
 def _finite(values: np.ndarray) -> np.ndarray:
@@ -209,6 +252,98 @@ def expected_false_positives(*, n: int, threshold: float, two_sided: bool) -> fl
     return float(n) * (2.0 * tail if two_sided else tail)
 
 
+def expected_false_positives_under(
+    *, n: int, threshold: float, null: EmpiricalNull, two_sided: bool
+) -> float:
+    """How many of ``n`` voxels clear ``threshold`` if every one is drawn from ``null``.
+
+    The counterpart of :func:`expected_false_positives` for a null that is not
+    N(0, 1), and the number that decides whether a survivor count is a finding. On this
+    study's own contrast the two disagree by a factor of seven: 1,086 voxels expected
+    under the theoretical null against 8,001 under the fitted one, out of 8,463
+    observed. The theoretical figure alone invites reading eightfold enrichment into a
+    map that produced almost exactly what its own noise predicts.
+
+    Both tails are counted under two-sided inference even when the null is shifted, so
+    the total is directly comparable with the observed survivor count.
+    """
+    if threshold <= 0:
+        raise ValueError(f"Threshold must be > 0, got {threshold!r}.")
+    if n < 0:
+        raise ValueError(f"Voxel count must be >= 0, got {n!r}.")
+
+    from scipy import stats
+
+    upper = float(stats.norm.sf((float(threshold) - null.centre) / null.scale))
+    if not two_sided:
+        return float(n) * upper
+    lower = float(stats.norm.cdf((-float(threshold) - null.centre) / null.scale))
+    return float(n) * (upper + lower)
+
+
+def empirical_calibration(
+    values: np.ndarray,
+    *,
+    null: EmpiricalNull,
+    applied_threshold: Optional[float],
+    fdr_q: float,
+    two_sided: bool,
+) -> EmpiricalCalibration:
+    """Re-read the applied height and an FDR correction against ``null``.
+
+    This is Efron's (2004) empirical-null correction, applied where it changes the
+    answer rather than only mentioned. Standardising each voxel by the fitted null and
+    running Benjamini-Hochberg on the resulting p values is the whole of it, and the
+    consequence is large: on this study's contrast the theoretical-null FDR rejects
+    4,469 voxels at q = 0.05 and the empirical-null FDR rejects 82.
+
+    The rejection region is returned as raw-z bounds rather than one height, because a
+    shifted null makes it asymmetric -- here, raw z above 5.35 or below -6.57. Reporting
+    a single ``|z| >`` height for it would be the same error this function exists to
+    correct.
+    """
+    from scipy import stats
+
+    finite = _finite(values)
+    standardised = (finite - null.centre) / null.scale
+    cutoff = fdr_p_cutoff(
+        p_values(standardised, two_sided=two_sided), q=fdr_q
+    )
+
+    fdr_upper: Optional[float] = None
+    fdr_lower: Optional[float] = None
+    survivors = 0
+    if cutoff is not None:
+        height = float(stats.norm.isf(cutoff / 2.0 if two_sided else cutoff))
+        fdr_upper = null.centre + height * null.scale
+        rejected = finite > fdr_upper
+        if two_sided:
+            fdr_lower = null.centre - height * null.scale
+            rejected = rejected | (finite < fdr_lower)
+        survivors = int(np.count_nonzero(rejected))
+
+    expected: Optional[float] = None
+    upper_tail: Optional[float] = None
+    lower_tail: Optional[float] = None
+    if applied_threshold is not None:
+        applied = float(applied_threshold)
+        expected = expected_false_positives_under(
+            n=int(finite.size), threshold=applied, null=null, two_sided=two_sided
+        )
+        upper_tail = float(stats.norm.sf((applied - null.centre) / null.scale))
+        if two_sided:
+            lower_tail = float(stats.norm.cdf((-applied - null.centre) / null.scale))
+
+    return EmpiricalCalibration(
+        expected_survivors=expected,
+        upper_tail_p=upper_tail,
+        lower_tail_p=lower_tail,
+        fdr_upper=fdr_upper,
+        fdr_lower=fdr_lower,
+        fdr_survivors=survivors,
+    )
+
+
 def _survivors(values: np.ndarray, threshold: Optional[float], *, two_sided: bool) -> int:
     if threshold is None:
         return 0
@@ -242,6 +377,18 @@ def threshold_context(
         # cost the panel the numbers it exists to state.
         null = None
 
+    calibration = (
+        None
+        if null is None
+        else empirical_calibration(
+            finite,
+            null=null,
+            applied_threshold=applied_threshold,
+            fdr_q=fdr_q,
+            two_sided=two_sided,
+        )
+    )
+
     fdr = fdr_threshold(finite, q=fdr_q, two_sided=two_sided)
     bonferroni = bonferroni_threshold(n=n, alpha=alpha, two_sided=two_sided)
 
@@ -265,18 +412,19 @@ def threshold_context(
         alpha=float(alpha),
         bonferroni_survivors=_survivors(finite, bonferroni, two_sided=two_sided),
         null=null,
-        applied_in_null_units=(
-            None if null is None or applied is None else applied / null.scale
-        ),
+        calibration=calibration,
     )
 
 
 __all__ = [
+    "EmpiricalCalibration",
     "EmpiricalNull",
     "ThresholdContext",
     "bonferroni_threshold",
+    "empirical_calibration",
     "empirical_null",
     "expected_false_positives",
+    "expected_false_positives_under",
     "fdr_p_cutoff",
     "fdr_threshold",
     "p_values",
