@@ -413,10 +413,34 @@ def regressor_correlation_figure(
     run_label: str = "",
     max_labelled: int = 30,
 ) -> Figure:
-    """How far the regressors duplicate one another."""
+    """How far the regressors duplicate one another.
+
+    Degrades to a statement rather than a picture when there is nothing to correlate.
+    A one-sample second-level design is intercept-only, so excluding the constant
+    leaves no columns at all -- and that is the commonest group analysis there is.
+    """
     import matplotlib.pyplot as plt
 
     frame, _ordered, _groups, modelled, _vector = _prepare(design_matrix, None)
+
+    if len(modelled) < 2:
+        # A one-sample second-level design is intercept-only, so nothing is left once
+        # the constant is excluded, and `np.corrcoef` of a single column returns a
+        # 0-d array that `imshow` rejects outright. Saying there is nothing to
+        # correlate is the answer; crashing on the commonest group design is not.
+        figure, ax = plt.subplots(figsize=(6.0, 2.0), constrained_layout=True)
+        ax.set_axis_off()
+        ax.text(
+            0.5,
+            0.5,
+            f"{len(modelled)} modelled regressor(s): nothing to correlate",
+            ha="center",
+            va="center",
+            fontsize=9,
+        )
+        style.annotate_provenance(figure, [run_label, "constant term excluded"])
+        return figure
+
     values = frame[modelled].to_numpy(dtype=float)
     with np.errstate(invalid="ignore"):
         correlation = np.nan_to_num(np.corrcoef(values, rowvar=False), nan=0.0)

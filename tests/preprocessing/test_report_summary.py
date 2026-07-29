@@ -615,11 +615,16 @@ def _removal_topography():
     return RemovalTopography(channel_names=tuple(names), change_db=change_db, info=info)
 
 
-def test_the_removal_figure_names_its_units_exactly_once() -> None:
+def test_the_removal_figure_labels_both_of_its_scales_without_collision() -> None:
     """The colourbar and the ranked panel measure the same thing in the same units.
 
-    Constrained layout puts them side by side, so labelling both printed "Amplitude
-    change (dB)" twice, overlapping, in the gap between the panels.
+    A vertical colourbar between the two panels sat hard against the ranked panel's own
+    y-axis label, so labelling both printed "Amplitude change (dB)" twice, overlapping.
+    The label was dropped from the colourbar to stop that, which left the topography — the
+    panel a reader looks at first — with a colour scale carrying no unit at all.
+
+    Laying the colourbar out horizontally under the map it belongs to separates the two
+    labels, so each scale can name itself.
     """
     import matplotlib
 
@@ -631,7 +636,68 @@ def test_the_removal_figure_names_its_units_exactly_once() -> None:
     labels = [axis.get_ylabel() for axis in figure.axes] + [
         axis.get_xlabel() for axis in figure.axes
     ]
-    assert labels.count("Amplitude change (dB)") == 1
+    assert labels.count("Amplitude change (dB)") == 2
+    assert colliding_text(figure) == []
+
+
+def test_the_removal_figure_draws_the_spread_its_title_quotes() -> None:
+    """The title reports a 10th-to-90th percentile spread and drew neither percentile.
+
+    That spread is the number the surrounding prose asks the reader to interpret — focal
+    removal against uniform — so the panel should show where it was taken from.
+    """
+    import matplotlib
+    import numpy as np
+
+    matplotlib.use("Agg")
+    from eeg_pipeline.preprocessing.report.summary import plot_removal_topography
+
+    topography = _removal_topography()
+
+    figure = plot_removal_topography(topography)
+    rank_axis = figure.axes[-1]
+
+    levels = [
+        line.get_ydata()[0]
+        for line in rank_axis.lines
+        if len(set(line.get_ydata())) == 1
+    ]
+    for percentile in (10.0, 90.0):
+        expected = float(np.percentile(topography.change_db, percentile))
+        assert any(abs(level - expected) < 1e-9 for level in levels)
+
+
+def test_a_full_montage_does_not_crowd_its_channel_labels() -> None:
+    """Sixty-odd channel names at 5 pt are a grey smear, not an axis.
+
+    The panel's subject is the shape of the distribution and its extremes; naming every
+    channel at a size nobody can read costs the axis its legibility and returns nothing.
+    """
+    import matplotlib
+    import mne
+    import numpy as np
+
+    matplotlib.use("Agg")
+    from eeg_pipeline.preprocessing.report.summary import (
+        RemovalTopography,
+        plot_removal_topography,
+    )
+
+    montage = mne.channels.make_standard_montage("standard_1020")
+    names = montage.ch_names[:64]
+    info = mne.create_info(names, 250.0, "eeg")
+    info.set_montage(montage, verbose="ERROR")
+    rng = np.random.default_rng(0)
+    topography = RemovalTopography(
+        channel_names=tuple(names),
+        change_db=-rng.uniform(1.0, 12.0, len(names)),
+        info=info,
+    )
+
+    rank_axis = plot_removal_topography(topography).axes[-1]
+
+    drawn = [label for label in rank_axis.get_xticklabels() if label.get_text()]
+    assert len(drawn) < len(names) / 2
 
 
 def _ledger(**overrides) -> str:

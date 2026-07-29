@@ -485,3 +485,43 @@ def test_the_correlation_panel_names_the_pair_behind_its_worst_r() -> None:
     assert "1.00" in text
     assert "trans_2" in text and "trans_9" in text
     plt.close(figure)
+
+
+# --- degenerate designs ---------------------------------------------------
+
+
+def test_the_correlation_panel_survives_an_intercept_only_design() -> None:
+    # A one-sample second-level design is intercept-only, so excluding the constant
+    # leaves no columns, and np.corrcoef of that returns a 0-d array imshow rejects.
+    # That is the commonest group analysis there is.
+    figure = design.regressor_correlation_figure(pd.DataFrame({"intercept": np.ones(10)}))
+    text = " ".join(t.get_text() for t in figure.axes[0].texts)
+    assert "nothing to correlate" in text
+    plt.close(figure)
+
+
+def test_the_correlation_panel_survives_a_single_modelled_regressor() -> None:
+    frame = pd.DataFrame({"intercept": np.ones(10), "group": np.r_[np.ones(5), -np.ones(5)]})
+    figure = design.regressor_correlation_figure(frame)
+    text = " ".join(t.get_text() for t in figure.axes[0].texts)
+    assert "nothing to correlate" in text
+    plt.close(figure)
+
+
+def test_two_modelled_regressors_still_get_a_real_matrix() -> None:
+    frame = pd.DataFrame(
+        {
+            "intercept": np.ones(20),
+            "group": np.r_[np.ones(10), -np.ones(10)],
+            "age": np.linspace(20, 60, 20),
+        }
+    )
+    figure = design.regressor_correlation_figure(frame)
+    assert figure.axes[0].images, "expected a correlation matrix to be drawn"
+    plt.close(figure)
+
+
+def test_the_vif_panel_survives_an_intercept_only_design() -> None:
+    figure = design.variance_inflation_figure(pd.DataFrame({"intercept": np.ones(10)}))
+    assert figure is not None
+    plt.close(figure)

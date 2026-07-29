@@ -53,7 +53,7 @@ def test_write_design_matrix_files_surfaces_plot_failures(tmp_path: Path) -> Non
     design_matrix = pd.DataFrame({"intercept": [1.0, 1.0]})
 
     with patch(
-        "nilearn.plotting.plot_design_matrix",
+        "fmri_pipeline.analysis.report.figures.design.design_matrix_figure",
         side_effect=RuntimeError("plot failed"),
     ):
         with pytest.raises(RuntimeError, match="plot failed"):
@@ -61,6 +61,52 @@ def test_write_design_matrix_files_surfaces_plot_failures(tmp_path: Path) -> Non
                 output_dir=tmp_path,
                 design_matrix=design_matrix,
             )
+
+
+def test_the_second_level_design_reports_its_conditioning(tmp_path: Path) -> None:
+    # A second-level design whose covariate is collinear with its group regressor is
+    # the classic group-analysis confound, and nilearn's bare design plotter shows
+    # nothing about it.
+    design_matrix = pd.DataFrame(
+        {
+            "intercept": np.ones(12),
+            "group": np.r_[np.ones(6), np.zeros(6)],
+            "covariate": np.r_[np.ones(6), np.zeros(6)] * 2.0 + 1e-9 * np.arange(12),
+        }
+    )
+    out = _write_design_matrix_files(
+        output_dir=tmp_path, design_matrix=design_matrix, contrast_spec="group"
+    )
+    assert Path(out["design_matrix_png"]).exists()
+    assert Path(out["design_correlation_png"]).exists()
+    assert Path(out["design_vif_png"]).exists()
+    assert float(out["design_condition_number"]) > 1.0
+    assert "design_max_vif" in out
+
+
+def test_the_second_level_design_carries_the_contrast_it_tests(tmp_path: Path) -> None:
+    design_matrix = pd.DataFrame(
+        {"intercept": np.ones(8), "group": np.r_[np.ones(4), -np.ones(4)]}
+    )
+    out = _write_design_matrix_files(
+        output_dir=tmp_path, design_matrix=design_matrix, contrast_spec="group"
+    )
+    # Efficiency is only defined once the contrast has landed on the columns.
+    assert "design_contrast_efficiency" in out
+
+
+def test_an_f_contrast_leaves_the_design_figure_without_a_strip(tmp_path: Path) -> None:
+    # Several rows cannot be drawn as one strip; the design is still worth drawing.
+    design_matrix = pd.DataFrame(
+        {"a": np.r_[np.ones(4), np.zeros(4)], "b": np.r_[np.zeros(4), np.ones(4)]}
+    )
+    out = _write_design_matrix_files(
+        output_dir=tmp_path,
+        design_matrix=design_matrix,
+        contrast_spec=np.array([[1.0, -1.0], [1.0, 1.0]]),
+    )
+    assert Path(out["design_matrix_png"]).exists()
+    assert "design_contrast_efficiency" not in out
 
 
 def test_prepare_second_level_one_sample_builds_intercept_design(tmp_path: Path) -> None:

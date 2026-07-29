@@ -2892,8 +2892,8 @@ def test_generate_fmri_space_section_records_slice_plot_failures_without_abortin
             )
 
     assert "slice plot failed" in caplog.text
-    # The histogram was still produced despite the mosaic failing.
-    assert any("histogram" in image.title.lower() for image in section.images)
+    # The calibration panel was still produced despite the mosaic failing.
+    assert any("calibration" in image.title.lower() for image in section.images)
 
 
 def test_run_fmri_plotting_and_report_rejects_non_z_stat_maps(tmp_path: Path) -> None:

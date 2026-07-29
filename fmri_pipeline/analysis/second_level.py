@@ -797,11 +797,47 @@ def _evaluate_second_level_contrast_expression(
     return contrast
 
 
+def _contrast_weights_for_design(
+    *, contrast_spec: Any, design_columns: Sequence[str]
+) -> Optional[Dict[str, float]]:
+    """Map a second-level contrast onto its design columns, or return None.
+
+    ``None`` for an F-contrast, whose several rows cannot be drawn as one strip, and
+    for anything that will not resolve. Best-effort throughout: the design figure is
+    worth drawing without its contrast, and by the time this runs the model is fitted.
+    """
+    if contrast_spec is None:
+        return None
+    try:
+        if isinstance(contrast_spec, str):
+            vector = _evaluate_second_level_contrast_expression(
+                contrast_spec, list(design_columns)
+            )
+        else:
+            vector = np.asarray(contrast_spec, dtype=float)
+    except Exception as exc:
+        logger.info("Could not resolve the second-level contrast for the figure (%s)", exc)
+        return None
+    if vector.ndim != 1 or vector.shape[0] != len(design_columns):
+        return None
+    return {str(name): float(w) for name, w in zip(design_columns, vector)}
+
+
 def _write_design_matrix_files(
     *,
     output_dir: Path,
     design_matrix: pd.DataFrame,
+    contrast_spec: Any = None,
 ) -> Dict[str, str]:
+    """Write the second-level design and its estimability diagnostics.
+
+    Drawn through the report's figure layer rather than ``nilearn.plot_design_matrix``.
+    The bare plotter carries no provenance, no contrast, and nothing about
+    conditioning, so a second-level design whose covariate is collinear with its group
+    regressor -- the classic group-analysis confound -- produced a figure in which
+    that is invisible. The first-level path removed its own plain rendition for the
+    same reason; this was the copy left behind.
+    """
     qc_dir = output_dir / "qc"
     qc_dir.mkdir(parents=True, exist_ok=True)
 
@@ -811,15 +847,54 @@ def _write_design_matrix_files(
     out["design_matrix_tsv"] = str(tsv_path)
 
     import matplotlib.pyplot as plt
-    from nilearn.plotting import plot_design_matrix
 
-    ax = plot_design_matrix(design_matrix)
-    figure = ax.figure
-    png_path = qc_dir / "second_level_design_matrix.png"
-    figure.savefig(png_path, dpi=200, bbox_inches="tight")
-    plt.close(figure)
-    out["design_matrix_png"] = str(png_path)
+    from fmri_pipeline.analysis.report import style as report_style
+    from fmri_pipeline.analysis.report.figures import design as design_figures
 
+    contrast = _contrast_weights_for_design(
+        contrast_spec=contrast_spec, design_columns=list(design_matrix.columns)
+    )
+
+    def _save(figure: Any, name: str, key: str) -> None:
+        path = qc_dir / name
+        try:
+            figure.savefig(path, **report_style.savefig_kwargs(path))
+            out[key] = str(path)
+        finally:
+            plt.close(figure)
+
+    _save(
+        design_figures.design_matrix_figure(
+            design_matrix, contrast=contrast, run_label="second level"
+        ),
+        "second_level_design_matrix.png",
+        "design_matrix_png",
+    )
+    _save(
+        design_figures.regressor_correlation_figure(
+            design_matrix, run_label="second level"
+        ),
+        "second_level_design_correlation.png",
+        "design_correlation_png",
+    )
+    _save(
+        design_figures.variance_inflation_figure(
+            design_matrix, contrast=contrast, run_label="second level"
+        ),
+        "second_level_design_vif.png",
+        "design_vif_png",
+    )
+
+    # The scalars, beside the pictures. Efficiency and the largest VIF are what say
+    # whether the group comparison rests on independent variance, and neither is
+    # readable off a heatmap.
+    summary = design_figures.summarize_design(design_matrix, contrast=contrast)
+    out["design_condition_number"] = f"{summary.condition_number:.6g}"
+    if summary.max_vif is not None:
+        out["design_max_vif"] = f"{summary.max_vif:.6g}"
+        out["design_max_vif_regressor"] = summary.max_vif_regressor
+    if summary.efficiency is not None:
+        out["design_contrast_efficiency"] = f"{summary.efficiency:.6g}"
     return out
 
 
@@ -1531,6 +1606,7 @@ def run_second_level_analysis(
         design_outputs = _write_design_matrix_files(
             output_dir=prepared.output_dir,
             design_matrix=prepared.design_matrix,
+            contrast_spec=prepared.contrast_spec,
         )
 
     manifest_path = _write_manifest(prepared.output_dir, prepared.manifest)

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import html
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -561,6 +561,32 @@ class MarkerAgreement:
     tolerance_s: float
     #: Detected peaks that have a marker within the tolerance, matched one-to-one.
     n_matched: int
+    #: Signed offset from each detected beat to its nearest marker, in seconds.
+    #:
+    #: Positive means the marker came first. Unbounded by :attr:`tolerance_s` on purpose:
+    #: this is the measurement that says what the matched fraction means, so restricting
+    #: it to the pairs that already matched would answer only for the runs that were never
+    #: in question.
+    lags_s: np.ndarray = field(default_factory=lambda: np.empty(0), compare=False)
+
+    @property
+    def median_lag_s(self) -> float | None:
+        """Typical offset between the two trains, or ``None`` with nothing to compare.
+
+        The pair of numbers that separates the two readings of a low matched fraction. On
+        sub-0012 run-5 the markers described the heartbeat exactly and sat 303 ms ahead of
+        it, which the share alone reported as complete disagreement.
+        """
+        if self.lags_s.size == 0:
+            return None
+        return float(np.median(self.lags_s))
+
+    @property
+    def lag_iqr_s(self) -> float | None:
+        """Spread of that offset: tight means a delay, broad means real disagreement."""
+        if self.lags_s.size == 0:
+            return None
+        return float(np.percentile(self.lags_s, 75) - np.percentile(self.lags_s, 25))
 
     @property
     def n_markers(self) -> int:
@@ -629,7 +655,27 @@ def compute_marker_agreement(
         detected_onsets_s=detected,
         tolerance_s=float(tolerance_s),
         n_matched=matched,
+        lags_s=_nearest_marker_lags(markers=markers, detected=detected),
     )
+
+
+def _nearest_marker_lags(*, markers: np.ndarray, detected: np.ndarray) -> np.ndarray:
+    """Signed offset from each detected beat to the nearest marker, positive if earlier.
+
+    Nearest rather than matched: the runs worth measuring are the ones where nothing
+    matched, so a lag taken over the matched pairs would be defined only where it was
+    never needed.
+
+    Both trains are sorted by the caller, so the nearest marker is one of the two
+    straddling each beat.
+    """
+    if markers.size == 0 or detected.size == 0:
+        return np.empty(0)
+    index = np.clip(np.searchsorted(markers, detected), 1, markers.size - 1)
+    before = markers[index - 1]
+    after = markers[index]
+    nearer = np.where(np.abs(detected - before) <= np.abs(detected - after), before, after)
+    return detected - nearer
 
 
 def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
@@ -640,6 +686,8 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
         Column("Beats detected from ECG"),
         Column("Matched"),
         Column("Share of detected beats marked"),
+        Column("Nearest marker (ms)"),
+        Column("Lag IQR (ms)"),
     )
     rows = [
         [
@@ -648,6 +696,8 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
             agreement.n_detected,
             agreement.n_matched,
             None if agreement.matched_fraction is None else f"{agreement.matched_fraction:.1%}",
+            None if agreement.median_lag_s is None else f"{agreement.median_lag_s * 1000:+.0f}",
+            None if agreement.lag_iqr_s is None else f"{agreement.lag_iqr_s * 1000:.0f}",
         ]
         for agreement in agreements
     ]
@@ -663,6 +713,13 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
         "at most one beat. The last column is a share of the beats the ECG shows, so it "
         "falls when Analyzer marked fewer beats than occurred; it is left blank when no "
         "beats were detected, because then there is nothing to take a share of.</p>"
+        "<p>The last two columns say what a low share is made of. They give the signed "
+        "distance from each detected beat to the nearest marker &mdash; positive when the "
+        "marker came first &mdash; as a median and an interquartile range, over every "
+        "beat rather than only the matched ones. A median well outside the tolerance with "
+        "a narrow range means the two detectors found the same heartbeat and disagree "
+        "about where in the beat to put it, which a share taken at a fixed tolerance "
+        "reports as total disagreement. A wide range means they genuinely disagree.</p>"
         "<p>What a low share means is not decided here. Analyzer marking few beats while "
         "the ECG shows many says the correction ran on an incomplete train. The reverse "
         "&mdash; markers without detected beats &mdash; more often points at the ECG "
@@ -712,8 +769,14 @@ def plot_marker_agreement(agreements: Sequence[MarkerAgreement]) -> plt.Figure:
     for axis, agreement in zip(axes[:, 0], agreements, strict=True):
         onsets = np.concatenate([agreement.marker_onsets_s, agreement.detected_onsets_s])
         stop = float(onsets.max()) if onsets.size else MARKER_RATE_BIN_S
-        edges = np.arange(0.0, stop + MARKER_RATE_BIN_S, MARKER_RATE_BIN_S)
+        # Whole windows only. A run rarely ends on a boundary, and counting the short
+        # remainder at the full window's rate drove the trace to the floor at the right
+        # edge of every panel — a collapse manufactured by where the recording stopped,
+        # in the one figure whose subject is when a train really did stop.
+        n_windows = max(int(stop // MARKER_RATE_BIN_S), 1)
+        edges = np.arange(n_windows + 1) * MARKER_RATE_BIN_S
         centres = edges[:-1] + MARKER_RATE_BIN_S / 2.0
+        rates = []
         for onsets_s, color, label in (
             (agreement.detected_onsets_s, PRIMARY_COLOR, "Detected from ECG"),
             (agreement.marker_onsets_s, BEFORE_COLOR, "Analyzer markers"),
@@ -721,9 +784,11 @@ def plot_marker_agreement(agreements: Sequence[MarkerAgreement]) -> plt.Figure:
             # Steps, not a smooth line: the rate is constant within each window by
             # construction, and interpolating between centres would draw a beat rate at
             # moments where none was measured.
+            rate = _binned_rate(onsets_s, edges)
+            rates.append(rate)
             axis.step(
                 centres,
-                _binned_rate(onsets_s, edges),
+                rate,
                 where="mid",
                 color=color,
                 linewidth=1.1,
@@ -746,17 +811,44 @@ def plot_marker_agreement(agreements: Sequence[MarkerAgreement]) -> plt.Figure:
             )
         fraction = agreement.matched_fraction
         share = "no beats detected" if fraction is None else f"{fraction:.1%} of beats marked"
+        title = (
+            f"{run_label(agreement.recording_id)} · "
+            f"{agreement.n_markers} markers · {agreement.n_detected} detected · {share}"
+        )
+        # What a low share means, stated beside it. A tight lag says the two trains
+        # describe the same heartbeat at an offset; a broad one says they disagree. On
+        # sub-0012 run-5 the share was 0.0% and the lag was 303 ms with a 19 ms spread,
+        # and the panel gave a reader no way to tell those apart.
+        median_lag = agreement.median_lag_s
+        if median_lag is not None and agreement.n_matched < agreement.n_detected:
+            title += (
+                f"\nnearest marker {median_lag * 1000:+.0f} ms away "
+                f"(IQR {agreement.lag_iqr_s * 1000:.0f} ms)"
+            )
+        # Zero is on the axis only when a detector reached it. Anchoring there always
+        # spent half the panel on rates neither trace visits, while the comparison the
+        # panel exists for is between two traces a few beats per minute apart.
+        observed = np.concatenate(rates) if rates else np.zeros(1)
+        floor = 0.0 if observed.min() <= 0.0 else max(float(observed.min()) - 10.0, 0.0)
         axis.set(
-            title=(
-                f"{run_label(agreement.recording_id)} · "
-                f"{agreement.n_markers} markers · {agreement.n_detected} detected · {share}"
-            ),
+            title=title,
             ylabel="Beats per min",
-            ylim=(0, None),
+            ylim=(floor, None),
         )
         axis.grid(axis="y", alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
-    axes[0, 0].legend(frameon=False, fontsize=8, ncol=2)
+    # Below the grid rather than inside the first panel. Placed in-axes it sat on top of
+    # the marker trace of whichever run came first, which on sub-0012 was the run with the
+    # sparsest markers — the one the panel most needed to show.
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(
+        handles,
+        labels,
+        loc="outside lower center",
+        ncol=len(labels),
+        frameon=False,
+        fontsize=8,
+    )
     axes[-1, 0].set_xlabel(f"Time in run (s) · beats counted in {MARKER_RATE_BIN_S:.0f} s windows")
     plt.close(figure)
     return figure

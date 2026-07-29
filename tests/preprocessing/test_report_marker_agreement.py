@@ -245,6 +245,64 @@ def test_a_train_that_stops_partway_falls_to_zero_at_that_moment() -> None:
     assert rate[times > 300.0].max() == 0.0
 
 
+def test_the_last_window_is_not_drawn_as_a_collapse_it_did_not_have() -> None:
+    """A run rarely ends on a window boundary, so the final bin is short.
+
+    Counting a partial window at the full window's rate turns two seconds of recording
+    into a rate near zero, and the trace plunges to the floor at the right edge of every
+    panel. That is an artefact of where the run stopped, and it sat in the same figure
+    that exists to show when a marker train really did stop.
+    """
+    # 605 s of beats against 10 s windows: the last window holds 5 s of recording.
+    beats = np.arange(0.0, 605.0, 0.85)
+    agreement = compute_marker_agreement(
+        recording_id="sub-01_run-1",
+        marker_onsets_s=beats,
+        detected_onsets_s=beats,
+    )
+
+    axis = plot_marker_agreement([agreement]).axes[0]
+    marker_line = next(line for line in axis.get_lines() if "Analyzer" in str(line.get_label()))
+    rate = np.asarray(marker_line.get_ydata(), dtype=float)
+
+    # The train is uniform throughout, so no window may report a collapse.
+    assert rate.min() > 50.0
+
+
+def test_the_rate_axis_is_not_anchored_to_a_rate_no_heart_reaches() -> None:
+    """Half the panel sat below 40 bpm, which no run in this study spends time at.
+
+    The comparison the panel exists for is between two traces a few beats per minute
+    apart, and anchoring at zero spent most of the height on rates neither trace visits.
+    The axis still has to reach zero when a train actually stops, which is the one case
+    where the floor carries information.
+    """
+    beats = np.arange(0.0, 600.0, 0.85)
+    healthy = compute_marker_agreement(
+        recording_id="sub-01_run-1",
+        marker_onsets_s=beats,
+        detected_onsets_s=beats,
+    )
+
+    axis = plot_marker_agreement([healthy]).axes[0]
+
+    assert axis.get_ylim()[0] > 20.0
+
+
+def test_a_train_that_stops_still_shows_its_floor() -> None:
+    """Zero belongs on the axis exactly when a detector reached it."""
+    beats = np.arange(0.0, 600.0, 0.85)
+    collapsing = compute_marker_agreement(
+        recording_id="sub-01_run-1",
+        marker_onsets_s=beats[beats < 200.0],
+        detected_onsets_s=beats,
+    )
+
+    axis = plot_marker_agreement([collapsing]).axes[0]
+
+    assert axis.get_ylim()[0] == pytest.approx(0.0)
+
+
 def test_the_figure_refuses_an_empty_set_rather_than_drawing_a_blank() -> None:
     with pytest.raises(ValueError, match="at least one run"):
         plot_marker_agreement([])
