@@ -194,7 +194,10 @@ def test_a_cluster_table_is_produced_with_peak_coordinates(tmp_path: Path) -> No
         manifest=_manifest(tmp_path), out_dir=tmp_path
     )
     assert table is not None
-    assert len(peaks) >= 1 and len(peaks[0]) == 3
+    assert len(peaks) >= 1
+    label, coord = peaks[0]
+    assert label.isdigit()
+    assert len(coord) == 3
 
 
 def test_the_table_caption_separates_threshold_from_extent(tmp_path: Path) -> None:
@@ -342,3 +345,43 @@ def test_the_analysis_mask_reaches_the_colour_limit(tmp_path: Path) -> None:
     assert mosaic.called
     passed = [call.kwargs.get("mask_img") for call in mosaic.call_args_list]
     assert any(m is not None for m in passed), "no panel received the analysis mask"
+
+
+# --- peaks key to clusters, not to table rows ------------------------------
+
+
+def _clustered_stat(tmp_path: Path, name: str) -> Path:
+    """Two clusters, the first with a secondary local peak."""
+    data = np.zeros((20, 20, 20), dtype=np.float32)
+    data[4:12, 4:12, 4:12] = 3.0
+    data[5, 5, 5] = 9.0
+    data[10, 10, 10] = 8.0
+    data[16, 16, 16] = 6.0
+    path = tmp_path / name
+    nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
+    return path
+
+
+def test_subpeak_rows_do_not_become_their_own_markers(tmp_path: Path) -> None:
+    """nilearn writes sub-peaks as rows '1a', '1b' beneath their cluster.
+
+    Counting every row as a peak numbered the markers 1..N while the table's own
+    Cluster ID column read 1, 1a, 2 -- so marker 2 pointed at a sub-peak of cluster
+    1 while the reader looked up cluster 2. The caption claims the two key to each
+    other, so they have to.
+    """
+    manifest = _manifest(
+        tmp_path, "clustered", stat_map=_clustered_stat(tmp_path, "clusters_fixture.nii.gz")
+    )
+    table, peaks = subject.build_cluster_table(manifest=manifest, out_dir=tmp_path)
+    assert table is not None
+    # Two clusters, three rows: the sub-peak must not be among the markers.
+    assert len(peaks) == 2
+
+
+def test_peak_labels_are_the_tables_own_cluster_ids(tmp_path: Path) -> None:
+    manifest = _manifest(
+        tmp_path, "labelled", stat_map=_clustered_stat(tmp_path, "labels_fixture.nii.gz")
+    )
+    _table, peaks = subject.build_cluster_table(manifest=manifest, out_dir=tmp_path)
+    assert [label for label, _coord in peaks] == ["1", "2"]

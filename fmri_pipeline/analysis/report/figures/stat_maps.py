@@ -249,10 +249,63 @@ def dual_coded_mosaic(
         return figure
 
 
+#: Which two world axes each glass-brain projection preserves.
+_PROJECTION_AXES = {"x": (1, 2), "y": (0, 2), "z": (0, 1), "l": (1, 2), "r": (1, 2)}
+
+
+def _annotate_peaks(
+    display: Any,
+    peak_coords: Sequence[Tuple[float, float, float]],
+    peak_labels: Optional[Sequence[str]] = None,
+) -> None:
+    """Mark each peak and write its label beside it, on every projection.
+
+    The label is the point. A dot alone tells a reader that something is there,
+    which the map already showed; the number is what lets a cluster in the table be
+    located in the projection. Previously the index reached only a debug log, so the
+    caption promised a key the figure did not carry.
+    """
+    labels = (
+        [str(label) for label in peak_labels]
+        if peak_labels is not None
+        else [str(i) for i in range(1, len(peak_coords) + 1)]
+    )
+    if len(labels) != len(peak_coords):
+        raise ValueError(
+            f"Got {len(labels)} peak labels for {len(peak_coords)} coordinates."
+        )
+
+    display.add_markers(
+        [tuple(c) for c in peak_coords],
+        marker_color=GUIDE_COLOR,
+        marker_size=18,
+        marker="o",
+    )
+
+    for direction, projection in display.axes.items():
+        pair = _PROJECTION_AXES.get(str(direction))
+        if pair is None:
+            logger.debug("No projection mapping for direction %r", direction)
+            continue
+        first, second = pair
+        for label, coord in zip(labels, peak_coords):
+            projection.ax.annotate(
+                label,
+                xy=(float(coord[first]), float(coord[second])),
+                xytext=(4, 3),
+                textcoords="offset points",
+                fontsize=7,
+                fontweight="bold",
+                color=GUIDE_COLOR,
+                annotation_clip=False,
+            )
+
+
 def glass_brain(
     stat_img: Any,
     *,
     mask_img: Any = None,
+    peak_labels: Optional[Sequence[str]] = None,
     threshold: Optional[float] = None,
     vmax: Optional[float] = None,
     two_sided: bool = True,
@@ -291,11 +344,7 @@ def glass_brain(
         )
         label_colorbar(display, cbar_label)
         if peak_coords:
-            for index, coord in enumerate(peak_coords, start=1):
-                display.add_markers(
-                    [tuple(coord)], marker_color=GUIDE_COLOR, marker_size=18, marker="o"
-                )
-                logger.debug("Annotated peak %d at %s", index, coord)
+            _annotate_peaks(display, peak_coords, peak_labels)
         figure = figure_of(display)
         annotate_provenance(
             figure,

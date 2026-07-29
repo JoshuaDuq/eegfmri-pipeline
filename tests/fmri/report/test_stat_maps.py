@@ -279,3 +279,70 @@ def test_the_mosaic_states_which_voxels_its_limit_came_from() -> None:
         assert "mask" in text.lower()
     finally:
         plt.close(figure)
+
+
+# --- peak markers actually carry the numbers the caption promises ----------
+
+
+def _peaked_map() -> "nib.Nifti1Image":
+    data = np.zeros((20, 20, 20), dtype=np.float32)
+    data[4:12, 4:12, 4:12] = 3.0
+    data[5, 5, 5] = 9.0
+    data[16, 16, 16] = 6.0
+    return nib.Nifti1Image(data, np.eye(4))
+
+
+def test_peak_markers_are_numbered_on_the_projection() -> None:
+    """The caption keys the markers to the cluster table, so numbers must be drawn.
+
+    Previously the index reached only a debug log and the projection carried
+    anonymous dots, while the caption told the reader they were numbered.
+    """
+    figure = stat_maps.glass_brain(
+        _peaked_map(), threshold=2.3, two_sided=False, peak_coords=[(5, 5, 5), (16, 16, 16)]
+    )
+    try:
+        drawn = {
+            t.get_text()
+            for ax in figure.axes
+            for t in ax.texts
+            if t.get_text() in {"1", "2"}
+        }
+        assert drawn == {"1", "2"}
+    finally:
+        plt.close(figure)
+
+
+def test_peak_markers_use_supplied_labels_when_given() -> None:
+    """Labels come from the cluster table's own IDs, not a fresh 1..N count."""
+    figure = stat_maps.glass_brain(
+        _peaked_map(),
+        threshold=2.3,
+        two_sided=False,
+        peak_coords=[(5, 5, 5), (16, 16, 16)],
+        peak_labels=["3", "7"],
+    )
+    try:
+        drawn = {
+            t.get_text()
+            for ax in figure.axes
+            for t in ax.texts
+            if t.get_text() in {"3", "7"}
+        }
+        assert drawn == {"3", "7"}
+    finally:
+        plt.close(figure)
+
+
+def test_a_glass_brain_without_peaks_draws_no_numbers() -> None:
+    figure = stat_maps.glass_brain(_peaked_map(), threshold=2.3, two_sided=False)
+    try:
+        numeric = [
+            t.get_text()
+            for ax in figure.axes
+            for t in ax.texts
+            if t.get_text().isdigit()
+        ]
+        assert numeric == []
+    finally:
+        plt.close(figure)

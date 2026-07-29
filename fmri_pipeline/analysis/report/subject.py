@@ -384,11 +384,61 @@ def coordinate_space_label(space: str) -> str:
     return f"coordinates: {space} scanner-native (mm), not MNI"
 
 
+def _cluster_peaks(frame: Any) -> Tuple[Tuple[str, Tuple[float, float, float]], ...]:
+    """Return one labelled peak per cluster, skipping nilearn's sub-peak rows.
+
+    ``get_clusters_table`` writes secondary local maxima as extra rows whose
+    ``Cluster ID`` is the parent's number with a letter appended -- 1a, 1b -- and
+    whose size column is an empty string. Treating every row as a peak numbered the
+    markers 1..N while the table read 1, 1a, 2, so marker 2 pointed at a sub-peak of
+    cluster 1 while the reader looked up cluster 2. The caption says the two key to
+    each other.
+
+    Labels are the table's own cluster IDs rather than a fresh count, so the two
+    agree even if this filter ever changes.
+    """
+    if not {"X", "Y", "Z", "Cluster ID"} <= set(frame.columns):
+        return ()
+
+    # Read columns directly rather than iterating rows. The Cluster ID column holds
+    # a mix of integers and strings, and `iterrows` upcasts each row to a common
+    # dtype -- turning cluster 1 into "1.0", which no longer looks like an integer.
+    identifiers = list(frame["Cluster ID"])
+    xs, ys, zs = list(frame["X"]), list(frame["Y"]), list(frame["Z"])
+
+    peaks: List[Tuple[str, Tuple[float, float, float]]] = []
+    for identifier, x, y, z in zip(identifiers, xs, ys, zs):
+        label = _cluster_identifier(identifier)
+        if label is None:
+            continue
+        peaks.append((label, (float(x), float(y), float(z))))
+    return tuple(peaks)
+
+
+def _cluster_identifier(value: Any) -> Optional[str]:
+    """Return a cluster's own label, or None when the row is a sub-peak.
+
+    A cluster's ID is a bare number; a sub-peak's carries a letter suffix (1a, 1b).
+    Numbers arrive as ints, floats, or strings depending on how pandas typed the
+    column, so all three are normalised to the same plain integer text.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        return text if text.isdigit() else None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(number) or number != int(number):
+        return None
+    return str(int(number))
+
+
 def build_cluster_table(
     *,
     manifest: ContrastManifest,
     out_dir: Path,
-) -> Tuple[Optional[html.Table], Tuple[Tuple[float, float, float], ...]]:
+) -> Tuple[Optional[html.Table], Tuple[Tuple[str, Tuple[float, float, float]], ...]]:
     """Return the cluster table and its peak coordinates.
 
     The peaks are handed to the glass brain so the numbered markers on the
@@ -420,12 +470,7 @@ def build_cluster_table(
         two_sided=manifest.two_sided,
     )
 
-    peaks: Tuple[Tuple[float, float, float], ...] = ()
-    if {"X", "Y", "Z"} <= set(frame.columns):
-        peaks = tuple(
-            (float(row["X"]), float(row["Y"]), float(row["Z"]))
-            for _, row in frame.iterrows()
-        )
+    peaks = _cluster_peaks(frame)
 
     plots_dir.mkdir(parents=True, exist_ok=True)
     tsv_path = plots_dir / "clusters.tsv"
@@ -536,7 +581,8 @@ def build_contrast_section(
                         threshold=float(threshold),
                         two_sided=manifest.two_sided,
                         radiological=manifest.radiological,
-                        peak_coords=peaks or None,
+                        peak_coords=[coord for _label, coord in peaks] or None,
+                        peak_labels=[label for label, _coord in peaks] or None,
                         title=f"{manifest.contrast_name}: glass brain",
                     ),
                     out_dir=plots_dir,
