@@ -226,6 +226,7 @@ def carpet_figure(
     fd: Optional[np.ndarray] = None,
     dvars: Optional[np.ndarray] = None,
     dvars_label: str = "DVARS",
+    voxel_source: str = "",
     title: str = "",
 ) -> plt.Figure:
     """Draw a carpet with FD and DVARS above it on a shared time axis.
@@ -353,8 +354,14 @@ def carpet_figure(
             figure.suptitle(title)
         figure.tight_layout()
 
+        # The denominator names where it came from. Counted against the field of view
+        # it reads as a far smaller sampling fraction than the panel actually applied,
+        # and says nothing about whether the voxels drawn are brain.
+        drawn_of = f"{ordered.shape[0]:,} of {carpet.shape[0]:,} voxels drawn"
+        if voxel_source:
+            drawn_of += f" ({voxel_source})"
         provenance = [
-            f"{ordered.shape[0]:,} of {carpet.shape[0]:,} voxels drawn",
+            drawn_of,
             f"{n_frames:,} frames · TR {float(tr):.3g} s",
             f"voxel order: {tissue_source}",
         ]

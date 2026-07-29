@@ -295,3 +295,38 @@ def test_carpet_states_how_many_voxels_it_actually_drew() -> None:
     text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
     assert "60" in text
     plt.close(figure)
+
+
+# --- which voxels the carpet is built from --------------------------------
+
+
+def test_the_carpet_names_the_voxels_it_was_built_from() -> None:
+    # Counted against the field of view the sampling fraction reads far smaller than
+    # what was applied, and says nothing about whether the voxels drawn are brain.
+    figure = carpet_mod.carpet_figure(
+        np.random.default_rng(0).standard_normal((50, 30)),
+        tissue_codes=None,
+        tissue_source="none",
+        tr=2.0,
+        run_boundaries=[],
+        run_labels=["run-01"],
+        voxel_source="analysis mask",
+    )
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "analysis mask" in text
+    plt.close(figure)
+
+
+def test_the_carpet_makes_no_claim_about_its_voxels_when_told_nothing() -> None:
+    figure = carpet_mod.carpet_figure(
+        np.random.default_rng(0).standard_normal((50, 30)),
+        tissue_codes=None,
+        tissue_source="none",
+        tr=2.0,
+        run_boundaries=[],
+        run_labels=["run-01"],
+    )
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "voxels drawn" in text
+    assert "analysis mask" not in text
+    plt.close(figure)

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import html
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
 import mne
@@ -41,6 +41,7 @@ from eeg_pipeline.preprocessing.report.spectra import (
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,
+    FLAG_COLOR,
     GUIDE_COLOR,
     PRIMARY_COLOR,
 )
@@ -228,6 +229,16 @@ class PosteriorAlpha:
     peak_frequency_hz: float
     #: Height of the peak over the aperiodic background interpolated beneath it.
     prominence_db: float
+    #: The fitted aperiodic background, evaluated at :attr:`frequencies_hz`.
+    #:
+    #: Carried so the panel can draw the line the prominence is measured from. It was
+    #: previously fitted, used once and dropped, which left the figure quoting a decibel
+    #: height over a background the reader could not see. Prominence is the whole
+    #: measurement here — absolute alpha power varies by an order of magnitude between
+    #: participants — so the line is not decoration, it is what the number means.
+    background_db: np.ndarray = field(
+        default_factory=lambda: np.empty(0), compare=False
+    )
     #: RMS roughness of the background the prominence is measured against, in decibels.
     #:
     #: The scale that decides whether a prominence means anything. Carried from the
@@ -395,13 +406,17 @@ def compute_posterior_alpha(
     if not in_band.any():
         return None
     band_frequencies = frequencies[in_band]
-    excess = power_db[in_band] - aperiodic_line_db(background, band_frequencies)
+    # Evaluated over the whole spectrum rather than only the band, so the panel can draw
+    # the same line across the axis it fitted the background on.
+    background_db = aperiodic_line_db(background, frequencies)
+    excess = power_db[in_band] - background_db[in_band]
     peak = int(np.argmax(excess))
     rival_hz, rival_gap = _runner_up(band_frequencies, excess, peak=peak)
     return PosteriorAlpha(
         channel_names=tuple(inst.ch_names[index] for index in picks),
         frequencies_hz=frequencies,
         power_db=power_db,
+        background_db=background_db,
         background_residual_db=background.residual_db,
         peak_frequency_hz=float(frequencies[in_band][peak]),
         prominence_db=float(excess[peak]),
@@ -533,19 +548,72 @@ def _draw_split_half(axis: plt.Axes, reliability: SplitHalfReliability) -> None:
 def _draw_posterior_alpha(axis: plt.Axes, alpha: PosteriorAlpha) -> None:
     axis.plot(alpha.frequencies_hz, alpha.power_db, color=PRIMARY_COLOR, linewidth=1.2)
     axis.axvspan(*ALPHA_BAND_HZ, color=GUIDE_COLOR, alpha=0.10, linewidth=0)
+    # The line the prominence is measured from. Without it the panel quotes a height over
+    # something the reader cannot see, and the two readings of a large number -- a real
+    # rhythm, or a steep background the fit followed -- are indistinguishable.
+    if alpha.background_db.size:
+        axis.plot(
+            alpha.frequencies_hz,
+            alpha.background_db,
+            color=GUIDE_COLOR,
+            linestyle="--",
+            linewidth=1.0,
+            label="Fitted aperiodic background",
+        )
+        # The prominence drawn as the segment it is, so the annotation names a distance
+        # the reader can see rather than asserting one.
+        peak = int(np.argmin(np.abs(alpha.frequencies_hz - alpha.peak_frequency_hz)))
+        axis.vlines(
+            alpha.frequencies_hz[peak],
+            alpha.background_db[peak],
+            alpha.power_db[peak],
+            color=FLAG_COLOR,
+            linewidth=1.2,
+        )
+    # Roughness and the multiplicity-corrected bar, because a prominence means nothing
+    # without the scatter of the background it stands on and the width of the search it
+    # won. Stated as measurements: the reader is given the height, the roughness and the
+    # bar, and decides what they add up to.
+    caption = f"{alpha.peak_frequency_hz:.1f} Hz\n{alpha.prominence_db:.1f} dB over background"
+    if alpha.background_residual_db > 0.0:
+        caption += f"\nbackground roughness {alpha.background_residual_db:.1f} dB"
+        if alpha.n_search_bins:
+            bar = resolvable_prominence_threshold(alpha.n_search_bins)
+            caption += (
+                f"\n{bar * alpha.background_residual_db:.1f} dB clears "
+                f"{alpha.n_search_bins} bins at "
+                f"{RESOLVABLE_PEAK_FALSE_POSITIVE_RATE:.0%}"
+            )
+    # Anchored to the axes rather than to the peak. Pinned beside the peak, a caption this
+    # long ran off the right edge whenever the rhythm sat in the upper half of the band --
+    # 12.7 Hz was already close. The drawn segment identifies which peak is meant, so the
+    # text does not have to sit against it. Top right is the corner a 1/f spectrum leaves
+    # empty.
     axis.annotate(
-        f"{alpha.peak_frequency_hz:.1f} Hz\n{alpha.prominence_db:.1f} dB over background",
-        xy=(alpha.peak_frequency_hz, alpha.power_db.max()),
-        xytext=(6, -14),
-        textcoords="offset points",
+        caption,
+        xy=(0.98, 0.98),
+        xycoords="axes fraction",
+        ha="right",
+        va="top",
         fontsize=7.5,
         color=GUIDE_COLOR,
     )
+    if alpha.peak_is_contested and np.isfinite(alpha.runner_up_frequency_hz):
+        # A band with two comparable bumps has no single peak frequency. Marked on the
+        # figure rather than left to the cohort, because the rival is visible here.
+        axis.axvline(
+            alpha.runner_up_frequency_hz,
+            color=FLAG_COLOR,
+            linestyle=":",
+            linewidth=1.0,
+            label=f"contested by {alpha.runner_up_frequency_hz:.1f} Hz",
+        )
     axis.set(
         title=f"Posterior spectrum · {len(alpha.channel_names)} channels",
         xlabel="Frequency (Hz)",
         ylabel=f"PSD ({POWER_UNIT_LABEL})",
     )
+    axis.legend(frameon=False, fontsize=7, loc="lower left")
 
 
 def plot_preservation(

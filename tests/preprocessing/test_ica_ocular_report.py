@@ -128,6 +128,56 @@ def test_the_score_panel_uses_markers_not_bars_on_the_log_axis() -> None:
     assert len(figure.axes[1].patches) > 0
 
 
+def test_the_panel_shows_where_the_detector_drew_its_line() -> None:
+    """Crosses said which components were flagged and never said why.
+
+    ``find_bads_eog`` thresholds an adaptive z-score, so there is no fixed correlation to
+    print -- but the decisions themselves bracket the cutoff: within a run it lies above
+    every unflagged component and at or below every flagged one. On sub-0012 a component
+    at r=0.3 was flagged while one at r=0.2 was not, and the panel gave a reader nothing
+    to reconcile that with.
+
+    Measured from the decisions rather than by reimplementing MNE's rule, so the band
+    cannot drift away from the flags drawn beside it.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from eeg_pipeline.preprocessing.ica_ocular_report import _plot_component_scores
+
+    scores = np.array([0.94, 0.05, 0.30, 0.04, 0.06, 0.05])
+
+    figure = _plot_component_scores([_run_review(scores, flagged=(0, 2))], excluded=[0])
+
+    spans = [
+        collection
+        for collection in figure.axes[0].collections
+        if type(collection).__name__ == "PolyCollection"
+    ]
+    assert spans, "the decision boundary is not drawn"
+    low, high = figure.axes[0]._eog_threshold_band
+    # Above every score the run left unflagged, and no higher than the lowest it flagged.
+    assert low == pytest.approx(0.06)
+    assert high == pytest.approx(0.30)
+
+
+def test_a_run_that_flagged_nothing_gets_no_invented_boundary() -> None:
+    """With no flags there is no bracket: the cutoff sits above every score, unbounded.
+
+    Drawing a band there would put a threshold on the figure that no decision supports.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from eeg_pipeline.preprocessing.ica_ocular_report import _plot_component_scores
+
+    scores = np.array([0.94, 0.05, 0.30, 0.04, 0.06, 0.05])
+
+    figure = _plot_component_scores([_run_review(scores)], excluded=[0])
+
+    assert not hasattr(figure.axes[0], "_eog_threshold_band")
+
+
 def test_exclusion_status_is_not_drawn_in_the_detector_flag_colour() -> None:
     """ "Excluded" and "flagged by find_bads_eog" are different claims about a component."""
     import matplotlib

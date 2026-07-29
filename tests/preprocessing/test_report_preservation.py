@@ -193,6 +193,53 @@ def test_the_posterior_spectrum_uses_the_same_power_reference_as_the_sensor_spec
     assert POWER_UNIT_LABEL in axis.get_ylabel()
 
 
+def test_the_alpha_panel_draws_the_background_its_prominence_is_measured_against() -> None:
+    """The panel printed "8.3 dB over background" and never drew the background.
+
+    Prominence here is the height of the peak over a line fitted to the surrounding
+    spectrum, and that line is the whole basis of the number: absolute alpha power varies
+    by an order of magnitude between participants, so the level says nothing on its own.
+    The fit was computed, used, and discarded, leaving a reader with a decibel figure and
+    no way to see what it was taken from.
+
+    ``aperiodic_line_db`` exists to draw this line -- its own docstring says so.
+    """
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+
+    assert alpha is not None
+    assert alpha.background_db.shape == alpha.power_db.shape
+
+    axis = plot_preservation(alpha=alpha).axes[0]
+    drawn = [line.get_ydata() for line in axis.lines]
+    assert any(
+        np.allclose(trace, alpha.background_db) for trace in drawn
+    ), "the fitted background is not drawn under the spectrum"
+
+    # The drawn gap at the peak is the reported number, so the figure and the caption
+    # cannot describe two different measurements.
+    peak = int(np.argmin(np.abs(alpha.frequencies_hz - alpha.peak_frequency_hz)))
+    gap = float(alpha.power_db[peak] - alpha.background_db[peak])
+    assert gap == pytest.approx(alpha.prominence_db, abs=1e-6)
+
+
+def test_the_alpha_panel_states_the_roughness_the_peak_had_to_clear() -> None:
+    """A prominence means nothing without the scatter of the background beneath it.
+
+    The pipeline measures that scatter and corrects it for the width of the search, and
+    the panel reported neither -- so a peak 8 dB over a background that wanders 4 dB read
+    the same as one over a background that wanders 0.2 dB.
+
+    Reported as the measured threshold, not as a verdict: the reader is given the height,
+    the roughness and the bar, and draws their own conclusion.
+    """
+    alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
+    axis = plot_preservation(alpha=alpha).axes[0]
+
+    annotations = " ".join(text.get_text().lower() for text in axis.texts)
+    assert "roughness" in annotations
+    assert f"{alpha.background_residual_db:.1f}" in annotations
+
+
 def test_a_recording_without_alpha_has_a_low_prominence() -> None:
     alpha = compute_posterior_alpha(_continuous(alpha_amplitude=0.0))
 

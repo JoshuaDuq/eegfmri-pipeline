@@ -11,6 +11,7 @@ import numpy as np
 
 from fmri_pipeline.analysis.report.figures._display import figure_of, label_colorbar
 from fmri_pipeline.analysis.report.style import (
+    GUIDE_COLOR,
     MAGNITUDE_CMAP,
     OKABE_ITO,
     RADIOLOGICAL,
@@ -38,6 +39,10 @@ class TsnrResult:
     per_run_median: Tuple[float, ...]
     frames_used: Tuple[int, ...]
     frames_dropped: Tuple[int, ...]
+    #: ``(q1, q3)`` of the in-mask tSNR of each run. A median alone cannot separate a
+    #: run that lost signal everywhere from one that lost it in a region: both move
+    #: the centre, only the second widens the spread.
+    per_run_iqr: Tuple[Tuple[float, float], ...] = ()
 
 
 def detrended_temporal_sd(data: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -114,6 +119,7 @@ def compute_tsnr(
     total: Optional[np.ndarray] = None
     affine = None
     medians: List[float] = []
+    quartiles: List[Tuple[float, float]] = []
     used: List[int] = []
     dropped: List[int] = []
 
@@ -162,6 +168,11 @@ def compute_tsnr(
 
         inside = tsnr[tsnr > 0]
         medians.append(float(np.median(inside)) if inside.size else 0.0)
+        quartiles.append(
+            (float(np.percentile(inside, 25)), float(np.percentile(inside, 75)))
+            if inside.size
+            else (0.0, 0.0)
+        )
 
         if total is None:
             total = tsnr.astype(float)
@@ -178,6 +189,7 @@ def compute_tsnr(
         per_run_median=tuple(medians),
         frames_used=tuple(used),
         frames_dropped=tuple(dropped),
+        per_run_iqr=tuple(quartiles),
     )
 
 
@@ -187,39 +199,86 @@ def per_run_tsnr_figure(
     run_labels: Sequence[str],
     title: str = "",
 ) -> plt.Figure:
-    """Draw each run's median tSNR, with the frames censored from each.
+    """Draw each run's tSNR distribution, with the frames censored from each.
 
-    Exists because the mean map cannot show that one run was bad. Drawn as bars
-    against a run axis with every run named, since the labels are what let a reader
-    act on the figure -- and the fill colour alone must not carry identity.
+    Exists because the mean map cannot show that one run was bad. The question is
+    therefore whether any run is unlike the others, which makes the comparison a
+    relative one.
+
+    Dots with an interquartile bar, not bars from zero. A bar chart anchors at zero
+    and spends the whole axis on the distance from it: measured on real data, six runs
+    between 58.6 and 60.5 drew six visually identical bars on a 0-60 axis, so the
+    between-run variation the panel exists to show was invisible. Dots carry no
+    baseline claim, which is what makes it honest to scale the axis to the data --
+    and the axis says that it does not start at zero.
+
+    The interquartile bar separates a run that lost signal everywhere from one that
+    lost it in a region. Both move the median; only the second widens the spread.
     """
     medians = np.asarray(result.per_run_median, dtype=float)
+    if medians.size == 0:
+        raise ValueError("per_run_tsnr_figure requires at least one run.")
     positions = np.arange(len(medians))
+    quartiles = result.per_run_iqr or tuple((m, m) for m in medians)
+
     with plot_context():
-        figure, axis = plt.subplots(figsize=(6.5, 0.4 * len(medians) + 1.6))
-        axis.barh(positions, medians, color=OKABE_ITO["sky_blue"])
+        figure, axis = plt.subplots(figsize=(6.8, 0.42 * len(medians) + 1.9))
+
+        for index, (low, high) in enumerate(quartiles[: len(medians)]):
+            axis.plot(
+                [low, high],
+                [index, index],
+                color=OKABE_ITO["sky_blue"],
+                linewidth=3.0,
+                solid_capstyle="butt",
+                alpha=0.55,
+                zorder=2,
+            )
+        axis.scatter(
+            medians, positions, s=42, color=OKABE_ITO["blue"], zorder=3, label="median"
+        )
+
+        # The across-run median, so "unlike the others" is a comparison the reader
+        # makes against a drawn reference rather than by eye.
+        centre = float(np.median(medians))
+        axis.axvline(centre, color=GUIDE_COLOR, linestyle="--", linewidth=1.0, zorder=1)
+        axis.annotate(
+            f"across-run median {centre:.1f}",
+            xy=(centre, 1.0),
+            xycoords=("data", "axes fraction"),
+            xytext=(3, -9),
+            textcoords="offset points",
+            fontsize=7,
+            color=GUIDE_COLOR,
+        )
+
+        # Censoring goes in the run's own label. Floated beside the dot it landed
+        # between two rows and could be read as belonging to either.
+        labels = list(run_labels)[: len(medians)]
+        while len(labels) < len(medians):
+            labels.append(f"run-{len(labels) + 1:02d}")
+        annotated = [
+            f"{label}\n({drop} censored)" if drop else label
+            for label, drop in zip(labels, result.frames_dropped)
+        ]
         axis.set_yticks(positions)
-        axis.set_yticklabels(list(run_labels)[: len(medians)], fontsize=8)
-        axis.invert_yaxis()
-        axis.set_xlabel("Median tSNR (masked voxels)")
+        axis.set_yticklabels(annotated, fontsize=8)
+        axis.set_ylim(len(medians) - 0.5, -0.5)
+        axis.set_xlabel("tSNR in the mask (dot: median, bar: interquartile range)")
         if title:
             axis.set_title(title)
-        for index, (value, drop) in enumerate(zip(medians, result.frames_dropped)):
-            note = f"{value:.1f}" + (f"  ({drop} frames censored)" if drop else "")
-            axis.annotate(
-                note,
-                xy=(value, index),
-                xytext=(4, 0),
-                textcoords="offset points",
-                va="center",
-                fontsize=7,
-            )
+
+        spread = float(np.max(medians) - np.min(medians))
         annotate_provenance(
             figure,
             [
                 f"{len(medians)} run(s)",
                 f"{sum(result.frames_used):,} frames used, "
                 f"{sum(result.frames_dropped):,} censored",
+                f"median range across runs: {spread:.1f} tSNR",
+                # Said outright, because a truncated axis on a ratio quantity is only
+                # honest when the reader is told the origin is off the figure.
+                "x axis does not start at zero",
             ],
         )
         figure.tight_layout()

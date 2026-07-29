@@ -430,6 +430,12 @@ def pool_alpha_runs(measured: Sequence[PosteriorAlpha]) -> PosteriorAlpha | None
         power_db=np.median(
             np.vstack([np.asarray(entry.power_db, dtype=float) for entry in entries]), axis=0
         ),
+        # Pooled the same way as the spectrum above, so the drawn background stays the
+        # background of the drawn spectrum rather than one run's line under all of them.
+        background_db=np.median(
+            np.vstack([np.asarray(entry.background_db, dtype=float) for entry in entries]),
+            axis=0,
+        ),
         peak_frequency_hz=float(
             np.median([entry.peak_frequency_hz for entry in peak_source])
         ),

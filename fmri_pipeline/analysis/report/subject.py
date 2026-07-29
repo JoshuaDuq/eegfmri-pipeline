@@ -324,6 +324,21 @@ def _carpet_blocks(
     standardised: List[np.ndarray] = []
     run_breaks = [0]
     voxel_mask = None
+    mask_source = "nonzero mean signal"
+
+    # The analysis mask decides which voxels the carpet shows, when there is one.
+    # Falling back on "mean signal is not exactly zero" admits the whole field of
+    # view on any acquisition whose background carries noise rather than true zeros
+    # -- measured here, 136,416 voxels of a 50,626-voxel brain -- so the panel
+    # sampled air, the row count it reported was a fraction of the wrong total, and a
+    # carpet captioned "as modelled" showed voxels the model never saw.
+    analysis_mask = _load_mask(manifest) if manifest.mask_is_analysis_mask else None
+    if analysis_mask is not None:
+        candidate = np.asanyarray(analysis_mask.dataobj).astype(bool)
+        reference = np.asanyarray(bold_imgs[0].dataobj).shape[:3]
+        if candidate.shape == reference:
+            voxel_mask = candidate
+            mask_source = "analysis mask"
 
     for index, img in enumerate(bold_imgs):
         data = np.asanyarray(img.dataobj)
@@ -401,6 +416,7 @@ def _carpet_blocks(
         fd=fd,
         dvars=dvars,
         dvars_label=dvars_label,
+        voxel_source=mask_source,
         title="Carpet (as modelled)",
     )
     path = _save(figure, out_dir=qc_dir, stem="carpet", formats=cfg.formats)

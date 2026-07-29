@@ -250,3 +250,70 @@ def test_the_header_declines_the_claim_for_a_merely_discovered_mask(
         [_manifest(tmp_path, mask_is_analysis_mask=False)]
     )
     assert "not verified as the fitted mask" in str(section)
+
+
+# --- the carpet's voxels --------------------------------------------------
+
+
+def _bold(tmp_path: Path, name: str, n_frames: int = 12) -> Path:
+    """A run whose background is noisy rather than exactly zero, as real data is."""
+    rng = np.random.default_rng(1)
+    data = (0.4 * rng.standard_normal((16, 16, 16, n_frames))).astype(np.float32)
+    data[2:12, 2:12, 2:12] += 100.0
+    path = tmp_path / name
+    nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
+    return path
+
+
+def test_the_carpet_is_built_from_the_analysis_mask_not_the_field_of_view(
+    tmp_path: Path,
+) -> None:
+    # "Mean signal is not exactly zero" admits the whole field of view on any
+    # acquisition whose background carries noise, so the panel sampled air while its
+    # caption said "as modelled".
+    manifest = _manifest(
+        tmp_path,
+        bold_paths=(_bold(tmp_path, "r1.nii.gz"),),
+        included_runs=("run-01",),
+    )
+    captured = {}
+
+    def _record(*_args, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop once the call is recorded")
+
+    with patch(
+        "fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record
+    ):
+        subject.build_qc_sections(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_dir=tmp_path,
+            cfg=_cfg(include_tsnr_qc=False),
+        )
+    assert captured.get("voxel_source") == "analysis mask"
+
+
+def test_the_carpet_falls_back_when_no_fitted_mask_was_recorded(tmp_path: Path) -> None:
+    manifest = _manifest(
+        tmp_path,
+        bold_paths=(_bold(tmp_path, "r2.nii.gz"),),
+        included_runs=("run-01",),
+        mask_is_analysis_mask=False,
+    )
+    captured = {}
+
+    def _record(*_args, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop once the call is recorded")
+
+    with patch(
+        "fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record
+    ):
+        subject.build_qc_sections(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_dir=tmp_path,
+            cfg=_cfg(include_tsnr_qc=False),
+        )
+    assert captured.get("voxel_source") == "nonzero mean signal"
