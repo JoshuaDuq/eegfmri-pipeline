@@ -412,3 +412,47 @@ def test_the_analysis_mask_reaches_the_tsnr_computation(tmp_path: Path) -> None:
 
     assert compute.called
     assert compute.call_args.kwargs.get("mask_img") is not None
+
+
+# --- signatures ------------------------------------------------------------
+
+
+def _signature_tsv(directory: Path) -> Path:
+    path = directory / "signature_expression.tsv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "signature\tdot\tcosine\tpearson_r\tn_voxels\tweight_path\n"
+        "NPS\t12.0\t0.31\t0.28\t9000\t/w/nps.nii.gz\n"
+        "SIIPS\t-4.0\t-0.12\t-0.10\t9000\t/w/siips.nii.gz\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_signature_section_is_built_from_the_expression_table(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path, "sig")
+    _signature_tsv(Path(manifest.stat_map).parent)
+    section = subject.build_signature_section(
+        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
+    )
+    assert section is not None
+    titles = " ".join(getattr(b, "title", "") for b in section.blocks).lower()
+    assert "signature" in titles
+
+
+def test_no_configured_signatures_yields_no_section(tmp_path: Path) -> None:
+    """The stock configuration has none; an empty section would be noise."""
+    section = subject.build_signature_section(
+        manifest=_manifest(tmp_path, "nosig"), out_dir=tmp_path, cfg=_cfg()
+    )
+    assert section is None
+
+
+def test_the_signature_section_reaches_the_document(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path, "docsig")
+    _signature_tsv(Path(manifest.stat_map).parent)
+    out = tmp_path / "report.html"
+    subject.build_subject_report(
+        manifests=[manifest], deriv_root=tmp_path, out_path=out, cfg=_cfg()
+    )
+    assert "NPS" in out.read_text()

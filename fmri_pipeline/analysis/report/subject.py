@@ -897,6 +897,77 @@ def build_design_section(
     )
 
 
+def build_signature_section(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> Optional[html.Section]:
+    """Signature expression as a dot plot beside the numbers.
+
+    Reads the expression table the analysis run wrote rather than recomputing it:
+    expression needs the weight maps and the study's signature configuration, and
+    the render path reaches for neither.
+
+    Returns ``None`` when no signatures were configured, which is the stock
+    configuration rather than a misconfiguration.
+    """
+    from fmri_pipeline.analysis.report.figures import signatures as signature_figures
+
+    tsv_path = Path(manifest.stat_map).parent / "signature_expression.tsv"
+    points = signature_figures.read_expression_tsv(tsv_path)
+    if not points:
+        return None
+
+    plots_dir = out_dir / "plots" / _slug(manifest)
+    blocks: List[html.Block] = []
+    with _panel(f"signature expression for {manifest.contrast_name}"):
+        path = _save(
+            signature_figures.signature_dot_plot(
+                points, title=f"{manifest.contrast_name}: signature expression"
+            ),
+            out_dir=plots_dir,
+            stem="signature_expression",
+            formats=cfg.formats,
+        )
+        if path:
+            blocks.append(
+                html.Figure(
+                    title="Signature expression",
+                    path=path,
+                    dense=False,
+                    caption=(
+                        "Cosine similarity between the unthresholded effect map and "
+                        "each signature's weight map. Sign carries the "
+                        "interpretation; no threshold is applied."
+                    ),
+                )
+            )
+
+    blocks.append(
+        html.KeyValues(
+            title="Expression values",
+            items=tuple(
+                (
+                    point.name,
+                    "cosine "
+                    + ("n/a" if point.cosine is None else f"{point.cosine:+.3f}")
+                    + f" · dot {point.dot:+.3g} · {point.n_voxels:,} voxels",
+                )
+                for point in points
+            ),
+        )
+    )
+
+    if not blocks:
+        return None
+    return html.Section(
+        slug=f"{_slug(manifest)}-signatures",
+        title=f"Signatures: {manifest.contrast_name}",
+        blocks=tuple(blocks),
+    )
+
+
 def build_methods_section(manifests: Sequence[ContrastManifest]) -> html.Section:
     """Record the thresholds and settings actually applied.
 
@@ -969,6 +1040,11 @@ def build_subject_report(
             )
             if design_section is not None:
                 sections.append(design_section)
+        signature_section = build_signature_section(
+            manifest=manifest, out_dir=out_dir, cfg=cfg
+        )
+        if signature_section is not None:
+            sections.append(signature_section)
         sections.append(
             build_diagnostics_section(manifest=manifest, out_dir=out_dir, cfg=cfg)
         )
@@ -995,6 +1071,7 @@ __all__ = [
     "build_header_section",
     "build_methods_section",
     "build_qc_sections",
+    "build_signature_section",
     "build_subject_report",
     "coordinate_space_label",
     "supports_glass_brain",
