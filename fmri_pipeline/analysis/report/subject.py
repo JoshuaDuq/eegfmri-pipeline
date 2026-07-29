@@ -85,6 +85,20 @@ def _effect_units(manifest: ContrastManifest) -> str:
     return "% signal change" if manifest.signal_scaling else "effect (arbitrary BOLD units)"
 
 
+def _error_units(manifest: ContrastManifest) -> str:
+    """Name the units of a standard error.
+
+    The same units as the effect, but the quantity is not the effect. Reusing
+    :func:`_effect_units` verbatim labelled the standard-error colourbar "effect",
+    which names the wrong map.
+    """
+    return (
+        "standard error (% signal change)"
+        if manifest.signal_scaling
+        else "standard error (arbitrary BOLD units)"
+    )
+
+
 def build_header_section(
     manifests: Sequence[ContrastManifest], *, background_source: str = ""
 ) -> html.Section:
@@ -931,8 +945,6 @@ def build_diagnostics_section(
 
     if manifest.variance_map and Path(manifest.variance_map).exists():
         with _panel(f"standard error for {manifest.contrast_name}"):
-            from fmri_pipeline.analysis.report.style import MAGNITUDE_CMAP
-
             variance_img = nib.load(str(manifest.variance_map))
             variance = np.asarray(variance_img.get_fdata())
             se_img = nib.Nifti1Image(
@@ -941,15 +953,15 @@ def build_diagnostics_section(
                 variance_img.header,
             )
             path = _save(
-                stat_map_figures.stat_map_mosaic(
+                # A standard error has no negative half, so it goes through the
+                # magnitude path. On the signed path it got a symmetric scale, spent
+                # half the ramp on values that cannot occur, and rendered flat.
+                stat_map_figures.magnitude_mosaic(
                     se_img,
                     bg_img=background,
                     mask_img=mask_img,
-                    threshold=None,
-                    two_sided=True,
                     radiological=manifest.radiological,
-                    cmap=MAGNITUDE_CMAP,
-                    cbar_label="standard error",
+                    cbar_label=_error_units(manifest),
                     title=f"{manifest.contrast_name}: standard error",
                 ),
                 out_dir=plots_dir,

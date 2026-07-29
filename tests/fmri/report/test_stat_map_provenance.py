@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
@@ -85,4 +87,89 @@ def test_a_thresholded_panel_survives_nothing_surviving() -> None:
     stat_img, mask_img = _map_with_background()
     figure = stat_maps.stat_map_mosaic(stat_img, mask_img=mask_img, threshold=99.0)
     assert "0.0% clipped" in _provenance(figure)
+    plt.close(figure)
+
+
+# --- unsigned magnitudes --------------------------------------------------
+
+
+def _magnitude_img(seed: int = 0):
+    """A standard-error-like map: zero outside the brain, positive inside."""
+    rng = np.random.default_rng(seed)
+    data = np.zeros((16, 16, 16), dtype=np.float32)
+    brain = np.zeros((16, 16, 16), dtype=bool)
+    brain[2:12, 2:12, 2:12] = True
+    data[brain] = (0.4 + rng.random(int(brain.sum()))).astype(np.float32)
+    return (
+        nib.Nifti1Image(data, np.eye(4)),
+        nib.Nifti1Image(brain.astype(np.uint8), np.eye(4)),
+    )
+
+
+def test_a_magnitude_scale_starts_at_zero_and_is_not_symmetric() -> None:
+    # Through the signed path a standard error spanning 0 to 1.09 got limits of
+    # +/-1.09: half the ramp went to values that cannot occur and every voxel landed
+    # in the top quarter of the colours, so the panel rendered as a flat wash.
+    img, mask = _magnitude_img()
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.magnitude_mosaic(img, mask_img=mask)
+        except Exception:
+            pass
+    kwargs = mock_plot.call_args.kwargs
+    assert kwargs["vmin"] == 0.0
+    assert kwargs["symmetric_cbar"] is False
+    assert kwargs["vmax"] > 0
+
+
+def test_a_magnitude_panel_uses_the_perceptually_uniform_ramp_by_default() -> None:
+    img, mask = _magnitude_img()
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.magnitude_mosaic(img, mask_img=mask)
+        except Exception:
+            pass
+    assert mock_plot.call_args.kwargs["cmap"] == "cividis"
+
+
+def test_a_magnitude_panel_leaves_the_zero_background_transparent() -> None:
+    # Exact zeros outside the brain otherwise land on the ramp and draw a solid block
+    # over the anatomy.
+    img, mask = _magnitude_img()
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.magnitude_mosaic(img, mask_img=mask)
+        except Exception:
+            pass
+    threshold = mock_plot.call_args.kwargs["threshold"]
+    assert 0 < threshold < 1e-30
+
+
+def test_a_magnitude_panel_declares_that_its_scale_is_unsigned() -> None:
+    img, mask = _magnitude_img()
+    figure = stat_maps.magnitude_mosaic(img, mask_img=mask)
+    assert "not symmetric" in _provenance(figure)
+    plt.close(figure)
+
+
+def test_a_magnitude_panel_refuses_a_map_with_nothing_positive() -> None:
+    empty = nib.Nifti1Image(np.zeros((8, 8, 8), dtype=np.float32), np.eye(4))
+    with pytest.raises(ValueError, match="positive"):
+        stat_maps.magnitude_mosaic(empty)
+
+
+def test_the_magnitude_limit_comes_from_the_positive_values_only() -> None:
+    from fmri_pipeline.analysis.report import style as style_mod
+
+    img, mask = _magnitude_img(seed=3)
+    data = np.asarray(img.get_fdata())
+    positive = data[np.asanyarray(mask.dataobj).astype(bool) & (data > 0)]
+    expected = style_mod.robust_upper_limit(positive)
+
+    figure = stat_maps.magnitude_mosaic(img, mask_img=mask)
+    reported = float(_provenance(figure).split("0–")[1].split(" ")[0])
+    assert reported == pytest.approx(expected, rel=0.01)
     plt.close(figure)

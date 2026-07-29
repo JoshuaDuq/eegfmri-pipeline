@@ -111,6 +111,57 @@ def _healthy_and_collapsed():
     ]
 
 
+def test_a_constant_lag_is_measured_rather_than_reported_as_disagreement() -> None:
+    """Two trains offset by a fixed delay describe the same heartbeat.
+
+    On sub-0012 run-5, Analyzer wrote 545 markers, the ECG gave 571 beats, and *none*
+    matched: every marker sat 303 ms ahead of its beat, with an interquartile range of
+    19 ms. The panel reported "0.0% of beats marked", which reads as "the marker train
+    does not describe this heartbeat" — the opposite of what the data says.
+
+    The matched fraction is correct and stays as it is. What was missing is the
+    measurement that makes it readable: a tight lag distribution says offset, a broad one
+    says disagreement, and the share alone cannot tell them apart.
+    """
+    beats = np.arange(1.0, 60.0, 0.8)
+    lagged = compute_marker_agreement(
+        recording_id="run-1",
+        marker_onsets_s=beats - 0.303,
+        detected_onsets_s=beats,
+    )
+
+    assert lagged.n_matched == 0
+    assert lagged.median_lag_s == pytest.approx(0.303, abs=1e-6)
+    # Tight: every beat carries the same offset, so the spread is what separates this
+    # from two detectors that genuinely disagree.
+    assert lagged.lag_iqr_s == pytest.approx(0.0, abs=1e-6)
+
+
+def test_genuine_disagreement_has_no_tight_lag_to_report() -> None:
+    """Markers scattered against the beats must not read as a clean offset."""
+    rng = np.random.default_rng(0)
+    beats = np.arange(1.0, 60.0, 0.8)
+    scattered = compute_marker_agreement(
+        recording_id="run-1",
+        marker_onsets_s=np.sort(rng.uniform(1.0, 60.0, beats.size)),
+        detected_onsets_s=beats,
+    )
+
+    assert scattered.lag_iqr_s > 0.1
+
+
+def test_a_run_with_nothing_to_compare_reports_no_lag() -> None:
+    """One empty train leaves no pairs, which is absence of evidence, not a lag of zero."""
+    empty = compute_marker_agreement(
+        recording_id="run-1",
+        marker_onsets_s=np.array([]),
+        detected_onsets_s=np.arange(1.0, 10.0, 0.8),
+    )
+
+    assert empty.median_lag_s is None
+    assert empty.lag_iqr_s is None
+
+
 def test_the_table_puts_both_detectors_counts_side_by_side() -> None:
     document = marker_agreement_html(_healthy_and_collapsed())
 

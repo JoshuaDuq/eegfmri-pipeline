@@ -10,12 +10,14 @@ import numpy as np
 from fmri_pipeline.analysis.report.figures._display import figure_of, label_colorbar
 from fmri_pipeline.analysis.report.style import (
     GUIDE_COLOR,
+    MAGNITUDE_CMAP,
     SIGNED_CMAP,
     annotate_provenance,
     clipped_fraction,
     orientation_label,
     plot_context,
     robust_symmetric_limit,
+    robust_upper_limit,
     suprathreshold_limit,
 )
 
@@ -194,6 +196,75 @@ def stat_map_mosaic(
                 radiological=radiological,
                 limit_source=limit_source,
             ),
+        )
+        return figure
+
+
+def magnitude_mosaic(
+    img: Any,
+    *,
+    bg_img: Any = None,
+    mask_img: Any = None,
+    vmax: Optional[float] = None,
+    radiological: bool = False,
+    title: str = "",
+    cbar_label: str = "",
+    cmap: str = MAGNITUDE_CMAP,
+) -> Any:
+    """Draw a slice mosaic of an unsigned magnitude -- a standard error, a tSNR.
+
+    Separate from :func:`stat_map_mosaic` because a symmetric scale is wrong for a
+    quantity with no negative half. Drawn through the signed path, a standard error
+    got limits of ±1.09 for data spanning 0 to 1.09: half the ramp went to values
+    that cannot occur, every voxel landed in the top quarter of the colours, and the
+    panel rendered as a flat wash -- showing none of the spatial structure it exists
+    to show. Exact zeros outside the brain landed on the ramp's midpoint and drew a
+    solid block over the anatomy.
+
+    The limit therefore comes from :func:`robust_upper_limit` over the positive
+    values, the scale runs from zero, and non-positive voxels are left transparent so
+    the background shows through.
+    """
+    from nilearn import plotting
+
+    values, limit_source = _masked_values(img, mask_img)
+    positive = values[values > 0]
+    if positive.size == 0:
+        raise ValueError("A magnitude panel requires at least one positive voxel.")
+    resolved_vmax = float(vmax) if vmax is not None else robust_upper_limit(positive)
+
+    with plot_context():
+        display = plotting.plot_stat_map(
+            img,
+            bg_img=bg_img,
+            title=title or None,
+            display_mode="mosaic",
+            # Just above zero: hides the background without hiding any measurement,
+            # since a magnitude of exactly zero is an absent voxel rather than a small
+            # one.
+            threshold=float(np.finfo(np.float32).tiny),
+            colorbar=True,
+            vmin=0.0,
+            vmax=resolved_vmax,
+            cmap=cmap,
+            dim=0,
+            black_bg=False,
+            symmetric_cbar=False,
+            annotate=True,
+            radiological=radiological,
+        )
+        label_colorbar(display, cbar_label)
+        figure = figure_of(display)
+        annotate_provenance(
+            figure,
+            [
+                f"n = {positive.size:,} voxels",
+                f"scale 0–{resolved_vmax:.3g} "
+                f"({float(np.mean(positive > resolved_vmax)):.1%} clipped)"
+                + (f", from {limit_source}" if limit_source else ""),
+                "unsigned magnitude: the scale starts at zero and is not symmetric",
+                orientation_label(radiological),
+            ],
         )
         return figure
 
@@ -381,4 +452,10 @@ def glass_brain(
         return figure
 
 
-__all__ = ["apply_sidedness", "dual_coded_mosaic", "glass_brain", "stat_map_mosaic"]
+__all__ = [
+    "apply_sidedness",
+    "dual_coded_mosaic",
+    "glass_brain",
+    "magnitude_mosaic",
+    "stat_map_mosaic",
+]

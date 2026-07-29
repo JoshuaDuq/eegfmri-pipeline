@@ -317,3 +317,21 @@ def test_the_carpet_falls_back_when_no_fitted_mask_was_recorded(tmp_path: Path) 
             cfg=_cfg(include_tsnr_qc=False),
         )
     assert captured.get("voxel_source") == "nonzero mean signal"
+
+
+# --- units ----------------------------------------------------------------
+
+
+def test_the_standard_error_colourbar_is_not_labelled_effect(tmp_path: Path) -> None:
+    # Same units as the effect, but a different quantity: reusing the effect label
+    # named the wrong map on the colourbar.
+    manifest = _manifest(tmp_path)
+    assert subject._error_units(manifest).startswith("standard error")
+    assert "arbitrary BOLD units" in subject._error_units(manifest)
+
+
+def test_scaled_models_carry_percent_signal_change_into_the_error_units(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(tmp_path, signal_scaling=True)
+    assert subject._error_units(manifest) == "standard error (% signal change)"

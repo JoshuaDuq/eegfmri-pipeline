@@ -20,6 +20,7 @@ from typing import Any, Callable, Sequence
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.ticker import NullFormatter, ScalarFormatter
 import mne
 import numpy as np
 import pandas as pd
@@ -53,15 +54,27 @@ MINIMUM_BEATS = 3
 #: Multiple of the run's median interval at which a single missed beat lands.
 MISSED_BEAT_FACTOR = 1.5
 
-#: Interval window the tachogram panels are drawn over, in seconds.
+#: Interval range a working detector on a resting or task recording stays inside.
 #:
-#: 0.3–2.0 s spans 200 down to 30 bpm, which covers every rate a resting or task
-#: recording plausibly contains including the extremes. It is a fixed constant rather
-#: than a percentile of the data so that a run with a failed detector cannot rescale the
-#: panels of the runs beside it, and so that the same interval occupies the same height
-#: in every report. Samples outside it are drawn on the boundary and counted, never
-#: dropped.
+#: 0.3–2.0 s spans 200 down to 30 bpm, which covers every rate such a recording plausibly
+#: contains including the extremes. This is the physiological statement; it is not the
+#: axis. See :data:`DRAWN_RR_RANGE_S`.
 PLAUSIBLE_RR_RANGE_S = (0.3, 2.0)
+
+#: Interval window the tachogram panels are drawn over, in seconds, on a log axis.
+#:
+#: Fixed rather than taken from the data, so a run with a failed detector cannot rescale
+#: the panels beside it and the same interval occupies the same height in every report.
+#:
+#: Wider than :data:`PLAUSIBLE_RR_RANGE_S`, and logarithmic, because clipping to the
+#: plausible range censored exactly the runs the panel exists to expose. On sub-0012
+#: run-1, 82 of 84 long intervals fell outside a linear 0.3–2 s window and were drawn
+#: stacked on the boundary: the count reached the title, but a 2.1 s gap and a 60 s one
+#: became the same mark, and the magnitude is the measurement. Logarithmic keeps the
+#: ordinary rhythm legible while placing a lapse where it actually falls — the plausible
+#: band still owns more than half the panel height, which is what the fixed window was
+#: protecting. Samples outside even this window are drawn on the boundary and counted.
+DRAWN_RR_RANGE_S = (0.3, 10.0)
 
 
 @dataclass(frozen=True)
@@ -865,25 +878,28 @@ def plot_rr_intervals(
     runs 2 and 4 were not acquired, were not measured, or failed, and the answer decides
     whether the pulse correction had markers to work from at all.
 
-    Every panel shares one fixed interval window, :data:`PLAUSIBLE_RR_RANGE_S`, so a run
+    Every panel shares one fixed logarithmic window, :data:`DRAWN_RR_RANGE_S`, so a run
     can be read against its neighbours.
 
-    The window is a physiological constant rather than the range of the data. Letting the
-    data set it meant one run whose detector had collapsed — seven markers across eight
-    minutes, intervals of two minutes — stretched the shared axis across two orders of
-    magnitude, and the ordinary beat-to-beat variation of every working run was flattened
-    into a band a few pixels tall. What the figure resolves now does not depend on which
-    runs happen to share it.
+    The window is a constant rather than the range of the data. Letting the data set it
+    meant one run whose detector had collapsed — seven markers across eight minutes,
+    intervals of two minutes — stretched the shared axis, and the ordinary beat-to-beat
+    variation of every working run was flattened into a band a few pixels tall. What the
+    figure resolves does not depend on which runs happen to share it.
 
-    Nothing is hidden by the window. Intervals outside it are drawn as markers on the
-    boundary they exceeded and counted in the panel title, so a collapsed detector still
-    reads as collapsed — it simply no longer costs every other panel its resolution. This
-    keeps the property the shared log axis was protecting: no run is excluded from the
-    figure, and no threshold decides which runs "look like a rhythm".
+    It is logarithmic, and wider than :data:`PLAUSIBLE_RR_RANGE_S`, because a linear
+    window clipped to the plausible range censored the runs the panel exists to expose:
+    on sub-0012 run-1, 82 of 84 long intervals landed on the boundary, which reported how
+    many there were and not how long any of them was. The plausible band still occupies
+    more than half the height, so the rhythm stays readable.
+
+    Intervals outside even this window are drawn as markers on the boundary they exceeded
+    and counted in the panel title, so a detector that collapsed entirely still reads as
+    collapsed, and no threshold decides which runs "look like a rhythm".
     """
     if not series:
         raise ValueError("The tachogram requires at least one run with R markers.")
-    low, high = PLAUSIBLE_RR_RANGE_S
+    low, high = DRAWN_RR_RANGE_S
     figure, axes = plt.subplots(
         len(series),
         1,
@@ -934,16 +950,33 @@ def plot_rr_intervals(
         )
         if clipped:
             title += f" · {clipped} outside the drawn range"
-        axis.set(title=title, ylabel="RR (s)", ylim=(low, high))
+        # The band a working detector stays inside, drawn so the widened axis still says
+        # where "plausible" ends without clipping anything to it.
+        axis.axhspan(
+            *PLAUSIBLE_RR_RANGE_S,
+            color=GUIDE_COLOR,
+            alpha=0.07,
+            linewidth=0,
+            zorder=0,
+        )
+        axis.set(title=title, ylabel="RR (s)", ylim=(low, high), yscale="log")
+        # Plain seconds rather than the powers of ten a log axis labels by default: the
+        # reader is comparing intervals against a heart rate, and "10^0" is not a number
+        # anyone converts to bpm in their head.
+        axis.yaxis.set_major_formatter(ScalarFormatter())
+        axis.yaxis.set_minor_formatter(NullFormatter())
+        axis.set_yticks([0.3, 0.5, 1.0, 2.0, 5.0, 10.0])
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
     axes[-1, 0].set_xlabel("Time in run (min)")
+    plausible_low, plausible_high = PLAUSIBLE_RR_RANGE_S
     caption = (
         "Beat-to-beat intervals from the R markers · dashed line is the run median\n"
         f"dotted line is {MISSED_BEAT_FACTOR:g}× the median, above which an interval is "
         "counted as a missed beat\n"
-        f"axis fixed to {low:g}–{high:g} s; triangles mark intervals outside it, "
-        "drawn on the boundary they exceeded"
+        f"log axis fixed to {low:g}–{high:g} s; shading marks the {plausible_low:g}–"
+        f"{plausible_high:g} s a working detector stays inside\n"
+        "triangles mark intervals outside the axis, drawn on the boundary they exceeded"
     )
     if missing:
         caption += (
@@ -1184,6 +1217,7 @@ __all__ = [
     "plot_marker_agreement",
     "plot_rr_intervals",
     "plot_rr_poincare",
+    "DRAWN_RR_RANGE_S",
     "PLAUSIBLE_RR_RANGE_S",
     "rr_intervals_html",
 ]
