@@ -30,11 +30,12 @@ def test_resolve_eeg_bids_root_uses_rest_root_when_rest_mode_enabled() -> None:
     assert resolved == Path("/tmp/rest")
 
 
-def test_resolve_eeg_bids_root_requires_rest_root_when_rest_mode_enabled() -> None:
+def test_resolve_eeg_bids_root_falls_back_to_the_primary_root() -> None:
+    """The rest-specific root is for a study that acquires *both* and keeps them apart.
+    Requiring it made a rest-only study write the same path twice under a second name."""
     config = DotConfig({"paths": {"bids_root": "/tmp/task"}})
 
-    with pytest.raises(ValueError, match="paths.bids_rest_root"):
-        resolve_eeg_bids_root(config, task_is_rest=True)
+    assert resolve_eeg_bids_root(config, task_is_rest=True) == Path("/tmp/task")
 
 
 def test_resolve_eeg_deriv_root_uses_rest_root_when_rest_mode_enabled() -> None:
@@ -52,11 +53,26 @@ def test_resolve_eeg_deriv_root_uses_rest_root_when_rest_mode_enabled() -> None:
     assert resolved == Path("/tmp/derivatives-rest")
 
 
-def test_resolve_eeg_deriv_root_requires_rest_root_when_rest_mode_enabled() -> None:
+def test_resolve_eeg_deriv_root_falls_back_to_the_primary_root() -> None:
     config = DotConfig({"paths": {"deriv_root": "/tmp/derivatives-task"}})
 
-    with pytest.raises(ValueError, match="paths.deriv_rest_root"):
-        resolve_eeg_deriv_root(config, task_is_rest=True)
+    assert resolve_eeg_deriv_root(config, task_is_rest=True) == Path("/tmp/derivatives-task")
+
+
+@pytest.mark.parametrize(
+    "resolve,key",
+    [
+        (resolve_eeg_bids_root, "paths.bids_root"),
+        (resolve_eeg_deriv_root, "paths.deriv_root"),
+    ],
+)
+def test_rest_mode_with_no_root_at_all_names_the_primary_key(resolve, key) -> None:
+    """The fallback removed the demand for a second root, not the error for having none.
+    What it must name is the key a rest-only study actually sets."""
+    config = DotConfig({"paths": {}})
+
+    with pytest.raises(ValueError, match=key):
+        resolve(config, task_is_rest=True)
 
 
 def test_get_available_subjects_uses_rest_root_in_rest_mode(tmp_path: Path) -> None:
