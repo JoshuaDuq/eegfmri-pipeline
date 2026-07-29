@@ -70,6 +70,7 @@ class ContrastManifest:
     signal_scaling: bool
     confound_strategy: str
 
+
     #: Whether ``mask`` is the mask the GLM was fitted inside, rather than one
     #: discovered from the preprocessing derivatives. The two differ: the fitted mask
     #: is the intersection across runs, a discovered one is a single run's. Only the
@@ -94,6 +95,16 @@ class ContrastManifest:
     #: per run depending on what fMRIPrep wrote, and the difference decides what the
     #: residuals contain.
     confound_columns: Tuple[str, ...] = ()
+
+    #: How the model scaled its signal, from
+    #: :func:`~fmri_pipeline.utils.bold_discovery.fitted_signal_scaling_mode`.
+    #:
+    #: ``signal_scaling`` says whether any scaling happened; this says which, and the
+    #: three modes do not produce the same quantity. Only ``voxel-mean`` divides each
+    #: voxel by its own temporal mean, which is what makes an effect a percentage of
+    #: that voxel's own baseline -- percent signal change. Recorded separately so the
+    #: units line can name the right one rather than assuming the common case.
+    signal_scaling_mode: Optional[str] = None
 
 
 def _encode(value: Any) -> Any:
@@ -302,7 +313,7 @@ def write_report_manifest(
     two_sided: bool = True,
     radiological: bool = False,
     smoothing_fwhm: Optional[float] = None,
-    signal_scaling: bool = False,
+    signal_scaling_mode: Optional[str] = None,
     mask_is_analysis_mask: bool = False,
     contrast_cfg: Any = None,
 ) -> Optional[Path]:
@@ -370,7 +381,10 @@ def write_report_manifest(
             smoothing_fwhm=(
                 None if smoothing_fwhm is None else float(smoothing_fwhm)
             ),
-            signal_scaling=bool(signal_scaling),
+            # Derived from the mode rather than passed alongside it, so the two cannot
+            # disagree about whether scaling happened.
+            signal_scaling=signal_scaling_mode is not None,
+            signal_scaling_mode=signal_scaling_mode,
             confound_strategy=str(meta.get("confounds_strategy", "unspecified")),
             # Only true when the caller passed the mask the model was fitted inside.
             # A mask discovered from the preprocessing derivatives is a single run's,

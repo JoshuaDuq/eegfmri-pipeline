@@ -11,6 +11,7 @@ import pytest
 
 from fmri_pipeline.analysis.plotting_config import FmriReportConfig
 from fmri_pipeline.analysis.report import subject
+from fmri_pipeline.analysis.report.figures import coverage
 from fmri_pipeline.analysis.report.manifest import ContrastManifest
 
 
@@ -198,6 +199,76 @@ def test_smoothness_facts_survive_a_map_they_cannot_measure(tmp_path: Path) -> N
     assert subject.smoothness_facts(tiny, mask_img=None, cluster_min_voxels=10) == []
 
 
+# --- smoothness is a property of the noise, not of the signal -------------
+
+
+def _smoothed_map_with_a_blob(fwhm_mm: float = 6.0, voxel_mm: float = 3.0):
+    """A z map of noise smoothed to a known FWHM, with a strong activation blob in it."""
+    from scipy import ndimage
+
+    rng = np.random.default_rng(0)
+    field = rng.standard_normal((40, 40, 40))
+    sigma_voxels = (fwhm_mm / voxel_mm) / np.sqrt(8.0 * np.log(2.0))
+    smoothed = ndimage.gaussian_filter(field, sigma=sigma_voxels)
+    smoothed /= smoothed.std()
+    smoothed[14:26, 14:26, 14:26] += 12.0
+    affine = np.diag([voxel_mm, voxel_mm, voxel_mm, 1.0])
+    mask = nib.Nifti1Image(np.ones((40, 40, 40), dtype=np.uint8), affine)
+    return nib.Nifti1Image(smoothed.astype(np.float32), affine), mask
+
+
+def test_the_smoothness_estimate_recovers_the_applied_kernel_from_the_noise() -> None:
+    # Ground truth: a field smoothed to 6 mm on a 3 mm grid. Excluding the blob is what
+    # makes the estimate a measurement of the smoothing rather than of the signal.
+    stat_img, mask = _smoothed_map_with_a_blob()
+    noise, source = subject.noise_mask(stat_img, mask_img=mask, threshold=2.3)
+    fwhm = coverage.estimate_fwhm(stat_img, mask=noise)
+    assert "sub-threshold" in source
+    assert float(np.mean(fwhm)) == pytest.approx(6.0, rel=0.15)
+
+
+def test_including_the_activation_inflates_the_smoothness_estimate() -> None:
+    # The error being corrected: signal is spatially structured, and the estimator
+    # cannot tell that structure from smoothing.
+    stat_img, mask = _smoothed_map_with_a_blob()
+    whole, _source = subject.noise_mask(stat_img, mask_img=mask, threshold=None)
+    noise, _source = subject.noise_mask(stat_img, mask_img=mask, threshold=2.3)
+    assert float(np.mean(coverage.estimate_fwhm(stat_img, mask=whole))) > float(
+        np.mean(coverage.estimate_fwhm(stat_img, mask=noise))
+    )
+
+
+def test_an_unthresholded_map_names_its_estimate_an_upper_bound() -> None:
+    # There is no height to exclude by, and a number that may be inflated must not be
+    # reported as though it were not.
+    stat_img, mask = _smoothed_map_with_a_blob()
+    _noise, source = subject.noise_mask(stat_img, mask_img=mask, threshold=None)
+    assert "upper bound" in source
+
+
+def test_a_map_that_is_suprathreshold_everywhere_falls_back_to_the_whole_mask() -> None:
+    # Excluding every voxel would leave nothing to estimate from at all.
+    affine = np.eye(4)
+    stat_img = nib.Nifti1Image(np.full((8, 8, 8), 9.0, dtype=np.float32), affine)
+    mask = nib.Nifti1Image(np.ones((8, 8, 8), dtype=np.uint8), affine)
+    voxels, source = subject.noise_mask(stat_img, mask_img=mask, threshold=2.3)
+    assert voxels is not None and voxels.all()
+    assert "upper bound" in source
+
+
+def test_the_cluster_caption_states_the_search_volume_in_resels(tmp_path: Path) -> None:
+    # Every corrected height in this report divides alpha across voxels; the resel
+    # count is what says how far that overshoots the family of independent tests.
+    manifest = _manifest(tmp_path, cluster_min_voxels=10)
+    facts = subject.smoothness_facts(
+        nib.load(str(manifest.stat_map)),
+        mask_img=nib.load(str(manifest.mask)),
+        cluster_min_voxels=10,
+        threshold=2.3,
+    )
+    assert any("search volume" in fact and "resels" in fact for fact in facts)
+
+
 # --- the anatomical underlay ----------------------------------------------
 
 
@@ -214,6 +285,41 @@ def test_volume_panels_are_drawn_over_the_discovered_anatomy(tmp_path: Path) -> 
             manifest=manifest, out_dir=tmp_path, cfg=_cfg(), background=background
         )
     assert mosaic.call_args.kwargs["bg_img"] is background
+
+
+def test_the_report_trims_the_underlay_to_what_was_modelled(tmp_path: Path) -> None:
+    # Nilearn picks slice positions across the underlay's extent, so a whole-head T1w
+    # put the vertex and the neck in every mosaic and left the brain occupying about
+    # half of each tile.
+    manifest = _manifest(tmp_path)
+    background = nib.Nifti1Image(
+        np.ones((60, 60, 60), dtype=np.float32), np.eye(4)
+    )
+    captured = {}
+
+    def _record(figure, **kwargs):
+        captured["bg"] = kwargs.get("bg_img")
+        raise RuntimeError("stop after the call is recorded")
+
+    with patch(
+        "fmri_pipeline.analysis.report.subject.load_background",
+        return_value=(background, "anat.nii.gz"),
+    ), patch(
+        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic",
+        side_effect=_record,
+    ):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "report.html",
+            cfg=_cfg(),
+        )
+
+    drawn = captured["bg"]
+    assert drawn is not None
+    # The mask in this fixture is 10^3 inside a 60^3 underlay, so a trimmed underlay
+    # has to be materially smaller than the one that was loaded.
+    assert np.prod(drawn.shape[:3]) < np.prod(background.shape[:3])
 
 
 def test_a_missing_background_is_reported_rather_than_left_to_assumption(
@@ -333,5 +439,37 @@ def test_the_standard_error_colourbar_is_not_labelled_effect(tmp_path: Path) -> 
 def test_scaled_models_carry_percent_signal_change_into_the_error_units(
     tmp_path: Path,
 ) -> None:
-    manifest = _manifest(tmp_path, signal_scaling=True)
+    manifest = _manifest(
+        tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean"
+    )
     assert subject._error_units(manifest) == "standard error (% signal change)"
+
+
+def test_voxel_mean_scaling_puts_percent_signal_change_on_the_effect_colourbar(
+    tmp_path: Path,
+) -> None:
+    # The units the maps have actually been in all along. Dividing each voxel by its
+    # own temporal mean is what makes an effect a percentage of that voxel's baseline.
+    manifest = _manifest(
+        tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean"
+    )
+    assert subject._effect_units(manifest) == "% signal change"
+
+
+def test_grand_mean_scaling_is_not_called_percent_signal_change(tmp_path: Path) -> None:
+    # A different denominator is a different quantity. Both modes answer "scaled", and
+    # collapsing them onto one label would put a number on the colourbar that the map
+    # does not carry.
+    manifest = _manifest(
+        tmp_path, signal_scaling=True, signal_scaling_mode="grand-mean"
+    )
+    assert subject._effect_units(manifest) == "% of the grand mean signal"
+
+
+def test_an_unrecognised_scaling_mode_declines_to_name_a_denominator(
+    tmp_path: Path,
+) -> None:
+    # Scaled, but by what is not known. A guess here would be worse than the neutral
+    # label, because a reader cannot check it against the map.
+    manifest = _manifest(tmp_path, signal_scaling=True, signal_scaling_mode="unknown")
+    assert subject._effect_units(manifest) == "effect (scaled BOLD units)"

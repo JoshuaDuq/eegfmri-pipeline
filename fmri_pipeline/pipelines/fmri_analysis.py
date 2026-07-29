@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
+from fmri_pipeline.utils.bold_discovery import fitted_signal_scaling_mode
 from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 from fmri_pipeline.utils.text import safe_slug
 
@@ -519,7 +520,13 @@ class FmriAnalysisPipeline(PipelineBase):
             smoothing_fwhm=_optional_positive_float(
                 getattr(contrast_cfg, "smoothing_fwhm", None)
             ),
-            signal_scaling=bool(getattr(contrast_cfg, "signal_scaling", False)),
+            # Off the fitted model, not off the config. `contrast_cfg` has no
+            # `signal_scaling` field, so reading one recorded "not scaled" for every
+            # contrast ever produced -- while the model scales unconditionally -- and
+            # the report labelled percent-signal-change maps "arbitrary BOLD units".
+            signal_scaling_mode=fitted_signal_scaling_mode(
+                getattr(glm_result, "flm", None)
+            ),
             threshold_mode=getattr(plot_cfg_for_manifest, "threshold_mode", "z"),
             z_threshold=getattr(plot_cfg_for_manifest, "z_threshold", 2.3),
             fdr_q=getattr(plot_cfg_for_manifest, "fdr_q", 0.05),

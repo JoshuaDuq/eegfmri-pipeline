@@ -255,6 +255,46 @@ def get_tr_from_bold(bold_path: Path) -> float:
     raise ValueError(f"Could not determine TR for {bold_path}")
 
 
+#: What nilearn's ``signal_scaling`` axis codes mean, named.
+#:
+#: Written into the manifest and read back by the report to put units on an effect
+#: map. A bare ``0`` there would be a number no reader of the JSON could interpret,
+#: and the three modes do not produce the same quantity.
+_SIGNAL_SCALING_MODES = {
+    0: "voxel-mean",
+    1: "timepoint-mean",
+    (0, 1): "grand-mean",
+}
+
+
+def fitted_signal_scaling_mode(model: Any) -> Optional[str]:
+    """How a fitted model scaled its signal, or None if it scaled none.
+
+    Read off the model rather than off the config, because the config has no such
+    setting: :func:`build_first_level_model` passes ``signal_scaling=0``
+    unconditionally. A manifest that asked the config recorded "no signal scaling" for
+    every contrast this pipeline has ever produced, and the report then labelled effect
+    maps that are in percent signal change "arbitrary BOLD units" -- refusing, on the
+    strength of a value nobody had set, to put units on the one map that has them.
+
+    ``voxel-mean`` is the mode that yields percent signal change: each voxel is divided
+    by its own temporal mean, so an effect is a percentage of that voxel's baseline.
+    The other two are percentages of something else and are named separately rather
+    than collapsed onto the same label.
+
+    Returns ``None`` for a mode nilearn accepts but this vocabulary does not name, so an
+    unrecognised setting costs the units line rather than mislabelling it.
+    """
+    scaling = getattr(model, "signal_scaling", False)
+    if scaling is False or scaling is None:
+        return None
+    key = tuple(scaling) if isinstance(scaling, (tuple, list)) else scaling
+    try:
+        return _SIGNAL_SCALING_MODES.get(key)
+    except TypeError:  # pragma: no cover - an unhashable setting nilearn cannot take
+        return None
+
+
 def build_first_level_model(
     *,
     tr: float,

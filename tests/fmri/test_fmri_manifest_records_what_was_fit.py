@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 
 from fmri_pipeline.pipelines import fmri_analysis as pipeline_module
+from fmri_pipeline.utils import bold_discovery
 from fmri_pipeline.pipelines.fmri_analysis import (
     FmriAnalysisPipeline,
     _contrast_vector_for_design,
@@ -266,6 +267,44 @@ def test_a_manifest_written_before_the_field_existed_still_loads(tmp_path: Path)
     )
     # Loads, and loads as the conservative answer.
     assert read_manifest(path).mask_is_analysis_mask is False
+
+
+# --- signal scaling, off the model rather than off the config -------------
+
+
+def test_the_scaling_mode_is_read_from_the_fitted_model() -> None:
+    # The config carries no `signal_scaling`, so asking it recorded "unscaled" for
+    # every contrast this pipeline has produced -- while the model scales every one.
+    model = types.SimpleNamespace(signal_scaling=0)
+    assert bold_discovery.fitted_signal_scaling_mode(model) == "voxel-mean"
+
+
+def test_grand_mean_scaling_is_named_separately_from_per_voxel_scaling() -> None:
+    model = types.SimpleNamespace(signal_scaling=(0, 1))
+    assert bold_discovery.fitted_signal_scaling_mode(model) == "grand-mean"
+
+
+def test_a_model_that_scaled_nothing_reports_no_mode() -> None:
+    assert (
+        bold_discovery.fitted_signal_scaling_mode(
+            types.SimpleNamespace(signal_scaling=False)
+        )
+        is None
+    )
+
+
+def test_an_absent_model_costs_the_units_line_rather_than_the_manifest() -> None:
+    # write_report_manifest is called after the maps are on disk; a missing attribute
+    # here must not be the thing that loses them.
+    assert bold_discovery.fitted_signal_scaling_mode(None) is None
+
+
+def test_the_model_this_pipeline_builds_scales_per_voxel() -> None:
+    # The claim the units label rests on, checked against the constructor rather than
+    # asserted in a comment.
+    cfg = types.SimpleNamespace(hrf_model="spm", drift_model="cosine", high_pass_hz=0.008)
+    model = bold_discovery.build_first_level_model(tr=2.0, cfg=cfg)
+    assert bold_discovery.fitted_signal_scaling_mode(model) == "voxel-mean"
 
 
 def test_the_module_exposes_the_helpers_the_pipeline_calls() -> None:

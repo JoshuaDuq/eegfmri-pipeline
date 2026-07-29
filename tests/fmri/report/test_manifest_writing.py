@@ -48,7 +48,7 @@ def test_a_fitted_contrast_leaves_a_manifest_beside_its_stat_maps(
         stat_map=stat_map,
         run_meta=_run_meta(),
         smoothing_fwhm=6.0,
-        signal_scaling=True,
+        signal_scaling_mode="voxel-mean",
     )
 
     assert written.name == MANIFEST_FILENAME
@@ -61,7 +61,33 @@ def test_a_fitted_contrast_leaves_a_manifest_beside_its_stat_maps(
     assert restored.t_r == 2.0
     assert restored.smoothing_fwhm == 6.0
     assert restored.signal_scaling is True
+    assert restored.signal_scaling_mode == "voxel-mean"
     assert restored.confound_strategy == "24HMP+aCompCor"
+
+
+def test_the_manifest_derives_that_no_scaling_happened_from_an_absent_mode(
+    tmp_path: Path,
+) -> None:
+    # The flag and the mode cannot disagree, because there is only one of them on the
+    # wire. Recording "scaled" beside "no mode" would leave the units unresolvable.
+    contrast_dir = tmp_path / "c"
+    contrast_dir.mkdir()
+    stat_map = contrast_dir / "z.nii.gz"
+    stat_map.touch()
+
+    restored = read_manifest(
+        write_report_manifest(
+            contrast_dir=contrast_dir,
+            subject="sub-01",
+            task="heat",
+            contrast_name="heat",
+            stat_map=stat_map,
+            run_meta=_run_meta(),
+            signal_scaling_mode=None,
+        )
+    )
+    assert restored.signal_scaling is False
+    assert restored.signal_scaling_mode is None
 
 
 def test_the_manifest_records_why_a_run_was_excluded(tmp_path: Path) -> None:
