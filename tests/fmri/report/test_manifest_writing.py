@@ -11,8 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from fmri_pipeline.analysis.contrast_builder import write_report_manifest
-from fmri_pipeline.analysis.report.manifest import MANIFEST_FILENAME, read_manifest
+from fmri_pipeline.analysis.report.manifest import (
+    MANIFEST_FILENAME,
+    read_manifest,
+    write_report_manifest,
+)
 
 
 def _run_meta(**overrides) -> dict:

@@ -186,6 +186,128 @@ def sample_masks_from_confounds(paths: Sequence[Any]) -> List[np.ndarray]:
     return masks
 
 
+def _run_label(path: Any, fallback_index: int) -> str:
+    """Name a run from its BIDS filename, or by position when it carries no entity."""
+    text = str(path)
+    for part in Path(text).name.split("_"):
+        if part.startswith("run-"):
+            return part
+    return f"run-{fallback_index:02d}"
+
+
+def _report_space(analysis_space: Any) -> str:
+    """Collapse an fMRIPrep space label to what the report reasons about.
+
+    The report only asks one question of a space: whether the glass-brain
+    projection is defined for it. Everything that is not MNI is native as far as
+    that question goes.
+    """
+    text = str(analysis_space or "").strip().lower()
+    return "mni" if text.startswith("mni") else "native"
+
+
+def write_report_manifest(
+    *,
+    contrast_dir: Path,
+    subject: str,
+    task: str,
+    contrast_name: str,
+    stat_map: Path,
+    run_meta: Any,
+    effect_map: Optional[Path] = None,
+    variance_map: Optional[Path] = None,
+    mask: Optional[Path] = None,
+    design_matrices: Sequence[Path] = (),
+    contrast_vector: Optional[Sequence[float]] = None,
+    contrast_columns: Sequence[str] = (),
+    threshold_mode: str = "z",
+    z_threshold: float = 2.3,
+    fdr_q: float = 0.05,
+    cluster_min_voxels: int = 0,
+    two_sided: bool = True,
+    radiological: bool = False,
+    smoothing_fwhm: Optional[float] = None,
+    signal_scaling: bool = False,
+) -> Optional[Path]:
+    """Record what was fit, beside what was fit.
+
+    This is the seam that lets a report be rendered from a derivatives tree without
+    the model. The report reads manifests and nothing else, so anything it needs
+    about a contrast has to be written here.
+
+    Returns ``None`` and logs rather than raising: by the time this runs the GLM has
+    already been fitted and its maps are on disk, and losing that to a problem with
+    reporting metadata would be the most expensive failure available.
+    """
+    try:
+        meta: Dict[str, Any] = run_meta if isinstance(run_meta, dict) else {}
+        if not isinstance(run_meta, dict):
+            raise TypeError(f"run_meta must be a mapping, got {type(run_meta).__name__}")
+
+        bold_paths = [Path(str(p)) for p in meta.get("included_bold_paths", []) or []]
+        confounds_paths = [
+            Path(str(p))
+            for p in (meta.get("included_confounds_paths", []) or [])
+            if p is not None
+        ]
+        included_runs = tuple(
+            _run_label(path, index) for index, path in enumerate(bold_paths, start=1)
+        )
+        excluded_runs = tuple(
+            (
+                f"run-{int(entry.get('run_index', 0)):02d}",
+                str(entry.get("reason", "unspecified")),
+            )
+            for entry in (meta.get("skipped_runs", []) or [])
+            if isinstance(entry, dict)
+        )
+
+        t_r = meta.get("tr")
+        manifest = ContrastManifest(
+            subject=subject,
+            task=task,
+            contrast_name=contrast_name,
+            space=_report_space(meta.get("analysis_space")),
+            stat_map=Path(stat_map),
+            effect_map=Path(effect_map) if effect_map else None,
+            variance_map=Path(variance_map) if variance_map else None,
+            mask=Path(mask) if mask else None,
+            threshold_mode=threshold_mode,
+            z_threshold=float(z_threshold),
+            fdr_q=float(fdr_q),
+            cluster_min_voxels=int(cluster_min_voxels),
+            two_sided=bool(two_sided),
+            radiological=bool(radiological),
+            design_matrices=tuple(Path(p) for p in design_matrices),
+            contrast_vector=(
+                tuple(float(v) for v in contrast_vector)
+                if contrast_vector is not None
+                else None
+            ),
+            contrast_columns=tuple(str(c) for c in contrast_columns),
+            included_runs=included_runs,
+            excluded_runs=excluded_runs,
+            bold_paths=tuple(bold_paths),
+            confounds_paths=tuple(confounds_paths),
+            t_r=None if t_r is None else float(t_r),
+            smoothing_fwhm=(
+                None if smoothing_fwhm is None else float(smoothing_fwhm)
+            ),
+            signal_scaling=bool(signal_scaling),
+            confound_strategy=str(meta.get("confounds_strategy", "unspecified")),
+        )
+        return write_manifest(manifest, Path(contrast_dir) / MANIFEST_FILENAME)
+    except Exception as exc:
+        logger.warning(
+            "Could not write the report manifest for %s/%s (%s). The contrast's "
+            "maps are unaffected; the report will not cover this contrast.",
+            subject,
+            contrast_name,
+            exc,
+        )
+        return None
+
+
 __all__ = [
     "MANIFEST_FILENAME",
     "ContrastManifest",
@@ -193,4 +315,5 @@ __all__ = [
     "read_manifest",
     "sample_masks_from_confounds",
     "write_manifest",
+    "write_report_manifest",
 ]

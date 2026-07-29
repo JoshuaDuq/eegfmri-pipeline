@@ -145,11 +145,10 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         self.assertEqual(cfg.fmriprep_space, "T1w")
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
         self.assertGreaterEqual(out_mni_loads["count"], 1)
-        self.assertEqual(len(report_calls), 2)
-        self.assertIsNotNone(report_calls[0]["mni_effect_img"])
-        self.assertIsNotNone(report_calls[0]["mni_variance_img"])
-        self.assertIsNotNone(report_calls[1]["mni_effect_img"])
-        self.assertIsNotNone(report_calls[1]["mni_variance_img"])
+        # Reporting no longer runs inside the GLM path: the analysis writes stat
+        # maps and a manifest, and `fmri-analysis report` renders from those. This
+        # is what stops subject-level QC being recomputed once per contrast.
+        self.assertEqual(report_calls, [])
 
     def test_mni_save_and_contrast_compute_exceptions_surface(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline

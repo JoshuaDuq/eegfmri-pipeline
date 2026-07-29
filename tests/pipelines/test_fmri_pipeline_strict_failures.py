@@ -13,7 +13,7 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestFmriPipelineStrictFailures(unittest.TestCase):
-    def test_process_subject_raises_when_enabled_plotting_fails(self):
+    def test_process_subject_is_unaffected_by_a_broken_reporting_module(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
 
         tmp = Path(tempfile.mkdtemp())
@@ -56,11 +56,14 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
         )
         fake_nib = types.SimpleNamespace(save=lambda img, path: None, load=lambda path: "img")
         fake_plotting = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        fake_reporting = types.SimpleNamespace(
-            run_fmri_plotting_and_report=lambda **kwargs: (_ for _ in ()).throw(
-                RuntimeError("plot-fail")
-            )
-        )
+        # Reporting is no longer reachable from the GLM path. A reporting module
+        # that explodes on any attribute access proves it: if process_subject still
+        # touched it, this would raise.
+        class ExplodingReporting(types.ModuleType):
+            def __getattr__(self, name):
+                raise RuntimeError("plot-fail")
+
+        fake_reporting = ExplodingReporting("fmri_pipeline.analysis.reporting")
 
         with patch.dict(
             sys.modules,
@@ -71,14 +74,13 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
                 "fmri_pipeline.analysis.reporting": fake_reporting,
             },
         ):
-            with self.assertRaisesRegex(RuntimeError, "plot-fail"):
-                pipeline.process_subject(
-                    "0001",
-                    task="pain",
-                    contrast_cfg=ContrastCfg(),
-                    plotting_cfg=PlotCfg(),
-                    dry_run=False,
-                )
+            pipeline.process_subject(
+                "0001",
+                task="pain",
+                contrast_cfg=ContrastCfg(),
+                plotting_cfg=PlotCfg(),
+                dry_run=False,
+            )
 
     def test_process_subject_raises_when_sidecar_write_fails(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline

@@ -167,3 +167,48 @@ def test_the_table_is_written_before_strict_raises(tmp_path) -> None:
         )
 
     assert out.is_file(), "the measurements must survive the raise"
+
+
+def test_gap_free_coverage_separates_a_sparse_train_from_a_short_one() -> None:
+    """A run can span almost all of its recording while marking a third of the beats.
+
+    ``recording_coverage`` is (last - first) / duration, so it reads high for both. The
+    pulse-correction recovery investigation reports the gap-aware quantity instead, and
+    that is what distinguishes the two cases.
+    """
+    # Beats every second for the first 30 s, then a 40 s hole, then beats again.
+    onsets = np.concatenate([np.arange(5.0, 35.0, 1.0), np.arange(75.0, 99.0, 1.0)])
+
+    metrics = measure_pulse_markers(
+        _raw_with_pulse_markers(onsets), recording_id="sub-0001_run-1"
+    )
+
+    # Spans nearly the whole recording...
+    assert metrics.recording_coverage > 0.9
+    # ...but the hole is excluded from the gap-aware measure.
+    assert metrics.gap_free_coverage == pytest.approx(0.53, abs=0.02)
+    assert metrics.gap_count == 1
+
+
+def test_a_continuous_train_scores_the_same_on_both_coverages() -> None:
+    onsets = np.arange(5.0, 100.0, 1.0)
+
+    metrics = measure_pulse_markers(
+        _raw_with_pulse_markers(onsets), recording_id="sub-0001_run-1"
+    )
+
+    assert metrics.gap_count == 0
+    assert metrics.gap_free_coverage == pytest.approx(metrics.recording_coverage)
+
+
+def test_a_slow_heart_is_not_mistaken_for_a_dropout() -> None:
+    """The gap threshold is relative to the run's own median, so an evenly slow train
+    has no gaps."""
+    onsets = np.arange(5.0, 100.0, 2.0)  # 30 bpm, perfectly regular
+
+    metrics = measure_pulse_markers(
+        _raw_with_pulse_markers(onsets), recording_id="sub-0001_run-1"
+    )
+
+    assert metrics.gap_count == 0
+    assert metrics.gap_free_coverage == pytest.approx(metrics.recording_coverage)

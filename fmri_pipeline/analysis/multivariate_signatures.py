@@ -722,3 +722,40 @@ def compute_signature_expression(
             ) from exc
 
     return results
+
+
+def write_signature_expression_tsv(
+    results: Sequence[SignatureResult],
+    path: Path,
+) -> Path:
+    """Write signature expression beside the contrast's maps, and return the path.
+
+    This is an analysis output, not a rendering artifact: computing it needs the
+    weight maps and the study's signature configuration, neither of which the report
+    path should reach for. The report reads this file.
+
+    A metric that could not be computed is written as an empty field rather than a
+    zero, because zero is a meaningful similarity and "not measured" is not.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _number(value: Optional[float]) -> str:
+        return "" if value is None else f"{value:.6g}"
+
+    lines = ["\t".join(("signature", "dot", "cosine", "pearson_r", "n_voxels", "weight_path"))]
+    for result in results:
+        lines.append(
+            "\t".join(
+                (
+                    result.name,
+                    _number(result.dot),
+                    _number(result.cosine),
+                    _number(result.pearson_r),
+                    str(int(result.n_voxels)),
+                    str(result.weight_path),
+                )
+            )
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path

@@ -35,6 +35,20 @@ def _contrast_hash(cfg: Any) -> str:
     return hashlib.md5(raw).hexdigest()[:8]
 
 
+def _optional_positive_float(value: Any) -> Optional[float]:
+    """Float when the value is a usable positive number, else None.
+
+    Local rather than imported from ``contrast_builder``: reaching across for a
+    private helper couples the two modules and breaks every test that stubs the
+    contrast builder out.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def _contrast_arg_for_model_runs(flm: Any, contrast_def: Any) -> Any:
     """Provide an explicit per-run contrast list for multi-run models."""
     if isinstance(contrast_def, (list, tuple, dict)):
@@ -321,10 +335,7 @@ class FmriAnalysisPipeline(PipelineBase):
 
         # Record what was fit, beside what was fit. This is what lets `fmri-analysis
         # report` render from the derivatives tree without touching the model.
-        from fmri_pipeline.analysis.contrast_builder import (
-            _coerce_optional_float,
-            write_report_manifest,
-        )
+        from fmri_pipeline.analysis.report.manifest import write_report_manifest
 
         plot_cfg_for_manifest = plotting_cfg.normalized() if hasattr(plotting_cfg, "normalized") else None
         # The mask the report scales colour inside. Discovered in the space the
@@ -347,7 +358,7 @@ class FmriAnalysisPipeline(PipelineBase):
             stat_map=nifti_path,
             run_meta=run_meta,
             mask=mask_for_manifest,
-            smoothing_fwhm=_coerce_optional_float(
+            smoothing_fwhm=_optional_positive_float(
                 getattr(contrast_cfg, "smoothing_fwhm", None)
             ),
             signal_scaling=bool(getattr(contrast_cfg, "signal_scaling", False)),
@@ -361,9 +372,8 @@ class FmriAnalysisPipeline(PipelineBase):
         if manifest_path is not None:
             self.logger.info("Wrote report manifest: %s", manifest_path.name)
 
-        plotting_meta: Optional[dict[str, Any]] = None
+        plotting_meta: Optional[dict[str, Any]] = None  # reporting now runs separately
         from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
-        from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
 
         cfg_obj = plotting_cfg if isinstance(plotting_cfg, FmriPlottingConfig) else None
         if cfg_obj is not None and cfg_obj.normalized().enabled:
@@ -459,28 +469,34 @@ class FmriAnalysisPipeline(PipelineBase):
                     output_type="effect_variance",
                 )
 
-            plotting_meta = run_fmri_plotting_and_report(
-                contrast_dir=out_dir,
-                subject=sub_label,
-                task=task,
-                contrast_name=contrast_name,
-                cfg=cfg_obj,
-                stat_map_type=output_type_actual,
-                run_meta=run_meta if isinstance(run_meta, dict) else None,
-                native_stat_img=contrast_img_for_plotting,
-                mni_stat_img=mni_img,
-                native_effect_img=native_effect,
-                native_variance_img=native_variance,
-                mni_effect_img=mni_effect,
-                mni_variance_img=mni_variance,
-                native_bg_img_path=native_bg,
-                mni_bg_img_path=mni_bg,
-                native_mask_img_path=native_mask,
-                mni_mask_img_path=mni_mask,
-                tissue_seg_path=tissue_seg,
-                signature_root=sig_root,
-                signature_specs=sig_specs,
-            )
+            # Signature expression is a computation, not a rendering step: it needs
+            # the weight maps and the study's signature configuration. It is written
+            # beside the contrast's maps, and the report reads it from there.
+            if sig_root is not None and sig_specs and mni_effect is not None:
+                try:
+                    from fmri_pipeline.analysis.multivariate_signatures import (
+                        compute_signature_expression,
+                        write_signature_expression_tsv,
+                    )
+
+                    signature_results = compute_signature_expression(
+                        stat_or_effect_img=mni_effect,
+                        signature_root=sig_root,
+                        signature_specs=sig_specs,
+                        mask_img=(
+                            nib.load(str(mni_mask)) if mni_mask is not None else None
+                        ),
+                    )
+                    tsv_path = write_signature_expression_tsv(
+                        signature_results, out_dir / "signature_expression.tsv"
+                    )
+                    self.logger.info("Wrote signature expression: %s", tsv_path.name)
+                except Exception as exc:
+                    # A signature that cannot be expressed is a measurement that did
+                    # not resolve, not a reason to lose the fitted contrast.
+                    self.logger.warning(
+                        "Signature expression failed for %s (%s)", contrast_name, exc
+                    )
 
         import json
 

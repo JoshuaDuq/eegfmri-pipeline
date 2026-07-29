@@ -32,8 +32,21 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
     )
     parser.add_argument(
         "mode",
-        choices=["first-level", "second-level", "beta-series", "lss", "rest"],
-        help="Operation to run (first-level | second-level | beta-series | lss | rest)",
+        choices=["first-level", "second-level", "beta-series", "lss", "rest", "report"],
+        help=(
+            "Operation to run (first-level | second-level | beta-series | lss | "
+            "rest | report). 'report' renders from existing derivatives and never "
+            "fits a model."
+        ),
+    )
+    parser.add_argument(
+        "--report-dir",
+        type=str,
+        default=None,
+        help=(
+            "Write reports here instead of beside the derivatives. Use when the "
+            "derivatives root is read-only or on a removable volume."
+        ),
     )
 
     add_common_subject_args(parser)
@@ -825,6 +838,76 @@ def _map_task_to_fmri(task: str) -> str:
 
 
 
+def _run_report_mode(
+    args: argparse.Namespace,
+    config: Any,
+    *,
+    subjects: List[str],
+    task: str,
+) -> None:
+    """Render per-subject reports from derivatives. Fits nothing.
+
+    Every import is local, so that nothing on the report path pulls the model
+    modules into ``sys.modules``. That is the invariant the decoupling exists for,
+    and a test asserts it by importing the report path in a clean interpreter.
+    """
+    import logging
+
+    from fmri_pipeline.analysis.plotting_config import FmriReportConfig
+    from fmri_pipeline.analysis.report.manifest import discover_manifests
+    from fmri_pipeline.analysis.report.subject import build_subject_report
+
+    logger = logging.getLogger(__name__)
+
+    deriv_root = Path(str(config.get("paths.deriv_root"))).expanduser().resolve()
+    report_root = (
+        Path(str(args.report_dir)).expanduser().resolve()
+        if getattr(args, "report_dir", None)
+        else deriv_root
+    )
+    if not subjects:
+        raise SystemExit(
+            "No subjects selected; pass --subject, --group, or --all-subjects."
+        )
+
+    cfg = FmriReportConfig(enabled=True, html_report=True)
+    written: List[Path] = []
+    for subject in subjects:
+        sub_label = subject if str(subject).startswith("sub-") else f"sub-{subject}"
+        manifests = discover_manifests(
+            deriv_root=deriv_root, subject=sub_label, task=task
+        )
+        if not manifests:
+            # No fitted contrast is a state of the derivatives tree, not a fault.
+            # Reporting it and continuing keeps one unfitted subject from ending a
+            # cohort run.
+            logger.warning(
+                "No report manifests for %s task-%s under %s; skipping.",
+                sub_label,
+                task,
+                deriv_root,
+            )
+            continue
+        out_path = (
+            report_root / sub_label / "fmri" / f"{sub_label}_task-{task}_report.html"
+        )
+        written.append(
+            build_subject_report(
+                manifests=manifests,
+                deriv_root=deriv_root,
+                out_path=out_path,
+                cfg=cfg,
+            )
+        )
+        logger.info("Wrote %s", out_path)
+
+    if not written:
+        logger.warning(
+            "No reports were written. Run 'fmri-analysis first-level' first: the "
+            "report reads the manifest each fitted contrast leaves behind."
+        )
+
+
 def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: Any) -> None:
     progress = create_progress_reporter(args)
     apply_fmri_config_defaults(config)
@@ -886,6 +969,10 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     fmri_task = _map_task_to_fmri(base_task)
 
     subjects = resolve_subjects(args, Path(bids_fmri_root), config)
+
+    if mode == "report":
+        _run_report_mode(args, config, subjects=subjects, task=fmri_task)
+        return
 
     def _cfg_value(*path: str) -> Any:
         current: Any = {}

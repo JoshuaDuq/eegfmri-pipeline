@@ -110,10 +110,41 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
                 )
             ),
         ),
+        # The dataset declaration, stubbed with the same rule the real helper applies so
+        # the step-selection tests below keep exercising their own configs rather than a
+        # constant. See tests/pipelines/test_eeg_only_gating.py for the real thing.
+        "eeg_pipeline.utils.config.acquisition": _make_module(
+            "eeg_pipeline.utils.config.acquisition",
+            is_eeg_fmri=lambda config: bool(
+                _get_config_value(config, "preprocessing.eeg_fmri", None)
+                if _get_config_value(config, "preprocessing.eeg_fmri", None) is not None
+                else _get_config_value(
+                    config, "preprocessing.brainvision_analyzer.enabled", False
+                )
+            ),
+        ),
+        # These tests build minimal configs to exercise one branch each, so a whole-config
+        # coherence check has nothing meaningful to say about them. It is covered on real
+        # configs in tests/config/test_config_coherence.py.
+        "eeg_pipeline.utils.config.coherence": _make_module(
+            "eeg_pipeline.utils.config.coherence",
+            check_config_coherence=lambda config: _NoopCoherenceReport(),
+        ),
         "eeg_pipeline.preprocessing": _make_package("eeg_pipeline.preprocessing"),
         "eeg_pipeline.preprocessing.pipeline": _make_package("eeg_pipeline.preprocessing.pipeline"),
         "eeg_pipeline.preprocessing.derivatives": _derivatives_module,
     }
+
+
+class _NoopCoherenceReport:
+    errors = ()
+    warnings = ()
+
+    def log_warnings(self, logger):
+        return None
+
+    def raise_if_errors(self):
+        return None
 
 
 class _PreprocessingImportMixin:
@@ -1151,10 +1182,14 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         p.logger = Mock()
         p.config = DotConfig(
             {
+                # The review measures the ballistocardiogram against a recorded ECG, so it
+                # is gated on the dataset being EEG-fMRI as well as on being enabled.
+                # tests/pipelines/test_eeg_only_gating.py covers the out-of-scanner case.
+                "preprocessing": {"eeg_fmri": True},
                 "ica": {
                     "cardiac_review": {"enabled": True},
                     "band_specific_report": {"enabled": False},
-                }
+                },
             }
         )
 
@@ -1170,10 +1205,11 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         p.config = DotConfig(
             {
+                "preprocessing": {"eeg_fmri": True},
                 "ica": {
                     "cardiac_review": {"enabled": False},
                     "band_specific_report": {"enabled": False},
-                }
+                },
             }
         )
         with (
