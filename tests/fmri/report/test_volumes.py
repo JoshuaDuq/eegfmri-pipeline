@@ -233,3 +233,40 @@ def test_the_tsnr_volume_states_its_orientation_convention() -> None:
         assert "neurological" in text or "radiological" in text
     finally:
         plt.close(figure)
+
+
+# --- the tSNR distribution follows the brain mask --------------------------
+
+
+def test_the_tsnr_median_comes_from_the_mask_not_from_positive_voxels() -> None:
+    """`tsnr > 0` drags partial-volume rim voxels into a distribution called 'masked'.
+
+    Rim voxels sit at very low tSNR, so including them pulls the reported median
+    down and widens the colour limit's range for no reason.
+    """
+    rng = np.random.default_rng(0)
+    shape = (10, 10, 10)
+    data = np.full((*shape, 40), 5.0)
+    brain = np.zeros(shape, dtype=bool)
+    brain[2:8, 2:8, 2:8] = True
+    # In-brain voxels: high tSNR. Rim voxels: noisy, so very low tSNR.
+    data[brain] = 1000.0 + rng.standard_normal((int(brain.sum()), 40)) * 10.0
+    data[~brain] = 100.0 + rng.standard_normal((int((~brain).sum()), 40)) * 100.0
+
+    img = nib.Nifti1Image(data.astype(np.float32), np.eye(4))
+    mask_img = nib.Nifti1Image(brain.astype(np.uint8), np.eye(4))
+
+    unmasked = volumes.compute_tsnr([img])
+    masked = volumes.compute_tsnr([img], mask_img=mask_img)
+
+    assert masked.per_run_median[0] > unmasked.per_run_median[0]
+    assert masked.per_run_median[0] > 50.0
+
+
+def test_the_tsnr_distribution_falls_back_to_positive_voxels_without_a_mask() -> None:
+    """No mask is a state of the derivatives, not a fault."""
+    data = np.zeros((6, 6, 6, 30), dtype=np.float32)
+    rng = np.random.default_rng(1)
+    data[1:4, 1:4, 1:4] = 500.0 + rng.standard_normal((3, 3, 3, 30)) * 5.0
+    result = volumes.compute_tsnr([nib.Nifti1Image(data, np.eye(4))])
+    assert result.per_run_median[0] > 0

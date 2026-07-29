@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from fmri_pipeline.analysis.report.manifest import (
+    sample_masks_from_confounds,
     ContrastManifest,
     discover_manifests,
     read_manifest,
@@ -145,3 +146,34 @@ def test_a_confounds_file_with_no_censor_columns_keeps_every_frame(
 
     (mask,) = sample_masks_from_confounds([path])
     assert mask.all() and mask.size == 4
+
+
+def test_censoring_every_frame_is_refused_rather_than_leaving_nothing(
+    tmp_path: Path,
+) -> None:
+    """A confounds file that flags every frame would otherwise erase the run.
+
+    An empty keep-mask makes the carpet unstandardisable and the tSNR
+    uncomputable, so the QC panels that exist to show what censoring did are the
+    ones censoring destroys. Keeping the frames and saying so preserves the
+    measurement.
+    """
+    import pandas as pd
+
+    path = tmp_path / "confounds.tsv"
+    pd.DataFrame({"non_steady_state_outlier00": [1, 1, 1]}).to_csv(
+        path, sep="\t", index=False
+    )
+    mask = sample_masks_from_confounds([path])[0]
+    assert mask.tolist() == [True, True, True]
+
+
+def test_partial_censoring_is_still_applied(tmp_path: Path) -> None:
+    import pandas as pd
+
+    path = tmp_path / "confounds.tsv"
+    pd.DataFrame({"non_steady_state_outlier00": [1, 0, 0, 1]}).to_csv(
+        path, sep="\t", index=False
+    )
+    mask = sample_masks_from_confounds([path])[0]
+    assert mask.tolist() == [False, True, True, False]

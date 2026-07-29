@@ -168,7 +168,14 @@ def build_qc_sections(
 
     if bold_imgs and cfg.include_tsnr_qc:
         with _panel("tSNR"):
-            result = volume_figures.compute_tsnr(bold_imgs, sample_masks=sample_masks)
+            # The mask keeps partial-volume rim voxels out of the median and the
+            # colour limit. Without it, `tsnr > 0` admits edge voxels sitting at
+            # very low tSNR and drags the reported value down.
+            result = volume_figures.compute_tsnr(
+                bold_imgs,
+                mask_img=_load_mask(first),
+                sample_masks=sample_masks,
+            )
             path = _save(
                 volume_figures.tsnr_volume(result, title="tSNR (as modelled)"),
                 out_dir=qc_dir,

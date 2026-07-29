@@ -385,3 +385,30 @@ def test_peak_labels_are_the_tables_own_cluster_ids(tmp_path: Path) -> None:
     )
     _table, peaks = subject.build_cluster_table(manifest=manifest, out_dir=tmp_path)
     assert [label for label, _coord in peaks] == ["1", "2"]
+
+
+def test_the_analysis_mask_reaches_the_tsnr_computation(tmp_path: Path) -> None:
+    """Wiring test: without the mask the median is taken over rim voxels too.
+
+    `tsnr > 0` picks up partial-volume voxels at the brain's edge, which sit at
+    very low tSNR and pull the reported median down.
+    """
+    mask_path = tmp_path / "qc_mask.nii.gz"
+    mask = np.zeros((6, 6, 6), dtype=np.uint8)
+    mask[1:5, 1:5, 1:5] = 1
+    nib.save(nib.Nifti1Image(mask, np.eye(4)), str(mask_path))
+
+    manifest = _manifest(tmp_path, "masked-qc", mask=mask_path)
+    with patch(
+        "fmri_pipeline.analysis.report.figures.volumes.compute_tsnr"
+    ) as compute:
+        compute.side_effect = RuntimeError("stop after the call is inspected")
+        subject.build_qc_sections(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_dir=tmp_path,
+            cfg=_cfg(include_carpet_qc=False),
+        )
+
+    assert compute.called
+    assert compute.call_args.kwargs.get("mask_img") is not None

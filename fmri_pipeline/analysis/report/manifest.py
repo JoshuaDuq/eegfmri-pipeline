@@ -170,7 +170,19 @@ def sample_masks_from_confounds(paths: Sequence[Any]) -> List[np.ndarray]:
             masks.append(np.ones(len(frame), dtype=bool))
             continue
         flagged = frame[censor].to_numpy(dtype=float) > 0
-        masks.append(~flagged.any(axis=1))
+        keep = ~flagged.any(axis=1)
+        if not keep.any():
+            # Censoring everything erases the run from exactly the panels that
+            # exist to show what censoring did: the carpet cannot be standardised
+            # and tSNR cannot be computed from nothing. Keep the frames and say so,
+            # so the reader sees a fully censored run rather than a failed panel.
+            logger.warning(
+                "Every frame of %s is flagged for censoring; QC panels will show "
+                "all frames uncensored.",
+                path,
+            )
+            keep = np.ones(len(frame), dtype=bool)
+        masks.append(keep)
     return masks
 
 
