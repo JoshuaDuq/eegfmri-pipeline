@@ -79,7 +79,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             resample_to_freesurfer: bool = False
             fmriprep_space: str = "T1w"
 
-        report_calls = []
         out_mni_loads = {"count": 0}
 
         def fake_load(path):
@@ -116,11 +115,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             ContrastBuilderConfig=CBuilderCfg,
         )
         fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        fake_report = types.SimpleNamespace(
-            run_fmri_plotting_and_report=lambda **kwargs: (
-                report_calls.append(kwargs) or {"ok": True}
-            )
-        )
         fake_nib = types.SimpleNamespace(
             save=lambda img, path: Path(path).write_text("x", encoding="utf-8"), load=fake_load
         )
@@ -130,7 +124,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             {
                 "fmri_pipeline.analysis.contrast_builder": fake_builder,
                 "fmri_pipeline.analysis.plotting_config": fake_plot,
-                "fmri_pipeline.analysis.reporting": fake_report,
                 "nibabel": fake_nib,
             },
         ):
@@ -146,9 +139,9 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
         self.assertGreaterEqual(out_mni_loads["count"], 1)
         # Reporting no longer runs inside the GLM path: the analysis writes stat
-        # maps and a manifest, and `fmri-analysis report` renders from those. This
-        # is what stops subject-level QC being recomputed once per contrast.
-        self.assertEqual(report_calls, [])
+        # maps and a manifest, and `fmri-analysis report` renders from those. The
+        # reporting module has since been deleted outright, so this is now
+        # structural rather than asserted.
 
     def test_mni_save_and_contrast_compute_exceptions_surface(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -204,9 +197,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             ContrastBuilderConfig=Cfg,
         )
         fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        fake_report = types.SimpleNamespace(
-            run_fmri_plotting_and_report=lambda **kwargs: {"ok": True}
-        )
         fake_nib = types.SimpleNamespace(save=_save, load=lambda p: "img")
 
         with patch.dict(
@@ -214,7 +204,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             {
                 "fmri_pipeline.analysis.contrast_builder": fake_builder,
                 "fmri_pipeline.analysis.plotting_config": fake_plot,
-                "fmri_pipeline.analysis.reporting": fake_report,
                 "nibabel": fake_nib,
             },
         ):
@@ -273,9 +262,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             ContrastBuilderConfig=Cfg,
         )
         fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        fake_report = types.SimpleNamespace(
-            run_fmri_plotting_and_report=lambda **kwargs: {"ok": True}
-        )
         fake_nib = types.SimpleNamespace(save=lambda *a, **k: None, load=lambda *a, **k: "img")
 
         with patch.dict(
@@ -283,7 +269,6 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             {
                 "fmri_pipeline.analysis.contrast_builder": fake_builder,
                 "fmri_pipeline.analysis.plotting_config": fake_plot,
-                "fmri_pipeline.analysis.reporting": fake_report,
                 "nibabel": fake_nib,
             },
         ):
@@ -805,9 +790,6 @@ class TestFmriDeep(unittest.TestCase):
             load=lambda path: "img",
         )
         fake_plot_mod = types.SimpleNamespace(FmriPlottingConfig=FakePlotCfg)
-        fake_report_mod = types.SimpleNamespace(
-            run_fmri_plotting_and_report=lambda **kwargs: {"ok": True}
-        )
 
         with patch.dict(
             sys.modules,
@@ -815,7 +797,6 @@ class TestFmriDeep(unittest.TestCase):
                 "fmri_pipeline.analysis.contrast_builder": fake_builder,
                 "nibabel": fake_nib,
                 "fmri_pipeline.analysis.plotting_config": fake_plot_mod,
-                "fmri_pipeline.analysis.reporting": fake_report_mod,
             },
         ):
             p.process_subject(
@@ -1074,7 +1055,6 @@ class TestFmriCompletion(unittest.TestCase):
             load=lambda path: "img",
         )
         fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        fake_report = types.SimpleNamespace(run_fmri_plotting_and_report=lambda **k: {"ok": True})
 
         with patch.dict(
             sys.modules,
@@ -1082,7 +1062,6 @@ class TestFmriCompletion(unittest.TestCase):
                 "fmri_pipeline.analysis.contrast_builder": fake_builder,
                 "nibabel": fake_nib,
                 "fmri_pipeline.analysis.plotting_config": fake_plot,
-                "fmri_pipeline.analysis.reporting": fake_report,
             },
         ):
             done = {"ok": False}

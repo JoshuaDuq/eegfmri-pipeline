@@ -56,14 +56,10 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
         )
         fake_nib = types.SimpleNamespace(save=lambda img, path: None, load=lambda path: "img")
         fake_plotting = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        # Reporting is no longer reachable from the GLM path. A reporting module
-        # that explodes on any attribute access proves it: if process_subject still
-        # touched it, this would raise.
-        class ExplodingReporting(types.ModuleType):
-            def __getattr__(self, name):
-                raise RuntimeError("plot-fail")
-
-        fake_reporting = ExplodingReporting("fmri_pipeline.analysis.reporting")
+        # Reporting is no longer reachable from the GLM path. This used to be proved
+        # with a stub module that exploded on any attribute access; the module has
+        # since been deleted outright, so reaching for it would be an ImportError and
+        # the guard is structural.
 
         with patch.dict(
             sys.modules,
@@ -71,7 +67,6 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
                 "fmri_pipeline.analysis.contrast_builder": fake_builder,
                 "nibabel": fake_nib,
                 "fmri_pipeline.analysis.plotting_config": fake_plotting,
-                "fmri_pipeline.analysis.reporting": fake_reporting,
             },
         ):
             pipeline.process_subject(

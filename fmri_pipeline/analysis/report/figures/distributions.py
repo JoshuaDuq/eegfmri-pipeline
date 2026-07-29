@@ -47,40 +47,6 @@ def _finite(values: np.ndarray) -> np.ndarray:
     return finite
 
 
-def magnitude_histogram(
-    values: np.ndarray,
-    *,
-    xlabel: str,
-    title: str = "",
-) -> plt.Figure:
-    """Draw the distribution of an unsigned magnitude with its median marked.
-
-    No alpha on the bars: a translucent fill over a solid histogram produces visible
-    seams at every bar boundary that read as structure in the data.
-    """
-    finite = _finite(values)
-    with plot_context():
-        figure, axis = plt.subplots(figsize=(7.2, 3.2))
-        axis.hist(finite, bins=_BINS, color=OKABE_ITO["bluish_green"], edgecolor="none")
-        median = float(np.median(finite))
-        axis.axvline(median, color=GUIDE_COLOR, linestyle="--", linewidth=1.2)
-        axis.annotate(
-            f"median {median:.3g}",
-            xy=(median, 1.0),
-            xycoords=("data", "axes fraction"),
-            xytext=(4, -10),
-            textcoords="offset points",
-            fontsize=8,
-            color=GUIDE_COLOR,
-        )
-        axis.set_xlabel(xlabel)
-        axis.set_ylabel("voxels")
-        if title:
-            axis.set_title(title)
-        figure.tight_layout()
-        return figure
-
-
 def _normal_counts(
     centres: np.ndarray, *, n: int, bin_width: float, centre: float, scale: float
 ) -> np.ndarray:
@@ -257,4 +223,4 @@ def null_calibration_figure(
         return figure
 
 
-__all__ = ["magnitude_histogram", "null_calibration_figure"]
+__all__ = ["null_calibration_figure"]
