@@ -17,10 +17,18 @@ def setup_validate(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     parser.add_argument(
         "mode",
-        choices=["all", "epochs", "features", "behavior", "bids", "quick"],
+        choices=["all", "config", "epochs", "features", "behavior", "bids", "quick"],
         nargs="?",
         default="quick",
         help="What to validate (default: quick)",
+    )
+    parser.add_argument(
+        "--config-only",
+        action="store_true",
+        help=(
+            "Check the configuration for contradictions and exit, without reading any "
+            "derivatives. Equivalent to the 'config' mode."
+        ),
     )
     add_task_arg(parser)
     parser.add_argument(

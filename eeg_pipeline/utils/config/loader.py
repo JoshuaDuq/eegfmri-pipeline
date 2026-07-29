@@ -124,6 +124,34 @@ def _resolve_paths_recursive(obj: Any, config_dir: Path, project_root: Path) -> 
 ###################################################################
 
 
+#: Process-wide override for which config file ``load_config()`` reads when no path is
+#: passed. Set by the CLI's ``--config``. It exists because almost all library code
+#: reaches configuration through ``ensure_config()``/``load_config()`` with no argument:
+#: threading a path down every one of those call sites would be a far larger change, and
+#: one missed site would silently read the packaged default while the rest read the
+#: user's file — a study running half on someone else's settings.
+_DEFAULT_CONFIG_PATH_OVERRIDE: Optional[Path] = None
+
+
+def set_default_config_path(config_path: Optional[Union[str, Path]]) -> None:
+    """Point every subsequent argument-less ``load_config()`` at this file.
+
+    ``None`` restores the packaged default. Raises if the file does not exist, so a typo
+    in ``--config`` is reported against the flag rather than silently ignored in favour
+    of the packaged config.
+    """
+    global _DEFAULT_CONFIG_PATH_OVERRIDE
+
+    if config_path is None:
+        _DEFAULT_CONFIG_PATH_OVERRIDE = None
+        return
+
+    resolved = Path(config_path).expanduser().resolve()
+    if not resolved.exists():
+        raise ConfigError(f"Configuration file not found: {resolved}")
+    _DEFAULT_CONFIG_PATH_OVERRIDE = resolved
+
+
 def _get_overrides_path(config_path: Path) -> Path:
     env_path = os.getenv("EEG_PIPELINE_TUI_OVERRIDES")
     if env_path:
@@ -269,18 +297,8 @@ def _get_overrides_cache_state(config_path: Path) -> tuple[Path, Optional[float]
     return overrides_path, overrides_mtime
 
 
-def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
-    """Load and parse YAML config file.
-
-    Args:
-        config_path: Path to config YAML file
-
-    Returns:
-        Parsed config dictionary with resolved paths
-
-    Raises:
-        ConfigError: If file cannot be read or parsed
-    """
+def _parse_config_yaml(config_path: Path) -> Dict[str, Any]:
+    """Read one YAML file into a dict, with the parse errors this project reports."""
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
@@ -300,9 +318,133 @@ def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
             f"Config file {config_path} must contain a YAML dictionary/mapping, "
             f"got {type(config).__name__}"
         )
+    return config
 
-    config = resolve_config_paths(config, config_path)
-    return _apply_config_overrides(config, config_path)
+
+def get_presets_dir() -> Path:
+    """Directory holding the packaged starting-point configs."""
+    return Path(__file__).parent / "presets"
+
+
+def _resolve_extends_target(extends: Any, config_path: Path) -> Path:
+    """Resolve one ``extends:`` value to a config file.
+
+    A bare name (no separator, no suffix) names a packaged preset; anything else is a
+    path, taken relative to the extending file so a study directory can be moved whole.
+    """
+    if not isinstance(extends, str) or not extends.strip():
+        raise ConfigError(
+            f"'extends' in {config_path} must be a preset name or a path to a YAML file, "
+            f"got {extends!r}."
+        )
+
+    value = extends.strip()
+    if "/" not in value and "\\" not in value and not value.endswith((".yaml", ".yml")):
+        candidate = get_presets_dir() / f"{value}.yaml"
+        if not candidate.exists():
+            available = sorted(p.stem for p in get_presets_dir().glob("*.yaml"))
+            raise ConfigError(
+                f"{config_path} extends unknown preset {value!r}. "
+                f"Available presets: {', '.join(available) or 'none'}."
+            )
+        return candidate
+
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = config_path.parent / candidate
+    candidate = candidate.resolve()
+    if not candidate.exists():
+        raise ConfigError(f"{config_path} extends {candidate}, which does not exist.")
+    return candidate
+
+
+def _load_config_layers(config_path: Path, seen: Tuple[Path, ...] = ()) -> Dict[str, Any]:
+    """Load one config and everything it extends, nearest layer winning.
+
+    ``extends:`` is what makes a per-study config viable. Without it a study that differs
+    from the default in nine keys has to copy all 1200-odd lines, and every later
+    correction to a scientific default has to be re-applied by hand to each copy.
+
+    Each layer's relative paths resolve against that layer's own directory, so a preset
+    keeps meaning what it said no matter where the file extending it lives.
+    """
+    resolved_path = config_path.resolve()
+    if resolved_path in seen:
+        chain = " -> ".join(str(p) for p in (*seen, resolved_path))
+        raise ConfigError(f"Circular 'extends' in configuration: {chain}")
+
+    config = _parse_config_yaml(resolved_path)
+    extends = config.pop("extends", None)
+    config = resolve_config_paths(config, resolved_path)
+
+    if extends is None:
+        return config
+
+    base_path = _resolve_extends_target(extends, resolved_path)
+    base = _load_config_layers(base_path, (*seen, resolved_path))
+    _merge_overrides(base, config)
+    return base
+
+
+def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
+    """Load a config, its ``extends`` chain, and the TUI overrides on top.
+
+    Args:
+        config_path: Path to config YAML file
+
+    Returns:
+        Parsed config dictionary with resolved paths
+
+    Raises:
+        ConfigError: If file cannot be read or parsed
+    """
+    config = _load_config_layers(config_path)
+    config = _apply_config_overrides(config, config_path)
+    _apply_paradigm(config)
+    return config
+
+
+#: The four ``task_is_rest`` flags ``project.paradigm`` stands in for. They are read by
+#: different subsystems, and two separate validators already raise when a pair of them
+#: disagrees, so in practice they were never four independent choices — only four places
+#: to make the same one and one chance in two of making it inconsistently by hand.
+_PARADIGM_REST_FLAGS = (
+    "preprocessing.task_is_rest",
+    "feature_engineering.task_is_rest",
+    "fmri_preprocessing.task_is_rest",
+    "fmri_resting_state.task_is_rest",
+)
+
+
+def _apply_paradigm(config: Dict[str, Any]) -> None:
+    """Derive the ``task_is_rest`` flags from ``project.paradigm`` when it is set.
+
+    The paradigm wins over any individual flag it covers, including one inherited
+    through ``extends``. That is what lets a preset say ``paradigm: rest`` in one line
+    instead of restating four booleans that the base config set to ``false``.
+
+    Absent (or null) it changes nothing, so a config written before this key existed
+    keeps setting the flags directly.
+    """
+    paradigm = get_nested_value(config, "project.paradigm", None)
+    if paradigm is None:
+        return
+
+    normalized = str(paradigm).strip().lower()
+    if normalized not in {"task", "rest"}:
+        raise ConfigError(
+            f"project.paradigm must be 'task' or 'rest', got {paradigm!r}. "
+            "Use 'rest' for resting-state or baseline-only acquisitions."
+        )
+
+    task_is_rest = normalized == "rest"
+    for dotted_key in _PARADIGM_REST_FLAGS:
+        section_name, _, leaf = dotted_key.partition(".")
+        section = config.get(section_name)
+        if not isinstance(section, dict):
+            section = {}
+            config[section_name] = section
+        section[leaf] = task_is_rest
 
 
 def _apply_thread_limits(config: Dict[str, Any]) -> None:
@@ -522,6 +664,30 @@ def ensure_config(config: Optional[Any] = None) -> Any:
 
 
 def _get_default_config_path() -> Path:
+    """Resolve the config file to read when no path is given.
+
+    Three sources, most explicit first: the CLI's ``--config`` (via
+    :func:`set_default_config_path`), the ``EEG_PIPELINE_CONFIG`` environment variable,
+    and the packaged ``eeg_config.yaml``.
+
+    The packaged file is the last resort rather than the only option because it lives
+    inside the installed package: editing it in place is the only way to configure a
+    study otherwise, which means two studies cannot coexist and any edit is lost on
+    reinstall.
+    """
+    if _DEFAULT_CONFIG_PATH_OVERRIDE is not None:
+        return _DEFAULT_CONFIG_PATH_OVERRIDE
+
+    env_path = os.getenv("EEG_PIPELINE_CONFIG")
+    if env_path and env_path.strip():
+        resolved = Path(env_path).expanduser().resolve()
+        if not resolved.exists():
+            raise ConfigError(
+                f"EEG_PIPELINE_CONFIG points at {resolved}, which does not exist. "
+                "Unset it to use the packaged default."
+            )
+        return resolved
+
     config_dir = Path(__file__).parent
     return config_dir / "eeg_config.yaml"
 

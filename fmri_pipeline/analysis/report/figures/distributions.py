@@ -1,80 +1,50 @@
-"""Histogram panels for statistic and magnitude distributions."""
+"""Distribution panels: what a height threshold on this map is actually worth.
+
+The panel here answers a question a thresholded brain picture cannot. A z map is
+nominally N(0, 1) under the null, and the threshold applied to it is chosen against
+that assumption -- but a single-subject GLM with unmodelled autocorrelation and
+physiological noise is routinely over-dispersed, and nothing in a thresholded mosaic
+reveals it. Drawing the map's own fitted null beside the theoretical one puts the
+discrepancy on the same axis as the threshold, where it can be read directly.
+
+The corrected thresholds share the axis for the same reason. Uncorrected, FDR and
+Bonferroni are three points on one scale; separating them into a table makes the
+reader do the comparison by arithmetic.
+"""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fmri_pipeline.analysis.report.style import GUIDE_COLOR, OKABE_ITO, plot_context
+from fmri_pipeline.analysis.report.inference import ThresholdContext
+from fmri_pipeline.analysis.report.style import (
+    GUIDE_COLOR,
+    OKABE_ITO,
+    annotate_provenance,
+    plot_context,
+)
 
-_BINS = 120
+_BINS = 160
+
+#: Colour and dash for each threshold line. Distinct on both counts, so the panel
+#: survives greyscale printing and the colour-blind readership the palette is chosen
+#: for.
+_THRESHOLD_STYLE = {
+    "applied": (OKABE_ITO["vermillion"], (0, (4, 2))),
+    "fdr": (OKABE_ITO["bluish_green"], (0, (5, 1, 1, 1))),
+    "bonferroni": (OKABE_ITO["blue"], (0, (1, 2))),
+}
 
 
 def _finite(values: np.ndarray) -> np.ndarray:
     array = np.asarray(values, dtype=float).ravel()
     finite = array[np.isfinite(array)]
     if finite.size == 0:
-        raise ValueError("A histogram requires at least one finite value.")
+        raise ValueError("A distribution panel requires at least one finite value.")
     return finite
-
-
-def z_histogram(
-    values: np.ndarray,
-    *,
-    threshold: Optional[float] = None,
-    title: str = "",
-) -> plt.Figure:
-    """Draw the distribution of z statistics against the standard normal null.
-
-    The y-axis is logarithmic and the null is drawn on top, because the question
-    this panel answers is how far the tails depart from N(0, 1). On a linear axis
-    the null peak is the only visible feature and the tails -- the signal -- are
-    flat against the axis.
-
-    The null curve is scaled to the total voxel count, which assumes most voxels
-    are null. That is the conventional display and close to true for a typical
-    contrast, but it understates the null for a map where a large fraction of the
-    brain is genuinely active.
-    """
-    finite = _finite(values)
-    with plot_context():
-        figure, axis = plt.subplots(figsize=(7.2, 3.2))
-        counts, edges, _ = axis.hist(
-            finite, bins=_BINS, color=OKABE_ITO["blue"], edgecolor="none"
-        )
-        centres = 0.5 * (edges[:-1] + edges[1:])
-        bin_width = float(edges[1] - edges[0])
-        null_density = (
-            finite.size * bin_width * np.exp(-0.5 * centres**2) / np.sqrt(2.0 * np.pi)
-        )
-        axis.plot(
-            centres,
-            null_density,
-            color=GUIDE_COLOR,
-            linewidth=1.5,
-            label="N(0, 1) null",
-        )
-        if threshold is not None and threshold > 0:
-            for sign in (1.0, -1.0):
-                axis.axvline(
-                    sign * float(threshold),
-                    color=OKABE_ITO["vermillion"],
-                    linestyle="--",
-                    linewidth=1.2,
-                )
-        axis.set_yscale("log")
-        positive = counts[counts > 0]
-        if positive.size:
-            axis.set_ylim(bottom=max(0.5, float(np.min(positive)) * 0.5))
-        axis.set_xlabel("z")
-        axis.set_ylabel("voxels")
-        if title:
-            axis.set_title(title)
-        axis.legend(fontsize=8)
-        figure.tight_layout()
-        return figure
 
 
 def magnitude_histogram(
@@ -111,4 +81,173 @@ def magnitude_histogram(
         return figure
 
 
-__all__ = ["magnitude_histogram", "z_histogram"]
+def _normal_counts(
+    centres: np.ndarray, *, n: int, bin_width: float, centre: float, scale: float
+) -> np.ndarray:
+    """Expected per-bin counts if every one of ``n`` voxels were drawn from the null."""
+    z = (centres - centre) / scale
+    density = np.exp(-0.5 * z**2) / (scale * np.sqrt(2.0 * np.pi))
+    return float(n) * float(bin_width) * density
+
+
+def _threshold_entries(
+    context: ThresholdContext,
+) -> List[Tuple[str, Optional[float], str]]:
+    """Name each threshold, its z height, and what survives it.
+
+    An FDR threshold that rejects nothing keeps its entry with the height left as
+    ``None``. Dropping the entry would make "no voxel survives correction" -- which is
+    a finding -- indistinguishable from a panel that failed to draw it.
+    """
+    comparison = "|z|" if context.two_sided else "z"
+    entries: List[Tuple[str, Optional[float], str]] = [
+        (
+            "applied",
+            context.applied,
+            f"applied {comparison} > {context.applied:.2f}: "
+            f"{context.applied_survivors:,} voxels "
+            f"({context.expected_null_survivors:,.0f} expected under N(0, 1))",
+        )
+    ]
+    if context.fdr is None:
+        entries.append(
+            (
+                "fdr",
+                None,
+                f"FDR q = {context.fdr_q:g}: no voxel survives correction",
+            )
+        )
+    else:
+        entries.append(
+            (
+                "fdr",
+                context.fdr,
+                f"FDR q = {context.fdr_q:g} at {comparison} > {context.fdr:.2f}: "
+                f"{context.fdr_survivors:,} voxels",
+            )
+        )
+    entries.append(
+        (
+            "bonferroni",
+            context.bonferroni,
+            f"Bonferroni {context.alpha:g} at {comparison} > {context.bonferroni:.2f}: "
+            f"{context.bonferroni_survivors:,} voxels",
+        )
+    )
+    return entries
+
+
+def null_calibration_figure(
+    values: np.ndarray,
+    *,
+    context: ThresholdContext,
+    mask_source: str = "",
+    title: str = "",
+) -> plt.Figure:
+    """Draw the in-mask z distribution against both nulls and all three thresholds.
+
+    ``values`` must already be restricted to the analysis mask. A whole volume is
+    mostly background zeros -- over 60% of a typical map -- which would put a spike at
+    the origin, inflate the test count behind every corrected threshold, and drag the
+    fitted null toward zero.
+
+    Both null curves are scaled to the full voxel count, which is exact only if no
+    voxel is active. The figure says so. The diagnostic this panel exists for is the
+    *width* of the fitted null against the theoretical one, and that comparison does
+    not depend on the scaling.
+
+    The y axis is logarithmic because the question lives in the tails; on a linear axis
+    the null peak is the only visible feature.
+    """
+    finite = _finite(values)
+    entries = _threshold_entries(context)
+
+    with plot_context():
+        figure, axis = plt.subplots(figsize=(7.6, 4.0))
+        counts, edges, _ = axis.hist(
+            finite, bins=_BINS, color="0.78", edgecolor="none", label="observed"
+        )
+        centres = 0.5 * (edges[:-1] + edges[1:])
+        bin_width = float(edges[1] - edges[0])
+
+        # Curves span the axis rather than only the data, so a null stays legible where
+        # it predicts counts the map does not contain -- which is exactly the region
+        # the corrected thresholds sit in.
+        drawn = [t for _key, t, _label in entries if t is not None]
+        reach = max([float(np.max(np.abs(finite)))] + drawn) * 1.08
+        span = np.linspace(-reach, reach, 512)
+
+        axis.plot(
+            span,
+            _normal_counts(span, n=finite.size, bin_width=bin_width, centre=0.0, scale=1.0),
+            color=GUIDE_COLOR,
+            linewidth=1.6,
+            label="theoretical N(0, 1)",
+        )
+        if context.null is not None:
+            axis.plot(
+                span,
+                _normal_counts(
+                    span,
+                    n=finite.size,
+                    bin_width=bin_width,
+                    centre=context.null.centre,
+                    scale=context.null.scale,
+                ),
+                color=OKABE_ITO["orange"],
+                linewidth=1.6,
+                label=(
+                    f"empirical null N({context.null.centre:+.2f}, "
+                    f"{context.null.scale:.2f}²)"
+                ),
+            )
+
+        for key, threshold, label in entries:
+            colour, dashes = _THRESHOLD_STYLE[key]
+            if threshold is None:
+                # Carries the finding into the legend without drawing a line at a
+                # height nothing reached.
+                axis.plot([], [], color=colour, linestyle=dashes, linewidth=1.3, label=label)
+                continue
+            axis.axvline(threshold, color=colour, linestyle=dashes, linewidth=1.3, label=label)
+            if context.two_sided:
+                # Unlabelled: one legend entry describes the pair.
+                axis.axvline(-threshold, color=colour, linestyle=dashes, linewidth=1.3)
+
+        axis.set_xlim(-reach, reach)
+        axis.set_yscale("log")
+        positive = counts[counts > 0]
+        if positive.size:
+            axis.set_ylim(bottom=max(0.5, float(np.min(positive)) * 0.5))
+        axis.set_xlabel("z")
+        axis.set_ylabel("voxels")
+        if title:
+            axis.set_title(title)
+        # Below the axes rather than inside it. The threshold lines are vertical and
+        # span the full height, so any in-axes legend is crossed by the very lines it
+        # describes -- and the entries carry the survivor counts, which is most of what
+        # this panel says.
+        axis.legend(
+            fontsize=7,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.16),
+            ncol=2,
+            framealpha=0.0,
+        )
+
+        provenance = [
+            f"n = {finite.size:,} voxels" + (f" ({mask_source})" if mask_source else ""),
+            "both null curves assume every voxel is null",
+        ]
+        if context.null is not None and context.applied_in_null_units is not None:
+            provenance.append(
+                f"applied threshold is {context.applied_in_null_units:.2f}× the "
+                f"empirical null's width"
+            )
+        provenance.append("null fitted by median and MAD (robust to a signal tail)")
+        annotate_provenance(figure, provenance)
+        figure.tight_layout()
+        return figure
+
+
+__all__ = ["magnitude_histogram", "null_calibration_figure"]

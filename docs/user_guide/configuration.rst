@@ -53,6 +53,10 @@ Quick Navigation
 .. grid:: 3
    :gutter: 2
 
+   .. grid-item-card:: :ref:`Your Own Study <configuration-your-own-config>`
+
+      Per-study configs, presets, EEG-only and resting-state setups.
+
    .. grid-item-card:: :ref:`Project & Paths <configuration-project-paths>`
 
       Task naming and all filesystem roots.
@@ -103,6 +107,108 @@ Quick Navigation
 
 ----
 
+.. _configuration-your-own-config:
+
+Configuring Your Own Study
+--------------------------
+
+The packaged ``eeg_config.yaml`` describes **one study**: a thermal-pain EEG-fMRI
+acquisition. Keys marked ``STUDY-SPECIFIC`` in that file encode that paradigm.
+
+Do not edit it. It lives inside the installed package, so edits are lost on
+reinstall and two studies cannot coexist. Write your own file that ``extends``
+a preset instead:
+
+.. code-block:: yaml
+
+   # my_study.yaml
+   extends: "eeg_only"
+
+   project:
+     task: "oddball"
+
+   paths:
+     bids_root: "/data/my_study/bids"
+     deriv_root: "/data/my_study/derivatives"
+
+.. code-block:: bash
+
+   eeg-pipeline --config my_study.yaml preprocessing full --all-subjects
+
+Only the keys you name are overridden; everything else is inherited, so later
+corrections to the scientific defaults reach your study without being copied.
+``--config`` is accepted before or after the subcommand, and
+``EEG_PIPELINE_CONFIG`` sets the same thing for a whole shell session.
+
+``extends`` accepts a packaged preset name or a path to another YAML file
+(relative paths resolve against the extending file). Chains are followed, and
+a cycle is reported rather than recursed.
+
+.. list-table:: Packaged presets
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Preset
+     - Purpose
+   * - ``eeg_only``
+     - EEG recorded outside an MR scanner. Turns off every scanner-only stage:
+       Analyzer pulse QC, cardiac attenuation QC, scanner-harmonic QC, the ECG
+       coupling metric, the ICA cardiac review, and volume-bound trimming.
+   * - ``rest``
+     - Resting-state or baseline-only acquisition. Fixed-length segments
+       instead of event-locked epochs.
+
+Combine them by extending one and setting the other's switch:
+
+.. code-block:: yaml
+
+   # Resting-state EEG recorded outside a scanner
+   extends: "eeg_only"
+   project:
+     paradigm: "rest"
+
+.. _configuration-paradigm:
+
+Paradigm and acquisition
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two keys describe what was recorded. Set these first; most other differences
+follow from them.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Key
+     - Default
+     - Description
+   * - ``project.paradigm``
+     - ``task``
+     - ``task`` (event-related) or ``rest`` (fixed-length segments). Sets
+       ``preprocessing.task_is_rest``, ``feature_engineering.task_is_rest`` and
+       both fMRI equivalents together, overriding whatever they say
+       individually. Leave ``null`` to keep setting those four by hand.
+   * - ``preprocessing.eeg_fmri``
+     - ``true``
+     - Whether the EEG was recorded inside an MR scanner. Gates every stage
+       whose inputs only exist for EEG-fMRI. Set ``false`` and the ordinary
+       path runs — filtering, PyPREP, ICA with ICLabel, the ocular review,
+       epoching — without asking for an ECG channel, volume markers, or
+       Analyzer output that will not be found.
+
+.. tip::
+
+   .. code-block:: bash
+
+      eeg-pipeline validate --config-only --config my_study.yaml
+
+   Reports every contradiction at once, reads no derivatives, and takes under a
+   second. **Errors** are things the run cannot produce. **Warnings** are
+   stages switched on that this dataset gives the pipeline no way to compute,
+   which will be skipped — expected in a config adapted from another study.
+
+----
+
 .. _configuration-project-paths:
 
 Project & Paths
@@ -129,7 +235,9 @@ Project & Paths
      - BIDS-formatted EEG data directory
    * - ``paths.bids_rest_root``
      - ``null``
-     - Optional resting-state EEG BIDS directory (``task_is_rest`` mode)
+     - Resting-state EEG BIDS directory, for a study that acquires **both**
+       task and rest and keeps them in separate trees. A rest-only study
+       leaves this ``null``; ``paths.bids_root`` is used instead.
    * - ``paths.bids_fmri_root``
      - ``"../../../data/bids_output/fmri"``
      - BIDS-formatted fMRI data directory
@@ -138,7 +246,8 @@ Project & Paths
      - Processed derivatives output directory
    * - ``paths.deriv_rest_root``
      - ``null``
-     - Resting-state EEG derivatives directory
+     - Resting-state EEG derivatives directory. As above, a rest-only study
+       leaves this ``null`` and uses ``paths.deriv_root``.
    * - ``paths.source_data``
      - ``"../../../data/source_data"``
      - Raw source data directory

@@ -85,6 +85,7 @@ eeg_pipeline = [
     "preprocessing/eeg_fmri/assets/*.npz",
     "preprocessing/eeg_fmri/assets/*.sha256",
     "utils/config/*.yaml",
+    "utils/config/presets/*.yaml",
 ]
 fmri_pipeline = ["utils/config/*.yaml"]
 

@@ -21,7 +21,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-from eeg_pipeline.utils.config.loader import load_config
+from eeg_pipeline.utils.config.loader import ConfigError, load_config, set_default_config_path
 from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 from eeg_pipeline.utils.data.subjects import parse_subject_args
 from eeg_pipeline.cli.common import get_deriv_root
@@ -68,12 +68,53 @@ For detailed help on each subcommand:
         """,
     )
 
+    # Declared for --help, but removed from argv before this parser sees it (see
+    # extract_config_path) so that it works in either position.
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help=(
+            "Configuration YAML to run with. Defaults to $EEG_PIPELINE_CONFIG, then the "
+            "packaged eeg_config.yaml. Accepted before or after the subcommand."
+        ),
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Analysis type")
 
     for command in get_commands():
         command.setup(subparsers)
 
     return parser
+
+
+def extract_config_path(argv: list[str]) -> tuple[list[str], str | None]:
+    """Pull ``--config PATH`` out of argv, wherever in it the user put it.
+
+    Handled before argparse rather than as an ordinary option because the config file
+    decides what the rest of the run means, and because a global option declared on the
+    top-level parser would only be accepted *before* the subcommand — which is not where
+    anyone types it.
+
+    Returns the remaining arguments and the requested path, if any.
+    """
+    remaining: list[str] = []
+    config_path: str | None = None
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--config":
+            if index + 1 >= len(argv):
+                raise SystemExit("--config requires a path to a configuration YAML file.")
+            config_path = argv[index + 1]
+            index += 2
+            continue
+        if argument.startswith("--config="):
+            config_path = argument.split("=", 1)[1]
+            index += 1
+            continue
+        remaining.append(argument)
+        index += 1
+    return remaining, config_path
 
 
 def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) -> None:
@@ -115,14 +156,28 @@ def main() -> int:
     """Main entry point for the CLI application."""
     setup_logging()
 
+    argv, config_path = extract_config_path(sys.argv[1:])
+
     parser = create_argument_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.command:
         parser.print_help()
         return EXIT_ERROR
 
-    config = load_config()
+    # Set process-wide before anything loads configuration: most of the pipeline reaches
+    # it through an argument-less load_config(), so passing the path here alone would
+    # leave those call sites reading the packaged default.
+    # A bad path, a broken 'extends', or unparseable YAML is a mistake in the invocation,
+    # not a crash in the pipeline. Report it as one line rather than a traceback through
+    # the loader's internals.
+    try:
+        set_default_config_path(config_path)
+        config = load_config()
+    except ConfigError as exc:
+        logging.error("%s", exc)
+        return EXIT_ERROR
+
     update_config_from_args(config, args)
     deriv_root = get_deriv_root(config, command=args.command)
 

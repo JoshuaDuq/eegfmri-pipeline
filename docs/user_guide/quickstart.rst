@@ -230,6 +230,32 @@ For a deeper sweep:
 All pipeline behavior is controlled by ``eeg_pipeline/utils/config/eeg_config.yaml``
 (and ``behavior_config.yaml`` / ``fmri_config.yaml`` for their respective domains).
 
+.. important::
+
+   The packaged ``eeg_config.yaml`` describes one study — a thermal-pain EEG-fMRI
+   acquisition. For anything else, write your own config extending a preset rather
+   than editing the packaged file:
+
+   .. code-block:: yaml
+
+      # my_study.yaml
+      extends: "eeg_only"      # EEG recorded outside a scanner
+      project:
+        task: "oddball"
+        paradigm: "task"       # or "rest" for baseline-only acquisitions
+      paths:
+        bids_root: "/data/my_study/bids"
+        deriv_root: "/data/my_study/derivatives"
+
+   .. code-block:: bash
+
+      eeg-pipeline validate --config-only --config my_study.yaml
+      eeg-pipeline --config my_study.yaml preprocessing full --all-subjects
+
+   See :ref:`Configuring Your Own Study <configuration-your-own-config>` for the
+   available presets, how ``extends`` resolves, and what changes in
+   resting-state mode.
+
 **Preferred path — TUI Global Setup:**
 Launch the TUI, navigate to *Global Setup* (or press ``C`` from the main menu),
 and set your task name and all path roots through the interactive editor.

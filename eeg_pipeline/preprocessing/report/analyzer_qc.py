@@ -193,9 +193,18 @@ _QC_COLUMNS: tuple[_QcColumn, ...] = (
     ),
     _QcColumn(
         "recording_coverage",
-        Column("Recording covered"),
+        Column("Marker span"),
         lambda value: f"{float(value):.0%}",
     ),
+    # Beside the span, not instead of it: the two answer different questions and the
+    # difference between them is the finding. A run can span 99% of its recording while
+    # marking beats in only a fifth of that span, and the span alone reads as complete.
+    _QcColumn(
+        "gap_free_coverage",
+        Column("Gap-free covered"),
+        lambda value: f"{float(value):.0%}",
+    ),
+    _QcColumn("gap_count", Column("Gaps"), lambda value: f"{int(value):,}"),
     _QcColumn(
         "before_rms_uv",
         Column("R-locked amplitude before ICA (µV)"),

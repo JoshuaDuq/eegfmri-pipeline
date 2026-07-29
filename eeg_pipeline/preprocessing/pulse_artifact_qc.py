@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 PULSE_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
+#: An inter-marker interval longer than this multiple of the run's own median is counted
+#: as a gap. Relative to the run rather than absolute, so it does not mistake a slow heart
+#: for a dropout. The value matches the pulse-correction recovery investigation, so the
+#: coverage reported here and the coverage quoted there are the same quantity.
+GAP_INTERVAL_MULTIPLE = 1.75
+
 
 def _number(value: float) -> str:
     """Format a measurement, leaving an undefined one visibly empty rather than absent."""
@@ -58,8 +64,18 @@ class PulseMarkerMetrics:
     duration_seconds: float
     median_bpm: float
     marker_fraction: float
+    #: Span of the marker train over the recording duration: ``(last - first) / duration``.
+    #: Says where the train starts and ends, not whether it is continuous in between.
     recording_coverage: float
+    #: Share of the recording inside the marker train and outside a gap, where a gap is an
+    #: inter-marker interval longer than :data:`GAP_INTERVAL_MULTIPLE` times the run's own
+    #: median. This is the quantity the pulse-correction recovery investigation reports,
+    #: and it is the one that separates a continuous train from a sparse one — a run can
+    #: span 99% of its recording while marking only a third of the beats in that span.
+    gap_free_coverage: float
     expected_marker_count: int
+    #: Number of inter-marker intervals counted as gaps.
+    gap_count: int
 
 
 def _pulse_onsets(raw: mne.io.BaseRaw) -> np.ndarray:
@@ -105,7 +121,9 @@ def measure_pulse_markers(
             median_bpm=float("nan"),
             marker_fraction=float("nan"),
             recording_coverage=float("nan"),
+            gap_free_coverage=float("nan"),
             expected_marker_count=0,
+            gap_count=0,
         )
 
     intervals = np.diff(onsets)
@@ -123,14 +141,20 @@ def measure_pulse_markers(
     marker_span = float(onsets[-1] - onsets[0])
     expected_marker_count = int(np.floor(marker_span / representative_interval)) + 1
 
+    median_interval = float(np.median(intervals))
+    gaps = intervals > GAP_INTERVAL_MULTIPLE * median_interval
+    gap_seconds = float(intervals[gaps].sum())
+
     return PulseMarkerMetrics(
         recording_id=recording_id,
         marker_count=len(onsets),
         duration_seconds=duration_seconds,
-        median_bpm=60.0 / float(np.median(intervals)),
+        median_bpm=60.0 / median_interval,
         marker_fraction=min(1.0, len(onsets) / expected_marker_count),
         recording_coverage=float(marker_span / duration_seconds),
+        gap_free_coverage=float((marker_span - gap_seconds) / duration_seconds),
         expected_marker_count=expected_marker_count,
+        gap_count=int(gaps.sum()),
     )
 
 
@@ -203,6 +227,8 @@ def summarize_pulse_marker_recordings(
                 "median_bpm": _number(metrics.median_bpm),
                 "marker_fraction": _number(metrics.marker_fraction),
                 "recording_coverage": _number(metrics.recording_coverage),
+                "gap_free_coverage": _number(metrics.gap_free_coverage),
+                "gap_count": metrics.gap_count,
                 "expected_marker_count": metrics.expected_marker_count,
                 "configured_bpm_range": f"{criteria.minimum_bpm:.0f}-{criteria.maximum_bpm:.0f}",
                 "configured_minimum_marker_fraction": f"{criteria.minimum_marker_fraction:.3f}",
@@ -237,6 +263,7 @@ def summarize_pulse_marker_recordings(
 
 
 __all__ = [
+    "GAP_INTERVAL_MULTIPLE",
     "PULSE_MARKER_DESCRIPTION",
     "PulseMarkerCriteria",
     "PulseMarkerMetrics",

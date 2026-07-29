@@ -9,8 +9,50 @@ from typing import Any, Dict, List
 from eeg_pipeline.cli.common import get_deriv_root, resolve_task
 
 
+def _collect_config_issues(
+    config: Any,
+    issues: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+    passed: List[str],
+) -> None:
+    """Fold the config coherence report into the validate command's own vocabulary.
+
+    Reported here as well as raised by the pipeline, because this is where someone looks
+    *before* committing to a run: the point of the check is to be cheap enough to ask
+    first.
+    """
+    from eeg_pipeline.utils.config.coherence import check_config_coherence
+
+    report = check_config_coherence(config)
+    for issue in report.errors:
+        issues.append({"type": "config", "message": str(issue)})
+    for warning in report.warnings:
+        warnings.append({"type": "config", "message": str(warning)})
+    if report.ok:
+        passed.append("Configuration is self-consistent")
+
+
 def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the validate command."""
+    mode = "config" if getattr(args, "config_only", False) else args.mode
+
+    if mode == "config":
+        config_issues: List[Dict[str, Any]] = []
+        config_warnings: List[Dict[str, Any]] = []
+        config_passed: List[str] = []
+        _collect_config_issues(config, config_issues, config_warnings, config_passed)
+
+        from eeg_pipeline.cli.commands.validate_checks import (
+            _output_json_report,
+            _output_text_report,
+        )
+
+        if args.output_json:
+            _output_json_report([], config_issues, config_warnings, config_passed)
+        else:
+            _output_text_report(mode, [], config_issues, config_warnings, config_passed)
+        return
+
     task = resolve_task(args.task, config)
     deriv_root = get_deriv_root(config, command="validate")
 
@@ -53,6 +95,8 @@ def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     passed: List[str] = []
 
     if _should_validate_mode(args.mode, "quick"):
+        # Cheapest check there is, and the one most likely to explain what follows.
+        _collect_config_issues(config, issues, warnings, passed)
         _validate_structure(deriv_root, issues, warnings, passed)
 
     if _should_validate_mode(args.mode, "epochs"):

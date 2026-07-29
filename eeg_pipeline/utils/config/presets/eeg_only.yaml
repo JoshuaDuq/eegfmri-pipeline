@@ -1,0 +1,69 @@
+# EEG recorded outside an MR scanner.
+#
+# Use as:
+#
+#     # my_study.yaml
+#     extends: "eeg_only"
+#     project:
+#       task: "oddball"
+#     paths:
+#       bids_root: "/data/my_study/bids"
+#       deriv_root: "/data/my_study/derivatives"
+#
+#     eeg-pipeline --config my_study.yaml preprocessing full --all-subjects
+#
+# Everything not named below is inherited from the packaged eeg_config.yaml, so
+# corrections to the scientific defaults reach this preset without being copied.
+#
+# WHAT THIS PRESET DOES NOT DECIDE FOR YOU
+# ----------------------------------------
+# The inherited defaults were chosen for a 22-second thermal-stimulation paradigm. They
+# are not wrong so much as specific, and no preset can guess the right values, so review
+# these before trusting any output:
+#
+#   epochs.tmin / epochs.tmax        -7.0 / 15.0 s — very long, for a slow thermal response
+#   epochs.baseline                  [-0.2, 0.0]
+#   time_windows.active              [3.0, 10.5] s — when the stimulus is "on"
+#   eeg.montage                      easycap-M1
+#   eeg.eog_channels                 Fp1/Fp2 surrogates; name a real EOG lead if you have one
+#   preprocessing.resample_freq      500 Hz
+#   preprocessing.notch_freq         60 Hz — set 50 outside North America
+#
+# 'eeg-pipeline validate --config-only' reports whatever is still contradictory.
+
+extends: "../eeg_config.yaml"
+
+project:
+  paradigm: "task"
+  # Deliberately unset: the BIDS task label selects which recordings are read, and
+  # inheriting another study's would quietly process nothing. validate --config-only
+  # names this key until you set it.
+  task: null
+
+preprocessing:
+  # The declaration every scanner-only stage is gated on.
+  eeg_fmri: false
+  brainvision_analyzer:
+    # No Analyzer gradient/pulse correction precedes an out-of-scanner recording.
+    enabled: false
+  clean_events_qc:
+    ecg_coupling:
+      # Correlates EEG against a recorded ECG lead. These montages carry none.
+      enabled: false
+
+alignment:
+  # No scanner volume markers to trim to.
+  trim_to_volume_bounds: false
+
+eeg:
+  ecg_channels: []
+
+ica:
+  cardiac_review:
+    # There is no ballistocardiogram outside the scanner. ICLabel still labels ordinary
+    # cardiac components, and the ocular review below is unaffected.
+    enabled: false
+  band_specific_report:
+    # The inherited comparison is on stimulus_temp, a column of the thermal study.
+    # Add your own condition contrasts here, or leave empty.
+    comparisons: []

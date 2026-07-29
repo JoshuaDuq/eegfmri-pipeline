@@ -1,0 +1,55 @@
+# Resting-state / baseline-only acquisition.
+#
+# Use as:
+#
+#     # my_baseline.yaml
+#     extends: "rest"
+#     paths:
+#       bids_root: "/data/my_study/bids"
+#       deriv_root: "/data/my_study/derivatives"
+#
+#     eeg-pipeline --config my_baseline.yaml preprocessing full --all-subjects
+#
+# For resting-state EEG recorded *outside* a scanner, combine the two:
+#
+#     extends: "eeg_only"
+#     project:
+#       paradigm: "rest"
+#
+# project.paradigm wins over the individual task_is_rest flags it covers, so that is all
+# it takes.
+#
+# WHAT CHANGES IN REST MODE
+# -------------------------
+# The recording is cut into fixed-length segments instead of being epoched around events.
+# There is no event, so there is no pre-stimulus interval and no baseline; anything
+# defined relative to a stimulus is unavailable rather than merely unset. Clean-events
+# export is skipped, and the subject report measures preservation on the posterior alpha
+# rhythm rather than on split-half evoked reliability.
+#
+# paths.bids_rest_root and paths.deriv_rest_root are only needed by a study that acquires
+# *both* task and rest and keeps them in separate trees. A rest-only study leaves them
+# null and uses paths.bids_root / paths.deriv_root like any other.
+
+extends: "../eeg_config.yaml"
+
+project:
+  # Sets preprocessing.task_is_rest, feature_engineering.task_is_rest and both fMRI
+  # equivalents together, so they cannot disagree.
+  paradigm: "rest"
+
+preprocessing:
+  # Length of each fixed-length segment. 10 s is a common choice for spectral estimates;
+  # longer segments buy frequency resolution at the cost of segment count.
+  rest_epochs_duration: 10.0
+  # Overlap is not supported: overlapping segments would be carried downstream as
+  # independent trial rows.
+  rest_epochs_overlap: 0.0
+
+ica:
+  band_specific_report:
+    tfr:
+      # Baseline-relative component TFR needs an event to be relative to.
+      enabled: false
+    # Condition contrasts need event-related epochs.
+    comparisons: []
