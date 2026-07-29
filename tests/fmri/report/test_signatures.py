@@ -5,6 +5,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pytest
 
+from fmri_pipeline.analysis.report.figures import signatures
 from fmri_pipeline.analysis.report.figures.signatures import (
     SignaturePoint,
     signature_dot_plot,
@@ -158,3 +159,65 @@ def test_a_missing_tsv_yields_no_points_rather_than_raising(tmp_path) -> None:
     from fmri_pipeline.analysis.report.figures.signatures import read_expression_tsv
 
     assert read_expression_tsv(tmp_path / "absent.tsv") == []
+
+
+# --- the reader locates columns by name, not position ---------------------
+
+
+def _write(tmp_path, header, *rows):
+    path = tmp_path / "signature_expression.tsv"
+    path.write_text(
+        "\n".join(["\t".join(header)] + ["\t".join(row) for row in rows]) + "\n"
+    )
+    return path
+
+
+def test_the_reader_survives_a_column_inserted_before_the_metrics(tmp_path) -> None:
+    # The writer lives in the analysis package and this reader in the report package,
+    # coupled only by the order of a TSV header. Parsed by position, an inserted
+    # column made the panel plot a number that is not the one it names.
+    path = _write(
+        tmp_path,
+        ["signature", "weight_path", "dot", "cosine", "pearson_r", "n_voxels"],
+        ["nps", "/weights/nps.nii.gz", "12.5", "0.42", "0.40", "1000"],
+    )
+    points = signatures.read_expression_tsv(path)
+    assert len(points) == 1
+    assert points[0].name == "nps"
+    assert points[0].cosine == pytest.approx(0.42)
+    assert points[0].n_voxels == 1000
+
+
+def test_the_reader_handles_reordered_columns(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        ["n_voxels", "cosine", "signature", "pearson_r", "dot"],
+        ["512", "-0.31", "siips", "-0.30", "-7.5"],
+    )
+    point = signatures.read_expression_tsv(path)[0]
+    assert point.name == "siips"
+    assert point.cosine == pytest.approx(-0.31)
+    assert point.dot == pytest.approx(-7.5)
+    assert point.n_voxels == 512
+
+
+def test_a_table_missing_a_required_column_yields_nothing(tmp_path) -> None:
+    # Better than guessing: a wrong value here is a wrong scientific claim, and the
+    # panel names the metric it is drawing.
+    path = _write(tmp_path, ["signature", "dot"], ["nps", "12.5"])
+    assert signatures.read_expression_tsv(path) == []
+
+
+def test_a_blank_metric_stays_unmeasured_rather_than_zero(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        ["signature", "dot", "cosine", "pearson_r", "n_voxels"],
+        ["nps", "12.5", "", "0.4", "100"],
+    )
+    assert signatures.read_expression_tsv(path)[0].cosine is None
+
+
+def test_an_empty_table_yields_nothing(tmp_path) -> None:
+    path = tmp_path / "signature_expression.tsv"
+    path.write_text("")
+    assert signatures.read_expression_tsv(path) == []

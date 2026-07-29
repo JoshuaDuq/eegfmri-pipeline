@@ -70,22 +70,42 @@ def read_expression_tsv(path: Any) -> List[SignaturePoint]:
         except ValueError:
             return None
 
-    points: List[SignaturePoint] = []
     lines = file_path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return []
+
+    # Columns are located by name, not by position. The writer lives in the analysis
+    # package and this reader in the report package, coupled only by the order of a
+    # TSV header; inserting a column there would have made this silently read the
+    # wrong field and plot a number that is not the one it names. A missing column
+    # now yields no points rather than a wrong figure.
+    header = [name.strip() for name in lines[0].split("\t")]
+    try:
+        index = {name: header.index(name) for name in ("signature", "dot", "cosine", "pearson_r", "n_voxels")}
+    except ValueError:
+        return []
+
+    def _field(fields: List[str], name: str) -> str:
+        position = index[name]
+        return fields[position] if position < len(fields) else ""
+
+    points: List[SignaturePoint] = []
     for line in lines[1:]:
         if not line.strip():
             continue
         fields = line.split("\t")
-        if len(fields) < 5:
-            continue
-        dot = _optional(fields[1])
+        dot = _optional(_field(fields, "dot"))
+        try:
+            n_voxels = int(float(_field(fields, "n_voxels") or 0))
+        except ValueError:
+            n_voxels = 0
         points.append(
             SignaturePoint(
-                name=fields[0].strip(),
+                name=_field(fields, "signature").strip(),
                 dot=0.0 if dot is None else dot,
-                cosine=_optional(fields[2]),
-                pearson_r=_optional(fields[3]),
-                n_voxels=int(float(fields[4] or 0)),
+                cosine=_optional(_field(fields, "cosine")),
+                pearson_r=_optional(_field(fields, "pearson_r")),
+                n_voxels=n_voxels,
             )
         )
     return points

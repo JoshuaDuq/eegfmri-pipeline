@@ -462,16 +462,39 @@ def regressor_correlation_figure(
         image = ax.imshow(
             correlation, cmap=style.SIGNED_CMAP, vmin=-1, vmax=1, interpolation="nearest"
         )
-        ax.set_title("Regressor correlation")
+        # Padded when the role bands are drawn: they sit at the top of the axes.
+        ax.set_title(
+            "Regressor correlation", pad=16 if len(modelled) > max_labelled else None
+        )
         if len(modelled) <= max_labelled:
             ax.set_xticks(range(len(modelled)))
             ax.set_xticklabels(modelled, rotation=90, fontsize=6.0)
             ax.set_yticks(range(len(modelled)))
             ax.set_yticklabels(modelled, fontsize=6.0)
         else:
+            # Role bands rather than names, as on the variance-inflation panel. A hot
+            # off-diagonal block among the confounds is ordinary -- a motion parameter
+            # and its own square are correlated by construction -- while the same
+            # block reaching the task regressors is what costs the contrast its
+            # variance. Unbanded, the two are indistinguishable.
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_xlabel(f"{len(modelled)} modelled regressors, grouped order")
+            ax.set_xlabel(f"{len(modelled)} modelled regressors, grouped by role")
+            for span in _role_spans(modelled):
+                if span.stop < len(modelled):
+                    for line in (ax.axvline, ax.axhline):
+                        line(span.stop - 0.5, color="0.35", linewidth=0.8)
+                ax.annotate(
+                    span.name,
+                    xy=((span.start + span.stop - 1) / 2.0, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
         bar = figure.colorbar(image, ax=ax, fraction=0.046, pad=0.02)
         bar.set_label("Pearson r")
         style.annotate_provenance(

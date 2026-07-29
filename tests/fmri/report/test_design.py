@@ -525,3 +525,30 @@ def test_the_vif_panel_survives_an_intercept_only_design() -> None:
     figure = design.variance_inflation_figure(pd.DataFrame({"intercept": np.ones(10)}))
     assert figure is not None
     plt.close(figure)
+
+
+def test_the_correlation_panel_bands_a_wide_design_by_role() -> None:
+    # A hot off-diagonal block among the confounds is ordinary -- a motion parameter
+    # and its own square are correlated by construction. The same block reaching the
+    # task regressors is what costs the contrast its variance, and unbanded the two
+    # are indistinguishable.
+    figure = design.regressor_correlation_figure(_wide_frame())
+    labels = " ".join(t.get_text() for t in figure.axes[0].texts)
+    assert "Task" in labels and "Confound" in labels
+    plt.close(figure)
+
+
+def test_a_narrow_design_keeps_its_regressor_names_instead_of_bands() -> None:
+    frame = pd.DataFrame(
+        {
+            "cond_a": np.linspace(0, 1, 40),
+            "cond_b": np.linspace(1, 0, 40),
+            "trans_x": np.random.default_rng(0).standard_normal(40),
+            "constant": np.ones(40),
+        }
+    )
+    figure = design.regressor_correlation_figure(frame)
+    figure.canvas.draw()
+    ticks = {t.get_text() for t in figure.axes[0].get_yticklabels() if t.get_text()}
+    assert {"cond_a", "cond_b", "trans_x"} <= ticks
+    plt.close(figure)
