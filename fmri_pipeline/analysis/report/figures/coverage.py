@@ -78,23 +78,43 @@ def estimate_fwhm(
     return (fwhm[0], fwhm[1], fwhm[2])
 
 
+def mask_volume_mm3(mask_img: Any) -> Tuple[int, float]:
+    """Return the voxel count of a mask and the volume it occupies, in mm^3.
+
+    The count alone is not comparable to anything: it depends on the resampling grid,
+    so the same brain at 2 mm and at 3 mm differs threefold. Volume is the quantity a
+    reader can carry to another subject, another study, or a published figure.
+    """
+    data = np.asarray(mask_img.get_fdata())
+    voxels = int(np.count_nonzero(data > 0))
+    voxel_sizes = np.sqrt((np.asarray(mask_img.affine)[:3, :3] ** 2).sum(axis=0))
+    return voxels, float(voxels * float(np.prod(voxel_sizes)))
+
+
 def coverage_figure(
     mask_img: Any,
     *,
     bg_img: Any = None,
-    n_runs: int = 1,
+    extent_note: str = "",
+    smoothness_note: str = "",
     title: str = "",
 ) -> plt.Figure:
     """Draw the analysis mask over the background, with its extent stated.
 
     Rendered as an ROI overlay rather than a bare binary volume so a reader can see
-    which anatomy fell outside the model, which is the only reading that matters.
+    which anatomy fell outside the model, which is the only reading that matters --
+    and that reading requires ``bg_img``. Over an empty background the panel shows a
+    blob whose missing regions cannot be named.
+
+    ``extent_note`` describes how the mask was derived, and is supplied by the caller
+    rather than assumed here. This panel previously asserted "intersection across N
+    runs" for whatever mask it was handed, which was false whenever the mask recorded
+    was a single run's.
     """
     from nilearn import plotting
 
-    data = np.asarray(mask_img.get_fdata())
-    modelled = int(np.count_nonzero(data > 0))
-    if modelled == 0:
+    voxels, volume = mask_volume_mm3(mask_img)
+    if voxels == 0:
         raise ValueError(
             "Coverage figure requires a mask with at least one voxel; got no voxels."
         )
@@ -111,15 +131,50 @@ def coverage_figure(
             annotate=True,
         )
         figure = figure_of(display)
-        annotate_provenance(
-            figure,
-            [
-                f"{modelled:,} voxels modelled of {data.size:,} in the field of view",
-                f"intersection across {n_runs} run(s)",
-                "voxels outside this mask were not tested",
-            ],
-        )
+        # The old first line was "N voxels modelled of M in the field of view". M
+        # counts air, so the ratio measured how much empty space the acquisition box
+        # contained and told a reader nothing about coverage.
+        lines = [f"{voxels:,} voxels modelled ({volume / 1000.0:,.1f} cm³)"]
+        if extent_note:
+            lines.append(extent_note)
+        if smoothness_note:
+            lines.append(smoothness_note)
+        lines.append("voxels outside this mask were not tested")
+        annotate_provenance(figure, lines)
         return figure
 
 
-__all__ = ["coverage_figure", "estimate_fwhm"]
+def smoothness_note(fwhm: Tuple[float, float, float], *, source: str) -> str:
+    """One line describing an estimated smoothness and where it came from.
+
+    The source matters enough to be mandatory. Estimated from a statistic map this
+    overestimates smoothness wherever real signal sits, because signal is spatially
+    structured; the same number from model residuals would not. A reader comparing
+    this against a published FWHM needs to know which they are looking at.
+    """
+    x, y, z = fwhm
+    return f"smoothness {x:.1f} × {y:.1f} × {z:.1f} mm FWHM (estimated from the {source})"
+
+
+def extent_in_resels(
+    voxels: int, *, mask_img: Any, fwhm: Tuple[float, float, float]
+) -> float:
+    """Convert a cluster-extent threshold in voxels to resolution elements.
+
+    A bare voxel count is not interpretable across datasets: the same 20 voxels is a
+    strong constraint on unsmoothed 3 mm data and almost none at 8 mm FWHM. One resel
+    is the volume of a single smoothing kernel, so an extent in resels says how many
+    independent bumps of noise a surviving cluster has to span.
+    """
+    voxel_sizes = np.sqrt((np.asarray(mask_img.affine)[:3, :3] ** 2).sum(axis=0))
+    resel_volume = float(np.prod([max(f, 1e-9) for f in fwhm]))
+    return float(voxels) * float(np.prod(voxel_sizes)) / resel_volume
+
+
+__all__ = [
+    "coverage_figure",
+    "estimate_fwhm",
+    "extent_in_resels",
+    "mask_volume_mm3",
+    "smoothness_note",
+]

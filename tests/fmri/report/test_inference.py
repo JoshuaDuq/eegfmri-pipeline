@@ -181,3 +181,19 @@ def test_the_summary_tolerates_a_null_it_cannot_fit() -> None:
     assert summary.null is None
     assert summary.applied_in_null_units is None
     assert summary.bonferroni > 0
+
+
+# --- an unthresholded report still needs the corrected heights ------------
+
+
+def test_the_summary_accepts_no_applied_threshold() -> None:
+    # threshold_mode: none. The corrected thresholds are what the map would have been
+    # cut at, and an unthresholded report is the one whose reader most needs them.
+    values = np.random.default_rng(11).standard_normal(20_000)
+    summary = _summary(values, applied_threshold=None)
+    assert summary.applied is None
+    assert summary.applied_survivors is None
+    assert summary.expected_null_survivors is None
+    assert summary.applied_in_null_units is None
+    assert summary.bonferroni > 0
+    assert summary.null is not None

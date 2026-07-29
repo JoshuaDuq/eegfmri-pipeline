@@ -192,3 +192,15 @@ def test_the_removed_histogram_is_gone() -> None:
     # Replaced rather than supplemented: it drew a theoretical null over an
     # unmasked volume and offered no way to see the map's own null.
     assert not hasattr(distributions, "z_histogram")
+
+
+def test_the_panel_draws_without_an_applied_threshold() -> None:
+    values = _values()
+    context = _context(values, applied_threshold=None)
+    figure = distributions.null_calibration_figure(
+        values, context=context, mask_source="analysis mask"
+    )
+    text = _legend_text(figure)
+    assert "no height threshold applied" in text
+    assert "Bonferroni" in text  # the corrected heights still belong on the axis
+    plt.close(figure)

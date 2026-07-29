@@ -62,9 +62,13 @@ class ThresholdContext:
 
     n_voxels: int
     two_sided: bool
-    applied: float
-    applied_survivors: int
-    expected_null_survivors: float
+    #: ``None`` under ``threshold_mode: none``, where no height was applied. The
+    #: corrected thresholds are still worth stating: they are what the map *would*
+    #: have been cut at, and an unthresholded report is the one whose reader most
+    #: needs them.
+    applied: Optional[float]
+    applied_survivors: Optional[int]
+    expected_null_survivors: Optional[float]
     fdr: Optional[float]
     fdr_q: float
     fdr_survivors: int
@@ -215,7 +219,7 @@ def _survivors(values: np.ndarray, threshold: Optional[float], *, two_sided: boo
 def threshold_context(
     values: np.ndarray,
     *,
-    applied_threshold: float,
+    applied_threshold: Optional[float],
     fdr_q: float,
     alpha: float,
     two_sided: bool,
@@ -241,13 +245,18 @@ def threshold_context(
     fdr = fdr_threshold(finite, q=fdr_q, two_sided=two_sided)
     bonferroni = bonferroni_threshold(n=n, alpha=alpha, two_sided=two_sided)
 
+    applied = None if applied_threshold is None else float(applied_threshold)
     return ThresholdContext(
         n_voxels=n,
         two_sided=two_sided,
-        applied=float(applied_threshold),
-        applied_survivors=_survivors(finite, applied_threshold, two_sided=two_sided),
-        expected_null_survivors=expected_false_positives(
-            n=n, threshold=float(applied_threshold), two_sided=two_sided
+        applied=applied,
+        applied_survivors=(
+            None if applied is None else _survivors(finite, applied, two_sided=two_sided)
+        ),
+        expected_null_survivors=(
+            None
+            if applied is None
+            else expected_false_positives(n=n, threshold=applied, two_sided=two_sided)
         ),
         fdr=fdr,
         fdr_q=float(fdr_q),
@@ -257,7 +266,7 @@ def threshold_context(
         bonferroni_survivors=_survivors(finite, bonferroni, two_sided=two_sided),
         null=null,
         applied_in_null_units=(
-            None if null is None else float(applied_threshold) / null.scale
+            None if null is None or applied is None else applied / null.scale
         ),
     )
 

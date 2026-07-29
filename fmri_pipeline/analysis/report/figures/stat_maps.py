@@ -40,15 +40,26 @@ def _masked_values(stat_img: Any, mask_img: Any = None) -> Tuple[np.ndarray, str
     data = np.asarray(stat_img.get_fdata())
     finite = np.isfinite(data)
 
+    # Why no mask was used, when none was. A rejected mask and an absent one are
+    # different faults -- one is looked for in the geometry, the other in the manifest
+    # -- and reporting them with the same words sends the reader to the wrong place.
+    reason = "no mask supplied"
     if mask_img is not None:
         mask = np.asanyarray(mask_img.dataobj).astype(bool)
         if mask.shape == data.shape:
             return data[finite & mask], "analysis mask"
+        logger.warning(
+            "Analysis mask shape %s does not match the map's %s; falling back to "
+            "nonzero voxels for the colour limit.",
+            mask.shape,
+            data.shape,
+        )
+        reason = "supplied mask did not fit the map"
 
     nonzero = finite & (data != 0)
     if nonzero.any() and int(nonzero.sum()) < int(finite.sum()):
-        return data[nonzero], "nonzero voxels (no mask supplied)"
-    return data[finite], "all voxels"
+        return data[nonzero], f"nonzero voxels ({reason})"
+    return data[finite], f"all voxels ({reason})"
 
 
 def _resolve_vmax(
@@ -101,13 +112,23 @@ def _provenance(
 ) -> List[str]:
     """Build the self-description line for a map panel."""
     lines = [f"n = {values.size:,} voxels"]
+    # The clipped fraction has to describe the voxels the panel draws. Taken over the
+    # whole mask on a thresholded panel it is a property of a population the reader
+    # cannot see, and it reads far lower than the saturation actually shown: the
+    # sub-threshold voxels that dominate the count are nowhere near the colour limit.
+    shown = values
     if threshold:
         comparison = "|z|" if two_sided else "z"
         lines.append(f"{comparison} > {float(threshold):.2f}")
+        compared = np.abs(values) if two_sided else values
+        shown = values[compared > float(threshold)]
     else:
         lines.append("unthresholded")
-    fraction = clipped_fraction(values, limit=limit)
-    limit_line = f"colour limit ±{limit:.2f} ({fraction:.1%} clipped)"
+    fraction = clipped_fraction(shown, limit=limit) if shown.size else 0.0
+    scope = "of drawn voxels" if threshold else ""
+    limit_line = (
+        f"colour limit ±{limit:.2f} ({fraction:.1%} clipped{f' {scope}' if scope else ''})"
+    )
     if limit_source:
         # Which voxels the limit came from changes it substantially, so a reader
         # comparing two panels needs to know.

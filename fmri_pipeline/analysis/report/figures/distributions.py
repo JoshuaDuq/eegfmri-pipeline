@@ -100,15 +100,22 @@ def _threshold_entries(
     a finding -- indistinguishable from a panel that failed to draw it.
     """
     comparison = "|z|" if context.two_sided else "z"
-    entries: List[Tuple[str, Optional[float], str]] = [
-        (
-            "applied",
-            context.applied,
-            f"applied {comparison} > {context.applied:.2f}: "
-            f"{context.applied_survivors:,} voxels "
-            f"({context.expected_null_survivors:,.0f} expected under N(0, 1))",
+    entries: List[Tuple[str, Optional[float], str]] = []
+    if context.applied is None:
+        # threshold_mode: none. The corrected heights below still belong on the axis:
+        # an unthresholded map is the one whose reader most needs to know where a
+        # threshold would have fallen.
+        entries.append(("applied", None, "no height threshold applied"))
+    else:
+        entries.append(
+            (
+                "applied",
+                context.applied,
+                f"applied {comparison} > {context.applied:.2f}: "
+                f"{context.applied_survivors:,} voxels "
+                f"({context.expected_null_survivors:,.0f} expected under N(0, 1))",
+            )
         )
-    ]
     if context.fdr is None:
         entries.append(
             (

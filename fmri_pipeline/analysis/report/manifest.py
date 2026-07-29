@@ -70,6 +70,16 @@ class ContrastManifest:
     signal_scaling: bool
     confound_strategy: str
 
+    #: Whether ``mask`` is the mask the GLM was fitted inside, rather than one
+    #: discovered from the preprocessing derivatives. The two differ: the fitted mask
+    #: is the intersection across runs, a discovered one is a single run's. Only the
+    #: first justifies the claim that voxels outside it were not tested, so the panel
+    #: that makes that claim checks this rather than assuming it.
+    #:
+    #: Defaulted, and last, so a manifest written before this field existed still
+    #: loads -- and loads as the conservative answer.
+    mask_is_analysis_mask: bool = False
+
 
 def _encode(value: Any) -> Any:
     if isinstance(value, Path):

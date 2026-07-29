@@ -85,11 +85,15 @@ def _effect_units(manifest: ContrastManifest) -> str:
     return "% signal change" if manifest.signal_scaling else "effect (arbitrary BOLD units)"
 
 
-def build_header_section(manifests: Sequence[ContrastManifest]) -> html.Section:
+def build_header_section(
+    manifests: Sequence[ContrastManifest], *, background_source: str = ""
+) -> html.Section:
     """Summarise the acquisition and what entered the model.
 
     Excluded runs carry their reasons: a report that says a run was dropped without
-    saying why gives a reader nothing to act on.
+    saying why gives a reader nothing to act on. The anatomical underlay is named for
+    the same reason: panels drawn over nothing look like panels drawn over something
+    until a reader tries to locate a cluster on them.
     """
     first = manifests[0]
     items = [
@@ -105,7 +109,22 @@ def build_header_section(manifests: Sequence[ContrastManifest]) -> html.Section:
         ),
         ("Confound strategy", first.confound_strategy or "unspecified"),
         ("Effect units", _effect_units(first)),
+        (
+            "Analysis mask",
+            "the mask the GLM was fitted inside"
+            if first.mask_is_analysis_mask
+            else "discovered from preprocessing; not verified as the fitted mask",
+        ),
     ]
+    if background_source:
+        items.append(
+            (
+                "Volume underlay",
+                Path(background_source).name
+                if Path(background_source).suffix
+                else background_source,
+            )
+        )
     blocks: List[html.Block] = [
         html.KeyValues(title="Acquisition and model", items=tuple(items))
     ]
@@ -119,12 +138,51 @@ def build_header_section(manifests: Sequence[ContrastManifest]) -> html.Section:
     return html.Section(slug="overview", title="Overview", blocks=tuple(blocks))
 
 
+def load_background(
+    *, deriv_root: Path, manifest: ContrastManifest
+) -> Tuple[Any, str]:
+    """Load the anatomical image the volume panels are drawn over.
+
+    Every volume panel in this report previously passed ``bg_img=None``, so a cluster
+    floated in empty space and could not be judged against grey matter, a ventricle,
+    or the edge of the brain -- which is most of what localising a result means. The
+    background was already discovered for the carpet's tissue ordering and thrown away.
+
+    Returns ``(None, reason)`` when no anatomy is available, so the caller can say the
+    panels are unbacked rather than leaving a reader to assume they are not.
+    """
+    from fmri_pipeline.analysis.report.assets import discover_plot_assets
+
+    try:
+        assets = discover_plot_assets(
+            deriv_root=Path(deriv_root),
+            subject=manifest.subject,
+            task=manifest.task,
+            space=manifest.space,
+        )
+    except Exception as exc:
+        logger.warning("Could not discover plotting assets (%s)", exc)
+        return None, "asset discovery failed"
+
+    if assets.background is None:
+        return None, "no anatomical image found in the derivatives"
+
+    try:
+        import nibabel as nib
+
+        return nib.load(str(assets.background)), str(assets.background)
+    except Exception as exc:
+        logger.warning("Could not load background %s (%s)", assets.background, exc)
+        return None, "the discovered anatomical image could not be read"
+
+
 def build_qc_sections(
     *,
     manifests: Sequence[ContrastManifest],
     deriv_root: Path,
     out_dir: Path,
     cfg: FmriReportConfig,
+    background: Any = None,
 ) -> List[html.Section]:
     """Build the as-modelled QC section, once for the whole subject-task.
 
@@ -177,7 +235,9 @@ def build_qc_sections(
                 sample_masks=sample_masks,
             )
             path = _save(
-                volume_figures.tsnr_volume(result, title="tSNR (as modelled)"),
+                volume_figures.tsnr_volume(
+                    result, bg_img=background, title="tSNR (as modelled)"
+                ),
                 out_dir=qc_dir,
                 stem="tsnr_map",
                 formats=cfg.formats,
@@ -208,10 +268,20 @@ def build_qc_sections(
 
     if first.mask and Path(first.mask).exists():
         with _panel("coverage"):
+            # The extent claim comes from the manifest's own record of how the mask was
+            # derived. This panel used to assert "intersection across N runs" for
+            # whatever mask it was handed, which was false whenever a single run's
+            # fMRIPrep brain mask had been recorded instead of the GLM's own.
+            extent_note = (
+                f"intersection across {len(first.included_runs)} run(s), as fitted"
+                if first.mask_is_analysis_mask
+                else "as recorded in the manifest; not verified against the fitted model"
+            )
             path = _save(
                 coverage_figures.coverage_figure(
                     nib.load(str(first.mask)),
-                    n_runs=len(first.included_runs),
+                    bg_img=background,
+                    extent_note=extent_note,
                     title="Analysis mask",
                 ),
                 out_dir=qc_dir,
@@ -348,6 +418,60 @@ def _carpet_blocks(
     ]
 
 
+def masked_stat_values(stat_img: Any, mask_img: Any) -> Tuple[np.ndarray, str]:
+    """Return the statistic values inside the analysis mask, and their source.
+
+    Everything inferential in this module reads this rather than the raw volume. On a
+    typical map over 60% of the volume is exact background zero, and including it
+    inflates the test count behind every corrected threshold, drags a fitted null
+    toward zero, and puts a spike at the origin that dominates any distribution panel.
+    """
+    data = np.asarray(stat_img.get_fdata())
+    finite = np.isfinite(data)
+    if mask_img is not None:
+        mask = np.asanyarray(mask_img.dataobj).astype(bool)
+        if mask.shape == data.shape:
+            return data[finite & mask], "analysis mask"
+        logger.warning(
+            "Analysis mask shape %s does not match the map's %s.", mask.shape, data.shape
+        )
+    nonzero = finite & (data != 0)
+    if nonzero.any() and int(nonzero.sum()) < int(finite.sum()):
+        return data[nonzero], "nonzero voxels (no usable mask)"
+    return data[finite], "all voxels (no usable mask)"
+
+
+def resolve_threshold(
+    manifest: ContrastManifest, *, values: np.ndarray
+) -> Tuple[Optional[float], str]:
+    """Return the height threshold this contrast's panels are drawn at, and its label.
+
+    Every ``threshold_mode`` the config accepts resolves here. Previously only ``z``
+    did, and the other two -- both validated, both configurable -- produced a contrast
+    section containing no panels at all: no dual-coded map, no thresholded map, no
+    glass brain, no cluster table. A supported setting has to produce a report.
+
+    ``fdr`` resolves against the map's own p-values inside the analysis mask, so the
+    threshold is a property of this contrast rather than a number carried over from a
+    config file. It returns ``None`` when Benjamini-Hochberg rejects nothing, which is
+    a finding and is stated as one.
+    """
+    mode = str(manifest.threshold_mode or "").strip().lower()
+    if mode == "z":
+        threshold = float(manifest.z_threshold)
+        return (threshold, f"|z| > {threshold:.2f} (uncorrected)") if threshold > 0 else (None, "none")
+    if mode == "fdr":
+        from fmri_pipeline.analysis.report import inference
+
+        threshold = inference.fdr_threshold(
+            values, q=float(manifest.fdr_q), two_sided=manifest.two_sided
+        )
+        if threshold is None:
+            return None, f"FDR q = {manifest.fdr_q:g}: no voxel survives correction"
+        return threshold, f"FDR q = {manifest.fdr_q:g} (|z| > {threshold:.2f})"
+    return None, "none"
+
+
 def _load_mask(manifest: ContrastManifest) -> Any:
     """Load the analysis mask, or None when the manifest records none.
 
@@ -441,10 +565,48 @@ def _cluster_identifier(value: Any) -> Optional[str]:
     return str(int(number))
 
 
+def smoothness_facts(
+    stat_img: Any, *, mask_img: Any, cluster_min_voxels: int
+) -> List[str]:
+    """Describe the map's spatial smoothness and what it makes an extent filter mean.
+
+    ``cluster_min_voxels`` is configured as a bare count, and a bare count is not
+    comparable to anything: the same twenty voxels is a strong constraint on
+    unsmoothed 3 mm data and almost none at 8 mm FWHM. Expressing it in resolution
+    elements says how many independent bumps of noise a surviving cluster spans.
+
+    Best-effort. A smoothness that cannot be estimated costs these lines and nothing
+    else -- an unresolved measurement is not a reason to lose the cluster table.
+    """
+    from fmri_pipeline.analysis.report.figures import coverage as coverage_figures
+
+    try:
+        mask = None
+        if mask_img is not None:
+            candidate = np.asanyarray(mask_img.dataobj).astype(bool)
+            data_shape = np.asarray(stat_img.get_fdata()).shape
+            mask = candidate if candidate.shape == data_shape else None
+        fwhm = coverage_figures.estimate_fwhm(stat_img, mask=mask)
+    except Exception as exc:
+        logger.info("Could not estimate smoothness (%s)", exc)
+        return []
+
+    facts = [coverage_figures.smoothness_note(fwhm, source="statistic map")]
+    if cluster_min_voxels > 0:
+        resels = coverage_figures.extent_in_resels(
+            cluster_min_voxels, mask_img=stat_img, fwhm=fwhm
+        )
+        facts.append(f"the {cluster_min_voxels}-voxel extent filter is {resels:.2f} resels")
+    return facts
+
+
 def build_cluster_table(
     *,
     manifest: ContrastManifest,
     out_dir: Path,
+    threshold: Optional[float] = None,
+    threshold_label: str = "",
+    extra_facts: Sequence[str] = (),
 ) -> Tuple[Optional[html.Table], Tuple[Tuple[str, Tuple[float, float, float]], ...]]:
     """Return the cluster table and its peak coordinates.
 
@@ -457,6 +619,10 @@ def build_cluster_table(
     Eklund, Nichols & Knutsson (2016) measured false-positive rates up to 70% for
     parametric cluster inference, so nothing here may read as inferential about
     extent.
+
+    ``threshold`` is resolved from the manifest when not supplied. Callers that have
+    already resolved it pass it in, because doing so under ``threshold_mode: fdr``
+    means a second pass over every voxel's p value.
     """
     import nibabel as nib
 
@@ -465,7 +631,11 @@ def build_cluster_table(
     except ImportError:
         return None, ()
 
-    threshold = manifest.z_threshold if manifest.threshold_mode == "z" else None
+    if threshold is None:
+        values, _source = masked_stat_values(
+            nib.load(str(manifest.stat_map)), _load_mask(manifest)
+        )
+        threshold, threshold_label = resolve_threshold(manifest, values=values)
     if threshold is None:
         return None, ()
 
@@ -485,9 +655,10 @@ def build_cluster_table(
 
     caption_parts = [
         "two-sided" if manifest.two_sided else "one-sided",
-        f"height threshold: |z| > {threshold:.2f}",
+        f"height threshold: {threshold_label or f'|z| > {threshold:.2f}'}",
         coordinate_space_label(manifest.space),
     ]
+    caption_parts.extend(str(fact) for fact in extra_facts if fact)
     if manifest.cluster_min_voxels > 0:
         caption_parts.append(
             f"clusters smaller than {manifest.cluster_min_voxels} voxels removed for "
@@ -511,6 +682,7 @@ def build_contrast_section(
     manifest: ContrastManifest,
     out_dir: Path,
     cfg: FmriReportConfig,
+    background: Any = None,
 ) -> html.Section:
     """Build the results section for one contrast.
 
@@ -518,15 +690,24 @@ def build_contrast_section(
     hard-thresholded panel the cluster table refers to. Both are needed: the first
     so a reader can see near-threshold structure, the second so the figure and the
     table describe the same voxels.
+
+    Closes on the calibration panel, which is what says whether the threshold the
+    other panels were drawn at means what it claims. It sits here rather than in the
+    collapsed diagnostics because a reader who does not see it will read every panel
+    above as more decisive than it is.
     """
     import nibabel as nib
 
+    from fmri_pipeline.analysis.report import inference
+
     plots_dir = out_dir / "plots" / _slug(manifest)
     stat_img = nib.load(str(manifest.stat_map))
-    # Colour limits are computed inside this mask. Without it a percentile is taken
-    # over a volume that is mostly background zeros and lands far too low.
+    # Colour limits, the fitted null, and every corrected threshold are computed
+    # inside this mask. Over the whole volume a percentile is taken from a
+    # distribution that is mostly background zeros and lands far too low.
     mask_img = _load_mask(manifest)
-    threshold = manifest.z_threshold if manifest.threshold_mode == "z" else None
+    values, mask_source = masked_stat_values(stat_img, mask_img)
+    threshold, threshold_label = resolve_threshold(manifest, values=values)
     blocks: List[html.Block] = []
 
     if manifest.effect_map and Path(manifest.effect_map).exists() and threshold:
@@ -535,6 +716,7 @@ def build_contrast_section(
                 stat_map_figures.dual_coded_mosaic(
                     nib.load(str(manifest.effect_map)),
                     stat_img=stat_img,
+                    bg_img=background,
                     threshold=float(threshold),
                     two_sided=manifest.two_sided,
                     radiological=manifest.radiological,
@@ -559,18 +741,28 @@ def build_contrast_section(
 
     table, peaks = (None, ())
     if threshold:
+        facts = smoothness_facts(
+            stat_img, mask_img=mask_img, cluster_min_voxels=manifest.cluster_min_voxels
+        )
         with _panel(f"cluster table for {manifest.contrast_name}"):
-            table, peaks = build_cluster_table(manifest=manifest, out_dir=out_dir)
+            table, peaks = build_cluster_table(
+                manifest=manifest,
+                out_dir=out_dir,
+                threshold=threshold,
+                threshold_label=threshold_label,
+                extra_facts=facts,
+            )
 
         with _panel(f"thresholded panel for {manifest.contrast_name}"):
             path = _save(
                 stat_map_figures.stat_map_mosaic(
                     stat_img,
+                    bg_img=background,
                     mask_img=mask_img,
                     threshold=float(threshold),
                     two_sided=manifest.two_sided,
                     radiological=manifest.radiological,
-                    title=f"{manifest.contrast_name}: z map (thresholded)",
+                    title=f"{manifest.contrast_name}: z map ({threshold_label})",
                 ),
                 out_dir=plots_dir,
                 stem="stat_thresholded",
@@ -620,9 +812,54 @@ def build_contrast_section(
                     )
                 )
             )
+    else:
+        # A mode that resolved no height is a fact about this contrast, not a gap.
+        blocks.append(
+            html.Note(
+                text=(
+                    f"No thresholded panels for this contrast: {threshold_label}. The "
+                    "calibration panel below still reports where a corrected threshold "
+                    "would fall."
+                )
+            )
+        )
 
     if table is not None:
         blocks.append(table)
+
+    with _panel(f"threshold calibration for {manifest.contrast_name}"):
+        context = inference.threshold_context(
+            values,
+            applied_threshold=threshold,
+            fdr_q=float(manifest.fdr_q),
+            alpha=0.05,
+            two_sided=manifest.two_sided,
+        )
+        path = _save(
+            distribution_figures.null_calibration_figure(
+                values,
+                context=context,
+                mask_source=mask_source,
+                title=f"{manifest.contrast_name}: threshold calibration",
+            ),
+            out_dir=plots_dir,
+            stem="threshold_calibration",
+            formats=cfg.formats,
+        )
+        if path:
+            blocks.append(
+                html.Figure(
+                    title="Threshold calibration",
+                    path=path,
+                    dense=False,
+                    caption=(
+                        "The applied height beside the corrected ones, and the map's "
+                        "own fitted null beside the theoretical N(0, 1) the threshold "
+                        "assumes. A null wider than 1 means the applied threshold is "
+                        "weaker than its nominal p value."
+                    ),
+                )
+            )
 
     if not blocks:
         blocks.append(html.Note(text="No panels could be generated for this contrast."))
@@ -638,12 +875,17 @@ def build_diagnostics_section(
     manifest: ContrastManifest,
     out_dir: Path,
     cfg: FmriReportConfig,
+    background: Any = None,
 ) -> html.Section:
     """Build the collapsed diagnostics for one contrast.
 
     Demoted, not deleted. The unthresholded map is the honest counterpart to the
     thresholded one, and the standard error is how a reader tells a true null from a
     dropout-driven absence of effect -- but neither should compete with the result.
+
+    The threshold calibration panel used to live here as a z histogram. It is now in
+    the contrast section: a reader who never opens this block would otherwise read
+    every result above at face value.
     """
     import nibabel as nib
 
@@ -657,6 +899,7 @@ def build_diagnostics_section(
             path = _save(
                 stat_map_figures.stat_map_mosaic(
                     stat_img,
+                    bg_img=background,
                     mask_img=mask_img,
                     threshold=None,
                     two_sided=manifest.two_sided,
@@ -684,6 +927,7 @@ def build_diagnostics_section(
             path = _save(
                 stat_map_figures.stat_map_mosaic(
                     se_img,
+                    bg_img=background,
                     mask_img=mask_img,
                     threshold=None,
                     two_sided=True,
@@ -707,23 +951,6 @@ def build_diagnostics_section(
                         ),
                     )
                 )
-
-    with _panel(f"z histogram for {manifest.contrast_name}"):
-        data = np.asarray(stat_img.get_fdata())
-        path = _save(
-            distribution_figures.z_histogram(
-                data[np.isfinite(data)],
-                threshold=(
-                    manifest.z_threshold if manifest.threshold_mode == "z" else None
-                ),
-                title="Z-statistic distribution",
-            ),
-            out_dir=plots_dir,
-            stem="z_hist",
-            formats=cfg.formats,
-        )
-        if path:
-            blocks.append(html.Figure(title="Z histogram", path=path, dense=False))
 
     return html.Section(
         slug=f"{_slug(manifest)}-diagnostics",
@@ -976,14 +1203,22 @@ def build_methods_section(manifests: Sequence[ContrastManifest]) -> html.Section
     """
     first = manifests[0]
     threshold = (
-        f"|z| > {first.z_threshold:.2f}"
+        f"|z| > {first.z_threshold:.2f}, uncorrected"
         if first.threshold_mode == "z"
-        else f"FDR q = {first.fdr_q:.3f}"
+        else f"Benjamini-Hochberg FDR, q = {first.fdr_q:.3f}"
         if first.threshold_mode == "fdr"
         else "none"
     )
     items = [
         ("Height threshold", threshold),
+        (
+            "Multiple comparisons",
+            "no familywise correction is applied to the map; each contrast's "
+            "calibration panel states where FDR and Bonferroni thresholds fall for "
+            "that map and how many voxels survive each"
+            if first.threshold_mode != "fdr"
+            else "voxelwise FDR across the analysis mask; no cluster-level correction",
+        ),
         ("Sidedness", "two-sided" if first.two_sided else "one-sided"),
         ("Confound strategy", first.confound_strategy or "unspecified"),
         (
@@ -1024,15 +1259,27 @@ def build_subject_report(
     out_path = Path(out_path)
     out_dir = out_path.parent
 
-    sections = [build_header_section(manifests)]
+    # Loaded once for the whole document. Every volume panel is drawn over it, and
+    # re-reading a T1w per panel is the most expensive way to get the same image.
+    background, background_source = load_background(
+        deriv_root=Path(deriv_root), manifest=first
+    )
+
+    sections = [build_header_section(manifests, background_source=background_source)]
     sections.extend(
         build_qc_sections(
-            manifests=manifests, deriv_root=Path(deriv_root), out_dir=out_dir, cfg=cfg
+            manifests=manifests,
+            deriv_root=Path(deriv_root),
+            out_dir=out_dir,
+            cfg=cfg,
+            background=background,
         )
     )
     for manifest in manifests:
         sections.append(
-            build_contrast_section(manifest=manifest, out_dir=out_dir, cfg=cfg)
+            build_contrast_section(
+                manifest=manifest, out_dir=out_dir, cfg=cfg, background=background
+            )
         )
         if cfg.include_design_qc:
             design_section = build_design_section(
@@ -1046,7 +1293,9 @@ def build_subject_report(
         if signature_section is not None:
             sections.append(signature_section)
         sections.append(
-            build_diagnostics_section(manifest=manifest, out_dir=out_dir, cfg=cfg)
+            build_diagnostics_section(
+                manifest=manifest, out_dir=out_dir, cfg=cfg, background=background
+            )
         )
     sections.append(build_methods_section(manifests))
 
@@ -1074,5 +1323,9 @@ __all__ = [
     "build_signature_section",
     "build_subject_report",
     "coordinate_space_label",
+    "load_background",
+    "masked_stat_values",
+    "resolve_threshold",
+    "smoothness_facts",
     "supports_glass_brain",
 ]

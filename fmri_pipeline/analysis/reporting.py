@@ -1013,19 +1013,39 @@ def generate_fmri_space_section(
             ))
 
     if "hist" in plot_types:
-        with _panel("z histogram"):
+        with _panel("threshold calibration"):
+            from fmri_pipeline.analysis.report import inference
+
             data = np.asarray(stat_img.get_fdata())
+            data = data[np.isfinite(data)]
             if mask_img is not None:
                 m = np.asarray(mask_img.get_fdata()).astype(bool)
-                data = data[m] if m.shape == data.shape else data[data != 0]
-            figure = distribution_figures.z_histogram(
+                full = np.asarray(stat_img.get_fdata())
+                data = (
+                    full[np.isfinite(full) & m]
+                    if m.shape == full.shape
+                    else data[data != 0]
+                )
+            context = inference.threshold_context(
                 data,
-                threshold=thr_val if thr_label != "none" else None,
-                title="Z-statistic distribution",
+                applied_threshold=thr_val if thr_label != "none" else None,
+                fdr_q=float(cfg_obj.fdr_q),
+                alpha=0.05,
+                two_sided=two_sided,
+            )
+            figure = distribution_figures.null_calibration_figure(
+                data,
+                context=context,
+                mask_source="analysis mask" if mask_img is not None else "nonzero voxels",
+                title="Threshold calibration",
             )
             images.extend(_save_figure(
                 figure, out_dir=out_dir, stem="z_hist", formats=formats,
-                title="Z histogram",
+                title="Threshold calibration",
+                caption=(
+                    "The applied height beside the corrected ones, and the map's own "
+                    "fitted null beside the theoretical N(0, 1) it assumes."
+                ),
             ))
 
     if mask_img is not None:

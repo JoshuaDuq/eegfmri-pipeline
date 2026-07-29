@@ -94,3 +94,69 @@ def test_coverage_figure_rejects_an_empty_mask() -> None:
     empty = nib.Nifti1Image(np.zeros((12, 12, 12), dtype=np.float32), np.eye(4))
     with pytest.raises(ValueError, match="no voxels"):
         coverage.coverage_figure(empty)
+
+
+# --- extent, volume, and smoothness reporting -----------------------------
+
+
+def test_mask_volume_scales_with_the_voxel_size() -> None:
+    # The point of reporting mm^3: the same brain on a coarser grid has a third the
+    # voxels and the same volume.
+    mask = np.zeros((10, 10, 10), dtype=np.uint8)
+    mask[2:8, 2:8, 2:8] = 1
+    fine = nib.Nifti1Image(mask, np.diag([1.0, 1.0, 1.0, 1.0]))
+    coarse = nib.Nifti1Image(mask, np.diag([3.0, 1.0, 1.0, 1.0]))
+    _, fine_volume = coverage.mask_volume_mm3(fine)
+    _, coarse_volume = coverage.mask_volume_mm3(coarse)
+    assert coarse_volume == pytest.approx(3.0 * fine_volume)
+
+
+def test_an_extent_threshold_in_resels_falls_as_smoothness_rises() -> None:
+    # The same voxel count is a strong constraint on unsmoothed data and almost none
+    # at 8 mm, which is exactly what a bare count fails to say.
+    mask = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.uint8), np.eye(4))
+    rough = coverage.extent_in_resels(50, mask_img=mask, fwhm=(2.0, 2.0, 2.0))
+    smooth = coverage.extent_in_resels(50, mask_img=mask, fwhm=(8.0, 8.0, 8.0))
+    assert rough > smooth
+    assert smooth == pytest.approx(50.0 / 8.0**3)
+
+
+def test_the_smoothness_note_names_where_the_estimate_came_from() -> None:
+    # Estimated from a statistic map this overestimates wherever signal sits; the
+    # same number from residuals would not, and the reader cannot tell them apart.
+    note = coverage.smoothness_note((5.0, 5.2, 6.1), source="statistic map")
+    assert "statistic map" in note and "FWHM" in note
+
+
+def test_the_coverage_panel_reports_volume_not_a_field_of_view_ratio() -> None:
+    # The old line counted air: the ratio measured how much empty space the
+    # acquisition box contained.
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    figure = coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "cm³" in text
+    assert "field of view" not in text
+    plt.close(figure)
+
+
+def test_the_coverage_panel_states_only_the_extent_it_was_told() -> None:
+    # It previously asserted "intersection across N runs" over whatever mask it was
+    # handed, which was false whenever that mask was a single run's.
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    figure = coverage.coverage_figure(
+        nib.Nifti1Image(mask, np.eye(4)), extent_note="intersection across 6 runs"
+    )
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "intersection across 6 runs" in text
+    plt.close(figure)
+
+
+def test_the_coverage_panel_makes_no_extent_claim_by_default() -> None:
+    mask = np.zeros((12, 12, 12), dtype=np.uint8)
+    mask[3:9, 3:9, 3:9] = 1
+    figure = coverage.coverage_figure(nib.Nifti1Image(mask, np.eye(4)))
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "intersection" not in text
+    plt.close(figure)

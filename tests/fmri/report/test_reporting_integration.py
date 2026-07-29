@@ -66,8 +66,8 @@ def test_a_failing_panel_does_not_abort_the_section(tmp_path: Path) -> None:
         section = _section(
             tmp_path, include_unthresholded=True, plot_types=("slices", "hist")
         )
-    # The histogram survived even though the mosaic raised.
-    assert any("histogram" in image.title.lower() for image in section.images)
+    # The calibration panel survived even though the mosaic raised.
+    assert any("calibration" in image.title.lower() for image in section.images)
 
 
 def test_no_unthresholded_glass_brain_is_produced(tmp_path: Path) -> None:
