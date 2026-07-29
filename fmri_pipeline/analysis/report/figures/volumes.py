@@ -13,11 +13,21 @@ from fmri_pipeline.analysis.report.figures._display import figure_of, label_colo
 from fmri_pipeline.analysis.report.style import (
     MAGNITUDE_CMAP,
     OKABE_ITO,
+    RADIOLOGICAL,
     annotate_provenance,
     clipped_fraction,
+    orientation_label,
     plot_context,
     robust_upper_limit,
 )
+
+
+#: Smallest residual standard deviation, as a fraction of a voxel's own mean, that
+#: still counts as a measurement rather than floating-point noise.
+#:
+#: Real BOLD tSNR tops out in the low hundreds, so a genuine voxel sits many orders
+#: of magnitude above this. Nothing measurable is excluded by it.
+_RESIDUAL_FLOOR_RATIO = 1e-9
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,48 @@ class TsnrResult:
     per_run_median: Tuple[float, ...]
     frames_used: Tuple[int, ...]
     frames_dropped: Tuple[int, ...]
+
+
+def detrended_temporal_sd(data: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Temporal standard deviation after removing low-order drift.
+
+    Scanner drift is not thermal or physiological noise, and the GLM's cosine
+    high-pass removes it before any statistic is computed. Leaving it in the temporal
+    standard deviation therefore reports a tSNR lower than the one the model actually
+    works with -- a quantitative error in a reported metric, not a display choice.
+
+    A cubic polynomial basis captures the drift the high-pass removes without needing
+    the run's exact cutoff frequency.
+    """
+    n_frames = data.shape[3]
+    if n_frames < 4:
+        # Fewer frames than basis functions: no drift estimate is possible, and
+        # fitting one would consume the signal rather than the trend.
+        return np.std(data, axis=3)
+
+    time = np.linspace(-1.0, 1.0, n_frames, dtype=np.float64)
+    basis = np.vstack([np.ones_like(time), time, time**2, time**3]).T
+
+    series = data[mask].astype(np.float64).T  # (frames, voxels)
+    if series.size == 0:
+        return np.std(data, axis=3)
+
+    # errstate: numpy on Accelerate BLAS raises spurious invalid/overflow flags from
+    # matmul even for well-conditioned finite operands, so the flags carry no
+    # information here. The finiteness check below is the real guard.
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        beta, *_ = np.linalg.lstsq(basis, series, rcond=None)
+        residual = series - basis @ beta
+
+    if not np.all(np.isfinite(residual)):
+        # A degenerate solve must not silently produce NaN standard deviations,
+        # which would render as holes in the tSNR map indistinguishable from
+        # genuinely unmeasurable voxels.
+        return np.std(data, axis=3)
+
+    out = np.zeros(data.shape[:3], dtype=np.float64)
+    out[mask] = residual.std(axis=0)
+    return out
 
 
 def compute_tsnr(
@@ -87,9 +139,24 @@ def compute_tsnr(
             raise ValueError(f"Run {index} has fewer than two frames after censoring.")
 
         mean = np.mean(data, axis=3)
-        std = np.std(data, axis=3)
-        # A zero-variance voxel has undefined tSNR, not infinite tSNR.
-        tsnr = np.divide(mean, std, out=np.zeros_like(mean, dtype=float), where=std > 0)
+        # Drift is removed before the standard deviation is taken; see
+        # detrended_temporal_sd. Without a mask every voxel is detrended, which is
+        # more work than necessary but never wrong.
+        sd_mask = (
+            mask
+            if mask is not None and mask.shape == data.shape[:3]
+            else np.ones(data.shape[:3], dtype=bool)
+        )
+        std = detrended_temporal_sd(data, sd_mask)
+        # A voxel with no residual variance has undefined tSNR, not infinite tSNR.
+        #
+        # The comparison is relative, not `std > 0`. Detrending leaves floating-point
+        # dust rather than exact zero where a voxel is fully explained by the drift
+        # basis, and dividing by dust reports a tSNR of order 1e15 -- a number that
+        # would dominate the colour limit and flatten the real map to nothing.
+        floor = np.abs(mean) * _RESIDUAL_FLOOR_RATIO
+        usable = std > floor
+        tsnr = np.divide(mean, std, out=np.zeros_like(mean, dtype=float), where=usable)
         if mask is not None and mask.shape == tsnr.shape:
             tsnr = np.where(mask, tsnr, 0.0)
 
@@ -165,12 +232,16 @@ def tsnr_volume(
     bg_img: Any = None,
     title: str = "",
     vmax: Optional[float] = None,
+    radiological: bool = RADIOLOGICAL,
 ) -> Any:
     """Draw a tSNR map in anatomical orientation.
 
     Rendered through nilearn so the affine determines what "sagittal" means. Slicing
     the voxel array directly and labelling the panels by anatomy is correct only for
     RAS-canonical data and silently mislabels -- including left/right -- otherwise.
+
+    The orientation convention is passed explicitly and stated on the figure, like
+    every other volume panel: a left/right error leaves no trace in the image.
     """
     from nilearn import plotting
 
@@ -195,6 +266,7 @@ def tsnr_volume(
             colorbar=True,
             black_bg=False,
             annotate=True,
+            radiological=radiological,
         )
         label_colorbar(display, "tSNR")
         figure = figure_of(display)
@@ -206,11 +278,22 @@ def tsnr_volume(
                     f"median tSNR {float(np.median(positive)):.1f}",
                     f"mean of {len(result.per_run_median)} run(s); "
                     f"{sum(result.frames_dropped):,} frames censored",
+                    # Named so this tSNR can be compared against one computed
+                    # elsewhere. Two pipelines differing only in drift handling
+                    # report visibly different numbers for identical data.
+                    "cubic drift removed before the temporal SD",
                     f"colour limit {resolved_vmax:.1f} "
                     f"({clipped_fraction(positive, limit=resolved_vmax):.1%} clipped)",
+                    orientation_label(radiological),
                 ],
             )
         return figure
 
 
-__all__ = ["TsnrResult", "compute_tsnr", "per_run_tsnr_figure", "tsnr_volume"]
+__all__ = [
+    "TsnrResult",
+    "compute_tsnr",
+    "detrended_temporal_sd",
+    "per_run_tsnr_figure",
+    "tsnr_volume",
+]

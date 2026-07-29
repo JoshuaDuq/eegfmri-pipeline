@@ -17,12 +17,31 @@ def _bold(seed: int = 0, affine: np.ndarray | None = None) -> nib.Nifti1Image:
 
 
 def test_compute_tsnr_returns_mean_over_standard_deviation() -> None:
+    """tSNR is the mean over the *detrended* temporal standard deviation."""
+    rng = np.random.default_rng(7)
+    n_frames = 40
+    noise = rng.standard_normal((2, 2, 2, n_frames)) * 5.0
+    data = (100.0 + noise).astype(np.float32)
+    img = nib.Nifti1Image(data, np.eye(4))
+
+    result = volumes.compute_tsnr([img])
+    expected = np.mean(data, axis=3) / volumes.detrended_temporal_sd(
+        data.astype(float), np.ones((2, 2, 2), dtype=bool)
+    )
+    assert np.allclose(np.asarray(result.mean_img.get_fdata()), expected, rtol=1e-4)
+
+
+def test_a_pure_drift_voxel_reports_no_tsnr_rather_than_a_flattering_one() -> None:
+    """A voxel whose only variation is drift has no measurable thermal noise.
+
+    Before drift removal this fixture reported mean/std(ramp) -- a finite,
+    respectable-looking tSNR computed entirely from the scanner's drift. Undefined
+    is the honest answer.
+    """
     data = np.zeros((2, 2, 2, 10), dtype=np.float32)
     data[...] = np.arange(10, dtype=np.float32)
-    img = nib.Nifti1Image(data, np.eye(4))
-    result = volumes.compute_tsnr([img])
-    expected = float(np.mean(np.arange(10)) / np.std(np.arange(10)))
-    assert np.allclose(np.asarray(result.mean_img.get_fdata()), expected)
+    result = volumes.compute_tsnr([nib.Nifti1Image(data, np.eye(4))])
+    assert np.allclose(np.asarray(result.mean_img.get_fdata()), 0.0)
 
 
 def test_compute_tsnr_preserves_the_source_affine() -> None:
@@ -129,3 +148,88 @@ def test_tsnr_volume_states_how_many_frames_were_censored() -> None:
     text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
     assert "4" in text and "censored" in text
     plt.close(figure)
+
+
+def test_linear_drift_does_not_inflate_the_temporal_standard_deviation() -> None:
+    """Drift is removed by the GLM's high-pass, so leaving it in under-reports tSNR."""
+    from fmri_pipeline.analysis.report.figures import volumes
+
+    rng = np.random.default_rng(0)
+    n_frames = 60
+    noise = rng.standard_normal((2, 2, 2, n_frames)) * 0.5
+    drift = np.linspace(0.0, 20.0, n_frames)
+    data = noise + drift
+    mask = np.ones((2, 2, 2), dtype=bool)
+
+    plain = np.std(data, axis=3)
+    detrended = volumes.detrended_temporal_sd(data, mask)
+
+    assert plain.mean() > 5.0, "the fixture must actually carry drift"
+    assert detrended.mean() < 1.0
+    assert np.allclose(detrended, 0.5, atol=0.2)
+
+
+def test_detrending_degrades_gracefully_on_a_very_short_run() -> None:
+    """Fewer frames than basis functions cannot be detrended; report the plain sd."""
+    from fmri_pipeline.analysis.report.figures import volumes
+
+    data = np.ones((2, 2, 2, 3), dtype=float)
+    mask = np.ones((2, 2, 2), dtype=bool)
+    result = volumes.detrended_temporal_sd(data, mask)
+    assert result.shape == (2, 2, 2)
+    assert np.all(np.isfinite(result))
+
+
+def test_tsnr_is_not_biased_low_by_scanner_drift() -> None:
+    """The end-to-end consequence: a drifting run must not report a depressed tSNR."""
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import volumes
+
+    rng = np.random.default_rng(1)
+    n_frames = 60
+    shape = (4, 4, 4)
+    signal = 1000.0 + rng.standard_normal((*shape, n_frames)) * 10.0
+    drifting = signal + np.linspace(0.0, 100.0, n_frames)
+
+    steady = volumes.compute_tsnr([nib.Nifti1Image(signal, np.eye(4))])
+    drifted = volumes.compute_tsnr([nib.Nifti1Image(drifting, np.eye(4))])
+
+    # Same thermal noise in both, so the same tSNR -- within sampling error.
+    assert drifted.per_run_median[0] == pytest.approx(
+        steady.per_run_median[0], rel=0.15
+    )
+
+
+def test_the_tsnr_figure_declares_the_drift_correction() -> None:
+    """A tSNR value cannot be compared against another unless its basis is stated."""
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import volumes
+
+    rng = np.random.default_rng(2)
+    data = 1000.0 + rng.standard_normal((4, 4, 4, 30)) * 10.0
+    result = volumes.compute_tsnr([nib.Nifti1Image(data, np.eye(4))])
+    figure = volumes.tsnr_volume(result)
+    try:
+        text = " ".join(t.get_text() for t in figure.texts)
+        assert "drift" in text.lower()
+    finally:
+        plt.close(figure)
+
+
+def test_the_tsnr_volume_states_its_orientation_convention() -> None:
+    """Every volume panel declares its convention; a L/R error is invisible otherwise."""
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import volumes
+
+    rng = np.random.default_rng(3)
+    data = 1000.0 + rng.standard_normal((4, 4, 4, 30)) * 10.0
+    result = volumes.compute_tsnr([nib.Nifti1Image(data, np.eye(4))])
+    figure = volumes.tsnr_volume(result)
+    try:
+        text = " ".join(t.get_text() for t in figure.texts)
+        assert "neurological" in text or "radiological" in text
+    finally:
+        plt.close(figure)
