@@ -131,13 +131,26 @@ def savefig_kwargs(path: Path) -> dict[str, Any]:
     Either makes two renders of identical data differ, so a figure cannot be diffed
     against its predecessor, content-addressed, or cached. Measured on this
     installation: PNG is stable either way, SVG is not.
+
+    ``bbox_inches`` is passed explicitly rather than left to the rcParam. The
+    provenance strip is drawn below the canvas and is only included in the output
+    because the bounding box is tight; a caller saving under different rc state would
+    otherwise silently crop the line off every figure.
     """
     suffix = Path(path).suffix.lower()
     if suffix == ".svg":
-        return {"metadata": {"Date": None}}
+        return {"bbox_inches": "tight", "metadata": {"Date": None}}
     if suffix == ".png":
-        return {"metadata": {"Software": None}}
-    return {}
+        return {"bbox_inches": "tight", "metadata": {"Software": None}}
+    return {"bbox_inches": "tight"}
+
+
+#: Where the provenance strip sits, in figure coordinates.
+#:
+#: Below the canvas, not on it. ``savefig`` runs with a tight bounding box, which
+#: expands the saved image to include every artist, so the strip gets a band of its
+#: own and the figure above it is untouched.
+PROVENANCE_Y = -0.045
 
 
 def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
@@ -150,16 +163,26 @@ def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
 
     Stating the clipped fraction matters most. A robust colour limit deliberately
     saturates the extreme voxels; unstated, the figure silently claims it did not.
+
+    The strip sits below the canvas rather than in its bottom corner. On a nilearn
+    mosaic the axes run to the figure edge and each slice writes its coordinate just
+    under its own box, so text at the corner lands on top of those labels -- and a
+    provenance line that cannot be read is worse than none, since the figure still
+    looks as though it documents itself.
+
+    Placing it below and letting the tight bounding box grow to include it is what
+    survives nilearn's layout. Reserving space by moving the axes does not: the
+    slicers reposition themselves at draw time and take the reserved band back.
     """
     if not lines:
         return
     figure.text(
         0.005,
-        0.005,
+        PROVENANCE_Y,
         "  ·  ".join(lines),
         fontsize=6.5,
         color=GUIDE_COLOR,
-        va="bottom",
+        va="center",
         ha="left",
     )
 

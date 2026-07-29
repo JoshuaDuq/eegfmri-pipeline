@@ -176,8 +176,18 @@ def test_design_matrix_figure_carries_the_contrast_on_a_shared_axis() -> None:
         assert len(data_axes) == 2, "expected the matrix and the contrast strip"
         matrix_ax, contrast_ax = data_axes
         assert matrix_ax.get_xlim() == contrast_ax.get_xlim()
-        labels = " ".join(t.get_text() for t in contrast_ax.texts)
-        assert "cond_a" in labels and "+1" in labels
+        # The weight sits on its cell; the column it lands on is named by the tick
+        # label beneath that same cell. Both on the shared axis is what makes the
+        # pairing readable without any matching up.
+        figure.canvas.draw()
+        weights = {t.get_text(): round(t.get_position()[0]) for t in contrast_ax.texts}
+        assert "+1" in weights
+        ticks = {
+            round(t.get_position()[0]): t.get_text()
+            for t in contrast_ax.get_xticklabels()
+            if t.get_text()
+        }
+        assert ticks[weights["+1"]] == "cond_a"
     finally:
         plt.close(figure)
 
@@ -324,3 +334,79 @@ def test_display_scaling_is_per_column() -> None:
     scaled = design._display_scaled(matrix)
     np.testing.assert_allclose(scaled[:, 0], scaled[:, 1])
     assert scaled.max() == pytest.approx(1.0)
+
+
+# --- label legibility -----------------------------------------------------
+
+
+def _visible_tick_labels(figure):
+    """Tick labels a reader actually sees, with their rotation."""
+    figure.canvas.draw()
+    seen = []
+    for axes in figure.axes:
+        for label in axes.get_xticklabels():
+            if label.get_visible() and label.get_text():
+                seen.append((label.get_text(), label.get_rotation()))
+    return seen
+
+
+def test_the_regressor_labels_a_reader_sees_are_rotated() -> None:
+    # Under sharex the upper axes' labels are hidden and the lower axes renders its
+    # own from the shared locator -- without the rotation, which belongs to the Text
+    # objects on the axes it was set on. Set on the wrong axes these came out
+    # horizontal and overlapped into an unreadable smear.
+    frame = pd.DataFrame(
+        {
+            "pain": np.linspace(0, 1, 30),
+            "nonpain": np.linspace(1, 0, 30),
+            "trans_x": np.random.default_rng(0).standard_normal(30),
+            "constant": np.ones(30),
+        }
+    )
+    figure = design.design_matrix_figure(frame, contrast={"pain": 1.0, "nonpain": -1.0})
+    labels = _visible_tick_labels(figure)
+    assert labels, "the panel showed no regressor labels at all"
+    assert all(rotation == 90 for _text, rotation in labels)
+    assert {"pain", "nonpain"} <= {text for text, _rotation in labels}
+    plt.close(figure)
+
+
+def test_a_wide_design_labels_its_task_regressors_and_not_its_nuisance_block() -> None:
+    columns = {f"task_{i}": np.linspace(0, 1, 40) for i in range(3)}
+    columns.update({f"trans_{i}": np.linspace(0, 1, 40) for i in range(30)})
+    columns["constant"] = np.ones(40)
+    figure = design.design_matrix_figure(pd.DataFrame(columns))
+    texts = {text for text, _rotation in _visible_tick_labels(figure)}
+    assert {"task_0", "task_1", "task_2"} <= texts
+    assert not any(text.startswith("trans_") for text in texts)
+    plt.close(figure)
+
+
+def test_the_contrast_weight_is_written_on_the_cell_it_belongs_to() -> None:
+    # Not in a caption below the strip: the column is already named by the tick label
+    # underneath, so a caption repeated the name and collided with it.
+    frame = pd.DataFrame(
+        {
+            "pain": np.linspace(0, 1, 30),
+            "nonpain": np.linspace(1, 0, 30),
+            "constant": np.ones(30),
+        }
+    )
+    figure = design.design_matrix_figure(frame, contrast={"pain": 1.0, "nonpain": -1.0})
+    strip = figure.axes[1]
+    weights = {t.get_text() for t in strip.texts}
+    assert weights == {"+1", "-1"}
+    # On the cell, vertically centred in the strip.
+    assert all(t.get_position()[1] == pytest.approx(0.5) for t in strip.texts)
+    plt.close(figure)
+
+
+def test_a_contrast_over_many_regressors_is_left_to_its_colour() -> None:
+    # Past a point the cells are narrower than the digits, and a number rendered over
+    # the wrong cell is worse than none.
+    columns = {f"c{i}": np.random.default_rng(i).standard_normal(60) for i in range(40)}
+    frame = pd.DataFrame(columns)
+    contrast = {f"c{i}": 1.0 for i in range(40)}
+    figure = design.design_matrix_figure(frame, contrast=contrast)
+    assert not figure.axes[1].texts
+    plt.close(figure)

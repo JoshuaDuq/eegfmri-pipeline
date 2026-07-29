@@ -238,6 +238,7 @@ def write_report_manifest(
     radiological: bool = False,
     smoothing_fwhm: Optional[float] = None,
     signal_scaling: bool = False,
+    mask_is_analysis_mask: bool = False,
 ) -> Optional[Path]:
     """Record what was fit, beside what was fit.
 
@@ -305,6 +306,10 @@ def write_report_manifest(
             ),
             signal_scaling=bool(signal_scaling),
             confound_strategy=str(meta.get("confounds_strategy", "unspecified")),
+            # Only true when the caller passed the mask the model was fitted inside.
+            # A mask discovered from the preprocessing derivatives is a single run's,
+            # and the report's coverage panel makes a claim only the fitted one earns.
+            mask_is_analysis_mask=bool(mask_is_analysis_mask and mask is not None),
         )
         return write_manifest(manifest, Path(contrast_dir) / MANIFEST_FILENAME)
     except Exception as exc:

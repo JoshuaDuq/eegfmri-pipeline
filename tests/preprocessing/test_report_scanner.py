@@ -23,6 +23,7 @@ from eeg_pipeline.preprocessing.report.scanner import (  # noqa: E402
     plot_volume_locked_average,
     scanner_residual_html,
 )
+from tests.utils.figure_layout import colliding_text  # noqa: E402
 
 SFREQ = 500.0
 TR = 0.9
@@ -391,6 +392,46 @@ def test_the_volume_locked_figure_lays_runs_out_as_a_grid() -> None:
     assert width / height < 2.0
 
 
+def test_the_volume_locked_panel_draws_the_floor_its_residual_has_to_clear() -> None:
+    """"What remains is the artifact itself" is only true above the averaging floor.
+
+    Averaging N epochs suppresses everything not locked to the marker by sqrt(N) and no
+    further, so a residual trace sits on a floor of sigma / sqrt(N) that is noise rather
+    than artifact. The pipeline already measures that floor exactly, from the odd-even
+    split, and stores it per run -- but the panel drew only the trace, so on sub-0012 a
+    reported 0.17 µV could not be told from a floor of comparable size.
+
+    Drawn per panel rather than stated in the title: the question is whether *this*
+    trace clears its floor at each latency, which is a comparison between a line and a
+    curve and not between two numbers.
+    """
+    averages = _averages_for(2)
+    assert all(
+        average.after_noise_floor_uv is not None for average in averages
+    ), "fixture carries no measured floor"
+
+    figure = plot_volume_locked_average(averages)
+
+    for axis, average in zip(figure.axes, averages, strict=True):
+        levels = [line.get_ydata()[0] for line in axis.lines if len(set(line.get_ydata())) == 1]
+        assert any(
+            abs(level - average.after_noise_floor_uv) < 1e-9 for level in levels
+        ), "the measured noise floor is not drawn on the panel"
+    labels = {text.get_text() for text in figure.legends[0].get_texts()}
+    assert any("floor" in label.lower() for label in labels)
+
+
+def test_the_volume_locked_figure_does_not_assert_what_the_floor_qualifies() -> None:
+    """The suptitle claimed the residual *is* the artifact, with no floor drawn.
+
+    With the floor on the panel the reader can see where that holds and where it does
+    not, so the figure states the mechanism and lets the comparison speak.
+    """
+    figure = plot_volume_locked_average(_averages_for(2))
+
+    assert "what remains is the artifact itself" not in figure.get_suptitle().lower()
+
+
 def test_the_volume_locked_panels_share_one_scale() -> None:
     figure = plot_volume_locked_average(_averages_for(4))
 
@@ -419,6 +460,72 @@ def test_the_zero_line_is_explained_off_the_data() -> None:
     legend_labels = {text.get_text() for text in figure.legends[0].get_texts()}
     assert any("indistinguishable from background" in label for label in legend_labels)
     assert not figure.axes[0].texts
+
+
+def _notched_combs_for(count: int):
+    """Comb measurements that carry a notched harmonic, so the footnote is drawn."""
+    raw = _notched_raw()
+    timing = measure_volume_timing(raw)
+    return [
+        compute_comb_residual(
+            raw,
+            raw.copy(),
+            timing=timing,
+            recording_id=f"sub-01_task-x_run-{index + 1}",
+            line_frequency=60.0,
+        )
+        for index in range(count)
+    ]
+
+
+def test_the_notch_note_is_readable_rather_than_printed_over_the_legend() -> None:
+    """The note was placed in figure coordinates, which no layout engine sees.
+
+    ``constrained_layout`` reserves space for the outside legend, but a bare
+    ``figure.text`` at y=0.005 is invisible to it, so both ended up at the bottom of the
+    same figure and on sub-0012 the stopband note printed straight through "Before ICA,
+    worst channel". Neither could be read.
+
+    The hollow marker is a legend concept, so the explanation belongs in the legend: that
+    puts the symbol beside the sentence about it, and an entry cannot collide with the
+    block that lays it out.
+    """
+    figure = plot_comb_residual(_notched_combs_for(2))
+
+    labels = {text.get_text() for text in figure.legends[0].get_texts()}
+    assert any("notch stopband" in label for label in labels)
+    assert colliding_text(figure) == []
+
+
+def test_the_comb_scale_is_set_by_the_harmonics_it_scores() -> None:
+    """A notch drives its harmonic tens of decibels below background.
+
+    That trough is excluded from every reported statistic, but it was still setting the
+    y-limits, so on sub-0012 a -25 dB stopband artifact compressed the +-10 dB range the
+    residual actually lives in. What the panel is about should set the scale it is drawn
+    at; the notch stays drawn, on an axis it no longer dictates.
+    """
+    combs = _notched_combs_for(2)
+    # The traces the panel actually draws, which are what the limits have to cover.
+    drawn = [
+        (comb, trace)
+        for comb in combs
+        for trace in (
+            comb.before_typical_db,
+            comb.after_typical_db,
+            comb.before_worst_db,
+            comb.after_worst_db,
+        )
+    ]
+    scored_depth = min(float(np.min(trace[comb.scored])) for comb, trace in drawn)
+    notched_depth = min(float(np.min(trace)) for _, trace in drawn)
+    assert notched_depth < scored_depth - 5.0, "fixture does not exercise the notch"
+
+    figure = plot_comb_residual(combs)
+
+    bottom = figure.axes[0].get_ylim()[0]
+    assert bottom > notched_depth
+    assert bottom <= scored_depth
 
 
 def test_the_volume_locked_panel_is_named_for_what_it_plots() -> None:

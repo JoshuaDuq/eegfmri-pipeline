@@ -181,6 +181,24 @@ def separated_labels(
     return placed
 
 
+def draw_figure_footnote(figure, text: str) -> None:
+    """Write a caveat under a whole figure, in space the layout engine has reserved.
+
+    ``figure.text`` places an artist in figure coordinates, which ``constrained_layout``
+    never consults. Two panels wrote their footnote at y=0.005 and the layout engine then
+    put something else there: the gradient comb's outside legend, and the ICA variance
+    panel's own axis label. Both printed through the note and neither could be read.
+
+    ``supxlabel`` is the same statement made where the layout engine can see it. It is
+    laid out below every subplot and below their axis labels, so the note keeps its
+    meaning -- a remark about the figure rather than about one panel -- and the engine
+    grows the figure to fit it instead of stacking it on whatever was already there.
+
+    Shared because this was written twice, in the two modules that got it wrong.
+    """
+    figure.supxlabel(text, fontsize=7, color=GUIDE_COLOR)
+
+
 #: Marker that makes :func:`apply_report_css` idempotent across repeated opens.
 _REPORT_CSS_SENTINEL = "/* eeg-pipeline report css */"
 
@@ -369,6 +387,7 @@ __all__ = [
     "apply_report_css",
     "apply_report_style",
     "draw_component_status_strip",
+    "draw_figure_footnote",
     "report_image_format",
     "power_colorbar_label",
     "robust_symmetric_limit",

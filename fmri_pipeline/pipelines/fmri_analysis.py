@@ -59,6 +59,52 @@ def _contrast_arg_for_model_runs(flm: Any, contrast_def: Any) -> Any:
     return contrast_def
 
 
+def _contrast_vector_for_design(
+    *, glm_result: Any, contrast_def: Any
+) -> tuple[Optional[list[float]], list[str]]:
+    """Expand a contrast expression into weights against the design's own columns.
+
+    The report draws the contrast as a strip beneath the design matrix, and computes
+    the design's efficiency for it. Both need numbers per column; the manifest carried
+    only the expression string, so neither could ever be produced. Matching is by
+    column name downstream, so the two lists are returned together.
+
+    Best-effort: an expression nilearn cannot parse against these columns costs the
+    contrast strip and nothing else, and the map is already on disk by now.
+    """
+    import logging
+
+    import numpy as np
+
+    logger = logging.getLogger(__name__)
+    design_matrices = getattr(getattr(glm_result, "flm", None), "design_matrices_", None)
+    if not design_matrices:
+        return None, []
+
+    columns = [str(c) for c in design_matrices[0].columns]
+    if not isinstance(contrast_def, str):
+        # An explicit vector, already aligned to the design nilearn was given.
+        try:
+            values = np.asarray(contrast_def, dtype=float).ravel()
+        except (TypeError, ValueError):
+            return None, columns
+        return (list(map(float, values)), columns) if values.size == len(columns) else (None, columns)
+
+    try:
+        from nilearn.glm.contrasts import expression_to_contrast_vector
+
+        vector = expression_to_contrast_vector(contrast_def, columns)
+    except Exception as exc:
+        logger.info(
+            "Could not expand contrast %r against the design columns (%s); the "
+            "report will show the design matrix without its contrast strip.",
+            contrast_def,
+            exc,
+        )
+        return None, columns
+    return [float(v) for v in np.asarray(vector).ravel()], columns
+
+
 class FmriAnalysisPipeline(PipelineBase):
     """Compute first-level fMRI contrasts for each subject."""
 
@@ -200,6 +246,64 @@ class FmriAnalysisPipeline(PipelineBase):
         )
         return out_path
 
+    def _save_optional(self, img: Any, path: Path) -> Optional[Path]:
+        """Write an image if there is one, and return where it went.
+
+        Returns ``None`` on failure rather than raising. By the time this runs the GLM
+        is fitted and the contrast is on disk; losing that to a problem writing an
+        ancillary map would be the most expensive failure available.
+        """
+        if img is None:
+            return None
+        try:
+            import nibabel as nib
+
+            nib.save(img, str(path))
+        except Exception as exc:
+            self.logger.warning("Could not write %s (%s)", path.name, exc)
+            return None
+        self.logger.info("Saved %s", path.name)
+        return path
+
+    def _contrast_detail_maps(
+        self, *, glm_result: Any, contrast_def: Any, plotting_cfg: Any
+    ) -> tuple[Any, Any]:
+        """Compute the effect and variance maps behind a contrast, if wanted.
+
+        Gated on ``include_effect_size`` / ``include_standard_error`` rather than on
+        whether plotting is enabled, which is where these used to live. Plotting is a
+        separate step now: gating a *derivative* on it meant the report could not be
+        rendered later without refitting the model, which is the one thing the
+        manifest seam exists to prevent.
+        """
+        want_effect = bool(getattr(plotting_cfg, "include_effect_size", True))
+        want_variance = bool(getattr(plotting_cfg, "include_standard_error", True))
+        if not (want_effect or want_variance):
+            return None, None
+
+        flm = getattr(glm_result, "flm", None)
+        if flm is None:
+            return None, None
+
+        try:
+            argument = _contrast_arg_for_model_runs(flm, contrast_def)
+            effect = flm.compute_contrast(argument, output_type="effect_size") if want_effect else None
+            variance = (
+                flm.compute_contrast(argument, output_type="effect_variance")
+                if want_variance
+                else None
+            )
+        except Exception as exc:
+            # Two extra contrasts off an already-fitted model. Failing here must not
+            # cost the fitted contrast that has already succeeded.
+            self.logger.warning(
+                "Could not compute the effect/variance maps for this contrast (%s); "
+                "the report will omit the dual-coded and standard-error panels.",
+                exc,
+            )
+            return None, None
+        return effect, variance
+
     def _discover_tissue_segmentation(self, *, sub_label: str, space: str) -> Optional[Path]:
         """Discrete GM/WM/CSF segmentation used to order carpet-plot rows."""
         deriv_root = self.deriv_root
@@ -314,6 +418,19 @@ class FmriAnalysisPipeline(PipelineBase):
 
         contrast_img_for_plotting = contrast_img
 
+        # The effect and the variance behind the same contrast, taken off the model
+        # that is already fitted. Two compute_contrast calls, no refit.
+        #
+        # These used to be computed only when plotting was enabled, and then discarded
+        # without being written. The report is a separate step now and cannot ask for
+        # them retroactively, so without this the dual-coded panel and the standard
+        # error panel were unreachable from any real run -- while the code that draws
+        # them was fully written and tested.
+        native_effect, native_variance = self._contrast_detail_maps(
+            glm_result=glm_result, contrast_def=contrast_def, plotting_cfg=plotting_cfg
+        )
+        analysis_mask_img = getattr(glm_result, "mask_img", None)
+
         # Optional: resample to FreeSurfer subject space for downstream EEG integration.
         if bool(getattr(contrast_cfg, "resample_to_freesurfer", False)):
             fs_dir = freesurfer_subjects_dir
@@ -329,17 +446,43 @@ class FmriAnalysisPipeline(PipelineBase):
             if not fs_subject_dir.exists():
                 raise FileNotFoundError(f"FreeSurfer subject directory not found: {fs_subject_dir}")
             contrast_img = resample_to_freesurfer(contrast_img, fs_subject_dir)
+            # Everything that has to stay on the stat map's grid moves with it. The
+            # dual-coded panel refuses a mismatched pair outright, and a mask on the
+            # wrong grid is silently ignored -- which costs the colour limits their
+            # brain and the report its coverage claim, with no error anywhere.
+            if native_effect is not None:
+                native_effect = resample_to_freesurfer(native_effect, fs_subject_dir)
+            if native_variance is not None:
+                native_variance = resample_to_freesurfer(native_variance, fs_subject_dir)
+            if analysis_mask_img is not None:
+                analysis_mask_img = resample_to_freesurfer(
+                    analysis_mask_img, fs_subject_dir, interpolation="nearest"
+                )
 
         nib.save(contrast_img, str(nifti_path))
         self.logger.info("Saved contrast map: %s", nifti_path.name)
+
+        stem = f"{sub_label}_task-{task}_contrast-{contrast_name}"
+        effect_path = self._save_optional(
+            native_effect, out_dir / f"{stem}_stat-effect_size_{cfg_hash}.nii.gz"
+        )
+        variance_path = self._save_optional(
+            native_variance, out_dir / f"{stem}_stat-effect_variance_{cfg_hash}.nii.gz"
+        )
+        # The mask the GLM was actually fitted inside: the intersection across runs.
+        # The report previously recorded a mask *discovered* from the preprocessing
+        # derivatives, which is a single run's brain mask. The two differ, and the
+        # difference reached the reader as a coverage panel claiming an intersection
+        # it was not showing and colour limits taken over voxels the model never fit.
+        mask_path = self._save_optional(
+            analysis_mask_img, out_dir / f"{stem}_desc-analysis_mask_{cfg_hash}.nii.gz"
+        )
 
         # Record what was fit, beside what was fit. This is what lets `fmri-analysis
         # report` render from the derivatives tree without touching the model.
         from fmri_pipeline.analysis.report.manifest import write_report_manifest
 
         plot_cfg_for_manifest = plotting_cfg.normalized() if hasattr(plotting_cfg, "normalized") else None
-        # The mask the report scales colour inside. Discovered in the space the
-        # contrast was actually fit in, so it matches the stat map's grid.
         manifest_space = (
             "mni"
             if str(run_meta.get("analysis_space", "") if isinstance(run_meta, dict) else "")
@@ -347,8 +490,15 @@ class FmriAnalysisPipeline(PipelineBase):
             .startswith("mni")
             else "native"
         )
-        _bg_for_manifest, mask_for_manifest = self._discover_plot_assets(
-            sub_label=sub_label, task=task, space=manifest_space
+        if mask_path is None:
+            # Falling back to a discovered mask is better than none, but it is not the
+            # fitted mask and the manifest must not let it pass as one.
+            _bg, mask_path = self._discover_plot_assets(
+                sub_label=sub_label, task=task, space=manifest_space
+            )
+
+        contrast_vector, contrast_columns = _contrast_vector_for_design(
+            glm_result=glm_result, contrast_def=contrast_def
         )
         manifest_path = write_report_manifest(
             contrast_dir=out_dir,
@@ -357,7 +507,15 @@ class FmriAnalysisPipeline(PipelineBase):
             contrast_name=contrast_name,
             stat_map=nifti_path,
             run_meta=run_meta,
-            mask=mask_for_manifest,
+            effect_map=effect_path,
+            variance_map=variance_path,
+            mask=mask_path,
+            mask_is_analysis_mask=analysis_mask_img is not None and mask_path is not None,
+            design_matrices=[
+                Path(p) for p in (run_meta.get("design_matrix_tsv_paths") or [])
+            ] if isinstance(run_meta, dict) else [],
+            contrast_vector=contrast_vector,
+            contrast_columns=contrast_columns,
             smoothing_fwhm=_optional_positive_float(
                 getattr(contrast_cfg, "smoothing_fwhm", None)
             ),
@@ -457,17 +615,9 @@ class FmriAnalysisPipeline(PipelineBase):
             )
             sig_root, sig_specs = self._discover_signature_root_and_specs()
 
-            native_effect = None
-            native_variance = None
-            if bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
-                getattr(cfg_obj, "include_standard_error", True)
-            ):
-                native_contrast_arg = _contrast_arg_for_model_runs(glm_result.flm, contrast_def)
-                native_effect = glm_result.flm.compute_contrast(native_contrast_arg, output_type="effect_size")
-                native_variance = glm_result.flm.compute_contrast(
-                    native_contrast_arg,
-                    output_type="effect_variance",
-                )
+            # native_effect and native_variance were recomputed here. They are now
+            # computed once above, before the FreeSurfer resample, and written to
+            # disk -- which is what makes them available to the report at all.
 
             # Signature expression is a computation, not a rendering step: it needs
             # the weight maps and the study's signature configuration. It is written

@@ -34,6 +34,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
+from matplotlib.lines import Line2D
 
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets, onset_events
 from eeg_pipeline.preprocessing.report.cohort.noise_floor import measure_locked_average
@@ -679,6 +680,28 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
         )
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
+    # Limits from the scored harmonics alone. A notch drives its harmonic tens of
+    # decibels below background, and that trough -- the pipeline's own filter, excluded
+    # from every reported statistic -- was setting the scale for the residual it is not
+    # part of: on sub-0012 a -25 dB stopband compressed the ±10 dB the comb lives in
+    # into the top fifth of each panel. The trough stays drawn and now runs off the axis,
+    # which is the honest picture of a value this figure does not measure.
+    scored_values = np.concatenate(
+        [
+            trace[comb.scored]
+            for comb in combs
+            for trace in (
+                comb.before_typical_db,
+                comb.after_typical_db,
+                comb.before_worst_db,
+                comb.after_worst_db,
+            )
+        ]
+    )
+    finite = scored_values[np.isfinite(scored_values)]
+    if finite.size:
+        margin = max(0.05 * float(np.ptp(finite)), 1.0)
+        flat[0].set_ylim(float(finite.min()) - margin, float(finite.max()) + margin)
     for axis in flat[len(combs) :]:
         axis.remove()
     for row in range(rows):
@@ -693,22 +716,6 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
         axis = flat[present[-1]]
         axis.set_xlabel("Frequency (Hz) · one point per gradient harmonic")
         axis.tick_params(axis="x", labelbottom=True)
-
-    # Hollow markers need naming somewhere, and the legend already carries four entries
-    # per stage. Stated once under the grid, where the notch is a property of the whole
-    # figure rather than of any one panel.
-    if any(comb.notched.any() for comb in combs):
-        notched_count = max(int(comb.notched.sum()) for comb in combs)
-        figure.text(
-            0.5,
-            0.005,
-            f"hollow markers: {notched_count} harmonic(s) inside the notch stopband, "
-            "drawn but excluded from every figure in the table above",
-            ha="center",
-            va="bottom",
-            fontsize=7,
-            color=GUIDE_COLOR,
-        )
 
     # Repetition time belongs to the acquisition, not to a run, so it is stated once.
     # A session whose runs disagree about it is a finding in itself and is named as one.
@@ -725,6 +732,27 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
         )
     figure.suptitle(f"Gradient comb against its local background · {timing_text}", fontsize=10)
     handles, labels = flat[0].get_legend_handles_labels()
+    # The hollow marker is a legend concept, so it is explained in the legend rather than
+    # in a footnote below it. As free-floating figure text the explanation sat in
+    # coordinates ``constrained_layout`` never reads, and printed through this very
+    # legend; as an entry it also puts the symbol beside the sentence describing it.
+    if any(comb.notched.any() for comb in combs):
+        notched_count = max(int(comb.notched.sum()) for comb in combs)
+        handles.append(
+            Line2D(
+                [],
+                [],
+                linestyle="none",
+                marker="o",
+                markersize=2.5,
+                markerfacecolor="white",
+                markeredgecolor=GUIDE_COLOR,
+                markeredgewidth=0.6,
+            )
+        )
+        labels.append(
+            f"inside the notch stopband: {notched_count} harmonic(s) drawn but not scored"
+        )
     figure.legend(
         handles,
         labels,
@@ -775,11 +803,26 @@ def plot_volume_locked_average(averages: Sequence[VolumeLockedAverage]) -> plt.F
             linewidth=1.0,
             label="After ICA",
         )
-        axis.set_title(
+        # The floor this trace has to clear to be artifact rather than averaging noise.
+        # Averaging n_volumes epochs suppresses everything not locked to the marker by
+        # sqrt(n) and no further, so the residual sits on a floor of sigma / sqrt(n) that
+        # the odd-even split measures exactly. Without it drawn, a reported 0.17 µV and a
+        # floor of 0.15 µV are the same picture.
+        if locked.after_noise_floor_uv is not None:
+            axis.axhline(
+                locked.after_noise_floor_uv,
+                color=GUIDE_COLOR,
+                linestyle="--",
+                linewidth=1.0,
+                label="Averaging noise floor (odd–even split)",
+            )
+        title = (
             f"{_comb_run_label(locked.recording_id)} · {locked.n_volumes} volumes · "
-            f"{locked.before_peak_to_peak_uv:.2f} → {locked.after_peak_to_peak_uv:.2f} µV p-p",
-            fontsize=8,
+            f"{locked.before_peak_to_peak_uv:.2f} → {locked.after_peak_to_peak_uv:.2f} µV p-p"
         )
+        if locked.after_noise_floor_uv is not None:
+            title += f" · floor {locked.after_noise_floor_uv:.2f} µV"
+        axis.set_title(title, fontsize=8)
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
     for axis in flat[len(averages) :]:
@@ -806,8 +849,8 @@ def plot_volume_locked_average(averages: Sequence[VolumeLockedAverage]) -> plt.F
         fontsize=7,
     )
     figure.suptitle(
-        "Residual gradient waveform: everything not locked to the volume marker "
-        "averages away, so what remains is the artifact itself",
+        "Residual gradient envelope: everything not locked to the volume marker averages "
+        "down by √n, so what clears the dashed floor is locked to the marker",
         fontsize=9,
     )
     plt.close(figure)

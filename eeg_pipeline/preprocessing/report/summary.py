@@ -26,6 +26,7 @@ from eeg_pipeline.preprocessing.report.style import (
     GUIDE_COLOR,
     RUN_COLORS,
     draw_component_status_strip,
+    draw_figure_footnote,
     run_label,
 )
 from eeg_pipeline.preprocessing.report.tables import (
@@ -564,15 +565,10 @@ def plot_variance_overview(
     # sit. Component order is ICA's own and carries no ranking, but the shares often fall
     # monotonically anyway, which is exactly when a reader mistakes the panel for a scree
     # plot — so the warning belongs with the other thing this panel is not.
-    figure.text(
-        0.5,
-        0.005,
+    draw_figure_footnote(
+        figure,
         "individual shares — not additive, they do not sum to the joint total, "
         "and component order carries no ranking",
-        ha="center",
-        va="bottom",
-        fontsize=7,
-        color=GUIDE_COLOR,
     )
     share_axis.grid(axis="y", alpha=0.2)
     share_axis.spines[["top", "right"]].set_visible(False)

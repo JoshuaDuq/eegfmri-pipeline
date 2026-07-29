@@ -36,6 +36,11 @@ __all__ = [
 ]
 
 
+#: Most non-zero contrast weights that can be written into the strip legibly. Past
+#: this the cells are narrower than the digits, and an unreadable number on the wrong
+#: cell is worse than none: the colour still carries the sign.
+_MAX_ANNOTATED_WEIGHTS = 14
+
 _DRIFT_RE = re.compile(r"^(drift[_\-]?\d+|cosine\d*|poly\d*)$", re.IGNORECASE)
 _CONSTANT_NAMES = {"constant", "intercept"}
 _CONFOUND_PREFIXES = (
@@ -166,8 +171,12 @@ def contrast_efficiency(design: "np.ndarray", contrast: "np.ndarray") -> Optiona
     if contrast.size != design.shape[1]:
         return None
     try:
-        covariance = np.linalg.pinv(design.T @ design)
-        denominator = float(contrast @ covariance @ contrast)
+        # errstate for the same reason as variance_inflation_factors: numpy on
+        # Accelerate BLAS raises spurious invalid/overflow flags from matmul even for
+        # well-conditioned finite operands. The finiteness check below is the guard.
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            covariance = np.linalg.pinv(design.T @ design)
+            denominator = float(contrast @ covariance @ contrast)
     except np.linalg.LinAlgError:
         return None
     if not np.isfinite(denominator) or denominator <= 0:
@@ -310,15 +319,26 @@ def design_matrix_figure(
         # Labelling every column is unreadable past a couple of dozen regressors, and the
         # nuisance block is not what a reader inspects by name. Task regressors keep
         # their labels; the rest are identified by their group band.
+        #
+        # Set on ax_contrast, the lower of the two shared axes. Under `sharex` the upper
+        # axes' tick labels are hidden and the lower axes renders its own from the shared
+        # locator -- without the rotation, because rotation belongs to the Text objects
+        # that were created on the axes we set it on. Setting these on `ax` therefore
+        # produced horizontal labels that overlapped into an unreadable smear, on a panel
+        # whose whole purpose is to say which weight lands on which regressor.
         if n_regressors <= max_labelled_columns:
-            ax.set_xticks(range(n_regressors))
-            ax.set_xticklabels(ordered_columns, rotation=90, fontsize=6.4)
+            ticks = list(range(n_regressors))
+            fontsize = 6.4
         elif task_group is not None:
             ticks = list(range(task_group.start, task_group.stop))
-            ax.set_xticks(ticks)
-            ax.set_xticklabels([ordered_columns[i] for i in ticks], rotation=90, fontsize=6.8)
+            fontsize = 6.8
         else:
-            ax.set_xticks([])
+            ticks = []
+            fontsize = 6.8
+        ax_contrast.set_xticks(ticks)
+        ax_contrast.set_xticklabels(
+            [ordered_columns[i] for i in ticks], rotation=90, fontsize=fontsize
+        )
 
         for group in groups[:-1]:
             for target in (ax, ax_contrast):
@@ -356,15 +376,25 @@ def design_matrix_figure(
                 extent=(-0.5, n_regressors - 0.5, 0, 1),
                 interpolation="nearest",
             )
-            for index in np.flatnonzero(vector):
-                ax_contrast.annotate(
-                    f"{ordered_columns[index]} {vector[index]:+g}",
-                    xy=(index, 0.0),
-                    xycoords=("data", "axes fraction"),
-                    xytext=(0, -5),
-                    textcoords="offset points",
-                    rotation=90, ha="center", va="top", fontsize=6.6,
-                )
+            # The weight goes in its own cell, not in a caption below the strip. The
+            # column is already named by the tick label underneath, so repeating it
+            # here duplicated the name and collided with it; and a weight written on
+            # the cell it belongs to needs no matching up at all.
+            weighted = np.flatnonzero(vector)
+            if 0 < weighted.size <= _MAX_ANNOTATED_WEIGHTS:
+                for index in weighted:
+                    ax_contrast.text(
+                        index,
+                        0.5,
+                        f"{vector[index]:+g}",
+                        ha="center",
+                        va="center",
+                        fontsize=6.4,
+                        fontweight="bold",
+                        # White on the saturated ends of the diverging map, dark in
+                        # the pale middle, so the number stays legible at any weight.
+                        color="white" if abs(vector[index]) > 0.55 * limit else "#222222",
+                    )
 
         style.annotate_provenance(
             figure,

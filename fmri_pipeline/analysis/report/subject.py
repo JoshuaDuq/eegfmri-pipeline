@@ -762,7 +762,7 @@ def build_contrast_section(
                     threshold=float(threshold),
                     two_sided=manifest.two_sided,
                     radiological=manifest.radiological,
-                    title=f"{manifest.contrast_name}: z map ({threshold_label})",
+                    title=f"{manifest.contrast_name}: z map, {threshold_label}",
                 ),
                 out_dir=plots_dir,
                 stem="stat_thresholded",

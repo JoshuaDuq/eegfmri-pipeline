@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -145,3 +146,48 @@ def test_a_panel_letter_lands_outside_the_axes() -> None:
         assert texts[0].get_position()[1] > 1.0
     finally:
         plt.close(figure)
+
+
+# --- the provenance strip -------------------------------------------------
+
+
+def test_the_provenance_strip_sits_below_the_canvas() -> None:
+    # On a nilearn mosaic each slice writes its coordinate just under its own box, so
+    # text placed in the figure's bottom corner lands on top of those labels. The
+    # strip goes below the canvas and the tight bounding box grows to include it.
+    #
+    # Reserving space by moving the axes was tried and does not survive: the slicers
+    # reposition themselves at draw time and take the reserved band back.
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots(figsize=(6.0, 4.0))
+    style.annotate_provenance(figure, ["n = 10 voxels", "|z| > 2.30"])
+    assert figure.texts[0].get_position()[1] < 0
+    assert figure.texts[0].get_position()[1] < axis.get_position().y0
+    plt.close(figure)
+
+
+def test_saving_always_uses_a_tight_bounding_box() -> None:
+    # The strip is off-canvas, so a save without a tight box crops it off every
+    # figure -- silently, since the figure itself still renders.
+    for name in ("panel.png", "panel.svg", "panel.pdf"):
+        assert style.savefig_kwargs(Path(name))["bbox_inches"] == "tight"
+
+
+def test_the_strip_is_written_as_one_line() -> None:
+    import matplotlib.pyplot as plt
+
+    figure, _axis = plt.subplots(figsize=(6.0, 4.0))
+    style.annotate_provenance(figure, ["a", "b", "c"])
+    assert figure.texts[0].get_text().count("\n") == 0
+    assert "a" in figure.texts[0].get_text() and "c" in figure.texts[0].get_text()
+    plt.close(figure)
+
+
+def test_no_lines_leaves_the_figure_untouched() -> None:
+    import matplotlib.pyplot as plt
+
+    figure, _axis = plt.subplots(figsize=(6.0, 4.0))
+    style.annotate_provenance(figure, [])
+    assert not figure.texts
+    plt.close(figure)

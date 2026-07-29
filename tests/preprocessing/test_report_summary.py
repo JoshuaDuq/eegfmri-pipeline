@@ -4,6 +4,7 @@ import mne
 import numpy as np
 import pytest
 from matplotlib.collections import PathCollection
+from matplotlib.text import Text
 
 from eeg_pipeline.preprocessing.report.summary import (
     DecompositionSummary,
@@ -11,6 +12,7 @@ from eeg_pipeline.preprocessing.report.summary import (
     plot_variance_overview,
     summarize_decomposition,
 )
+from tests.utils.figure_layout import colliding_text
 
 
 def _summary(**overrides) -> DecompositionSummary:
@@ -294,8 +296,22 @@ def test_variance_axis_does_not_claim_an_ordering_it_does_not_use() -> None:
 
     xlabel = figure.axes[-1].get_xlabel()
     assert "decreasing variance" not in xlabel
-    footnotes = " ".join(text.get_text().lower() for text in figure.texts)
+    # Found across every text artist rather than in ``figure.texts``: the footnote is a
+    # ``supxlabel``, which the layout engine places but which that list does not hold.
+    footnotes = " ".join(text.get_text().lower() for text in figure.findobj(Text))
     assert "component order carries no ranking" in footnotes
+
+
+def test_the_variance_footnote_does_not_print_over_the_axis_label() -> None:
+    """The footnote was drawn in figure coordinates, which no layout engine consults.
+
+    ``figure.text`` at y=0.005 sits below everything ``constrained_layout`` measured,
+    which on sub-0012 was the status strip's own "ICA component" label. The two printed
+    through each other and neither could be read.
+    """
+    figure = plot_variance_overview(_summary())
+
+    assert colliding_text(figure) == []
 
 
 def test_summarize_decomposition_recovers_rank_and_variance() -> None:
