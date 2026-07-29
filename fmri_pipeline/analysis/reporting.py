@@ -4,9 +4,10 @@ import html
 import logging
 import base64
 import json
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -15,6 +16,24 @@ from fmri_pipeline.analysis.multivariate_signatures import (
     SignatureResult,
     compute_signature_expression,
     discover_signature_files,
+)
+from fmri_pipeline.analysis.report.figures import (
+    carpet as carpet_figures,
+    coverage as coverage_figures,
+    distributions as distribution_figures,
+    stat_maps as stat_map_figures,
+    volumes as volume_figures,
+)
+from fmri_pipeline.analysis.report.manifest import (
+    sample_masks_from_confounds as _sample_masks_from_confounds,
+)
+from fmri_pipeline.analysis.report.figures.design import (
+    vif_from_design as _vif_from_design,
+)
+from fmri_pipeline.analysis.report.style import (
+    MAGNITUDE_CMAP,
+    plot_context,
+    savefig_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,42 +116,72 @@ def _discover_design_matrix_qc(
     return out
 
 
-def _vif_from_design(X: "np.ndarray") -> "np.ndarray":
+def _save_figure(
+    figure: Any,
+    *,
+    out_dir: Path,
+    stem: str,
+    formats: Sequence[str],
+    title: str,
+    caption: str = "",
+) -> List[ReportImage]:
+    """Write one figure to every requested format and return a single report entry.
+
+    One entry, not one per format. ``formats`` says what to put on disk; the report
+    embeds a figure once. Emitting one entry per format previously rendered every
+    figure twice in a report configured for both PNG and SVG.
     """
-    Variance inflation factor per column of design matrix X (n_samples, n_features).
+    import matplotlib.pyplot as plt
 
-    VIF_j = 1 / (1 - R²_j), where R²_j is from regressing column j on all other columns.
-    Returns inf where R² >= 1 (perfect collinearity) or computation fails.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        primary: Optional[Path] = None
+        # Saving happens inside the style context, not just drawing. svg.hashsalt,
+        # savefig.dpi, and savefig.bbox are all read at save time, so a figure drawn
+        # under the context but written outside it gets none of them -- and without
+        # a fixed hashsalt the SVG element ids differ on every render.
+        with plot_context():
+            for fmt in formats:
+                path = out_dir / f"{stem}.{fmt}"
+                # Deterministic metadata: without it an SVG carries a timestamp and
+                # the same figure differs on every render.
+                figure.savefig(path, **savefig_kwargs(path))
+                if primary is None:
+                    primary = path
+        if primary is None:
+            return []
+        return [ReportImage(title=title, path=primary, caption=caption)]
+    finally:
+        # Closed here rather than after a successful save: a figure leaked on the
+        # error path grows without bound across a cohort.
+        with suppress(Exception):
+            plt.close(figure)
+
+
+@contextmanager
+def _panel(description: str) -> Iterator[None]:
+    """Log and swallow one panel's failure.
+
+    A panel that cannot be drawn is a gap in the report, not a reason to lose the
+    rest of it. This is the policy the QC blocks already used; the space sections
+    previously logged and then re-raised, so one bad panel cost the whole contrast.
     """
-    import numpy as np
+    try:
+        yield
+    except Exception as exc:
+        logger.warning("Failed to generate %s (%s)", description, exc)
 
-    n, p = X.shape
-    if p < 2:
-        return np.array([], dtype=np.float64)
 
-    vif = np.full(p, np.nan, dtype=np.float64)
-    for j in range(p):
-        y = X[:, j]
-        Z = np.delete(X, j, axis=1)
-        Z_const = np.column_stack([np.ones(n, dtype=X.dtype), Z])
-        try:
-            beta, residuals, _rank, _ = np.linalg.lstsq(Z_const, y, rcond=None)
-            if residuals.size:
-                ss_res = float(residuals.flat[0])
-            else:
-                ss_res = float(np.sum((y - Z_const @ beta) ** 2))
-            ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-            if ss_tot <= 0:
-                vif[j] = np.inf
-                continue
-            r_sq = 1.0 - (ss_res / ss_tot)
-            if r_sq >= 1.0 or np.isnan(r_sq):
-                vif[j] = np.inf
-            else:
-                vif[j] = 1.0 / (1.0 - r_sq)
-        except Exception:
-            vif[j] = np.inf
-    return vif
+def _effect_units(run_meta: Optional[Dict[str, Any]]) -> str:
+    """Name the units of a GLM effect size, or decline to.
+
+    A contrast effect is in arbitrary BOLD units unless the model applied signal
+    scaling. Printing "% signal change" on a map that is not in those units is worse
+    than printing nothing, because it invites a quantitative reading the number
+    cannot support.
+    """
+    scaling = (run_meta or {}).get("signal_scaling")
+    return "% signal change" if scaling else "effect (arbitrary BOLD units)"
 
 
 def generate_carpet_qc_images(
@@ -143,11 +192,7 @@ def generate_carpet_qc_images(
     mask_img_path: Optional[Path] = None,
     max_voxels: int = 6000,
 ) -> List[ReportImage]:
-    """
-    Generate a "carpet plot" QC image (best-effort).
-
-    Uses the included BOLD run paths from run_meta["included_bold_paths"].
-    """
+    """Generate the carpet QC panel with motion traces on a shared time axis."""
     cfg = cfg.normalized()
     if not cfg.enabled or not cfg.include_carpet_qc:
         return []
@@ -156,110 +201,126 @@ def generate_carpet_qc_images(
     if not isinstance(bold_paths, list) or not bold_paths:
         return []
 
-    try:
-        import numpy as np  # type: ignore
-        import matplotlib.pyplot as plt  # type: ignore
-
-        nib = _maybe_import_nibabel()
-        if nib is None:
+    images: List[ReportImage] = []
+    with _panel("carpet QC"):
+        series, _imgs, _mask, labels = _load_run_series(bold_paths, mask_img_path)
+        if not series:
             return []
 
-        qc_dir = contrast_dir / "plots" / "qc"
-        qc_dir.mkdir(parents=True, exist_ok=True)
+        confound_paths = run_meta.get("included_confounds_paths") or []
+        sample_masks: List[np.ndarray] = []
+        if isinstance(confound_paths, list) and len(confound_paths) == len(series):
+            with suppress(Exception):
+                sample_masks = _sample_masks_from_confounds(confound_paths)
 
-        mask_img = None
-        if mask_img_path and mask_img_path.exists():
-            try:
-                mask_img = nib.load(str(mask_img_path))
-            except Exception:
-                mask_img = None
-
-        mats = []
+        standardised: List[np.ndarray] = []
         run_breaks = [0]
+        for index, voxels in enumerate(series):
+            mask = sample_masks[index] if index < len(sample_masks) else None
+            if mask is not None and mask.size != voxels.shape[1]:
+                mask = None
+            standardised.append(
+                carpet_figures.standardise_carpet(voxels, sample_mask=mask)
+            )
+            run_breaks.append(run_breaks[-1] + int(voxels.shape[1]))
 
-        for bp in bold_paths:
-            if not bp:
-                continue
-            p = Path(str(bp))
-            if not p.exists():
-                continue
-            img = nib.load(str(p))
-            data = np.asanyarray(img.dataobj)
-            if data.ndim != 4:
-                continue
-
-            m = None
-            if mask_img is not None:
-                try:
-                    mdata = np.asanyarray(mask_img.dataobj).astype(bool)
-                    if mdata.shape != data.shape[:3]:
-                        try:
-                            from nibabel.processing import resample_from_to  # type: ignore
-
-                            mask_res = resample_from_to(mask_img, (data.shape[:3], img.affine), order=0)
-                            mdata = np.asanyarray(mask_res.dataobj).astype(bool)
-                        except Exception:
-                            mdata = None
-                    if mdata is not None and mdata.shape == data.shape[:3]:
-                        m = mdata
-                except Exception:
-                    m = None
-
-            if m is None:
-                # fall back to non-zero voxels in mean image
-                mean_img = np.mean(data, axis=3)
-                m = np.isfinite(mean_img) & (mean_img != 0)
-
-            vox_ts = data[m]  # (n_voxels, T)
-            if vox_ts.size == 0:
-                continue
-
-            # Downsample voxels for readability and performance
-            if vox_ts.shape[0] > max_voxels:
-                idx = np.linspace(0, vox_ts.shape[0] - 1, max_voxels).astype(int)
-                vox_ts = vox_ts[idx, :]
-
-            mean = np.mean(vox_ts, axis=1, keepdims=True)
-            std = np.std(vox_ts, axis=1, keepdims=True)
-            std[std == 0] = 1.0
-            vox_ts = (vox_ts - mean) / std
-            vox_ts = np.clip(vox_ts, -3, 3)
-
-            mats.append(vox_ts)
-            run_breaks.append(run_breaks[-1] + int(vox_ts.shape[1]))
-
-        if not mats:
-            return []
-
-        carpet = np.concatenate(mats, axis=1)
-        fig, ax = plt.subplots(figsize=(12, 5), dpi=150)
-        im = ax.imshow(
-            carpet,
-            aspect="auto",
-            interpolation="nearest",
-            cmap="RdBu_r",
-            vmin=-2.5,
-            vmax=2.5,
+        carpet = np.concatenate(standardised, axis=1)
+        fd_values, dvars_values, dvars_label = _motion_traces(
+            confound_paths, n_frames=carpet.shape[1]
         )
-        ax.set_title("Carpet plot (standardized voxel time series; concatenated runs)")
-        ax.set_xlabel("Frame")
-        ax.set_ylabel("Voxels (subsampled)")
-        for b in run_breaks[1:-1]:
-            ax.axvline(b, color="#000000", linewidth=0.7, alpha=0.35)
-        cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
-        cbar.set_label("z (per voxel)")
-        fig.tight_layout()
 
-        images: List[ReportImage] = []
-        for fmt in cfg.formats:
-            out_path = qc_dir / f"carpet_qc.{fmt}"
-            fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
-            images.append(ReportImage(title="QC: Carpet plot", path=out_path))
-        plt.close(fig)
-        return images
-    except Exception as exc:
-        logger.warning("Failed to generate carpet QC (%s)", exc)
-        return []
+        codes, source = (None, "none")
+        with suppress(Exception):
+            reference = _imgs[0] if _imgs else None
+            if reference is not None:
+                from fmri_pipeline.analysis.report.assets import PlotAssets
+
+                assets = run_meta.get("plot_assets")
+                if isinstance(assets, PlotAssets):
+                    volume_codes, source = carpet_figures.resolve_tissue_codes(
+                        np.asanyarray(reference.dataobj).shape[:3],
+                        assets=assets,
+                        reference_img=reference,
+                    )
+                    if volume_codes is not None:
+                        codes = volume_codes[
+                            np.isfinite(np.mean(np.asanyarray(reference.dataobj), axis=3))
+                        ]
+
+        tr = run_meta.get("t_r") or run_meta.get("repetition_time") or 1.0
+        figure = carpet_figures.carpet_figure(
+            carpet,
+            tissue_codes=codes,
+            tissue_source=source,
+            tr=float(tr),
+            run_boundaries=run_breaks[1:-1],
+            run_labels=labels,
+            fd=fd_values,
+            dvars=dvars_values,
+            dvars_label=dvars_label,
+            title="Carpet (as modelled)",
+        )
+        images.extend(_save_figure(
+            figure,
+            out_dir=contrast_dir / "plots" / "qc",
+            stem="carpet_qc",
+            formats=cfg.formats,
+            title="QC: Carpet",
+            caption=f"Voxel order: {source}. Motion shares the carpet's time axis.",
+        ))
+    return images
+
+
+def _motion_traces(
+    confound_paths: Sequence[Any],
+    *,
+    n_frames: int,
+) -> Tuple[Optional["np.ndarray"], Optional["np.ndarray"], str]:
+    """Concatenate FD and DVARS across runs, preserving undefined samples.
+
+    ``framewise_displacement`` is undefined for the first frame of every run.
+    Filling it with zero draws a dip to "no motion" at each run boundary, which is
+    a fabricated measurement; NaN is left in place and Matplotlib gaps it.
+
+    The DVARS label follows the column that was actually found, because ``dvars``
+    and ``std_dvars`` live on different scales and mislabelling one as the other
+    makes the axis unreadable.
+    """
+    if not confound_paths:
+        return None, None, "DVARS"
+
+    import pandas as pd
+
+    fd_parts: List[np.ndarray] = []
+    dvars_parts: List[np.ndarray] = []
+    label = "DVARS"
+    for path in confound_paths:
+        if not path:
+            continue
+        try:
+            frame = pd.read_csv(str(path), sep="\t")
+        except Exception:
+            return None, None, label
+        fd_parts.append(
+            frame["framewise_displacement"].to_numpy(dtype=float)
+            if "framewise_displacement" in frame.columns
+            else np.full(len(frame), np.nan)
+        )
+        if "dvars" in frame.columns:
+            dvars_parts.append(frame["dvars"].to_numpy(dtype=float))
+        elif "std_dvars" in frame.columns:
+            dvars_parts.append(frame["std_dvars"].to_numpy(dtype=float))
+            label = "std DVARS"
+        else:
+            dvars_parts.append(np.full(len(frame), np.nan))
+
+    fd = np.concatenate(fd_parts) if fd_parts else None
+    dvars = np.concatenate(dvars_parts) if dvars_parts else None
+    if fd is not None and fd.size != n_frames:
+        fd = None
+    if dvars is not None and dvars.size != n_frames:
+        dvars = None
+    return fd, dvars, label
 
 
 def generate_tsnr_qc_images(
@@ -269,10 +330,11 @@ def generate_tsnr_qc_images(
     run_meta: Dict[str, Any],
     mask_img_path: Optional[Path] = None,
 ) -> List[ReportImage]:
-    """
-    Generate tSNR QC images (best-effort).
+    """Generate tSNR QC panels: the mean map, per-run medians, and a histogram.
 
-    Uses the included BOLD run paths from run_meta["included_bold_paths"].
+    Non-steady-state frames are excluded from the computation. They sit far above
+    steady state before longitudinal magnetisation saturates, so including them
+    inflates the temporal standard deviation and biases every tSNR value low.
     """
     cfg = cfg.normalized()
     if not cfg.enabled or not cfg.include_tsnr_qc:
@@ -282,142 +344,65 @@ def generate_tsnr_qc_images(
     if not isinstance(bold_paths, list) or not bold_paths:
         return []
 
-    try:
-        import numpy as np  # type: ignore
-        import matplotlib.pyplot as plt  # type: ignore
+    images: List[ReportImage] = []
+    qc_dir = contrast_dir / "plots" / "qc"
 
+    with _panel("tSNR QC"):
         nib = _maybe_import_nibabel()
         if nib is None:
             return []
-
-        qc_dir = contrast_dir / "plots" / "qc"
-        qc_dir.mkdir(parents=True, exist_ok=True)
-
-        mask_img = None
-        if mask_img_path and mask_img_path.exists():
-            try:
-                mask_img = nib.load(str(mask_img_path))
-            except Exception:
-                mask_img = None
-
-        tsnr_sum = None
-        tsnr_n = 0
-        ref_affine = None
-
-        for bp in bold_paths:
-            if not bp:
-                continue
-            p = Path(str(bp))
-            if not p.exists():
-                continue
-            img = nib.load(str(p))
-            data = np.asanyarray(img.dataobj)
-            if data.ndim != 4:
-                continue
-            ref_affine = img.affine if ref_affine is None else ref_affine
-
-            m = None
-            if mask_img is not None:
-                try:
-                    mdata = np.asanyarray(mask_img.dataobj).astype(bool)
-                    if mdata.shape != data.shape[:3]:
-                        try:
-                            from nibabel.processing import resample_from_to  # type: ignore
-
-                            mask_res = resample_from_to(mask_img, (data.shape[:3], img.affine), order=0)
-                            mdata = np.asanyarray(mask_res.dataobj).astype(bool)
-                        except Exception:
-                            mdata = None
-                    if mdata is not None and mdata.shape == data.shape[:3]:
-                        m = mdata
-                except Exception:
-                    m = None
-            if m is None:
-                mean_img = np.mean(data, axis=3)
-                m = np.isfinite(mean_img) & (mean_img != 0)
-
-            mean = np.mean(data, axis=3)
-            std = np.std(data, axis=3)
-            std = np.where(std == 0, np.nan, std)
-            tsnr = mean / std
-            tsnr = np.nan_to_num(tsnr, nan=0.0, posinf=0.0, neginf=0.0)
-            tsnr = np.where(m, tsnr, 0.0)
-
-            if tsnr_sum is None:
-                tsnr_sum = tsnr.astype(float)
-            else:
-                if tsnr_sum.shape != tsnr.shape:
-                    continue
-                tsnr_sum += tsnr
-            tsnr_n += 1
-
-        if tsnr_sum is None or tsnr_n == 0:
+        _series, imgs, mask_img, labels = _load_run_series(bold_paths, mask_img_path)
+        if not imgs:
             return []
 
-        tsnr_mean = tsnr_sum / float(tsnr_n)
+        confound_paths = run_meta.get("included_confounds_paths") or []
+        sample_masks = None
+        if isinstance(confound_paths, list) and len(confound_paths) == len(imgs):
+            with suppress(Exception):
+                candidate = _sample_masks_from_confounds(confound_paths)
+                if all(
+                    m.size == np.asanyarray(img.dataobj).shape[3]
+                    for m, img in zip(candidate, imgs)
+                ):
+                    sample_masks = candidate
 
-        # Write a NIfTI for downstream use (best-effort)
-        try:
-            if ref_affine is not None:
-                tsnr_img = nib.Nifti1Image(tsnr_mean.astype("float32"), affine=ref_affine)
-                nii_path = qc_dir / "tsnr_mean.nii.gz"
-                nib.save(tsnr_img, str(nii_path))
-        except Exception as exc:
-            logger.warning("Failed to write tSNR NIfTI at %s: %s", qc_dir / "tsnr_mean.nii.gz", exc)
+        result = volume_figures.compute_tsnr(
+            imgs, mask_img=mask_img, sample_masks=sample_masks
+        )
 
-        # Pick informative slices (max mask coverage)
-        m = tsnr_mean > 0
-        if m.any():
-            x_idx = int(np.argmax(m.sum(axis=(1, 2))))
-            y_idx = int(np.argmax(m.sum(axis=(0, 2))))
-            z_idx = int(np.argmax(m.sum(axis=(0, 1))))
-        else:
-            x_idx, y_idx, z_idx = (tsnr_mean.shape[0] // 2, tsnr_mean.shape[1] // 2, tsnr_mean.shape[2] // 2)
+        with suppress(Exception):
+            qc_dir.mkdir(parents=True, exist_ok=True)
+            nib.save(result.mean_img, str(qc_dir / "tsnr_mean.nii.gz"))
 
-        vals = tsnr_mean[m]
-        vmax = float(np.percentile(vals, 98)) if vals.size else float(np.max(tsnr_mean))
-        vmax = max(vmax, 1.0)
+        figure = volume_figures.tsnr_volume(
+            result, title=f"tSNR (mean of {len(imgs)} run(s), as modelled)"
+        )
+        images.extend(_save_figure(
+            figure, out_dir=qc_dir, stem="tsnr_map", formats=cfg.formats,
+            title="QC: tSNR map",
+        ))
 
-        # Map montage
-        fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.5), dpi=150)
-        im0 = axes[0].imshow(tsnr_mean[x_idx, :, :].T, origin="lower", cmap="viridis", vmin=0, vmax=vmax)
-        axes[0].set_title("Sagittal")
-        axes[1].imshow(tsnr_mean[:, y_idx, :].T, origin="lower", cmap="viridis", vmin=0, vmax=vmax)
-        axes[1].set_title("Coronal")
-        axes[2].imshow(tsnr_mean[:, :, z_idx].T, origin="lower", cmap="viridis", vmin=0, vmax=vmax)
-        axes[2].set_title("Axial")
-        for ax in axes:
-            ax.axis("off")
-        cbar = fig.colorbar(im0, ax=axes, fraction=0.02, pad=0.06)
-        cbar.set_label("tSNR")
-        fig.suptitle(f"tSNR (mean across runs, n={tsnr_n})")
-        fig.tight_layout(rect=[0, 0, 0.88, 0.96])
+        if len(result.per_run_median) > 1:
+            figure = volume_figures.per_run_tsnr_figure(
+                result, run_labels=labels, title="tSNR by run"
+            )
+            images.extend(_save_figure(
+                figure, out_dir=qc_dir, stem="tsnr_by_run", formats=cfg.formats,
+                title="QC: tSNR by run",
+                caption="Shown per run because averaging maps hides a single bad run.",
+            ))
 
-        images: List[ReportImage] = []
-        for fmt in cfg.formats:
-            out_path = qc_dir / f"tsnr_map.{fmt}"
-            fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
-            images.append(ReportImage(title="QC: tSNR map", path=out_path))
-        plt.close(fig)
-
-        # Histogram
-        if vals.size:
-            fig, ax = plt.subplots(figsize=(7.2, 3.2), dpi=150)
-            ax.hist(vals, bins=80, color="#2CA02C", alpha=0.9, edgecolor="none")
-            ax.set_title("tSNR distribution (masked voxels)")
-            ax.set_xlabel("tSNR")
-            ax.set_ylabel("voxels")
-            fig.tight_layout()
-            for fmt in cfg.formats:
-                out_path = qc_dir / f"tsnr_hist.{fmt}"
-                fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
-                images.append(ReportImage(title="QC: tSNR histogram", path=out_path))
-            plt.close(fig)
-
-        return images
-    except Exception as exc:
-        logger.warning("Failed to generate tSNR QC (%s)", exc)
-        return []
+        data = np.asarray(result.mean_img.get_fdata())
+        values = data[np.isfinite(data) & (data > 0)]
+        if values.size:
+            figure = distribution_figures.magnitude_histogram(
+                values, xlabel="tSNR", title="tSNR distribution (masked voxels)"
+            )
+            images.extend(_save_figure(
+                figure, out_dir=qc_dir, stem="tsnr_hist", formats=cfg.formats,
+                title="QC: tSNR histogram",
+            ))
+    return images
 
 
 def generate_signature_tables(
@@ -769,22 +754,6 @@ def _load_mni_template_background() -> Optional[Any]:
         return None
 
 
-def _save_nilearn_display(display: Any, out_path: Path, *, dpi: int = 300) -> None:
-    fig = getattr(display, "figure", None) or getattr(display, "_fig", None)
-    if fig is None and hasattr(display, "frame_axes"):
-        fig = getattr(display.frame_axes, "figure", None)
-    if fig is None:
-        raise RuntimeError("Could not resolve matplotlib figure from nilearn display object")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", pad_inches=0.02)
-    try:
-        import matplotlib.pyplot as plt
-
-        plt.close(fig)
-    except Exception as exc:
-        logger.debug("Failed to close nilearn display figure: %s", exc)
-
-
 def _stat_summary_from_img(img: Any, mask_img: Optional[Any] = None) -> Dict[str, Any]:
     nib = _maybe_import_nibabel()
     if nib is None:
@@ -959,12 +928,6 @@ def generate_fmri_space_section(
     images: List[ReportImage] = []
     tables: List[ReportTable] = []
 
-    def _add_image(title: str, display: Any, stem: str, caption: str = "") -> None:
-        for fmt in formats:
-            out_path = out_dir / f"{stem}.{fmt}"
-            _save_nilearn_display(display, out_path)
-            images.append(ReportImage(title=title, path=out_path, caption=caption))
-
     cfg_obj = cfg.normalized() if cfg is not None else FmriPlottingConfig(enabled=True)
     thr_img, thr_val, thr_label = _compute_threshold_for_cfg(stat_img, cfg_obj)
     if cfg_obj.threshold_mode == "z" and cfg_obj.cluster_min_voxels > 0 and thr_val is not None:
@@ -980,116 +943,102 @@ def generate_fmri_space_section(
     if z_vmax is None:
         z_vmax = _robust_vmax_abs(stat_img, mask_img=mask_img) or None
 
-    # Slices (mosaic): Z-stat
+    two_sided = bool(cfg_obj.two_sided)
+    radiological = bool(getattr(cfg_obj, "radiological", False))
+
+    # Dual-coded panel leads the results: hue carries the effect, opacity carries
+    # the evidence, so sub-threshold structure fades instead of vanishing. Needs
+    # both an effect map and a statistic map, so it is skipped when only one exists.
+    if "slices" in plot_types and effect_img is not None and thr_val is not None:
+        with _panel("dual-coded stat map"):
+            figure = stat_map_figures.dual_coded_mosaic(
+                effect_img,
+                stat_img=stat_img,
+                bg_img=bg_img,
+                threshold=float(thr_val),
+                two_sided=two_sided,
+                radiological=radiological,
+                cbar_label=_effect_units(None),
+                title=f"{title_prefix}Effect, opacity-coded by evidence".strip(),
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="dual_coded", formats=formats,
+                title="Effect map · dual-coded",
+                caption=(
+                    "Colour is effect magnitude; opacity is statistical evidence, "
+                    f"ramped from |z| {0.5 * float(thr_val):.2f} to "
+                    f"{float(thr_val):.2f}. No voxels are hidden."
+                ),
+            ))
+
     if "slices" in plot_types:
-        try:
-            if include_unthresholded:
-                disp = plotting.plot_stat_map(
-                    stat_img,
-                    bg_img=bg_img,
+        if include_unthresholded:
+            with _panel("unthresholded stat-map slices"):
+                figure = stat_map_figures.stat_map_mosaic(
+                    stat_img, bg_img=bg_img, threshold=None, vmax=z_vmax,
+                    two_sided=two_sided, radiological=radiological,
                     title=f"{title_prefix}Z map (unthresholded)".strip(),
-                    display_mode="mosaic",
-                    threshold=None,
-                    colorbar=True,
-                    vmax=z_vmax,
-                    dim=0,
-                    black_bg=False,
-                    symmetric_cbar=True,
-                    annotate=False,
                 )
-                _add_image("Stat map (slices) · unthresholded", disp, "stat_slices_unthresholded")
-            if thr_label != "none":
-                thr_plot_threshold = float(thr_val) if thr_val is not None else 1e-6
-                disp = plotting.plot_stat_map(
-                    thr_img if thr_img is not None else stat_img,
-                    bg_img=bg_img,
-                    title=f"{title_prefix}Z map (thresholded: {thr_label})".strip(),
-                    display_mode="mosaic",
-                    threshold=thr_plot_threshold,
-                    colorbar=True,
-                    vmax=z_vmax,
-                    dim=0,
-                    black_bg=False,
-                    symmetric_cbar=True,
-                    annotate=False,
+                images.extend(_save_figure(
+                    figure, out_dir=out_dir, stem="stat_slices_unthresholded",
+                    formats=formats, title="Stat map (slices) · unthresholded",
+                ))
+        if thr_label != "none":
+            with _panel("thresholded stat-map slices"):
+                figure = stat_map_figures.stat_map_mosaic(
+                    stat_img if thr_img is None else thr_img, bg_img=bg_img,
+                    threshold=float(thr_val) if thr_val is not None else None,
+                    two_sided=two_sided, radiological=radiological,
+                    title=f"{title_prefix}Z map (thresholded)".strip(),
                 )
-                _add_image("Stat map (slices) · thresholded", disp, "stat_slices_thresholded", caption=thr_label)
-        except Exception as exc:
-            logger.warning("Failed to generate stat-map slices (%s)", exc)
-            raise
+                images.extend(_save_figure(
+                    figure, out_dir=out_dir, stem="stat_slices_thresholded",
+                    formats=formats, title="Stat map (slices) · thresholded",
+                    caption=thr_label,
+                ))
 
-    # Glass brain: Z-stat
-    if "glass" in plot_types:
-        try:
-            if include_unthresholded:
-                disp = plotting.plot_glass_brain(
-                    stat_img,
-                    title=f"{title_prefix}Glass brain (unthresholded)".strip(),
-                    threshold=None,
-                    colorbar=True,
-                    vmax=z_vmax,
-                    black_bg=False,
-                )
-                _add_image("Glass brain · unthresholded", disp, "glass_unthresholded")
-            if thr_label != "none":
-                thr_plot_threshold = float(thr_val) if thr_val is not None else 1e-6
-                disp = plotting.plot_glass_brain(
-                    thr_img if thr_img is not None else stat_img,
-                    title=f"{title_prefix}Glass brain (thresholded: {thr_label})".strip(),
-                    threshold=thr_plot_threshold,
-                    colorbar=True,
-                    vmax=z_vmax,
-                    black_bg=False,
-                )
-                _add_image("Glass brain · thresholded", disp, "glass_thresholded", caption=thr_label)
-        except Exception as exc:
-            logger.warning("Failed to generate glass brain (%s)", exc)
-            raise
+    # Only the thresholded glass brain is drawn. An unthresholded projection is a
+    # saturated blob at any threshold setting and carries no information.
+    if "glass" in plot_types and thr_label != "none":
+        with _panel("thresholded glass brain"):
+            figure = stat_map_figures.glass_brain(
+                stat_img if thr_img is None else thr_img,
+                threshold=float(thr_val) if thr_val is not None else None,
+                two_sided=two_sided, radiological=radiological,
+                title=f"{title_prefix}Glass brain (thresholded)".strip(),
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="glass_thresholded", formats=formats,
+                title="Glass brain · thresholded", caption=thr_label,
+            ))
 
-    # Histogram
     if "hist" in plot_types:
-        try:
-            import numpy as np
-            import matplotlib.pyplot as plt
-
+        with _panel("z histogram"):
             data = np.asarray(stat_img.get_fdata())
             if mask_img is not None:
                 m = np.asarray(mask_img.get_fdata()).astype(bool)
-                if m.shape != data.shape:
-                    try:
-                        from nilearn.image import resample_to_img  # type: ignore
+                data = data[m] if m.shape == data.shape else data[data != 0]
+            figure = distribution_figures.z_histogram(
+                data,
+                threshold=thr_val if thr_label != "none" else None,
+                title="Z-statistic distribution",
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="z_hist", formats=formats,
+                title="Z histogram",
+            ))
 
-                        m_res = resample_to_img(
-                        mask_img, stat_img, interpolation="nearest",
-                        force_resample=True, copy_header=True,
-                    )
-                        m = np.asarray(m_res.get_fdata()).astype(bool)
-                    except Exception:
-                        m = None
-                if m is not None and m.shape == data.shape:
-                    data = data[m]
-                else:
-                    data = data[data != 0]
-            data = data[np.isfinite(data)]
-            if data.size:
-                fig, ax = plt.subplots(figsize=(7.2, 3.2), dpi=150)
-                ax.hist(data, bins=80, color="#1F77B4", alpha=0.9, edgecolor="none")
-                if thr_val is not None and thr_label != "none":
-                    ax.axvline(float(thr_val), color="#E31A1C", linestyle="--", linewidth=1.5, label="+thr")
-                    ax.axvline(-float(thr_val), color="#E31A1C", linestyle="--", linewidth=1.5)
-                ax.set_title("Z-statistic distribution")
-                ax.set_xlabel("z")
-                ax.set_ylabel("voxels")
-                ax.legend(frameon=False, fontsize=9)
-                fig.tight_layout()
-                for fmt in formats:
-                    out_path = out_dir / f"z_hist.{fmt}"
-                    fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
-                    images.append(ReportImage(title="Z histogram", path=out_path))
-                plt.close(fig)
-        except Exception as exc:
-            logger.warning("Failed to generate z histogram (%s)", exc)
-            raise
+    if mask_img is not None:
+        with _panel("coverage"):
+            figure = coverage_figures.coverage_figure(
+                mask_img, bg_img=bg_img,
+                title=f"{title_prefix}Analysis mask".strip(),
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="coverage", formats=formats,
+                title="Coverage (analysis mask)",
+                caption="Voxels outside this mask were not tested.",
+            ))
 
     # Cluster/peak table
     if "clusters" in plot_types and reporting is not None:
@@ -1120,9 +1069,28 @@ def generate_fmri_space_section(
                     caption=f"{'two-sided' if cfg_obj.two_sided else 'one-sided'}, {thr_label}",
                 )
             )
+            caption_parts = [
+                "two-sided" if cfg_obj.two_sided else "one-sided",
+                f"height threshold: {thr_label}",
+            ]
+            if cfg_obj.cluster_min_voxels > 0:
+                # Eklund, Nichols & Knutsson (2016) measured familywise false-positive
+                # rates up to 70% for parametric cluster-extent inference. This
+                # pipeline performs no cluster-level correction at all, so the caption
+                # must not let extent read as inferential.
+                caption_parts.append(
+                    f"clusters smaller than {cfg_obj.cluster_min_voxels} voxels removed "
+                    "for display; this is an extent filter, not familywise-error-"
+                    "corrected cluster-level inference"
+                )
+            tables[-1] = ReportTable(
+                title=tables[-1].title,
+                tsv_path=tables[-1].tsv_path,
+                html_table=tables[-1].html_table,
+                caption="; ".join(caption_parts),
+            )
         except Exception as exc:
             logger.warning("Failed to generate clusters table (%s)", exc)
-            raise
 
     summary = _stat_summary_from_img(stat_img, mask_img=mask_img)
     if summary:
@@ -1133,69 +1101,59 @@ def generate_fmri_space_section(
             "p99(|z|)": f"{summary.get('p99_abs', float('nan')):.3f}" if "p99_abs" in summary else "",
         }
 
-    # Optional: effect size + standard error (from variance)
-    try:
-        if bool(getattr(cfg_obj, "include_effect_size", True)) and effect_img is not None:
-            eff_vmax = _robust_vmax_abs(effect_img, mask_img=mask_img) or None
-            if "slices" in plot_types:
-                disp = plotting.plot_stat_map(
-                    effect_img,
-                    bg_img=bg_img,
-                    title=f"{title_prefix}Effect size (unthresholded)".strip(),
-                    display_mode="mosaic",
-                    threshold=None,
-                    colorbar=True,
-                    vmax=eff_vmax,
-                    dim=0,
-                    black_bg=False,
-                    symmetric_cbar=True,
-                    cmap="cold_hot",
-                    annotate=False,
+    # Effect size and standard error are diagnostics, kept but drawn through the
+    # tested figure layer. The effect map uses the same diverging colormap as the z
+    # map: same kind of data, so a second colormap would imply a difference that is
+    # not there. Standard error is an unsigned magnitude and takes the sequential ramp.
+    if bool(getattr(cfg_obj, "include_effect_size", True)) and effect_img is not None:
+        if "slices" in plot_types:
+            with _panel("effect size slices"):
+                figure = stat_map_figures.stat_map_mosaic(
+                    effect_img, bg_img=bg_img, threshold=None,
+                    two_sided=two_sided, radiological=radiological,
+                    cbar_label=_effect_units(None),
+                    title=f"{title_prefix}Effect size".strip(),
                 )
-                _add_image("Effect size (slices)", disp, "effect_slices")
-            if "glass" in plot_types:
-                disp = plotting.plot_glass_brain(
-                    effect_img,
+                images.extend(_save_figure(
+                    figure, out_dir=out_dir, stem="effect_slices", formats=formats,
+                    title="Effect size (slices)",
+                ))
+        if "glass" in plot_types:
+            with _panel("effect size glass brain"):
+                figure = stat_map_figures.glass_brain(
+                    effect_img, threshold=None,
+                    two_sided=two_sided, radiological=radiological,
+                    cbar_label=_effect_units(None),
                     title=f"{title_prefix}Effect size (glass)".strip(),
-                    threshold=None,
-                    colorbar=True,
-                    vmax=eff_vmax,
-                    black_bg=False,
-                    cmap="cold_hot",
                 )
-                _add_image("Effect size (glass)", disp, "effect_glass")
-    except Exception as exc:
-        logger.warning("Failed to generate effect size panels (%s)", exc)
-        raise
+                images.extend(_save_figure(
+                    figure, out_dir=out_dir, stem="effect_glass", formats=formats,
+                    title="Effect size (glass)",
+                ))
 
-    try:
-        if bool(getattr(cfg_obj, "include_standard_error", True)) and variance_img is not None:
-            import numpy as np
-            import nibabel as nib  # type: ignore
+    if (
+        bool(getattr(cfg_obj, "include_standard_error", True))
+        and variance_img is not None
+        and "slices" in plot_types
+    ):
+        with _panel("standard error slices"):
+            import nibabel as nib_se  # type: ignore
 
             var = np.asarray(variance_img.get_fdata())
             se = np.sqrt(np.clip(var, 0, None))
-            se_img = nib.Nifti1Image(se, variance_img.affine, variance_img.header)
-            se_vmax = float(np.percentile(se[np.isfinite(se)], 99)) if np.isfinite(se).any() else None
-            if "slices" in plot_types:
-                disp = plotting.plot_stat_map(
-                    se_img,
-                    bg_img=bg_img,
-                    title=f"{title_prefix}Std. error".strip(),
-                    display_mode="mosaic",
-                    threshold=None,
-                    colorbar=True,
-                    vmax=se_vmax,
-                    dim=0,
-                    black_bg=False,
-                    symmetric_cbar=False,
-                    cmap="viridis",
-                    annotate=False,
-                )
-                _add_image("Std. error (slices)", disp, "se_slices")
-    except Exception as exc:
-        logger.warning("Failed to generate standard error panels (%s)", exc)
-        raise
+            se_img = nib_se.Nifti1Image(se, variance_img.affine, variance_img.header)
+            figure = stat_map_figures.stat_map_mosaic(
+                se_img, bg_img=bg_img, threshold=None,
+                two_sided=True, radiological=radiological,
+                cmap=MAGNITUDE_CMAP, cbar_label="standard error",
+                title=f"{title_prefix}Standard error".strip(),
+            )
+            images.extend(_save_figure(
+                figure, out_dir=out_dir, stem="se_slices", formats=formats,
+                title="Std. error (slices)",
+                caption="Where the model is least certain; distinguishes a true null "
+                        "from dropout-driven absence of effect.",
+            ))
 
     return ReportSpaceSection(space=space, images=tuple(images), tables=tuple(tables), summary=summary)
 
@@ -1368,51 +1326,11 @@ def run_fmri_plotting_and_report(
     # QC sections (not space-specific)
     qc_images: List[ReportImage] = []
     qc_tables: List[ReportTable] = []
-    try:
-        if cfg.include_motion_qc and isinstance(run_meta, dict):
-            conf_paths = run_meta.get("included_confounds_paths") or []
-            if isinstance(conf_paths, list) and conf_paths:
-                import pandas as pd
-                import numpy as np
-                import matplotlib.pyplot as plt
+    # Motion no longer has a figure of its own: FD and DVARS are drawn on the
+    # carpet's time axis, which is the only arrangement in which either is
+    # diagnostic. A spike beside a carpet band is evidence; a spike on a separate
+    # axis with its own x-scale is not.
 
-                dfs = []
-                run_breaks = [0]
-                for p in conf_paths:
-                    if not p:
-                        continue
-                    df = pd.read_csv(str(p), sep="\t")
-                    dfs.append(df)
-                    run_breaks.append(run_breaks[-1] + len(df))
-                if dfs:
-                    df_all = pd.concat(dfs, ignore_index=True)
-                    x = np.arange(len(df_all))
-                    fd = df_all.get("framewise_displacement")
-                    dvars = df_all.get("dvars") if "dvars" in df_all.columns else df_all.get("std_dvars")
-
-                    fig, axes = plt.subplots(2, 1, figsize=(10, 5), sharex=True, dpi=150)
-                    if fd is not None:
-                        axes[0].plot(x, fd.fillna(0).to_numpy(), color="#444444", linewidth=0.8)
-                        axes[0].set_ylabel("FD (mm)")
-                    if dvars is not None:
-                        axes[1].plot(x, dvars.fillna(0).to_numpy(), color="#1F77B4", linewidth=0.8)
-                        axes[1].set_ylabel("DVARS")
-                    axes[1].set_xlabel("Frame (concatenated runs)")
-                    for b in run_breaks[1:-1]:
-                        for ax in axes:
-                            ax.axvline(b, color="#999999", linewidth=0.7, alpha=0.6)
-                    fig.suptitle("Motion QC (concatenated across runs)")
-                    fig.tight_layout()
-
-                    qc_dir = contrast_dir / "plots" / "qc"
-                    qc_dir.mkdir(parents=True, exist_ok=True)
-                    for fmt in cfg.formats:
-                        out_path = qc_dir / f"motion_qc.{fmt}"
-                        fig.savefig(out_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
-                        qc_images.append(ReportImage(title="Motion QC (FD/DVARS)", path=out_path))
-                    plt.close(fig)
-    except Exception as exc:
-        logger.warning("Failed to generate motion QC (%s)", exc)
 
     try:
         if cfg.include_carpet_qc and isinstance(run_meta, dict):

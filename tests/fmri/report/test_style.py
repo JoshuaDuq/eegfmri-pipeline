@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import hashlib
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pytest
+
+from fmri_pipeline.analysis.report import style
+
+
+def test_plot_context_does_not_leak_into_global_rcparams() -> None:
+    before = plt.rcParams["axes.spines.top"]
+    with style.plot_context():
+        assert plt.rcParams["axes.spines.top"] is False
+    assert plt.rcParams["axes.spines.top"] == before
+
+
+def test_robust_symmetric_limit_is_not_dominated_by_a_single_outlier() -> None:
+    values = np.concatenate([np.full(999, 1.0), np.array([1000.0])])
+    assert style.robust_symmetric_limit(values) == pytest.approx(1.0, abs=0.01)
+
+
+def test_robust_symmetric_limit_rejects_an_all_nonfinite_input() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        style.robust_symmetric_limit(np.array([np.nan, np.inf]))
+
+
+def test_suprathreshold_limit_uses_only_surviving_voxels() -> None:
+    # 990 sub-threshold voxels must not drag the limit down toward the threshold.
+    values = np.concatenate([np.full(990, 0.1), np.full(10, 8.0)])
+    assert style.suprathreshold_limit(values, threshold=2.3) == pytest.approx(8.0, abs=0.01)
+
+
+def test_suprathreshold_limit_floors_above_the_threshold_for_a_noise_map() -> None:
+    # p99(|z|) of standard normal noise is ~2.58, barely above a 2.3 threshold.
+    rng = np.random.default_rng(0)
+    limit = style.suprathreshold_limit(rng.standard_normal(100_000), threshold=2.3)
+    assert limit >= 2.3 * 1.5
+
+
+def test_suprathreshold_limit_floors_when_nothing_survives() -> None:
+    assert style.suprathreshold_limit(np.zeros(100), threshold=2.3) == pytest.approx(3.45)
+
+
+def test_dense_figures_are_raster_and_line_figures_are_vector() -> None:
+    assert style.figure_format(dense=True) == "png"
+    assert style.figure_format(dense=False) == "svg"
+
+
+def test_signed_and_magnitude_colormaps_are_not_rainbows() -> None:
+    assert style.SIGNED_CMAP == "RdBu_r"
+    assert style.MAGNITUDE_CMAP == "cividis"
+
+
+def test_robust_upper_limit_ignores_sign_conventions_of_symmetric_data() -> None:
+    # An unsigned magnitude gets an upper bound, not a symmetric one.
+    assert style.robust_upper_limit(np.arange(101.0)) == pytest.approx(98.0, abs=0.5)
+
+
+def test_clipped_fraction_reports_what_a_colour_limit_hides() -> None:
+    values = np.concatenate([np.zeros(90), np.full(10, 100.0)])
+    assert style.clipped_fraction(values, limit=50.0) == pytest.approx(0.10)
+
+
+def test_clipped_fraction_is_zero_when_the_limit_covers_everything() -> None:
+    assert style.clipped_fraction(np.arange(10.0), limit=100.0) == 0.0
+
+
+def test_annotate_provenance_writes_its_lines_into_the_figure() -> None:
+    figure, _ = plt.subplots()
+    style.annotate_provenance(figure, ["n = 1,024 voxels", "|z| > 2.30"])
+    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
+    assert "n = 1,024 voxels" in text and "|z| > 2.30" in text
+    plt.close(figure)
+
+
+def _render(tmp_path, name: str) -> str:
+    with style.plot_context():
+        figure, axis = plt.subplots()
+        axis.plot([1, 2, 3])
+        path = tmp_path / name
+        figure.savefig(path, **style.savefig_kwargs(path))
+        plt.close(figure)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_svg_rendering_is_byte_stable_across_repeated_renders(tmp_path) -> None:
+    # SVG embeds a timestamp by default, so figures churn and cannot be diffed.
+    first = _render(tmp_path, "a.svg")
+    time.sleep(1.1)
+    assert _render(tmp_path, "b.svg") == first
+
+
+def test_png_rendering_is_byte_stable_across_repeated_renders(tmp_path) -> None:
+    first = _render(tmp_path, "a.png")
+    time.sleep(1.1)
+    assert _render(tmp_path, "b.png") == first

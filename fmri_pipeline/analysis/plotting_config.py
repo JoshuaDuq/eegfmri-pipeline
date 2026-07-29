@@ -26,6 +26,128 @@ def _normalize_str_list(values: Optional[Iterable[str]]) -> List[str]:
     return out
 
 
+#: Keys that moved off the plotting config, and where they went.
+#:
+#: Each of these caused statistics to be computed while living on a config named for
+#: rendering: ``space`` including ``mni`` triggered a complete second GLM fit, and
+#: ``include_effect_size`` / ``include_standard_error`` drove ``compute_contrast``
+#: calls. Deprecated aliases are deliberately not offered -- an alias that accepts a
+#: rendering flag which fits a GLM preserves exactly the confusion the split removes.
+MOVED_KEYS = {
+    "space": "fmri_stats.space",
+    "include_effect_size": "fmri_stats.include_effect_size",
+    "include_standard_error": "fmri_stats.include_standard_error",
+    "include_signatures": "fmri_stats.include_signatures",
+}
+
+
+@dataclass(frozen=True)
+class FmriStatsConfig:
+    """Settings that cause statistics to be computed.
+
+    Separate from the report config because each of these costs a model fit or a
+    contrast computation, and that cost should be visible where it is configured.
+    """
+
+    space: str = "native"
+    include_effect_size: bool = True
+    include_standard_error: bool = True
+    include_signatures: bool = True
+
+    def validate(self) -> None:
+        if self.space not in _ALLOWED_SPACES:
+            raise ValueError(
+                f"fmri_stats.space must be one of {sorted(_ALLOWED_SPACES)}, "
+                f"got '{self.space}'"
+            )
+
+
+@dataclass(frozen=True)
+class FmriReportConfig:
+    """Settings that only decide how existing results are drawn.
+
+    Nothing here may cause a GLM to be fit. That invariant is what lets a report be
+    regenerated from a derivatives tree without the model, and it is enforced by a
+    test that imports the report path and asserts the fitting modules stay absent.
+    """
+
+    enabled: bool = False
+    html_report: bool = False
+    formats: Sequence[str] = field(default_factory=lambda: ("png",))
+    threshold_mode: str = "z"
+    z_threshold: float = 2.3
+    fdr_q: float = 0.05
+    cluster_min_voxels: int = 0
+    two_sided: bool = True
+    radiological: bool = False
+    vmax_mode: str = "per_space_robust"
+    vmax_manual: Optional[float] = None
+    include_unthresholded: bool = True
+    plot_types: Sequence[str] = field(
+        default_factory=lambda: ("slices", "glass", "hist", "clusters")
+    )
+    include_motion_qc: bool = True
+    include_carpet_qc: bool = True
+    include_tsnr_qc: bool = True
+    include_design_qc: bool = True
+    embed_images: bool = True
+
+    def validate(self) -> None:
+        if not self.enabled:
+            return
+        if self.threshold_mode not in _ALLOWED_THRESHOLD_MODES:
+            raise ValueError(
+                f"threshold mode must be one of {sorted(_ALLOWED_THRESHOLD_MODES)}, "
+                f"got '{self.threshold_mode}'"
+            )
+        if self.threshold_mode == "z" and self.z_threshold <= 0:
+            raise ValueError("plot z-threshold must be > 0")
+        if self.threshold_mode == "fdr" and not (0 < self.fdr_q <= 1):
+            raise ValueError("plot FDR q must be in (0, 1]")
+        if self.cluster_min_voxels < 0:
+            raise ValueError("cluster_min_voxels must be >= 0")
+        formats = _normalize_str_list(self.formats)
+        if not formats:
+            raise ValueError("plot formats must include at least one of: png, svg")
+        unknown_formats = sorted(set(formats) - _ALLOWED_FORMATS)
+        if unknown_formats:
+            raise ValueError(
+                f"Unsupported plot format(s): {unknown_formats}. "
+                f"Allowed: {sorted(_ALLOWED_FORMATS)}"
+            )
+        if self.vmax_mode not in _ALLOWED_VMAX_MODES:
+            raise ValueError(
+                f"vmax_mode must be one of {sorted(_ALLOWED_VMAX_MODES)}, "
+                f"got '{self.vmax_mode}'"
+            )
+        plot_types = _normalize_str_list(self.plot_types)
+        unknown_types = sorted(set(plot_types) - _ALLOWED_PLOT_TYPES)
+        if unknown_types:
+            raise ValueError(
+                f"Unsupported plot type(s): {unknown_types}. "
+                f"Allowed: {sorted(_ALLOWED_PLOT_TYPES)}"
+            )
+
+
+def split_legacy_plotting_config(section: dict) -> FmriReportConfig:
+    """Build a report config from a config section, rejecting moved keys.
+
+    Fails rather than silently ignoring a moved key: a study whose YAML still sets
+    ``plotting.space`` would otherwise get native-only output with no indication
+    that its setting had stopped being read.
+    """
+    stale = sorted(key for key in MOVED_KEYS if key in section)
+    if stale:
+        moved = ", ".join(f"'{key}' -> {MOVED_KEYS[key]}" for key in stale)
+        raise ValueError(
+            f"These plotting keys moved to the fmri_stats section because they cause "
+            f"statistics to be computed: {moved}. Update the config; there are "
+            f"deliberately no aliases."
+        )
+    known = set(FmriReportConfig.__dataclass_fields__)
+    return FmriReportConfig(**{k: v for k, v in section.items() if k in known})
+
+
 @dataclass(frozen=True)
 class FmriPlottingConfig:
     enabled: bool = False
