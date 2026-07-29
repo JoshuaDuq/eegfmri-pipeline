@@ -206,6 +206,16 @@ class DesignSummary:
     max_vif: Optional[float]
     max_vif_regressor: str
     efficiency: Optional[float]
+    #: Numerical rank of the design. Equal to ``n_regressors`` for a design of full
+    #: rank, and smaller for one that is not -- which is the difference between a model
+    #: with the parameters it appears to have and one carrying columns that add no
+    #: information. Nothing else in the report distinguishes the two.
+    rank: int = 0
+    #: Scans minus rank: the degrees of freedom left to estimate the residual variance,
+    #: which is the denominator of every t statistic this design produces. Reported
+    #: because a confident-looking map from a design with little residual freedom is
+    #: exactly the case a reader has no other way to detect.
+    residual_dof: int = 0
 
 
 def _prepare(
@@ -261,6 +271,11 @@ def summarize_design(
             max_vif = float(vifs[index])
             max_vif_regressor = modelled[index] if index < len(modelled) else ""
 
+    # Rank rather than column count. A design whose columns are linearly dependent has
+    # fewer parameters than it has columns, and the residual degrees of freedom follow
+    # the rank -- so subtracting the column count would understate them.
+    rank = int(np.linalg.matrix_rank(matrix)) if matrix.size else 0
+
     return DesignSummary(
         n_scans=int(matrix.shape[0]),
         n_regressors=int(matrix.shape[1]),
@@ -268,6 +283,8 @@ def summarize_design(
         max_vif=max_vif,
         max_vif_regressor=max_vif_regressor,
         efficiency=contrast_efficiency(matrix, vector) if vector is not None else None,
+        rank=rank,
+        residual_dof=int(matrix.shape[0]) - rank,
     )
 
 

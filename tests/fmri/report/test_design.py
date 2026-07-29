@@ -328,6 +328,25 @@ def test_summary_survives_a_singular_design() -> None:
     assert not np.isfinite(summary.max_vif) or summary.max_vif > 100
 
 
+def test_summary_reports_the_residual_degrees_of_freedom() -> None:
+    # The denominator of every t this design produces. A map can look decisive on very
+    # few, and nothing else in the report reveals it.
+    summary = design.summarize_design(_design_frame())
+    assert summary.rank == 7
+    assert summary.residual_dof == 120 - 7
+
+
+def test_the_residual_dof_follows_the_rank_not_the_column_count() -> None:
+    # A duplicated column adds no parameter, so it costs no degree of freedom. Taking
+    # the column count would understate what is left to estimate the variance with.
+    frame = _design_frame()
+    frame["duplicate"] = frame["cond_a"]
+    summary = design.summarize_design(frame)
+    assert summary.n_regressors == 8
+    assert summary.rank == 7
+    assert summary.residual_dof == 120 - 7
+
+
 def test_display_scaling_is_per_column() -> None:
     """Motion in millimetres and task in HRF units cannot share one colour scale."""
     matrix = np.column_stack([np.array([0.0, 1.0, 2.0]), np.array([0.0, 100.0, 200.0])])
