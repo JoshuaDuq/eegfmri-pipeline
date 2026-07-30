@@ -26,6 +26,7 @@ dependencies = [
     "mne-connectivity>=0.7.0",
     "mne-icalabel>=0.7.0",
     "networkx>=3.5",
+    "neurokit2==0.2.12",
     "nibabel>=3.2.0,<6.0.0",
     "nilearn>=0.11.1",
     "numba>=0.62,<1.0",

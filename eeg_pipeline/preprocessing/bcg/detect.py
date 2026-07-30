@@ -276,3 +276,47 @@ def _quality(
         gap_seconds_after=float(after["gap_seconds"]),
         status=status,
     )
+
+
+def crosscheck_agreement(
+    recovered_beats: np.ndarray,
+    ecg_uv: np.ndarray,
+    sfreq: float,
+    *,
+    tolerance: float = 0.05,
+) -> dict[str, float]:
+    """Compare our beat set against NeuroKit2, as a measurement only.
+
+    Never used to accept or reject a beat. NeuroKit2 reads the same magnetohydrodynamically
+    distorted ECG and inflates counts on the affected subjects, so its disagreement is
+    evidence about the run, not about our beats.
+    """
+    try:
+        import neurokit2 as nk
+
+        _, info = nk.ecg_peaks(ecg_uv, sampling_rate=int(sfreq), correct_artifacts=True)
+        other = np.asarray(info["ECG_R_Peaks"], dtype=float) / sfreq
+    except Exception as error:
+        return {
+            "status": f"unavailable: {type(error).__name__}",
+            "agreement_fraction": float("nan"),
+            "crosscheck_beats": 0.0,
+            "crosscheck_lock_ratio": float("nan"),
+        }
+
+    beats = np.asarray(recovered_beats, dtype=float)
+    if beats.size == 0 or other.size == 0:
+        return {
+            "status": "no_beats",
+            "agreement_fraction": float("nan"),
+            "crosscheck_beats": float(other.size),
+            "crosscheck_lock_ratio": float("nan"),
+        }
+
+    nearest = np.abs(beats[:, None] - other[None, :]).min(axis=1)
+    return {
+        "status": "ok",
+        "agreement_fraction": float(np.mean(nearest <= tolerance)),
+        "crosscheck_beats": float(other.size),
+        "crosscheck_lock_ratio": lock_ratio(ecg_uv, other, sfreq, (-0.2, 0.4)),
+    }

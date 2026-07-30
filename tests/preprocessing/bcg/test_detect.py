@@ -3,6 +3,7 @@ import numpy as np
 from eeg_pipeline.preprocessing.bcg.detect import (
     RecoverySettings,
     _normalised_correlation,
+    crosscheck_agreement,
     find_gaps,
     gap_summary,
     qrs_template,
@@ -155,3 +156,21 @@ def test_too_few_seed_beats_reports_status_rather_than_raising():
 
     assert result.quality.status == "insufficient_seed_beats"
     assert result.recovered_beats.size == 0
+
+
+def test_crosscheck_reports_agreement_without_changing_beats():
+    beats = np.arange(5.0, 190.0, 0.9)
+    ecg = _synthetic_ecg(beats, 200.0)
+
+    report = crosscheck_agreement(beats, ecg, SFREQ)
+
+    assert 0.0 <= report["agreement_fraction"] <= 1.0
+    assert report["crosscheck_beats"] > 0
+    assert "crosscheck_lock_ratio" in report
+
+
+def test_crosscheck_degrades_gracefully_when_neurokit_fails():
+    """A cross-check that cannot run is a missing measurement, not an error."""
+    report = crosscheck_agreement(np.array([1.0, 2.0]), np.zeros(100), SFREQ)
+
+    assert report["status"] != "ok"
