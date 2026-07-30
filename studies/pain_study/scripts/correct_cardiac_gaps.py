@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import numpy as np
 
 from eeg_pipeline.preprocessing.bcg import correct as bcg_correct
 from eeg_pipeline.preprocessing.bcg import detect as bcg_detect
+from eeg_pipeline.preprocessing.bcg import markers as bcg_markers
 from eeg_pipeline.preprocessing.bcg import metrics as bcg_metrics
 from eeg_pipeline.preprocessing.bcg.sources import (
     discover_run_pairs,
@@ -329,6 +331,64 @@ def report_run(pair, *, crosscheck: bool = True) -> dict:
     return row
 
 
+def markers_run(pair, output_root: Path) -> dict:
+    """Re-emit a recording unchanged except for the recovered R markers.
+
+    Analyzer corrects better than we do at the beats it has, so handing the beats back is
+    worth more than correcting with them ourselves. The ``.eeg`` and ``.vhdr`` are copied
+    byte for byte and only the ``.vmrk`` grows, so Analyzer resumes from its own
+    `Pulse Artifact Correction (Mark R peaks)` node with nothing else disturbed.
+    """
+    import mne
+
+    mne.set_log_level("ERROR")
+    source = pair.uncorrected_vhdr
+    raw = mne.io.read_raw_brainvision(source, preload=True, verbose="ERROR")
+    sfreq = raw.info["sfreq"]
+
+    if "ECG" not in raw.ch_names:
+        return {"subject": pair.subject, "run": pair.run, "status": "missing_ecg"}
+
+    ecg = raw.copy().pick(["ECG"]).get_data()[0] * 1e6
+    analyzer = bcg_detect.read_analyzer_beats(source)
+    recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
+
+    # A run with nothing to add is still re-emitted, so the output tree is a complete
+    # drop-in replacement rather than a partial one the caller has to merge by hand.
+    marker_file = bcg_markers.read_marker_file(source.with_suffix(".vmrk"))
+    augmented = bcg_markers.add_pulse_markers(marker_file, recovery.recovered_beats, sfreq)
+
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    for suffix in (".eeg", ".vhdr"):
+        shutil.copy2(source.with_suffix(suffix), output_root / source.with_suffix(suffix).name)
+    destination = output_root / source.name
+    bcg_markers.write_marker_file(destination.with_suffix(".vmrk"), augmented)
+
+    check = bcg_detect.read_analyzer_beats(destination)
+    expected = recovery.combined_beats.size
+    if check.size != expected:
+        raise RuntimeError(
+            f"{destination.name}: wrote {expected} R markers but read back {check.size}"
+        )
+
+    row = {
+        "subject": pair.subject,
+        "run": pair.run,
+        "status": recovery_status(recovery, minimum=1),
+        "analyzer_beats": int(analyzer.size),
+        "recovered_beats": int(recovery.recovered_beats.size),
+        "total_r_markers": int(check.size),
+        "markers_total": len(augmented.markers),
+        "recovered_lock_ratio": recovery.quality.recovered_lock_ratio,
+        "gap_seconds_before": recovery.quality.gap_seconds_before,
+        "gap_seconds_after": recovery.quality.gap_seconds_after,
+        "output": str(destination),
+    }
+    write_provenance(destination, {**row, "source": str(source)})
+    return row
+
+
 def _write_tsv(rows: list[dict], destination: Path) -> None:
     import csv
 
@@ -491,7 +551,7 @@ def verify_run(pair, output_root: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["report", "benchmark", "apply", "verify"])
+    parser.add_argument("command", choices=["report", "markers", "benchmark", "apply", "verify"])
     parser.add_argument("--uncorrected-root", type=Path, default=DEFAULT_UNCORRECTED)
     parser.add_argument("--corrected-root", type=Path, default=DEFAULT_CORRECTED)
     parser.add_argument(
@@ -531,6 +591,7 @@ def main(argv: list[str] | None = None) -> None:
 
     default_names = {
         "report": "recovery_report.tsv",
+        "markers": "markers.tsv",
         "benchmark": "benchmark.tsv",
         "apply": "apply.tsv",
         "verify": "verify.tsv",
@@ -543,6 +604,8 @@ def main(argv: list[str] | None = None) -> None:
         try:
             if args.command == "report":
                 rows.append(report_run(pair))
+            elif args.command == "markers":
+                rows.append(markers_run(pair, args.output_root))
             elif args.command == "benchmark":
                 rows.extend(benchmark_run(pair, BenchmarkSettings()))
             elif args.command == "apply":
