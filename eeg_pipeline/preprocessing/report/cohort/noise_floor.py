@@ -6,20 +6,21 @@ participant scanned for four hundred volumes reports a smaller residual than one
 for a hundred even when the correction worked equally well on both, and a cohort figure
 built on the raw number would rank participants by session length.
 
-The floor is measured, not assumed, by splitting the epochs odd against even. Writing s for
-the locked waveform and n for everything else:
+The floor is estimated from an odd-even split. Writing s for a stationary locked waveform
+and n for independent, equal-variance noise:
 
     A = mean over all epochs           -> s          + noise, power sigma^2 / N
     D = mean(odd) - mean(even)         -> s cancels  + noise, power 4 sigma^2 / N
 
-The locked waveform cancels exactly in D, because it is identical in both halves. So D
-measures the noise alone at a known scale, and
+The locked waveform cancels in D under those assumptions. When ``N`` is odd, the split
+uses ``N_p = N - 1`` epochs and its power is rescaled from ``sigma^2 / N_p`` to the
+``sigma^2 / N`` floor of the full average. In expectation,
 
-    mean(s^2) = mean(A^2) - mean(D^2) / 4
+    mean(s^2) = mean(A^2) - (N_p / N) mean(D^2) / 4
 
-is an exact expression for the locked power with the floor removed. It needs no random
-draws, no seed and no correction term, and it costs one pass over epochs that the caller
-has already extracted in order to average them at all.
+is an unbiased expression for locked power. A single estimate can be negative, which
+means the locked signal was unresolved at this averaging floor; it must not be clipped
+into evidence of an exact zero.
 
 Alternating rather than splitting at the midpoint, for the same reason the evoked
 reliability does: slow drift in impedance or arousal then falls equally on both halves
@@ -40,8 +41,7 @@ class LockedAverage:
     """One stage's volume-locked average, with its own noise floor measured.
 
     ``average`` is the waveform the subject panel draws and is large. Callers reduce it
-    and drop it; only the scalars are worth keeping, and only
-    :attr:`corrected_amplitude_uv` is worth pooling.
+    and drop it; only the scalars are worth keeping.
     """
 
     #: ``(n_channels, n_times)`` volume-locked average, in the input's units.
@@ -56,13 +56,25 @@ class LockedAverage:
     locked_rms_uv: float
     #: The floor at this epoch count, in microvolts, measured from the odd-even split.
     noise_floor_uv: float
-    #: Locked amplitude with the floor removed, in microvolts. Independent of epoch count,
-    #: and therefore the quantity a cohort pools.
-    corrected_amplitude_uv: float
+    #: Signed locked power after subtracting the estimated floor, in microvolts squared.
+    #: Negative means unresolved, not a negative physical power.
+    excess_power_uv2: float
     n_epochs: int
     #: Epochs entering the odd-even split. One fewer than ``n_epochs`` when that is odd, so
     #: the two halves stay equal and the algebra above stays exact.
     n_paired_epochs: int
+
+    @property
+    def is_resolved(self) -> bool:
+        """Whether locked power exceeded the estimated averaging floor."""
+        return self.excess_power_uv2 > 0.0
+
+    @property
+    def resolved_amplitude_uv(self) -> float | None:
+        """Floor-adjusted amplitude, or ``None`` where it did not resolve."""
+        if not self.is_resolved:
+            return None
+        return float(np.sqrt(self.excess_power_uv2))
 
     @property
     def detectability(self) -> float:
@@ -102,13 +114,14 @@ def measure_locked_average(epoch_data: np.ndarray) -> LockedAverage:
 
     paired = 2 * (n_epochs // 2)
     difference = data[0:paired:2].mean(axis=0) - data[1:paired:2].mean(axis=0)
-    floor_power = float(np.mean(difference**2)) / 4.0
+    paired_floor_power = float(np.mean(difference**2)) / 4.0
+    floor_power = paired_floor_power * paired / n_epochs
 
     return LockedAverage(
         average=average,
         locked_rms_uv=float(np.sqrt(locked_power) * 1e6),
         noise_floor_uv=float(np.sqrt(floor_power) * 1e6),
-        corrected_amplitude_uv=float(np.sqrt(max(locked_power - floor_power, 0.0)) * 1e6),
+        excess_power_uv2=float((locked_power - floor_power) * 1e12),
         n_epochs=n_epochs,
         n_paired_epochs=paired,
     )

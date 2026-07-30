@@ -159,7 +159,6 @@ Explore the Documentation
    :caption: User Guide
 
    user_guide/index
-   native_eeg_fmri_artifact_correction
    pulse_artifact_correction_recovery
 
 .. toctree::

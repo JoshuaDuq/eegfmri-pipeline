@@ -4,13 +4,30 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import mne
 
 VOLUME_MARKER_TYPE = "Volume"
 VAS_MARKER_TYPE = "Vas_on"
 SCANNER_DESCRIPTION = "V  1"
 SANITIZED_VAS_DESCRIPTION = "VAS_ON"
 
+#: The description a Vas_on marker carries before sanitation. It collides with the
+#: scanner's own ``Volume`` description, so a reader cannot tell the two apart.
+AMBIGUOUS_VAS_DESCRIPTION = f"{VAS_MARKER_TYPE}/{SCANNER_DESCRIPTION}"
+
 _MARKER_ID_PATTERN = re.compile(r"Mk\d+")
+
+
+def validate_unambiguous_vas_markers(raw: mne.io.BaseRaw) -> None:
+    """Reject a recording whose VAS markers still collide with the scanner's."""
+    if AMBIGUOUS_VAS_DESCRIPTION in set(raw.annotations.description):
+        raise ValueError(
+            f"Ambiguous BrainVision marker {AMBIGUOUS_VAS_DESCRIPTION!r} remains; "
+            "use marker-sanitized metadata"
+        )
 
 
 @dataclass(frozen=True)

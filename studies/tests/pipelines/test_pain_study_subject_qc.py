@@ -149,7 +149,7 @@ def _timing_alignment_frame() -> pd.DataFrame:
 
 
 def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: Path) -> None:
-    from studies.pain_study.scripts.study_subject_qc_summary import (
+    from studies.pain_study.scripts.study_support.study_subject_qc_summary import (
         SourcePowerShape,
         SubjectQcInputs,
         build_subject_qc,
@@ -229,7 +229,7 @@ def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: 
 
 
 def test_subject_qc_summary_rejects_missing_required_columns() -> None:
-    from studies.pain_study.scripts.study_subject_qc_summary import (
+    from studies.pain_study.scripts.study_support.study_subject_qc_summary import (
         require_columns,
     )
 
@@ -238,7 +238,7 @@ def test_subject_qc_summary_rejects_missing_required_columns() -> None:
 
 
 def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
-    from studies.pain_study.scripts.study_subject_qc_summary import (
+    from studies.pain_study.scripts.study_support.study_subject_qc_summary import (
         SourcePowerShape,
         SubjectQcInputs,
         build_subject_qc,
@@ -279,7 +279,7 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
 
 
 def test_incomplete_run_summary_uses_design_trial_count() -> None:
-    from studies.pain_study.scripts.study_subject_qc_summary import (
+    from studies.pain_study.scripts.study_support.study_subject_qc_summary import (
         incomplete_run_summary,
     )
 

@@ -28,10 +28,14 @@ from __future__ import annotations
 import html
 import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
+
+if TYPE_CHECKING:
+    from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
 from eeg_pipeline.preprocessing.report.aperiodic import aperiodic_line_db, fit_aperiodic
 from eeg_pipeline.preprocessing.report.spectra import (
@@ -164,6 +168,12 @@ class SplitHalfReliability:
     #: which peaks exactly where the two halves are being asked to agree.
     odd_gfp_uv: np.ndarray
     even_gfp_uv: np.ndarray
+    #: Pearson correlation of the odd- and even-half spatial fields at each latency.
+    #:
+    #: This is the time-resolved evidence beneath the pooled channels-by-time scalar.
+    #: It lets a reviewer see whether agreement is response-localized or driven by an
+    #: unrelated part of the configured window.
+    spatial_correlation: np.ndarray
     #: Correlation between the two halves over channels and time.
     correlation: float
     #: Same quantity corrected to the full trial count by Spearman-Brown.
@@ -173,6 +183,47 @@ class SplitHalfReliability:
     response_window_s: tuple[float, float]
 
 
+def _stratified_half_indices(event_codes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Alternate trials within each event code, returning equal-sized halves.
+
+    Alternating globally balances slow drift, but a blocked design with odd block sizes
+    can still put different condition counts in the two halves. Pairing within event code
+    preserves the temporal interleaving while ensuring that condition composition cannot
+    drive the correlation. One trial is omitted from each odd-sized condition.
+    """
+    codes = np.asarray(event_codes)
+    if codes.ndim != 1:
+        raise ValueError("Split-half event codes must be one-dimensional.")
+    even: list[int] = []
+    odd: list[int] = []
+    for code in np.unique(codes):
+        indices = np.flatnonzero(codes == code)
+        paired = indices[: 2 * (indices.size // 2)]
+        even.extend(paired[0::2])
+        odd.extend(paired[1::2])
+    return np.sort(np.asarray(even, dtype=int)), np.sort(np.asarray(odd, dtype=int))
+
+
+def _spatial_correlation_by_time(odd: np.ndarray, even: np.ndarray) -> np.ndarray:
+    """Correlate two evoked spatial fields independently at every latency."""
+    if odd.shape != even.shape or odd.ndim != 2:
+        raise ValueError("Split-half evoked fields must be matching channel-by-time arrays.")
+    if odd.shape[0] < 2:
+        raise ValueError("Spatial correlation requires at least two EEG channels.")
+
+    odd_centered = odd - odd.mean(axis=0, keepdims=True)
+    even_centered = even - even.mean(axis=0, keepdims=True)
+    numerator = np.sum(odd_centered * even_centered, axis=0)
+    denominator = np.sqrt(
+        np.sum(odd_centered**2, axis=0) * np.sum(even_centered**2, axis=0)
+    )
+    correlation = np.full(odd.shape[1], np.nan, dtype=float)
+    valid = denominator > 0.0
+    correlation[valid] = numerator[valid] / denominator[valid]
+    correlation[valid] = np.clip(correlation[valid], -1.0, 1.0)
+    return correlation
+
+
 def compute_split_half_reliability(
     epochs: mne.BaseEpochs,
     *,
@@ -180,9 +231,10 @@ def compute_split_half_reliability(
 ) -> SplitHalfReliability | None:
     """Correlate the evoked response of odd against even trials.
 
-    Trials are split by alternating position rather than at the midpoint, so that slow
-    drift in attention, impedance, or arousal falls equally on both halves. A midpoint
-    split would confound reliability with whatever changed over the session.
+    Trials are split by alternating position within event code rather than at the
+    midpoint, so that slow drift in attention, impedance, or arousal falls equally on
+    both halves without allowing unequal condition composition to drive their agreement.
+    A midpoint split would confound reliability with whatever changed over the session.
 
     The correlation is taken over ``response_window_s`` rather than the whole epoch. See
     :data:`DEFAULT_RESPONSE_WINDOW_S` for why that choice dominates the result.
@@ -193,6 +245,10 @@ def compute_split_half_reliability(
     picked = epochs.copy().pick("eeg")
     if len(picked) < MINIMUM_TRIALS_FOR_SPLIT_HALF:
         return None
+    even_indices, odd_indices = _stratified_half_indices(picked.events[:, 2])
+    n_used = int(even_indices.size + odd_indices.size)
+    if n_used < MINIMUM_TRIALS_FOR_SPLIT_HALF:
+        return None
 
     low = max(float(response_window_s[0]), float(picked.times[0]))
     high = min(float(response_window_s[1]), float(picked.times[-1]))
@@ -200,18 +256,19 @@ def compute_split_half_reliability(
         return None
     picked = picked.crop(tmin=low, tmax=high)
 
-    odd = picked[1::2].average().get_data()
-    even = picked[0::2].average().get_data()
+    odd = picked[odd_indices].average().get_data()
+    even = picked[even_indices].average().get_data()
     correlation = float(np.corrcoef(odd.ravel(), even.ravel())[0, 1])
     # Spearman-Brown steps the two half-length averages up to the reliability the full
     # trial count supports, which is the quantity the analysis actually runs on.
     denominator = 1.0 + correlation
     corrected = (2.0 * correlation / denominator) if denominator > 0 else 0.0
     return SplitHalfReliability(
-        n_trials=len(picked),
+        n_trials=n_used,
         times_s=np.asarray(picked.times, dtype=float),
         odd_gfp_uv=odd.std(axis=0) * 1e6,
         even_gfp_uv=even.std(axis=0) * 1e6,
+        spatial_correlation=_spatial_correlation_by_time(odd, even),
         correlation=correlation,
         corrected_correlation=float(corrected),
         response_window_s=(low, high),
@@ -229,6 +286,8 @@ class PosteriorAlpha:
     peak_frequency_hz: float
     #: Height of the peak over the aperiodic background interpolated beneath it.
     prominence_db: float
+    #: Frequency interval searched for the peak and shaded in the figure.
+    band_hz: tuple[float, float] = ALPHA_BAND_HZ
     #: The fitted aperiodic background, evaluated at :attr:`frequencies_hz`.
     #:
     #: Carried so the panel can draw the line the prominence is measured from. It was
@@ -420,6 +479,7 @@ def compute_posterior_alpha(
         background_residual_db=background.residual_db,
         peak_frequency_hz=float(frequencies[in_band][peak]),
         prominence_db=float(excess[peak]),
+        band_hz=band_hz,
         n_search_bins=int(in_band.sum()),
         is_interior=bool(0 < peak < excess.size - 1),
         runner_up_frequency_hz=rival_hz,
@@ -472,7 +532,10 @@ def preservation_html(
             "and time. Splitting by alternating position rather than at the midpoint "
             "keeps slow drift in arousal or impedance on both halves equally. The "
             "measurement assumes nothing about the response's shape: if a stimulus-locked "
-            "response survived, two halves of the same trials have to agree about it.</p>"
+            "response survived, two halves of the same trials have to agree about it. "
+            "The latency-resolved trace shows Pearson correlation across channels at "
+            "each sample; the headline scalar pools all channels and samples in the "
+            "configured window and is therefore not the average of that trace.</p>"
             "<p>The window matters as much as the correlation. Epochs here run well "
             "past the response to give time-frequency baselines room, and correlating "
             "across all of that would average one second of response into twenty of "
@@ -534,20 +597,32 @@ def _draw_split_half(axis: plt.Axes, reliability: SplitHalfReliability) -> None:
         xlabel="Time (s)",
         ylabel="Global field power (µV)",
     )
-    # The traces are global field power; the correlation above is taken over every
-    # channel and time point, not over these two curves. Saying so on the panel stops
-    # the figure being read as "r between the two lines shown".
-    #
-    # It goes below the axis rather than inside it. Global field power is at its most
-    # variable in the upper half of the panel, which is exactly where an annotation
-    # pinned to the top of the axes lands: on sub-0015 the caveat crossed both traces.
-    axis.set_xlabel("Time (s)\nr is over all channels × times, not over these two traces")
     axis.legend(frameon=False, fontsize=8)
+
+
+def _draw_spatial_correlation(
+    axis: plt.Axes,
+    reliability: SplitHalfReliability,
+) -> None:
+    axis.plot(
+        reliability.times_s,
+        reliability.spatial_correlation,
+        color=PRIMARY_COLOR,
+        linewidth=1.0,
+    )
+    axis.axhline(0.0, color=GUIDE_COLOR, linewidth=0.8)
+    axis.axvline(0.0, color=GUIDE_COLOR, linewidth=0.8)
+    axis.set(
+        title="Odd-vs-even spatial agreement by latency",
+        xlabel="Time (s)",
+        ylabel="Pearson r across channels",
+        ylim=(-1.0, 1.0),
+    )
 
 
 def _draw_posterior_alpha(axis: plt.Axes, alpha: PosteriorAlpha) -> None:
     axis.plot(alpha.frequencies_hz, alpha.power_db, color=PRIMARY_COLOR, linewidth=1.2)
-    axis.axvspan(*ALPHA_BAND_HZ, color=GUIDE_COLOR, alpha=0.10, linewidth=0)
+    axis.axvspan(*alpha.band_hz, color=GUIDE_COLOR, alpha=0.10, linewidth=0)
     # The line the prominence is measured from. Without it the panel quotes a height over
     # something the reader cannot see, and the two readings of a large number -- a real
     # rhythm, or a steep background the fit followed -- are indistinguishable.
@@ -622,23 +697,30 @@ def plot_preservation(
     alpha: PosteriorAlpha | None = None,
 ) -> plt.Figure:
     """Plot whichever preservation measurements the paradigm supported."""
-    panels = []
-    if reliability is not None:
-        panels.append(lambda axis: _draw_split_half(axis, reliability))
-    if alpha is not None:
-        panels.append(lambda axis: _draw_posterior_alpha(axis, alpha))
-    if not panels:
+    if reliability is None and alpha is None:
         raise ValueError("The preservation figure requires at least one measurement.")
 
-    figure, axes = plt.subplots(
-        1,
-        len(panels),
-        figsize=(5.6 * len(panels), 3.8),
-        squeeze=False,
+    columns = 1 + int(reliability is not None and alpha is not None)
+    rows = 2 if reliability is not None else 1
+    figure = plt.figure(
+        figsize=(5.6 * columns, 3.0 * rows),
         layout="constrained",
     )
-    for axis, draw in zip(axes[0], panels, strict=True):
-        draw(axis)
+    grid = figure.add_gridspec(rows, columns)
+    axes: list[plt.Axes] = []
+    if reliability is not None:
+        gfp_axis = figure.add_subplot(grid[0, 0])
+        spatial_axis = figure.add_subplot(grid[1, 0], sharex=gfp_axis)
+        _draw_split_half(gfp_axis, reliability)
+        _draw_spatial_correlation(spatial_axis, reliability)
+        axes.extend((gfp_axis, spatial_axis))
+    if alpha is not None:
+        alpha_column = 1 if reliability is not None else 0
+        alpha_axis = figure.add_subplot(grid[:, alpha_column])
+        _draw_posterior_alpha(alpha_axis, alpha)
+        axes.append(alpha_axis)
+
+    for axis in axes:
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
     plt.close(figure)
@@ -696,6 +778,7 @@ def add_task_preservation_review(
     epochs: mne.BaseEpochs,
     section: str = "Signal preservation",
     analysis_status: str = FINAL_ANALYSIS_STATUS,
+    settings: ReportSettings | None = None,
 ) -> tuple[SplitHalfReliability | None, PosteriorAlpha | None]:
     """Append preservation evidence for a stimulus-locked paradigm.
 
@@ -707,8 +790,18 @@ def add_task_preservation_review(
 
     Returns the measurements so a caller can log them.
     """
-    reliability = compute_split_half_reliability(epochs)
-    alpha = compute_posterior_alpha(epochs)
+    from eeg_pipeline.preprocessing.report.settings import ReportSettings
+
+    resolved = settings if settings is not None else ReportSettings()
+    reliability = compute_split_half_reliability(
+        epochs,
+        response_window_s=resolved.response_window_s,
+    )
+    alpha = compute_posterior_alpha(
+        epochs,
+        band_hz=resolved.alpha_band_hz,
+        pattern=resolved.posterior_channel_pattern,
+    )
     _add_preservation_section(
         report=report,
         reliability=reliability,
@@ -725,13 +818,21 @@ def add_rest_preservation_review(
     epochs: mne.BaseEpochs,
     section: str = "Signal preservation",
     analysis_status: str = FINAL_ANALYSIS_STATUS,
+    settings: ReportSettings | None = None,
 ) -> PosteriorAlpha | None:
     """Append preservation evidence for a resting-state recording.
 
     Rest has no stimulus to lock to, so split-half reliability of an evoked response is
     undefined rather than merely weak, and only the posterior rhythm is measured.
     """
-    alpha = compute_posterior_alpha(epochs)
+    from eeg_pipeline.preprocessing.report.settings import ReportSettings
+
+    resolved = settings if settings is not None else ReportSettings()
+    alpha = compute_posterior_alpha(
+        epochs,
+        band_hz=resolved.alpha_band_hz,
+        pattern=resolved.posterior_channel_pattern,
+    )
     _add_preservation_section(
         report=report,
         reliability=None,

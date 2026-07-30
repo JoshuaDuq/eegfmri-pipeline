@@ -435,6 +435,7 @@ def compute_cardiac_residual(
     *,
     recording_id: str,
     ecg_channel: str = "ECG",
+    marker_description: str = PULSE_MARKER_DESCRIPTION,
 ) -> CardiacResidual:
     """Measure the beat-locked EEG deflection one run still carries.
 
@@ -449,7 +450,7 @@ def compute_cardiac_residual(
         detect_ecg_events,
     )
 
-    marker_count = int(np.asarray(annotation_onsets(raw, PULSE_MARKER_DESCRIPTION)).size)
+    marker_count = int(np.asarray(annotation_onsets(raw, marker_description)).size)
     if ecg_channel not in raw.ch_names and marker_count == 0:
         return CardiacResidual(recording_id, marker_count, None, None)
 
@@ -609,6 +610,13 @@ class MarkerAgreement:
             return None
         return self.n_matched / self.n_detected
 
+    @property
+    def marker_precision(self) -> float | None:
+        """Share of Analyzer markers supported by a detected ECG beat."""
+        if self.n_markers == 0:
+            return None
+        return self.n_matched / self.n_markers
+
 
 def compute_marker_agreement(
     *,
@@ -685,7 +693,8 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
         Column("Analyzer markers"),
         Column("Beats detected from ECG"),
         Column("Matched"),
-        Column("Share of detected beats marked"),
+        Column("Beat sensitivity"),
+        Column("Marker precision"),
         Column("Nearest marker (ms)"),
         Column("Lag IQR (ms)"),
     )
@@ -696,6 +705,7 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
             agreement.n_detected,
             agreement.n_matched,
             None if agreement.matched_fraction is None else f"{agreement.matched_fraction:.1%}",
+            None if agreement.marker_precision is None else f"{agreement.marker_precision:.1%}",
             None if agreement.median_lag_s is None else f"{agreement.median_lag_s * 1000:+.0f}",
             None if agreement.lag_iqr_s is None else f"{agreement.lag_iqr_s * 1000:.0f}",
         ]
@@ -708,11 +718,13 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
         "the marker train it was given, so the comparison says whether that train "
         "described the heartbeat the ECG recorded.</p>"
         + grid_table(columns, rows)
+        + "<p>Beat sensitivity is matched beats divided by ECG-detected beats; marker "
+        "precision is matched beats divided by Analyzer markers. The first reveals missed "
+        "markers and the second reveals unsupported extra markers.</p>"
         + "<p>A beat counts as matched when a marker falls within "
         f"{MARKER_AGREEMENT_TOLERANCE_S * 1000:.0f} ms of it, and each marker is spent on "
-        "at most one beat. The last column is a share of the beats the ECG shows, so it "
-        "falls when Analyzer marked fewer beats than occurred; it is left blank when no "
-        "beats were detected, because then there is nothing to take a share of.</p>"
+        "at most one beat. Beat sensitivity is left blank when no beats were detected, "
+        "because then there is nothing to take a share of.</p>"
         "<p>The last two columns say what a low share is made of. They give the signed "
         "distance from each detected beat to the nearest marker &mdash; positive when the "
         "marker came first &mdash; as a median and an interquartile range, over every "

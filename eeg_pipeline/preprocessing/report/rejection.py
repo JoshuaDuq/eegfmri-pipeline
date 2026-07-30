@@ -59,15 +59,36 @@ class RejectionSummary:
         return self.dropped / self.total if self.total else 0.0
 
 
+@dataclass(frozen=True)
+class GroupRetention:
+    """Retained counts and, when observed, their presented denominators."""
+
+    retained: pd.Series
+    presented: pd.Series | None = None
+
+    @property
+    def n_groups(self) -> int:
+        reference = self.presented if self.presented is not None else self.retained
+        return int(reference.size)
+
+    @property
+    def rates(self) -> pd.Series | None:
+        if self.presented is None:
+            return None
+        return self.retained / self.presented
+
+
 def summarize_rejection(drop_log: Sequence[Sequence[str]]) -> RejectionSummary:
     """Summarize an MNE drop log into counts, reasons, and dropped positions.
 
-    MNE records one entry per pre-cleaning epoch: empty when the epoch was kept, and
-    otherwise the reasons it was dropped.
+    MNE records one entry per input event, including ``IGNORED`` entries for event types
+    that were never selected into the epoch set. Those are not rejected trials and are
+    removed before the denominator and positions are calculated. Among considered events,
+    an empty entry means the epoch was kept and any reason means it was dropped.
     """
     if drop_log is None:
         raise ValueError("A drop log is required to summarize epoch rejection.")
-    entries = [tuple(entry) for entry in drop_log]
+    entries = [tuple(entry) for entry in drop_log if "IGNORED" not in entry]
     dropped = [index for index, entry in enumerate(entries) if entry]
     reasons = Counter(reason for entry in entries if entry for reason in entry)
     return RejectionSummary(
@@ -111,19 +132,42 @@ def retention_by_group(
     events: pd.DataFrame,
     *,
     total: int,
+    presented_events: pd.DataFrame | None = None,
     columns: Sequence[str] = DEFAULT_GROUPING_COLUMNS,
-) -> dict[str, pd.Series]:
-    """Count retained trials per group for each grouping column that exists.
+) -> dict[str, GroupRetention]:
+    """Measure retained trials and per-group rates where denominators are available.
 
-    Only the retained trials appear in the clean events table, so this reports the
-    surviving distribution rather than a per-group rejection rate. An uneven surviving
-    distribution is the signal worth acting on.
+    Without ``presented_events``, only the surviving composition is defined. With it,
+    each retained count is paired with the number originally presented, so differential
+    rejection can be reported as a rate rather than inferred from unequal counts.
     """
     available = [column for column in columns if column in events.columns]
-    counts = {column: events[column].value_counts().sort_index() for column in available}
     if total < len(events):
         raise ValueError("Clean events cannot contain more trials than the pre-cleaning set.")
-    return counts
+    if presented_events is not None and len(presented_events) != total:
+        raise ValueError(
+            f"Presented events contain {len(presented_events)} rows but rejection considered "
+            f"{total} epochs."
+        )
+
+    retention: dict[str, GroupRetention] = {}
+    for column in available:
+        retained = events[column].value_counts().sort_index()
+        if presented_events is None or column not in presented_events.columns:
+            retention[column] = GroupRetention(retained=retained)
+            continue
+        presented = presented_events[column].value_counts().sort_index()
+        unexpected = retained.index.difference(presented.index)
+        if not unexpected.empty:
+            raise ValueError(
+                f"Retained {column} levels are absent from the presented events: "
+                f"{unexpected.tolist()}."
+            )
+        retained = retained.reindex(presented.index, fill_value=0).astype(int)
+        if (retained > presented).any():
+            raise ValueError(f"Retained {column} counts exceed the presented counts.")
+        retention[column] = GroupRetention(retained=retained, presented=presented)
+    return retention
 
 
 def run_of_position(
@@ -132,31 +176,29 @@ def run_of_position(
     *,
     column: str = "run_id",
 ) -> np.ndarray | None:
-    """Map each pre-cleaning epoch position to its run, using the retained trials.
+    """Map each pre-cleaning epoch position to its run from presented events.
 
-    Only retained trials appear in the clean events table, but they appear in the same
-    order as the surviving epochs, so the run label can be carried back onto the
-    pre-cleaning positions. Dropped positions are left unlabelled. Without this the
-    reviewer cannot see that a block of dropped epochs all belonged to one run.
+    The full event table is required. Reconstructing run labels from retained epochs
+    leaves drops unlabelled, so filling those gaps can move a run boundary when the last
+    epoch of one run or the first epoch of the next was rejected.
     """
     if column not in events.columns:
         return None
-    retained = [
-        index for index in range(summary.total) if index not in set(summary.dropped_positions)
-    ]
-    if len(retained) != len(events):
+    if len(events) != summary.total:
         raise ValueError(
-            f"{len(events)} clean events cannot be aligned to {len(retained)} retained epochs."
+            f"Presented events contain {len(events)} rows but rejection considered "
+            f"{summary.total} epochs."
         )
-    assignment = np.full(summary.total, np.nan)
-    assignment[retained] = pd.to_numeric(events[column], errors="coerce").to_numpy()
+    assignment = pd.to_numeric(events[column], errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(assignment).all():
+        raise ValueError(f"Presented-event column {column!r} must contain finite run labels.")
     return assignment
 
 
 def rejection_summary_html(
     summary: RejectionSummary,
     *,
-    group_counts: Mapping[str, pd.Series] | None = None,
+    group_retention: Mapping[str, GroupRetention] | None = None,
 ) -> str:
     """Render trial retention and its reasons."""
     rows: list[Metric | tuple[str, object]] = [
@@ -172,17 +214,37 @@ def rejection_summary_html(
         rows.append(Metric(f"dropped by {reason}", f"{count}", indent=True))
     document = (
         "<p>Trial counts entering and leaving epoch cleaning. Rejection is applied "
-        "automatically; this is the record of what it removed.</p>"
+        "automatically; this is the record of what it removed. Drop reasons may overlap "
+        "because MNE can attach more than one reason to the same epoch, so their counts "
+        "must not be summed as a second dropped total.</p>"
         f"{metric_table(rows)}"
     )
-    for column, counts in (group_counts or {}).items():
-        if counts.size < 2:
+    for column, retention in (group_retention or {}).items():
+        if retention.n_groups < 2:
             continue
+        if retention.presented is None:
+            document += (
+                f"<p><strong>Retained trials by {html.escape(column)}.</strong> An uneven "
+                "retained distribution cannot distinguish the original design from "
+                "differential rejection without the corresponding presented count for "
+                "each group. It is shown as composition evidence, not as a rejection "
+                "rate.</p>"
+                f"{metric_table((str(name), int(value)) for name, value in retention.retained.items())}"
+            )
+            continue
+        rates = retention.rates
         document += (
-            f"<p><strong>Retained trials by {html.escape(column)}.</strong> An uneven "
-            "distribution means the surviving trials are no longer a random sample, "
-            "which biases any contrast computed across these groups.</p>"
-            f"{metric_table((str(name), int(value)) for name, value in counts.items())}"
+            f"<p><strong>Retention rate by {html.escape(column)}.</strong> Each denominator "
+            "is the number of trials in that group before epoch rejection, so differences "
+            "between rows measure differential loss rather than the original design.</p>"
+            + metric_table(
+                (
+                    str(name),
+                    f"{int(retention.retained[name])} / {int(presented)} "
+                    f"({float(rates[name]):.1%})",
+                )
+                for name, presented in retention.presented.items()
+            )
         )
     return document
 
@@ -190,14 +252,16 @@ def rejection_summary_html(
 def plot_rejection(
     summary: RejectionSummary,
     *,
-    group_counts: Mapping[str, pd.Series] | None = None,
+    group_retention: Mapping[str, GroupRetention] | None = None,
     run_assignment: np.ndarray | None = None,
 ) -> plt.Figure:
     """Plot where the dropped epochs sit, and the surviving group distribution."""
-    group_counts = {
-        column: counts for column, counts in (group_counts or {}).items() if counts.size >= 2
+    group_retention = {
+        column: retention
+        for column, retention in (group_retention or {}).items()
+        if retention.n_groups >= 2
     }
-    panels = 1 + len(group_counts)
+    panels = 1 + len(group_retention)
     figure, axes = plt.subplots(
         1,
         panels,
@@ -221,8 +285,15 @@ def plot_rejection(
         color=[RETAINED_COLOR if flag else EXCLUDED_COLOR for flag in kept],
     )
     if run_assignment is not None:
+        run_assignment = np.asarray(run_assignment, dtype=float)
+        if run_assignment.shape != (summary.total,):
+            raise ValueError(
+                "Run assignment must contain one label per pre-cleaning epoch."
+            )
+        if not np.isfinite(run_assignment).all():
+            raise ValueError("Run assignment must contain only finite labels.")
         # Run boundaries turn "a block of epochs was dropped" into "run N lost them".
-        boundaries = np.flatnonzero(np.diff(pd.Series(run_assignment).ffill().bfill().to_numpy()))
+        boundaries = np.flatnonzero(np.diff(run_assignment))
         for boundary in boundaries:
             position_axis.axvline(
                 boundary + 0.5,
@@ -231,9 +302,8 @@ def plot_rejection(
                 color="black",
                 linewidth=0.8,
             )
-        labelled = pd.Series(run_assignment).ffill().bfill().to_numpy()
-        for value in np.unique(labelled):
-            positions = np.flatnonzero(labelled == value)
+        for value in np.unique(run_assignment):
+            positions = np.flatnonzero(run_assignment == value)
             position_axis.annotate(
                 f"run-{int(value)}",
                 xy=(positions.mean(), strip_bottom + strip_height + 0.03),
@@ -261,22 +331,40 @@ def plot_rejection(
     )
     position_axis.spines[["top", "right", "left"]].set_visible(False)
 
-    for axis, (column, counts) in zip(axes[0][1:], group_counts.items(), strict=True):
-        positions = np.arange(counts.size)
-        axis.bar(positions, counts.to_numpy(), color="0.80")
+    for axis, (column, retention) in zip(
+        axes[0][1:], group_retention.items(), strict=True
+    ):
+        rates = retention.rates
+        values = retention.retained if rates is None else rates
+        positions = np.arange(values.size)
+        axis.bar(positions, values.to_numpy(), color="0.80")
+        baseline = (
+            float(values.mean())
+            if rates is None
+            else summary.kept / summary.total
+        )
         axis.axhline(
-            float(counts.mean()),
+            baseline,
             color=GUIDE_COLOR,
             linestyle="--",
             linewidth=1.0,
-            label=f"mean {counts.mean():.1f}",
+            label=(
+                f"mean {baseline:.1f}"
+                if rates is None
+                else f"overall {baseline:.1%}"
+            ),
         )
         axis.set(
-            title=f"Retained trials by {column}",
+            title=(
+                f"Retained trials by {column}"
+                if rates is None
+                else f"Retention rate by {column}"
+            ),
             xlabel=column,
-            ylabel="Trials retained",
+            ylabel="Trials retained" if rates is None else "Retained / presented",
             xticks=positions,
-            xticklabels=[str(name) for name in counts.index],
+            xticklabels=[str(name) for name in values.index],
+            **({"ylim": (0.0, 1.0)} if rates is not None else {}),
         )
         axis.tick_params(axis="x", labelrotation=45, labelsize=7)
         axis.legend(frameon=False, fontsize=8)
@@ -291,6 +379,7 @@ def add_rejection_review(
     report: mne.Report,
     clean_epochs: mne.BaseEpochs,
     clean_events: pd.DataFrame | None = None,
+    presented_events: pd.DataFrame | None = None,
     config: object | None = None,
     section: str = "Epoch rejection",
 ) -> RejectionSummary:
@@ -303,19 +392,38 @@ def add_rejection_review(
     from eeg_pipeline.preprocessing.report.style import report_image_format
 
     summary = summarize_rejection(clean_epochs.drop_log)
-    group_counts = (
+    retained_events = clean_events
+    if presented_events is not None:
+        if len(presented_events) != summary.total:
+            raise ValueError(
+                f"Presented events contain {len(presented_events)} rows but rejection "
+                f"considered {summary.total} epochs."
+            )
+        kept = np.ones(summary.total, dtype=bool)
+        kept[list(summary.dropped_positions)] = False
+        retained_events = presented_events.loc[kept].reset_index(drop=True)
+        if len(retained_events) != summary.kept:
+            raise ValueError("Presented-event alignment does not reproduce the retained count.")
+
+    grouping_events = presented_events if presented_events is not None else retained_events
+    group_retention = (
         retention_by_group(
-            clean_events,
+            retained_events,
             total=summary.total,
-            columns=resolve_grouping_columns(clean_events, config=config),
+            presented_events=presented_events,
+            columns=resolve_grouping_columns(grouping_events, config=config),
         )
-        if clean_events is not None
+        if retained_events is not None
         else None
     )
-    run_assignment = run_of_position(summary, clean_events) if clean_events is not None else None
+    run_assignment = (
+        run_of_position(summary, presented_events)
+        if presented_events is not None
+        else None
+    )
     remove_tagged_content(report, tag="epoch-rejection")
     report.add_html(
-        html=rejection_summary_html(summary, group_counts=group_counts),
+        html=rejection_summary_html(summary, group_retention=group_retention),
         title="Trial retention",
         section=section,
         tags=("epochs", "epoch-rejection"),
@@ -324,7 +432,7 @@ def add_rejection_review(
     report.add_figure(
         fig=plot_rejection(
             summary,
-            group_counts=group_counts,
+            group_retention=group_retention,
             run_assignment=run_assignment,
         ),
         title="Dropped epochs and retained trial distribution",
@@ -339,6 +447,7 @@ def add_rejection_review(
 
 __all__ = [
     "DEFAULT_GROUPING_COLUMNS",
+    "GroupRetention",
     "RejectionSummary",
     "add_rejection_review",
     "plot_rejection",

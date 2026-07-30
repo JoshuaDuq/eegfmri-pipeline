@@ -7,13 +7,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from studies.pain_study.scripts import export_brainvision_matlab
+from studies.pain_study.scripts.conversion import export_brainvision_matlab
 
 MODULE_PATH = (
     Path(__file__).parents[2]
     / "studies"
     / "pain_study"
     / "scripts"
+    / "conversion"
     / "export_brainvision_matlab.py"
 )
 

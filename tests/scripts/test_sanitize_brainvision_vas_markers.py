@@ -8,7 +8,7 @@ import numpy as np
 import pybv
 import pytest
 
-from studies.pain_study.scripts.sanitize_brainvision_vas_markers import (
+from studies.pain_study.scripts.conversion.sanitize_brainvision_vas_markers import (
     _remove_appledouble_files,
     discover_cohort_recordings,
     run_sanitization,

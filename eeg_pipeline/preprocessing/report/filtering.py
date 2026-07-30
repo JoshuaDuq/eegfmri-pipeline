@@ -103,6 +103,16 @@ class FilterDescription:
         """Length of the impulse response in seconds, comparable with an epoch."""
         return float(self.taps.size) / float(self.sfreq)
 
+    @property
+    def edge_support_s(self) -> float:
+        """One-sided support of this linear-phase FIR around an output sample.
+
+        MNE's zero-phase FIR is centred, so an output sample depends on this much input
+        on either side. This measured property, rather than a time constant inferred from
+        a cutoff frequency, defines the run edge that continuity statistics exclude.
+        """
+        return float(self.taps.size - 1) / (2.0 * float(self.sfreq))
+
 
 def _cutoff(frequencies: np.ndarray, magnitude_db: np.ndarray, *, edge: str) -> float | None:
     """Return the frequency where the response crosses :data:`CUTOFF_DB`.
@@ -202,6 +212,7 @@ def filter_response_html(description: FilterDescription) -> str:
         ),
         ("Filter length", f"{description.n_taps} taps"),
         Metric("Filter length in time", f"{description.duration_s:.1f} s", emphasis=True),
+        Metric("Edge support on each side", f"{description.edge_support_s:.1f} s"),
     ]
     return (
         "<p>The filter this configuration produces, built with the same MNE defaults the "

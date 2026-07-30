@@ -13,7 +13,7 @@ fi
 run_root="${STUDY1_RUNTIME_ROOT}/${STUDY1_RUN_ID}"
 cell_manifest="${run_root}/missing_benchmark_cells.txt"
 mkdir -p "${run_root}" "${STUDY1_LOG_ROOT}"
-python studies/pain_study/scripts/study1_missing_benchmark_cells.py \
+python studies/pain_study/scripts/study_support/study1_missing_benchmark_cells.py \
     "${COMMON_ARGS[@]}" > "${cell_manifest}.tmp"
 
 if ! awk '

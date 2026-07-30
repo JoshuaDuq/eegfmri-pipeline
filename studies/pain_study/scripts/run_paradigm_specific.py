@@ -4,16 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
-_SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_DIR))
-
-from eeg_raw_to_bids import run_raw_to_bids
-from fmri_raw_to_bids import run_fmri_raw_to_bids
-from merge_psychopy import run_merge_psychopy
+from studies.pain_study.scripts.conversion.eeg_raw_to_bids import run_raw_to_bids
+from studies.pain_study.scripts.conversion.fmri_raw_to_bids import run_fmri_raw_to_bids
+from studies.pain_study.scripts.conversion.merge_psychopy import run_merge_psychopy
 
 
 def _parser() -> argparse.ArgumentParser:

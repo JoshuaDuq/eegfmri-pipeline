@@ -1,9 +1,10 @@
 # Removing the room's line comb
 
 **Built:** 2026-07-29. **Companion to:** [`scanner_harmonic_diagnosis.md`](scanner_harmonic_diagnosis.md).
-**Code:** `studies/pain_study/analysis/line_removal.py`,
-`studies/pain_study/scripts/remove_line_comb.py`.
-**Configuration:** `preprocessing.line_comb_removal` in `eeg_pipeline/utils/config/eeg_config.yaml`.
+**Code:** `studies/pain_study/analysis/line_comb/removal.py`,
+`studies/pain_study/scripts/line_comb/remove.py`.
+**Run:** `eeg-pipeline line-comb {benchmark,apply,verify,report}`.
+**Configuration:** `line_comb_removal` in `studies/pain_study/scripts/line_comb/config.yaml`.
 
 ---
 
@@ -240,11 +241,11 @@ and can reach 18 dB in one run. Anyone analysing that neighbourhood specifically
 ## Running it
 
 ```bash
-python -m studies.pain_study.scripts.remove_line_comb --stage benchmark --limit 5
+eeg-pipeline line-comb benchmark --limit 5
 ```
 
 ```bash
-python -m studies.pain_study.scripts.remove_line_comb --stage apply
+eeg-pipeline line-comb apply
 ```
 
 Benchmark first. A failure means the settings are wrong for the data in front of you, not
@@ -323,7 +324,7 @@ from the cleaned continuous BIDS runs; MNE-BIDS-Pipeline has not yet been re-run
 Its remaining operations — band-pass, mains notch, resampling, ICA, epoching — do not
 reintroduce narrowband lines, and the blind detector finding nothing in the cleaned
 continuous data is the strongest available evidence short of producing the epochs. Confirm
-by re-running `diagnose_scanner_harmonics --stage all` against the new derivatives once
+by re-running `eeg-pipeline line-comb diagnose --stage all` against the new derivatives once
 they exist.
 
 ## What has to happen afterwards

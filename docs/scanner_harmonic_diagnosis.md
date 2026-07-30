@@ -4,8 +4,8 @@
 **Dataset:** `task-thermalactive`, 15 participants, 90 runs, plus 14 baseline recordings.
 **Stage examined:** final cleaned epochs, `derivatives/preprocessed/eeg/sub-*/eeg/sub-*_task-thermalactive_epo.fif`.
 **Control:** gradient-free EEG at the head of all 104 source recordings.
-**Reproduce:** `studies/pain_study/scripts/diagnose_scanner_harmonics.py`, then
-`studies/pain_study/scripts/plot_scanner_harmonics.py`.
+**Reproduce:** `eeg-pipeline line-comb diagnose`, then `eeg-pipeline line-comb plot`
+(`studies/pain_study/scripts/line_comb/`).
 **Removal:** [`scanner_harmonic_removal.md`](scanner_harmonic_removal.md) acts on what this
 document measures.
 
@@ -473,11 +473,11 @@ neither understates the lines nor charges their background to them.
 ## 8. Reproducing
 
 ```bash
-python -m studies.pain_study.scripts.diagnose_scanner_harmonics --stage all
+eeg-pipeline line-comb diagnose --stage all
 ```
 
 ```bash
-python -m studies.pain_study.scripts.plot_scanner_harmonics
+eeg-pipeline line-comb plot
 ```
 
 The first stage reads the drive once (~15 min) and caches per-participant spectra under
@@ -500,10 +500,10 @@ from the cache in about a minute. Outputs in `outputs/scanner_harmonic_diagnosis
 | `per_run_line_prominence.tsv`, `per_subject_line_prominence.tsv` | the underlying values |
 | `figures/fig1…fig6` | cohort spectrum, final vs control, comb structure, per-participant heatmap, topographies, band impact |
 
-Estimators live in `studies/pain_study/analysis/harmonic_diagnosis.py` and cohort assembly
-in `harmonic_cohort.py`, covered by `tests/analysis/test_harmonic_diagnosis.py`,
-`tests/analysis/test_harmonic_cohort.py` and
-`tests/scripts/test_diagnose_scanner_harmonics.py` (142 tests).
+Estimators live in `studies/pain_study/analysis/line_comb/diagnosis.py` and cohort assembly
+in `cohort.py` alongside it, covered by `tests/analysis/line_comb/test_diagnosis.py`,
+`tests/analysis/line_comb/test_cohort.py` and
+`tests/scripts/line_comb/test_diagnose.py` (142 tests).
 
 ---
 

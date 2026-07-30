@@ -279,42 +279,10 @@ preprocessing:
   notch_freq: 60
   line_freq: 60
 
-  # STUDY-SPECIFIC. Removal of the scanner room's line comb, applied to the BIDS runs by
-  # studies/pain_study/scripts/remove_line_comb.py before this pipeline reads them. It is
-  # not a stage of this pipeline: MNE-BIDS-Pipeline's notch is FIR, and fifty narrow FIR
-  # notches would take the surrounding band with them. The settings live here so the one
-  # script that performs the removal is configured like everything else.
-  #
-  # What is being removed is documented in docs/scanner_harmonic_diagnosis.md: a comb at
-  # multiples of about 1.2 Hz that is mains-synchronous, independent of the imaging
-  # gradients, and present before the scanner starts, plus four lines that drift on their
-  # own. Every run gets its own frequency estimate; the values below are only where the
-  # search starts. They describe one scanner room and mean nothing for another site.
-  line_comb_removal:
-    enabled: false  # the cleaned dataset is written to its own BIDS root; point paths.bids_root at it to use it
-    nominal_fundamental_hz: 1.2      # search seed only; each run is measured
-    harmonic_range: [24, 79]         # harmonics used to FIT the fundamental (well-determined ones)
-    # Harmonics actually removed. Reaches lower than the fit: the diagnosis found comb
-    # membership at harmonics 22 and 23 (26.40 and 27.60 Hz), each within 5 mHz of its comb
-    # position, which is far too precise to be coincidence. Harmonic 11 (13.23 Hz) is left
-    # alone -- 30 mHz off, in 2 of 15 participants, and sitting where alpha meets beta.
-    removal_harmonic_range: [22, 79]
-    isolated_hz: [47.0362, 57.2247, 58.1807, 94.0748]  # not on the comb, and they drift
-    search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
-    isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
-    min_prominence_db: 1.0           # a harmonic weaker than this does not join the fit
-    filter_length: "20s"             # 4 s windows cannot resolve a 1.2 Hz spacing and fail the gate
-    mt_bandwidth: 0.6                # +/-0.3 Hz, half the distance to the neighbouring line
-    # How much spectrum each line costs. spectrum_fit subtracts a sinusoid at every bin
-    # inside this window, so it, not mt_bandwidth, sets the size of the hole. The width is
-    # freq/ratio because a mains-locked comb wanders in proportion to harmonic number.
-    # MNE's own default is freq/200, which would empty a quarter of 28-95 Hz; freq/450 is
-    # the narrowest setting measured to push every line below background, at 12% of the
-    # band. Raising the ratio further leaves the high harmonics standing.
-    notch_width_ratio: 450
-    notch_width_min_hz: 0.05         # one bin at the 20 s working resolution
-    low_hz: 3.0
-    high_hz: 95.0
+  # The scanner room's line comb is removed before this pipeline reads the data, by
+  # `eeg-pipeline line-comb apply`. Its settings describe one room and are therefore
+  # paradigm-specific: they live with the code that applies them, in
+  # studies/pain_study/scripts/line_comb/config.yaml.
   # Worker count for PyPREP's loop over recordings and for MNE-BIDS-Pipeline's loop over
   # subjects and runs, including the autoreject threshold search that ica.reject and
   # epochs.reject both request. It selects how the work is executed, not what is

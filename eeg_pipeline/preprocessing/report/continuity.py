@@ -48,28 +48,6 @@ VOLUME_GAP_FACTOR = 1.5
 #: Annotation prefix MNE uses for spans excluded from processing.
 BAD_ANNOTATION_PREFIX = "BAD"
 
-#: High-pass time constants a run is given to settle before its amplitude is comparable.
-#:
-#: A high-pass filter rings at the start of a record, and that ringing is the largest
-#: amplitude in the run: every run of one subject reported its worst excursion at 0.0 min
-#: with the same value, which is the filter rather than the participant, and no real
-#: excursion later in the run could exceed it. The settling span is therefore excluded
-#: from the excursion *statistic* while still being drawn in the trace.
-#:
-#: Three time constants leaves under 5% of the step response, which is the usual
-#: engineering convention for "settled" rather than a threshold tuned on this data. The
-#: span itself comes from the recording's own high-pass, so a differently filtered dataset
-#: gets a differently sized exclusion and an unfiltered one gets none.
-SETTLING_TIME_CONSTANTS = 3.0
-
-
-def _settling_seconds(highpass_hz: float) -> float:
-    """Seconds a high-pass at ``highpass_hz`` needs to settle, or 0 when there is none."""
-    if not np.isfinite(highpass_hz) or highpass_hz <= 0.0:
-        return 0.0
-    return float(SETTLING_TIME_CONSTANTS / (2.0 * np.pi * highpass_hz))
-
-
 @dataclass(frozen=True)
 class RunContinuity:
     """Windowed amplitude over one run, with the spans that were excluded from it."""
@@ -86,8 +64,9 @@ class RunContinuity:
     #: ``(onset, duration)`` of every interruption in the volume-marker train.
     volume_gaps: tuple[tuple[float, float], ...]
     duration_s: float
-    #: Span at the run start excluded from the excursion statistic, in seconds.
-    settling_s: float = 0.0
+    #: Realised filter's one-sided support at the run edge, excluded from the excursion
+    #: statistic but retained in the trace. Zero when no filter description was supplied.
+    edge_support_s: float = 0.0
     #: Onset of every task event, in seconds from the run start.
     #:
     #: Drawn as a rug beneath the time axis so that a bad stretch can be read against the
@@ -117,7 +96,7 @@ class RunContinuity:
         """Share of the run inside a BAD_* span."""
         if self.duration_s <= 0:
             return 0.0
-        return sum(duration for _, duration in self.bad_spans) / self.duration_s
+        return _covered_duration(self.bad_spans, stop=self.duration_s) / self.duration_s
 
     @property
     def excursion_db(self) -> np.ndarray:
@@ -130,25 +109,26 @@ class RunContinuity:
         return np.median(self.relative_db, axis=0)
 
     @property
-    def settled_mask(self) -> np.ndarray:
-        """Windows whose amplitude is comparable with the rest of the run.
+    def full_support_mask(self) -> np.ndarray:
+        """Windows backed by a complete filter neighbourhood.
 
-        Excludes the high-pass settling span at the run start. Never excludes every
-        window: a run shorter than its own settling time would otherwise have no
-        excursion at all, and reporting the transient is better than reporting nothing.
+        Excludes the realised filter's edge-support span at both run boundaries. The
+        entry point refuses a span that would exclude every window, so this mask is
+        always non-empty.
         """
-        mask = self.times_s >= self.settling_s
-        return mask if mask.any() else np.ones_like(self.times_s, dtype=bool)
+        return (self.times_s >= self.edge_support_s) & (
+            self.times_s <= self.duration_s - self.edge_support_s
+        )
 
     @property
     def worst_window_s(self) -> float:
-        settled = self.settled_mask
-        excursion = np.where(settled, self.excursion_db, -np.inf)
+        full_support = self.full_support_mask
+        excursion = np.where(full_support, self.excursion_db, -np.inf)
         return float(self.times_s[int(np.argmax(excursion))])
 
     @property
     def worst_excursion_db(self) -> float:
-        return float(np.max(self.excursion_db[self.settled_mask]))
+        return float(np.max(self.excursion_db[self.full_support_mask]))
 
 
 def _bad_spans(raw: mne.io.BaseRaw) -> tuple[tuple[float, float], ...]:
@@ -161,10 +141,33 @@ def _bad_spans(raw: mne.io.BaseRaw) -> tuple[tuple[float, float], ...]:
     )
 
 
-def _volume_gaps(
-    raw: mne.io.BaseRaw,
+def _covered_duration(
+    spans: Sequence[tuple[float, float]],
     *,
-    description: str,
+    stop: float,
+) -> float:
+    """Duration of the clipped union of possibly overlapping spans."""
+    intervals = sorted(
+        (max(0.0, onset), min(stop, onset + duration))
+        for onset, duration in spans
+        if duration > 0.0 and onset < stop and onset + duration > 0.0
+    )
+    if not intervals:
+        return 0.0
+    covered = 0.0
+    current_start, current_stop = intervals[0]
+    for start, end in intervals[1:]:
+        if start <= current_stop:
+            current_stop = max(current_stop, end)
+            continue
+        covered += current_stop - current_start
+        current_start, current_stop = start, end
+    return covered + current_stop - current_start
+
+
+def _volume_gaps(
+    onsets: np.ndarray,
+    *,
     factor: float = VOLUME_GAP_FACTOR,
 ) -> tuple[tuple[float, float], ...]:
     """Find interruptions in the volume-marker train.
@@ -173,7 +176,6 @@ def _volume_gaps(
     correction on both sides of it was built from different conditions, so the boundary
     is worth seeing next to the amplitude.
     """
-    onsets = annotation_onsets(raw, description)
     if onsets.size < 3:
         return ()
     intervals = np.diff(onsets)
@@ -193,12 +195,15 @@ def _volume_gaps(
 _NON_EVENT_PREFIXES = ("BAD", "EDGE", "NEW SEGMENT", "VOLUME/", "R  ", "R/", "RESPONSE/")
 
 
-def _event_onsets(raw: mne.io.BaseRaw, *, volume_description: str | None) -> tuple[float, ...]:
+def _event_onsets(
+    raw: mne.io.BaseRaw,
+    *,
+    marker_descriptions: Sequence[str],
+) -> tuple[float, ...]:
     """Return the onset of every task event, in seconds from the run start."""
     start = raw.first_time
     excluded = set(_NON_EVENT_PREFIXES)
-    if volume_description:
-        excluded.add(volume_description.upper())
+    excluded.update(description.upper() for description in marker_descriptions if description)
     onsets = []
     for annotation in raw.annotations:
         description = str(annotation["description"]).upper()
@@ -242,11 +247,15 @@ def compute_run_continuity(
     *,
     recording_id: str,
     window_seconds: float = WINDOW_SECONDS,
+    edge_support_seconds: float = 0.0,
     volume_description: str | None = None,
+    pulse_description: str | None = None,
 ) -> RunContinuity:
     """Measure windowed amplitude across one continuous run."""
     if window_seconds <= 0:
         raise ValueError("The continuity window must be positive.")
+    if not np.isfinite(edge_support_seconds) or edge_support_seconds < 0.0:
+        raise ValueError("The filter edge-support span must be finite and non-negative.")
     picks = mne.pick_types(raw.info, eeg=True, exclude="bads")
     if picks.size == 0:
         raise ValueError("Time-resolved quality requires at least one good EEG channel.")
@@ -276,6 +285,18 @@ def compute_run_continuity(
     relative_db = 20.0 * np.log10(np.maximum(rms, tiny) / np.maximum(reference, tiny))
 
     centres = (np.arange(n_windows) + 0.5) * window_seconds
+    full_support = (centres >= edge_support_seconds) & (
+        centres <= raw.n_times / sfreq - edge_support_seconds
+    )
+    if not full_support.any():
+        raise ValueError(
+            f"{recording_id}: the filter edge-support span leaves no continuity windows."
+        )
+    volume_onsets = (
+        annotation_onsets(raw, volume_description)
+        if volume_description
+        else np.array([], dtype=float)
+    )
     return RunContinuity(
         recording_id=recording_id,
         window_seconds=float(window_seconds),
@@ -283,13 +304,14 @@ def compute_run_continuity(
         channel_names=tuple(raw.ch_names[index] for index in picks),
         relative_db=relative_db,
         bad_spans=_bad_spans(raw),
-        volume_gaps=(
-            _volume_gaps(raw, description=volume_description) if volume_description else ()
-        ),
+        volume_gaps=_volume_gaps(volume_onsets),
         duration_s=float(raw.n_times / sfreq),
-        settling_s=_settling_seconds(float(raw.info["highpass"] or 0.0)),
-        event_onsets=_event_onsets(raw, volume_description=volume_description),
-        has_volume_markers=bool(volume_description),
+        edge_support_s=float(edge_support_seconds),
+        event_onsets=_event_onsets(
+            raw,
+            marker_descriptions=(volume_description or "", pulse_description or ""),
+        ),
+        has_volume_markers=bool(volume_onsets.size),
         ordered_by_position=ordered_by_position,
     )
 
@@ -342,26 +364,26 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
         + grid_table(columns, rows)
         + "<p>The excursion is the across-channel median, so it responds to the whole "
         "montage moving together rather than to one sensor misbehaving."
-        f"{gap_note}</p>" + _settling_note(runs)
+        f"{gap_note}</p>" + _edge_support_note(runs)
     )
 
 
-def _settling_note(runs: Sequence[RunContinuity]) -> str:
+def _edge_support_note(runs: Sequence[RunContinuity]) -> str:
     """State the span excluded from the excursion, or say nothing when none was."""
-    spans = {round(run.settling_s, 3) for run in runs if run.settling_s > 0.0}
+    spans = {round(run.edge_support_s, 3) for run in runs if run.edge_support_s > 0.0}
     if not spans:
         return ""
     span = f"{max(spans):.1f} s" if len(spans) == 1 else f"up to {max(spans):.1f} s"
     return (
-        f"<p>The first {span} of each run is drawn but excluded from the largest-excursion "
-        "column. A high-pass filter rings as a record starts, and that ringing is the "
-        f"largest amplitude in the run — {SETTLING_TIME_CONSTANTS:g} time constants of the "
-        "recording's own high-pass are allowed for it to settle, so the column reports the "
-        "worst moment during the run rather than the moment the filter started.</p>"
+        f"<p>The first and last {span} of each run are drawn but excluded from the "
+        "largest-excursion column. This is the one-sided support of the realised "
+        "zero-phase FIR: samples in those edge spans depend on boundary handling rather "
+        "than a complete neighbourhood of observed data. The trace keeps them visible "
+        "while the statistic is restricted to samples with full filter support.</p>"
     )
 
 
-#: Headroom left above and below the settled excursion range, in decibels.
+#: Headroom left above and below the full-support excursion range, in decibels.
 _TRACE_MARGIN_DB = 1.5
 
 #: Most channel names labelled on the map's vertical axis.
@@ -376,19 +398,18 @@ _MAX_CHANNEL_TICKS = 14
 def _trace_limits(run: RunContinuity) -> tuple[float, float]:
     """Bound the excursion trace by the span the excursion column is measured over.
 
-    The high-pass transient at the record start is the largest amplitude in the run by a
-    wide margin — on a 0.1 Hz high-pass it reached +25 dB where the rest of the run spans
-    ±10 — so an autoscaled axis is set by the one span the figure has already declared it
+    The record-edge response can be the largest amplitude in a run by a wide margin. An
+    autoscaled axis would then be set by the one span the figure has already declared it
     is not reporting. The trace and its hatch still cross the top of the axis, which is
-    what a clipped transient should look like; what changes is that the remaining 8
-    minutes are no longer flattened into the bottom fifth of the panel.
+    what a clipped edge response should look like; the remaining run is no longer
+    flattened into the bottom fifth of the panel.
 
     Zero is always included: the trace is a deviation from each channel's own median, and
     an axis that excluded its own reference would misstate the sign of everything on it.
     """
-    settled = run.excursion_db[run.settled_mask]
-    low = min(0.0, float(np.min(settled))) - _TRACE_MARGIN_DB
-    high = max(0.0, float(np.max(settled))) + _TRACE_MARGIN_DB
+    full_support = run.excursion_db[run.full_support_mask]
+    low = min(0.0, float(np.min(full_support))) - _TRACE_MARGIN_DB
+    high = max(0.0, float(np.max(full_support))) + _TRACE_MARGIN_DB
     return low, high
 
 
@@ -442,22 +463,26 @@ def plot_run_continuity(run: RunContinuity) -> plt.Figure:
 
     trace_axis.plot(minutes, run.excursion_db, color="0.30", linewidth=0.9)
     trace_axis.axhline(0.0, color="black", linewidth=0.8)
-    # The settling span stays on the trace and is hatched instead, so the transient is
+    # The edge-support span stays on the trace and is hatched, so the boundary response is
     # visibly set aside rather than quietly missing from a figure that reports a maximum.
-    if run.settling_s > 0.0:
+    if run.edge_support_s > 0.0:
         for axis in (map_axis, trace_axis):
-            axis.axvspan(
-                0.0,
-                run.settling_s / 60.0,
-                facecolor="none",
-                edgecolor=GUIDE_COLOR,
-                hatch="///",
-                linewidth=0.0,
-                alpha=0.5,
-            )
+            for start, stop in (
+                (0.0, run.edge_support_s),
+                (run.duration_s - run.edge_support_s, run.duration_s),
+            ):
+                axis.axvspan(
+                    start / 60.0,
+                    stop / 60.0,
+                    facecolor="none",
+                    edgecolor=GUIDE_COLOR,
+                    hatch="///",
+                    linewidth=0.0,
+                    alpha=0.5,
+                )
         trace_axis.annotate(
-            "filter settling,\nexcluded from the maximum",
-            xy=(run.settling_s / 60.0, 1.0),
+            "filter edge support,\nexcluded from the maximum",
+            xy=(run.edge_support_s / 60.0, 1.0),
             xycoords=("data", "axes fraction"),
             xytext=(3, -3),
             textcoords="offset points",
