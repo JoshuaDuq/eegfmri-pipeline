@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.signal import welch
 
 
 def epoch_stack(
@@ -152,3 +153,91 @@ def naive_peak_to_peak(
     hi = int(round((measure[1] - window[0]) * sfreq))
     segment = evoked[:, lo:hi]
     return segment.max(axis=1) - segment.min(axis=1)
+
+
+def band_power(
+    data_uv: np.ndarray,
+    sfreq: float,
+    band: tuple[float, float],
+    picks: np.ndarray | None = None,
+) -> float:
+    """Mean power in a band, averaged over the selected channels."""
+    selected = data_uv if picks is None else data_uv[picks]
+    nperseg = min(int(4 * sfreq), selected.shape[1])
+    freqs, power = welch(selected, fs=sfreq, nperseg=nperseg, axis=1)
+    mask = (freqs >= band[0]) & (freqs <= band[1])
+    return float(np.mean(power[:, mask]))
+
+
+def band_retention(
+    before_uv: np.ndarray,
+    after_uv: np.ndarray,
+    sfreq: float,
+    band: tuple[float, float],
+    picks: np.ndarray | None = None,
+) -> float:
+    """Fraction of band power surviving a correction.
+
+    Not a preservation measure on its own -- the artifact contributes power inside the
+    band, so a value below 1 is expected even for a perfect correction. Pair it with the
+    same quantity computed under a sham correction.
+    """
+    baseline = band_power(before_uv, sfreq, band, picks)
+    if baseline == 0.0:
+        return float("nan")
+    return band_power(after_uv, sfreq, band, picks) / baseline
+
+
+def lock_ratio(
+    signal_uv: np.ndarray,
+    onset_seconds: np.ndarray,
+    sfreq: float,
+    window: tuple[float, float],
+) -> float:
+    """Event-locked average peak-to-peak over mean single-trial SD, for one channel.
+
+    Used on the ECG channel to judge whether a marker set sits on the QRS complex rather
+    than on a T-wave or on noise.
+    """
+    samples = np.round(np.asarray(onset_seconds) * sfreq).astype(int)
+    stack = epoch_stack(signal_uv[None, :], samples, sfreq, window)
+    if stack.shape[1] == 0:
+        return float("nan")
+    evoked = stack.mean(axis=1)[0]
+    single = float(np.sqrt(stack[0].var(axis=1)).mean())
+    if single == 0.0:
+        return float("nan")
+    return float((evoked.max() - evoked.min()) / single)
+
+
+@dataclass(frozen=True)
+class EvokedPreservation:
+    correlation: np.ndarray
+    amplitude_ratio: np.ndarray
+
+
+def evoked_preservation(
+    before_uv: np.ndarray,
+    after_uv: np.ndarray,
+    onset_seconds: np.ndarray,
+    sfreq: float,
+    window: tuple[float, float],
+) -> EvokedPreservation:
+    """Per-channel survival of the stimulus-locked average.
+
+    Stimulus events are not cardiac-locked, so the ballistocardiogram averages out of this
+    waveform. What remains is brain response, which a correction must not distort.
+    """
+    samples = np.round(np.asarray(onset_seconds) * sfreq).astype(int)
+    left = epoch_stack(before_uv, samples, sfreq, window).mean(axis=1)
+    right = epoch_stack(after_uv, samples, sfreq, window).mean(axis=1)
+
+    correlation = np.empty(left.shape[0])
+    ratio = np.empty(left.shape[0])
+    for channel in range(left.shape[0]):
+        a, b = left[channel], right[channel]
+        denominator = np.linalg.norm(a) * np.linalg.norm(b)
+        correlation[channel] = float(np.dot(a, b) / denominator) if denominator else np.nan
+        span = a.max() - a.min()
+        ratio[channel] = float((b.max() - b.min()) / span) if span else np.nan
+    return EvokedPreservation(correlation=correlation, amplitude_ratio=ratio)
