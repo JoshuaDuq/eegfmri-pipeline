@@ -119,6 +119,33 @@ class TestChannelScaling:
         with pytest.raises(ValueError, match="MULTIPLEXED"):
             rlc.parse_channel_scaling(path)
 
+    def test_ignores_a_coordinates_section(self, tmp_path):
+        """Headers written by Analyzer carry a second block of ``Ch<N>=`` lines.
+
+        Those hold three comma-separated numbers rather than the four fields of
+        ``[Channel Infos]``. A pattern whose character classes admit newlines runs one
+        coordinate line into the next and parses a resolution of ``"-72\\nCh2=1"``.
+        """
+        path = tmp_path / "x.vhdr"
+        path.write_text(
+            "BinaryFormat=IEEE_FLOAT_32\n"
+            "DataOrientation=MULTIPLEXED\n"
+            "[Channel Infos]\n"
+            "Ch1=Fp1,,0.5,µV\n"
+            "Ch2=Cz,,0.5,µV\n"
+            "Ch3=Oz,,0.5,µV\n"
+            "[Coordinates]\n"
+            "Ch1=1,-90,-72\n"
+            "Ch2=1,45,90\n"
+            "Ch3=1,0,0\n",
+            encoding="utf-8",
+        )
+
+        names, resolutions = rlc.parse_channel_scaling(path)
+
+        assert names == ["Fp1", "Cz", "Oz"]
+        assert np.allclose(resolutions, 0.5)
+
 
 class TestWriteEegBinary:
     def test_round_trips_through_the_original_header(self, brainvision_run, tmp_path):

@@ -129,8 +129,11 @@ def parse_channel_scaling(vhdr_path: Path) -> tuple[list[str], np.ndarray]:
     if orientation is None or orientation.group(1) != "MULTIPLEXED":
         raise ValueError(f"{vhdr_path.name}: expected MULTIPLEXED data orientation.")
 
+    # Channel definitions carry four comma-separated fields: name, reference, resolution,
+    # unit. The classes exclude newlines so a `[Coordinates]` line, which holds only three
+    # numbers, cannot be run into the one below it and parsed as `"-72\nCh2=1"`.
     names, resolutions = [], []
-    for match in re.finditer(r"^Ch(\d+)=([^,]*),([^,]*),([^,]*),", text, flags=re.MULTILINE):
+    for match in re.finditer(r"^Ch(\d+)=([^,\n]*),([^,\n]*),([^,\n]*),", text, flags=re.MULTILINE):
         names.append(match.group(2))
         resolutions.append(float(match.group(4)))
     if not names:
