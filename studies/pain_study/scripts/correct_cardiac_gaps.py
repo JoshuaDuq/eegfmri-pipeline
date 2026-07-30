@@ -117,6 +117,9 @@ def benchmark_arrays(
 
 
 MINIMUM_SCORABLE_BEATS = 8
+# A resting adult in the bore runs roughly 45-100 bpm; the cohort's own median is 60.9 and
+# its 5th percentile 46.8. Outside this the marker set cannot be the whole beat train.
+PLAUSIBLE_BPM = (40.0, 110.0)
 
 
 def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
@@ -134,6 +137,12 @@ def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
         return "no_gaps"
     if recovered < minimum:
         return f"too_few_recovered ({recovered})"
+    # Structural checks can all pass on a run that is simply under-marked everywhere: the
+    # gap rule is relative to the run's own median RR, so when Analyzer marked a fraction
+    # of the beats there is no stretch long enough to flag and nothing gets searched.
+    bpm = recovery.quality.implied_bpm
+    if bpm == bpm and not PLAUSIBLE_BPM[0] <= bpm <= PLAUSIBLE_BPM[1]:
+        return f"implausible_rate ({bpm:.1f} bpm)"
     return "ok"
 
 

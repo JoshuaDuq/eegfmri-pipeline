@@ -153,6 +153,28 @@ def test_quality_row_carries_every_beat_quality_field():
     assert row["crosscheck_status"] == "ok"
 
 
+def test_an_implausible_heart_rate_is_flagged_rather_than_passed_on():
+    """A run can pass every structural check and still be unusable.
+
+    sub-0008 run 4 ends with 103 beats across 497 s -- 12.4 bpm. Its recovered beats are
+    good (QRS lock ratio 4.53), but Analyzer marked so little that the gap rule, which is
+    relative to the run's own median RR, never flags the ~4 s intervals where the rest of
+    the beats are hiding. The run is globally under-marked rather than gap-structured, so
+    gap filling cannot reach it and Analyzer must not be handed it as if corrected.
+    """
+    recovery = _recovery(59, gap_seconds_before=347.0)
+    object.__setattr__(recovery.quality, "implied_bpm", 12.4)
+
+    assert correct_cardiac_gaps.recovery_status(recovery) == "implausible_rate (12.4 bpm)"
+
+
+def test_an_ordinary_rate_is_not_flagged():
+    recovery = _recovery(30, gap_seconds_before=57.3)
+    object.__setattr__(recovery.quality, "implied_bpm", 61.6)
+
+    assert correct_cardiac_gaps.recovery_status(recovery) == "ok"
+
+
 def test_quality_row_does_not_clobber_the_run_level_status():
     """BeatQuality carries its own `status`, which is not the run's outcome.
 
