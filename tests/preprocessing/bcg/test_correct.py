@@ -96,6 +96,33 @@ def test_substitute_stretches_replaces_only_named_windows():
     assert np.all(out[:, 4000:] == 0.0)
 
 
+@pytest.mark.parametrize("n_beats", [0, 1, 2, 4])
+def test_obs_states_its_epoch_requirement_instead_of_failing_inside_mne(n_beats):
+    """Too few epochs for the basis must be a stated precondition, not an MNE crash.
+
+    Measured on MNE 1.12.1: one beat raises `cannot convert float NaN to integer`, two
+    raise `SVD did not converge`, and three "succeed" on a basis of three epochs. A real
+    run hit this -- sub0009 run 5 recovers exactly one beat -- and it surfaced as an
+    unreadable error row in the cohort report.
+    """
+    rng = np.random.default_rng(3)
+    data = rng.normal(0, 10.0, (4, int(60 * SFREQ)))
+    beats = 20.0 + np.arange(n_beats) * 1.0
+
+    with pytest.raises(ValueError, match="needs at least 5 beats"):
+        correct_beats(data, beats, SFREQ, method="obs", n_components=4)
+
+
+def test_aas_has_no_such_floor():
+    """AAS averages neighbours, so it degrades rather than failing on a thin beat set."""
+    rng = np.random.default_rng(4)
+    data = rng.normal(0, 10.0, (4, int(60 * SFREQ)))
+
+    corrected = correct_beats(data, np.array([20.0]), SFREQ, method="aas")
+
+    assert np.all(np.isfinite(corrected))
+
+
 def test_unknown_method_raises():
     with pytest.raises(ValueError, match="unknown method"):
         correct_beats(np.zeros((2, 5000)), np.array([1.0, 2.0]), SFREQ, method="nope")

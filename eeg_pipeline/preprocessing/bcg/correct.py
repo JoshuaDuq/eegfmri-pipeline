@@ -73,8 +73,22 @@ def _confine_to_epochs(original_uv, corrected_uv, beat_seconds, sfreq, window):
 
 
 def _correct_obs(data_uv, beat_seconds, sfreq, n_components, ch_names):
-    """PCA optimal basis set (Niazy et al. 2005) via MNE."""
+    """PCA optimal basis set (Niazy et al. 2005) via MNE.
+
+    A basis of `n_components` needs more epochs than components to mean anything, and MNE
+    fails opaquely below that: on 1.12.1, one beat raises `cannot convert float NaN to
+    integer` and two raise `SVD did not converge`, both from inside `apply_pca_obs`. The
+    precondition is stated here so a thin run is a readable status rather than a crash.
+    """
     import mne
+
+    n_beats = int(np.asarray(beat_seconds, dtype=float).size)
+    required = n_components + 1
+    if n_beats < required:
+        raise ValueError(
+            f"obs with n_components={n_components} needs at least {required} beats "
+            f"to form a basis; got {n_beats}"
+        )
 
     mne.set_log_level("ERROR")
     names = ch_names or [f"CH{i:03d}" for i in range(data_uv.shape[0])]
