@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from eeg_pipeline.preprocessing.bcg.detect import (
     RecoverySettings,
@@ -6,6 +7,7 @@ from eeg_pipeline.preprocessing.bcg.detect import (
     crosscheck_agreement,
     find_gaps,
     gap_summary,
+    physiological_floor,
     qrs_template,
     recover_beats,
 )
@@ -156,6 +158,66 @@ def test_too_few_seed_beats_reports_status_rather_than_raising():
 
     assert result.quality.status == "insufficient_seed_beats"
     assert result.recovered_beats.size == 0
+
+
+def test_a_beat_closer_than_the_run_s_own_physiology_is_rejected():
+    """A recovered beat must not create an RR this subject's heart never produced.
+
+    Measured on the cohort: 9.6% of recovered beats created an interval shorter than the
+    run's own Analyzer-derived minimum, up to 38.7% in the worst run. Those beats sit on
+    ECG deflections at the 0th percentile of Analyzer's, and dropping them *raises* the
+    QRS lock ratio of what remains -- they are false positives, and a false R marker makes
+    Analyzer subtract a pulse template where no beat exists.
+    """
+    beats = np.arange(5.0, 190.0, 0.9)
+    ecg = _synthetic_ecg(beats, 200.0)
+    kept = beats[(beats < 80.0) | (beats > 95.0)]
+
+    result = recover_beats(ecg, kept, SFREQ)
+
+    combined = result.combined_beats
+    intervals = np.diff(combined)
+    floor = physiological_floor(kept, combined)
+
+    assert floor > 0.0
+    assert intervals.min() >= floor
+    assert result.quality.refractory_violations == 0
+
+
+def test_the_floor_is_capped_so_a_sparsely_marked_run_is_not_gutted():
+    """On sub-0008 run 6 the Analyzer RR p01 sits at 0.98 of the median.
+
+    Taken literally that floor rejects almost any beat, so it is capped against the
+    combined train's own median rather than trusted outright.
+    """
+    # Analyzer marked only every other beat, so its intervals are all ~1.8 s.
+    analyzer = np.arange(5.0, 100.0, 1.8)
+    combined = np.arange(5.0, 100.0, 0.9)
+
+    floor = physiological_floor(analyzer, combined)
+
+    assert floor < 0.9  # must not exceed the true beat-to-beat interval
+    assert floor == pytest.approx(0.75 * 0.9, abs=1e-6)
+
+
+def test_a_plausible_recovered_beat_survives_the_filter():
+    analyzer = np.arange(5.0, 100.0, 0.9)
+    combined = np.sort(np.append(analyzer, 50.0 + 0.45))  # mid-gap, half an RR away
+
+    floor = physiological_floor(analyzer, combined)
+
+    assert 0.45 < floor  # the interloper is closer than the floor allows
+
+
+def test_analyzer_beats_are_never_dropped_by_the_filter():
+    """Analyzer's marks are the trusted set; filtering only ever removes our own."""
+    beats = np.arange(5.0, 190.0, 0.9)
+    ecg = _synthetic_ecg(beats, 200.0)
+    kept = beats[(beats < 80.0) | (beats > 95.0)]
+
+    result = recover_beats(ecg, kept, SFREQ)
+
+    assert np.all(np.isin(kept, result.combined_beats))
 
 
 def test_crosscheck_reports_agreement_without_changing_beats():

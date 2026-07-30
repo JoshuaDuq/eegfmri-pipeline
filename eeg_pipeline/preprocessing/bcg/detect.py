@@ -105,6 +105,58 @@ class RecoverySettings:
     iterations: int = 2
     minimum_seconds: float = 2.0
     factor: float = 2.0
+    refractory_percentile: float = 1.0
+    refractory_cap_fraction: float = 0.75
+
+
+def physiological_floor(
+    analyzer_beats: np.ndarray,
+    combined_beats: np.ndarray,
+    *,
+    percentile: float = 1.0,
+    cap_fraction: float = 0.75,
+) -> float:
+    """Shortest RR interval this run may plausibly contain, in seconds.
+
+    Taken from Analyzer's own intervals, which are the trustworthy set, at a low percentile
+    rather than the raw minimum so one bad Analyzer interval cannot set the floor. Measured
+    across 45 cohort runs, that percentile sits at a median of 0.82 of the beat-to-beat
+    interval.
+
+    It is then capped against the combined train's median, because a sparsely marked run
+    has an inflated RR distribution -- on sub-0008 run 6 the percentile reaches 0.98 of the
+    median, which taken literally would reject almost every recovered beat.
+
+    Returns 0.0 when there is too little evidence to estimate, which disables filtering
+    rather than guessing.
+    """
+    analyzer_rr = np.diff(np.sort(np.asarray(analyzer_beats, dtype=float)))
+    combined_rr = np.diff(np.sort(np.asarray(combined_beats, dtype=float)))
+    if analyzer_rr.size < 10 or combined_rr.size < 10:
+        return 0.0
+    subject = float(np.percentile(analyzer_rr, percentile))
+    cap = cap_fraction * float(np.median(combined_rr))
+    return min(subject, cap)
+
+
+def _enforce_floor(
+    analyzer_beats: np.ndarray, recovered_beats: np.ndarray, floor_s: float
+) -> np.ndarray:
+    """Recovered beats at least `floor_s` from every accepted beat, earliest first.
+
+    Analyzer's marks are accepted unconditionally and never dropped; only our own are
+    filtered, so the trusted set is never degraded by this step.
+    """
+    if floor_s <= 0.0 or recovered_beats.size == 0:
+        return recovered_beats
+
+    accepted = np.sort(np.asarray(analyzer_beats, dtype=float))
+    kept: list[float] = []
+    for beat in np.sort(np.asarray(recovered_beats, dtype=float)):
+        pool = np.concatenate([accepted, np.asarray(kept)]) if kept else accepted
+        if pool.size == 0 or float(np.abs(pool - beat).min()) >= floor_s:
+            kept.append(float(beat))
+    return np.asarray(kept, dtype=float)
 
 
 @dataclass(frozen=True)
@@ -112,11 +164,13 @@ class BeatQuality:
     analyzer_lock_ratio: float
     recovered_lock_ratio: float
     combined_lock_ratio: float
+    physiological_floor_s: float
     rr_median_s: float
     rr_min_s: float
     rr_max_s: float
     implied_bpm: float
     refractory_violations: int
+    refractory_rejected: int
     recovered_beats: int
     gap_seconds_before: float
     gap_seconds_after: float
@@ -234,6 +288,21 @@ def recover_beats(
         recovered = np.sort(np.asarray(found, dtype=float))
         seed = np.sort(np.concatenate([analyzer, recovered])) if recovered.size else analyzer
 
+    # The matcher's refractory period is half the median RR, which measured across the
+    # cohort admits 9.6% false positives -- beats forming intervals shorter than the run's
+    # own heart ever produced. Filter against that physiology before anything downstream
+    # sees them: a false R marker makes Analyzer subtract a pulse template where no beat is.
+    provisional = np.sort(np.concatenate([analyzer, recovered])) if recovered.size else analyzer
+    floor = physiological_floor(
+        analyzer,
+        provisional,
+        percentile=settings.refractory_percentile,
+        cap_fraction=settings.refractory_cap_fraction,
+    )
+    proposed = int(recovered.size)
+    recovered = _enforce_floor(analyzer, recovered, floor)
+    rejected = proposed - int(recovered.size)
+
     combined = np.sort(np.concatenate([analyzer, recovered])) if recovered.size else analyzer
     after = gap_summary(
         combined, duration, minimum_seconds=settings.minimum_seconds, factor=settings.factor
@@ -243,13 +312,36 @@ def recover_beats(
         recovered_beats=recovered,
         combined_beats=combined,
         quality=_quality(
-            ecg_uv, analyzer, recovered, combined, sfreq, window, duration, before, after, "ok"
+            ecg_uv,
+            analyzer,
+            recovered,
+            combined,
+            sfreq,
+            window,
+            duration,
+            before,
+            after,
+            "ok",
+            rejected=rejected,
+            floor_s=floor,
         ),
     )
 
 
 def _quality(
-    ecg_uv, analyzer, recovered, combined, sfreq, window, duration, before, after, status
+    ecg_uv,
+    analyzer,
+    recovered,
+    combined,
+    sfreq,
+    window,
+    duration,
+    before,
+    after,
+    status,
+    *,
+    rejected: int = 0,
+    floor_s: float = 0.0,
 ) -> BeatQuality:
     intervals = np.diff(combined) if combined.size > 1 else np.array([np.nan])
     median_rr = float(np.median(intervals)) if combined.size > 1 else float("nan")
@@ -264,6 +356,7 @@ def _quality(
         combined_lock_ratio=(
             lock_ratio(ecg_uv, combined, sfreq, window) if combined.size else float("nan")
         ),
+        physiological_floor_s=float(floor_s),
         rr_median_s=median_rr,
         rr_min_s=float(np.min(intervals)) if intervals.size else float("nan"),
         rr_max_s=float(np.max(intervals)) if intervals.size else float("nan"),
@@ -271,6 +364,7 @@ def _quality(
         refractory_violations=(
             int(np.sum(intervals < refractory_floor)) if combined.size > 1 else 0
         ),
+        refractory_rejected=int(rejected),
         recovered_beats=int(recovered.size),
         gap_seconds_before=float(before["gap_seconds"]),
         gap_seconds_after=float(after["gap_seconds"]),
