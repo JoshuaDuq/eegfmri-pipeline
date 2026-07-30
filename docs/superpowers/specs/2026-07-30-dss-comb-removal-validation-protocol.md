@@ -121,6 +121,47 @@ separately.
    component that carries the source of interest is worse than removing ten empty
    directions. Criterion 3 is the preservation gate; this one only bounds gross cost.
 
+## Amendment 1 (2026-07-30, before the cohort sweep)
+
+A smoke test on five runs showed the estimator specified above does not work, and the
+correction changes the method rather than any threshold. Recorded here in full.
+
+**The subspace was ranked by the wrong quantity.** Whitening the comb covariance by the
+background covariance and taking the leading generalised eigenvector finds the direction
+with the best comb-to-background *ratio*. That direction can carry almost none of the
+comb's absolute energy: a tiny background with a modest comb yields a huge ratio. Measured
+on sub-0008 run-3, projecting out the top 12 ratio directions moved the median line
+prominence from 7.50 dB to 7.37 dB -- it removed nothing, while reporting a held-out
+contrast of 49x.
+
+The artifact subspace is instead the leading eigenspace of the **excess covariance**
+`C_comb - C_control`. This is the spatial form of the principle already adopted for
+measurement on this branch: the artifact is the excess over background, not the whole
+content of the bin. Same run, same folds: 7.50 dB falls to 2.86 dB at rank 3.
+
+**Integer rank cannot land on background.** The same run gives +2.86 dB at rank 3 and
+-2.38 dB at rank 4. No integer rank lands inside the +/-1 dB criterion, so a binary
+projection reintroduces the trough in spatial form -- the exact failure this work exists
+to remove.
+
+Each direction is therefore scaled rather than zeroed, by the Wiener-style gain
+`sqrt(background_power / comb_power)` clipped to 1, estimated on the fitting blocks and
+applied to the held-out block. A direction that is mostly artifact is strongly attenuated;
+a direction where the comb does not exceed background is left alone. This removes the
+excess and keeps the background by construction, and replaces rank with a continuous knob.
+
+**Consequences for the criteria.** "Smallest rank satisfying all criteria" no longer
+applies unchanged: the selected quantity is the number of directions given a gain below 1,
+reported alongside the gains themselves. The rank ceiling of criterion 5 now bounds the
+count of attenuated directions. All other criteria and thresholds stand as frozen.
+
+**What the smoke test does not settle.** With gains applied, only 40% of held-out folds
+land within +/-1 dB, and retention for the declared probes runs 0.33-0.73 before the angle
+gate is applied. Both numbers are reported by the sweep rather than treated as a reason to
+adjust the criteria. If preservation fails cohort-wide, the finding is that the comb and
+the dominant neural topography overlap too much for linear spatial separation in this
+recording setup, which is an answer, not a failure to report.
+
 ## Probe bank
 
 One topography is not enough -- a single choice may happen to be favourable or
