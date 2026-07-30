@@ -45,3 +45,21 @@ def test_sham_retention_is_higher_than_real_when_artifact_present():
     )
 
     assert rows[0]["sham_band_retained"] > rows[0]["real_band_retained"]
+
+
+def test_apply_only_changes_gap_stretches(tmp_path):
+    """Everything outside a gap must survive byte-for-byte from Analyzer's output."""
+    rng = np.random.default_rng(2)
+    sfreq = 1000.0
+    n = int(200 * sfreq)
+    analyzer_corrected = rng.normal(0, 10.0, (4, n))
+    uncorrected = analyzer_corrected + rng.normal(0, 1.0, (4, n))
+
+    out = correct_cardiac_gaps.substitute_gap_stretches(
+        analyzer_corrected, uncorrected, [(80.0, 95.0)], sfreq, pad_seconds=0.5
+    )
+
+    lo, hi = int(79.5 * sfreq), int(95.5 * sfreq)
+    assert np.array_equal(out[:, :lo], analyzer_corrected[:, :lo])
+    assert np.array_equal(out[:, hi:], analyzer_corrected[:, hi:])
+    assert not np.array_equal(out[:, lo:hi], analyzer_corrected[:, lo:hi])

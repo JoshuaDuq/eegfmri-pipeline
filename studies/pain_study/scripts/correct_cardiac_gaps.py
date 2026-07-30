@@ -206,16 +206,141 @@ def _write_tsv(rows: list[dict], destination: Path) -> None:
         writer.writerows(rows)
 
 
+ROUNDTRIP_RELATIVE_TOLERANCE = 1e-6
+
+
+@dataclass(frozen=True)
+class ApplySettings:
+    method: str = "obs"
+    n_components: int = 4
+    window: tuple[float, float] = (-0.3, 0.7)
+    pad_seconds: float = 0.5
+
+
+def substitute_gap_stretches(base_uv, replacement_uv, gaps, sfreq, pad_seconds=0.5):
+    """Splice corrected gap stretches into Analyzer's output, with a small pad.
+
+    The pad covers epochs of beats sitting just inside a gap edge, whose correction window
+    extends slightly beyond the gap itself.
+    """
+    padded = [(start - pad_seconds, end + pad_seconds) for start, end in gaps]
+    return bcg_correct.substitute_stretches(base_uv, replacement_uv, padded, sfreq)
+
+
+def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
+    """Correct one recording's gap stretches and write the result beside its sidecars."""
+    import mne
+
+    validation = validate_pair(pair)
+    if validation.status != "ok":
+        return {"subject": pair.subject, "run": pair.run, "status": validation.status}
+
+    uncorrected, corrected = _load_pair(pair)
+    sfreq = uncorrected.info["sfreq"]
+    eeg_names = uncorrected.copy().pick("eeg").ch_names
+    unc = uncorrected.copy().pick(eeg_names).get_data() * 1e6
+    cor = corrected.copy().pick(eeg_names).get_data() * 1e6
+
+    ecg = uncorrected.copy().pick(["ECG"]).get_data()[0] * 1e6
+    analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
+    recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
+    if recovery.recovered_beats.size == 0:
+        return {
+            "subject": pair.subject,
+            "run": pair.run,
+            "status": "no_recovered_beats",
+            "gap_seconds_before": recovery.quality.gap_seconds_before,
+        }
+
+    kwargs = dict(method=settings.method, window=settings.window, ch_names=eeg_names)
+    if settings.method == "obs":
+        kwargs["n_components"] = settings.n_components
+    repaired = bcg_correct.correct_beats(unc, recovery.recovered_beats, sfreq, **kwargs)
+
+    gaps = [(g.start_s, g.end_s) for g in bcg_detect.find_gaps(analyzer)]
+    merged = substitute_gap_stretches(cor, repaired, gaps, sfreq, settings.pad_seconds)
+
+    info = mne.create_info(eeg_names, sfreq, ch_types="eeg")
+    out_raw = mne.io.RawArray(merged * 1e-6, info, verbose="ERROR")
+    destination = output_root / pair.corrected_vhdr.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    mne.export.export_raw(destination, out_raw, fmt="brainvision", overwrite=True, verbose="ERROR")
+
+    check = mne.io.read_raw_brainvision(destination, preload=True, verbose="ERROR")
+    deviation = float(np.max(np.abs(check.get_data() * 1e6 - merged)))
+    scale = float(np.max(np.abs(merged)))
+    if deviation > ROUNDTRIP_RELATIVE_TOLERANCE * scale:
+        raise RuntimeError(
+            f"{destination.name}: written data differs by {deviation:.3e} uV, "
+            f"above the {ROUNDTRIP_RELATIVE_TOLERANCE * scale:.3e} uV round-trip tolerance."
+        )
+
+    return {
+        "subject": pair.subject,
+        "run": pair.run,
+        "status": "ok",
+        "method": settings.method,
+        "n_components": settings.n_components,
+        "recovered_beats": int(recovery.recovered_beats.size),
+        "gap_seconds_before": recovery.quality.gap_seconds_before,
+        "gap_seconds_after": recovery.quality.gap_seconds_after,
+        "gap_fraction_replaced": sum(e - s for s, e in gaps) / (unc.shape[1] / sfreq),
+        "roundtrip_max_deviation_uv": deviation,
+        "output": str(destination),
+    }
+
+
+def verify_run(pair, output_root: Path) -> dict:
+    """Re-score a written recording with the referee, inside the gaps and outside them.
+
+    Scoring the two separately is what shows whether the stage introduced a time-varying
+    difference within the run, which is the risk of correcting only part of it.
+    """
+    import mne
+
+    mne.set_log_level("ERROR")
+    destination = output_root / pair.corrected_vhdr.name
+    if not destination.exists():
+        return {"subject": pair.subject, "run": pair.run, "status": "not_written"}
+
+    written = mne.io.read_raw_brainvision(destination, preload=True, verbose="ERROR")
+    uncorrected, _ = _load_pair(pair)
+    sfreq = written.info["sfreq"]
+    data = written.get_data() * 1e6
+
+    ecg = uncorrected.copy().pick(["ECG"]).get_data()[0] * 1e6
+    analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
+    recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
+
+    result = bcg_metrics.rlocked_reduction(
+        data, recovery.recovered_beats, sfreq, n_surrogate=20, seed=0
+    )
+    analyzer_result = bcg_metrics.rlocked_reduction(data, analyzer, sfreq, n_surrogate=20, seed=0)
+    return {
+        "subject": pair.subject,
+        "run": pair.run,
+        "status": "ok",
+        "recovered_removal_max": result.max_value,
+        "recovered_null_max": result.null_max,
+        "recovered_channels_above_null": result.channels_above_null,
+        "analyzer_removal_max": analyzer_result.max_value,
+        "analyzer_channels_above_null": analyzer_result.channels_above_null,
+    }
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["benchmark"])
+    parser.add_argument("command", choices=["benchmark", "apply", "verify"])
     parser.add_argument("--uncorrected-root", type=Path, default=DEFAULT_UNCORRECTED)
     parser.add_argument("--corrected-root", type=Path, default=DEFAULT_CORRECTED)
+    parser.add_argument(
+        "--output-root", type=Path, default=Path("outputs/cardiac_gap_fill/corrected")
+    )
+    parser.add_argument("--method", default="obs", choices=["obs", "aas"])
+    parser.add_argument("--n-components", type=int, default=4)
     parser.add_argument("--subjects", nargs="*", default=None)
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument(
-        "--output", type=Path, default=Path("outputs/cardiac_gap_fill/benchmark.tsv")
-    )
+    parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)
 
     pairs = discover_run_pairs(args.uncorrected_root, args.corrected_root)
@@ -224,11 +349,23 @@ def main(argv: list[str] | None = None) -> None:
     if args.limit:
         pairs = pairs[: args.limit]
 
-    settings = BenchmarkSettings()
+    default_names = {
+        "benchmark": "benchmark.tsv",
+        "apply": "apply.tsv",
+        "verify": "verify.tsv",
+    }
+    destination = args.output or Path("outputs/cardiac_gap_fill") / default_names[args.command]
+    apply_settings = ApplySettings(method=args.method, n_components=args.n_components)
+
     rows: list[dict] = []
     for pair in pairs:
         try:
-            rows.extend(benchmark_run(pair, settings))
+            if args.command == "benchmark":
+                rows.extend(benchmark_run(pair, BenchmarkSettings()))
+            elif args.command == "apply":
+                rows.append(apply_run(pair, args.output_root, apply_settings))
+            else:
+                rows.append(verify_run(pair, args.output_root))
         except Exception as error:  # a failing run is a measurement, not a fault
             rows.append(
                 {
@@ -238,8 +375,8 @@ def main(argv: list[str] | None = None) -> None:
                 }
             )
         print(json.dumps(rows[-1]), flush=True)
-    _write_tsv(rows, args.output)
-    print(f"wrote {len(rows)} rows to {args.output}")
+    _write_tsv(rows, destination)
+    print(f"wrote {len(rows)} rows to {destination}")
 
 
 if __name__ == "__main__":
