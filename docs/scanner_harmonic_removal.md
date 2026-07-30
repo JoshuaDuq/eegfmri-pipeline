@@ -129,6 +129,9 @@ are removed and the probes are measured.
 
 **5 of 5 runs passed every criterion.**
 
+One gap in this gate is worth naming: it tests the *median* residual across a run's lines,
+not the worst one. Applied to the cohort that turned out to matter — see below.
+
 Two things about this gate are worth stating plainly, because both were mistakes caught
 during the work rather than foresight.
 
@@ -150,6 +153,43 @@ physics showed that 12.1% is the floor for full suppression. The revision is rec
 the code rather than quietly applied.
 
 ---
+
+## Cohort result
+
+All 90 runs, session-pooled frequencies, `freq/450` widths:
+
+| | |
+|---|---|
+| Median suppression | **24.1 dB** (20.3–27.6 across runs) |
+| Median residual prominence | **−16.1 dB** (worst run −13.8 dB) |
+| Session fundamental | 1.1999816 Hz, SD **115 µHz** across 15 participants |
+| Per-run estimates before pooling | SD 180 µHz |
+| Band touched | 12.1% (12.1–12.2) |
+| Binary round-trip | ≤ 5.5 × 10⁻⁸ relative, every run |
+
+**Individual runs are not uniformly clean.** Twenty-nine of 90 retain at least one line
+above their own local background, eleven above 6 dB, and sub-0000 run-1 leaves one at
+14 dB. This is not explained by the session pooling: the correlation between a run's
+distance from its session median and its worst residual is 0.089. Some lines are simply
+harder to fit in some runs, and the gate did not catch it because it reads the median.
+
+**At cohort level nothing survives.** Re-running the diagnosis's own detector — a blind
+FDR-controlled sweep of 3–95 Hz with no knowledge of where the lines were, on one run per
+participant:
+
+| Stage | Lines detected at *q* < 0.05 | On the comb | Max prominence |
+|---|---:|---:|---:|
+| Original | **82** | 44 | 16.8 dB |
+| Cleaned | **0** | 0 | — |
+
+That is the level at which the contamination mattered. The comb was a problem because it
+was consistent across participants and therefore a systematic between-participant offset;
+after removal no line is consistent enough to be detected at all. A residual line in one
+run of one participant is run-level noise, not a confound — but it is there, and anyone
+running a single-run analysis should read `removal_manifest.tsv` rather than assume
+uniform suppression.
+
+Reproduce with `--stage verify`.
 
 ## Running it
 
@@ -204,9 +244,12 @@ contamination and the removal touches nothing below 28.8 Hz.
 
 ## Limitations
 
-- The removal is validated on five runs spanning the cohort, not on all ninety. The
-  manifest records per-run suppression for every run so the full distribution is
-  inspectable, but the injected-probe gate was run on the sample.
+- The injected-probe gate was run on five runs spanning the cohort, not on all ninety.
+  Per-run suppression is recorded for every run in the manifest, but signal preservation
+  was verified on the sample.
+- The gate tests the median residual across a run's lines, not the worst. Twenty-nine of
+  90 runs keep at least one line above their own background; no cohort-level line survives
+  detection, but a single-run analysis should consult the manifest.
 - 12.1% of 28–95 Hz is removed. That is the price of taking out 55 wandering lines, and it
   is lower than masking them in analysis would cost (about 22%), but it is not free: any
   genuine narrowband activity at a comb frequency goes with the artifact, and there is no

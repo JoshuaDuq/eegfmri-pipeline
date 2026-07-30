@@ -395,6 +395,49 @@ def apply_run(
     }
 
 
+def verify_cohort(bids_root: Path, cleaned_root: Path, settings: RemovalSettings, runs):
+    """Run the diagnosis's own line detector over cleaned and original data alike.
+
+    The manifest reports each run against its own targets. This asks the question the
+    diagnosis asked: sweeping the whole band with FDR control and no knowledge of where
+    the lines were, what is still detectable?
+    """
+    import mne
+
+    mne.set_log_level("ERROR")
+    from studies.pain_study.scripts import diagnose_scanner_harmonics as ds
+
+    rows, spectra = [], {"original": [], "cleaned": []}
+    for vhdr in runs:
+        for label, root in (("original", bids_root), ("cleaned", cleaned_root)):
+            raw = mne.io.read_raw_brainvision(root / vhdr.relative_to(bids_root), preload=True)
+            freqs, spectrum_db, prominence = run_spectrum(raw)
+            spectra[label].append(10 ** (spectrum_db / 10.0))
+        rows.append(vhdr.stem)
+
+    grids = {
+        label: ds.build_grid(freqs, np.stack(values)) for label, values in spectra.items()
+    }
+    report = []
+    for label, grid in grids.items():
+        try:
+            lines = ds.detect_cohort_lines(grid)
+        except RuntimeError:
+            report.append({"stage": label, "n_lines": 0, "n_comb_lines": 0,
+                           "max_prominence_db": float("nan")})
+            continue
+        classified = ds.classify_lines(lines, ds.comb_structure(lines))
+        report.append({
+            "stage": label,
+            "n_lines": int(len(classified)),
+            "n_comb_lines": int(classified.kind.isin(("comb", "comb_wide")).sum()),
+            "n_isolated": int((classified.kind == "isolated").sum()),
+            "max_prominence_db": float(classified.cohort_median_prominence_db.max()),
+            "median_prominence_db": float(classified.cohort_median_prominence_db.median()),
+        })
+    return pd.DataFrame(report), grids
+
+
 def discover_runs(bids_root: Path, subjects: list[str] | None) -> list[Path]:
     paths = sorted(bids_root.glob(f"sub-*/eeg/sub-*_task-{TASK}_run-*_eeg.vhdr"))
     if subjects:
@@ -410,7 +453,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--bids-root", type=Path, default=DEFAULT_BIDS_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
-    parser.add_argument("--stage", choices=("benchmark", "apply"), default="benchmark")
+    parser.add_argument(
+        "--stage", choices=("benchmark", "apply", "verify"), default="benchmark"
+    )
     parser.add_argument("--subjects", nargs="*", default=None)
     parser.add_argument("--limit", type=int, default=None, help="benchmark: runs to sample")
     parser.add_argument(
@@ -440,6 +485,27 @@ def main(argv: list[str] | None = None) -> None:
 
     runs = discover_runs(args.bids_root, args.subjects)
     args.report_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.stage == "verify":
+        # One run per participant keeps the participant the unit of inference.
+        by_subject: dict[str, Path] = {}
+        for vhdr in runs:
+            by_subject.setdefault(vhdr.parent.parent.name, vhdr)
+        sample = list(by_subject.values())
+        print(f"Verifying on {len(sample)} runs, one per participant")
+        report, grids = verify_cohort(args.bids_root, args.output_root, settings, sample)
+        report.to_csv(args.report_dir / "verification.tsv", sep="\t", index=False,
+                      float_format="%.6g")
+        print(report.to_string(index=False))
+        np.savez_compressed(
+            args.report_dir / "verification_spectra.npz",
+            freqs=grids["original"].freqs,
+            original=grids["original"].subject_psd,
+            cleaned=grids["cleaned"].subject_psd,
+            recordings=np.array([p.stem for p in sample]),
+        )
+        print(f"  wrote {args.report_dir/'verification.tsv'}")
+        return
 
     if args.stage == "benchmark":
         # One run per participant unless told otherwise, so the sample spans the cohort.
