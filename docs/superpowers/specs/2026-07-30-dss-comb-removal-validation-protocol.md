@@ -162,6 +162,48 @@ adjust the criteria. If preservation fails cohort-wide, the finding is that the 
 the dominant neural topography overlap too much for linear spatial separation in this
 recording setup, which is an answer, not a failure to report.
 
+## Amendment 2 (2026-07-30): development and confirmation participants
+
+The five participants used in the pilot influenced the estimator itself -- excess
+covariance replaced ratio ranking, and per-line gains replaced pooled gains, after looking
+at where sub-0008 failed. They are development data from this point on and cannot serve as
+confirmation, under leave-one-participant-out or any other resampling. Cross-validation
+does not undo a design choice made after seeing the data.
+
+- **Development (burned):** sub-0000, sub-0004, sub-0008, sub-0012, sub-0015.
+  All estimator iteration, threshold sanity checks and debugging happen here.
+- **Confirmation (untouched):** sub-0001, sub-0003, sub-0005, sub-0006, sub-0007,
+  sub-0009, sub-0010, sub-0011, sub-0013, sub-0014. 60 runs.
+
+Confirmation runs once, on a frozen estimator, and its result is reported whatever it is.
+If the estimator is changed after seeing confirmation data, the confirmation set is spent
+and the claim reverts to development-only.
+
+## Amendment 3 (2026-07-30): corrections to the pilot's claims and probe handling
+
+**Poor transfer is not by itself proof of nonstationarity.** The pilot showed a subspace
+fitted on two contiguous blocks failing on the third. Spatial overlap with the dominant
+neural topography, estimator variance at 16 fitting windows, and frequency-specific
+topographies remain live contributors. What the pilot does isolate is a time-ordering
+effect: interleaved and contiguous splits at matched sample size differ sharply, which
+rules out sample size alone as the explanation. The three estimator variants tried share
+covariances, folds and data; their agreement is correlated, not independent confirmation.
+
+**Probes must be injected before the estimator is fitted.** The pilot computed retention
+as the projection applied to a topography, with the projection fitted on probe-free data.
+That cannot see signal-dependent overfitting: an estimator that partly fits the probe will
+remove it more aggressively than that calculation predicts. Probes are injected into the
+recording first, the estimator is fitted on the injected data, and retention is recovered
+by differencing against the same pipeline run without the probe -- the structure
+`remove_line_comb.py` already uses via `recover_probe`.
+
+**Next experiment, on development participants only.** Pooled spatial basis fitted per run,
+with time-adaptive per-line gains estimated causally from the preceding window and applied
+to the next. A fully time-local spatial basis is not attempted first: 64 dimensions cannot
+be identified from a single 20 s window, whereas a per-line gain is a scalar ratio. The
+basis becomes adaptive only if gain adaptation fails and basis stability is demonstrated
+separately.
+
 ## Probe bank
 
 One topography is not enough -- a single choice may happen to be favourable or
