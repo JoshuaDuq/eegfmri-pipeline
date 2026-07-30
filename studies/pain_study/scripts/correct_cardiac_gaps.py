@@ -146,6 +146,9 @@ def quality_row(recovery, crosscheck: dict | None) -> dict:
     from dataclasses import asdict
 
     row = asdict(recovery.quality)
+    # BeatQuality's own `status` describes the beat set, not the run's outcome. Left under
+    # that name it overwrites the run status when the row is merged into the report.
+    row["beat_status"] = row.pop("status")
     if crosscheck is None:
         crosscheck = {"status": "not_run"}
     row["crosscheck_status"] = crosscheck.get("status", "not_run")

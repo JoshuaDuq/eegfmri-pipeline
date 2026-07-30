@@ -141,10 +141,27 @@ def test_quality_row_carries_every_beat_quality_field():
         },
     )
 
+    # `status` is deliberately republished as `beat_status`, so it cannot overwrite the
+    # run-level status when the row is merged into the report.
+    renamed = {"status": "beat_status"}
     for field in fields(BeatQuality):
-        assert field.name in row, f"BeatQuality.{field.name} missing from the report row"
+        name = renamed.get(field.name, field.name)
+        assert name in row, f"BeatQuality.{field.name} missing from the report row"
     assert row["crosscheck_agreement_fraction"] == 0.9
     assert row["crosscheck_status"] == "ok"
+
+
+def test_quality_row_does_not_clobber_the_run_level_status():
+    """BeatQuality carries its own `status`, which is not the run's outcome.
+
+    Merging the row straight into the report overwrote the run status with the dataclass's
+    own: a cohort pass reported every one of 103 recordings as `ok`, including the 23 with
+    no gaps at all.
+    """
+    row = correct_cardiac_gaps.quality_row(_recovery(0, gap_seconds_before=0.0), crosscheck=None)
+
+    assert "status" not in row
+    assert row["beat_status"] == "ok"
 
 
 def test_quality_row_survives_an_unavailable_crosscheck():

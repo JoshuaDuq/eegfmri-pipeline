@@ -383,10 +383,15 @@ every row above.
 - **sub-0012 needs individual attention.** Under the wide window its implied rate rose to
   85–91 bpm against a measured 67.4 while coverage collapsed, which is the detector locking
   onto wrong intervals rather than a window problem.
-- **Naming defect in the audit exports.** In all four batch folders sub-0003's
-  `11h30.23.962` recording is labelled `run1`, duplicating the real `run1` at
-  `11h11.33.962`; there is no `run3`. Join these folders on the acquisition timestamp, not
-  the run label, until it is fixed.
+- **Naming defect in the audit exports — fixed 2026-07-30.** sub-0003's `11h30.23.962`
+  recording was labelled `run1` in every batch folder, duplicating the real `run1` at
+  `11h11.33.962`. It is run 3, acquired with the run 1 stimulus sequence, and the processed
+  1 kHz tree and PsychoPy data already named it `run3`. The five batch folders were
+  relabelled to `run3` and their `.vhdr`/`.vmrk` self-references rewritten, so joining on
+  the run label is now correct. The raw acquisition folders (`original_trimmed_5khz`,
+  `original_untrimmed_5khz`) deliberately keep the `run1` name, because
+  `native_eeg_fmri_recording_overrides.tsv` and `study1_figure_config.yaml` key on it and
+  already map that recording to run 3.
 
 ### Where the data is
 
