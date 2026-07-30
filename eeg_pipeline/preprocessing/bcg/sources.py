@@ -9,10 +9,14 @@ measured per run rather than assumed.
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+CHANNEL_PATTERN = re.compile(r"^Ch(\d+)=([^,]*),([^,]*),([^,]*)(?:,(.*))?$", re.MULTILINE)
+SIDECAR_SUFFIXES = (".vhdr", ".vmrk")
 
 RUN_PATTERN = re.compile(r"_run(?P<run>\d+)_(?P<subject>sub\d+)_")
 BASELINE_PATTERN = re.compile(r"^BaselineEEG_(?P<subject>sub\d+)_")
@@ -106,3 +110,65 @@ def validate_pair(pair: RunPair, ecg_channel: str = "ECG") -> PairValidation:
         ecg_max_abs_diff_uv=difference,
         status=status,
     )
+
+
+def channel_scaling(vhdr_path: Path | str) -> tuple[list[str], np.ndarray]:
+    """Channel names and their binary resolution, in the header's own unit.
+
+    Analyzer writes these exports with an empty resolution field, which BrainVision reads
+    as 1.0 -- the samples are already microvolts. Parsing it rather than assuming keeps the
+    writer correct if a future export carries an explicit scale.
+    """
+    path = Path(vhdr_path)
+    text = path.read_text(encoding="utf-8", errors="replace")
+
+    binary_format = re.search(r"BinaryFormat=(\S+)", text)
+    orientation = re.search(r"DataOrientation=(\S+)", text)
+    if binary_format is None or binary_format.group(1) != "IEEE_FLOAT_32":
+        raise ValueError(f"{path.name}: expected IEEE_FLOAT_32 binary data.")
+    if orientation is None or orientation.group(1) != "VECTORIZED":
+        raise ValueError(
+            f"{path.name}: expected VECTORIZED data orientation, "
+            f"got {orientation.group(1) if orientation else 'none'}."
+        )
+
+    names, resolutions = [], []
+    for match in CHANNEL_PATTERN.finditer(text):
+        names.append(match.group(2))
+        scale = match.group(4).strip()
+        resolutions.append(float(scale) if scale else 1.0)
+    if not names:
+        raise ValueError(f"{path.name}: no channel definitions found.")
+    return names, np.asarray(resolutions, dtype=float)
+
+
+def write_corrected_recording(
+    source_vhdr: Path | str, destination_dir: Path, data_uv: np.ndarray
+) -> Path:
+    """Write `data_uv` as a new recording, reusing the source header and marker file.
+
+    Only the ``.eeg`` binary is rewritten; ``.vhdr`` and ``.vmrk`` are copied byte for
+    byte, so channel metadata and every marker survive unchanged. Rebuilding the file
+    through `mne.export.export_raw` instead would drop the stimulus markers the study
+    depends on, and would rewrite the header in a different layout.
+    """
+    source = Path(source_vhdr)
+    names, resolutions = channel_scaling(source)
+
+    array = np.asarray(data_uv, dtype=float)
+    if array.shape[0] != len(names):
+        raise ValueError(
+            f"{source.name}: header describes {len(names)} channels, got {array.shape[0]}."
+        )
+
+    destination_dir = Path(destination_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for suffix in SIDECAR_SUFFIXES:
+        companion = source.with_suffix(suffix)
+        if companion.exists():
+            shutil.copy2(companion, destination_dir / companion.name)
+
+    # VECTORIZED is channel-major, so the array is written without transposing.
+    scaled = array / resolutions[:, None]
+    scaled.astype("<f4").tofile(destination_dir / source.with_suffix(".eeg").name)
+    return destination_dir / source.name

@@ -18,7 +18,11 @@ import numpy as np
 from eeg_pipeline.preprocessing.bcg import correct as bcg_correct
 from eeg_pipeline.preprocessing.bcg import detect as bcg_detect
 from eeg_pipeline.preprocessing.bcg import metrics as bcg_metrics
-from eeg_pipeline.preprocessing.bcg.sources import discover_run_pairs, validate_pair
+from eeg_pipeline.preprocessing.bcg.sources import (
+    discover_run_pairs,
+    validate_pair,
+    write_corrected_recording,
+)
 
 DEFAULT_UNCORRECTED = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/source_data/"
@@ -292,15 +296,16 @@ def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
     gaps = [(g.start_s, g.end_s) for g in bcg_detect.find_gaps(analyzer)]
     merged = substitute_gap_stretches(cor, repaired, gaps, sfreq, settings.pad_seconds)
 
-    info = mne.create_info(eeg_names, sfreq, ch_types="eeg")
-    out_raw = mne.io.RawArray(merged * 1e-6, info, verbose="ERROR")
-    destination = output_root / pair.corrected_vhdr.name
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    mne.export.export_raw(destination, out_raw, fmt="brainvision", overwrite=True, verbose="ERROR")
+    # Write every channel the header describes, with the EEG rows replaced and the rest --
+    # ECG above all -- carried through from Analyzer's own output untouched.
+    full = corrected.get_data() * 1e6
+    eeg_rows = [corrected.ch_names.index(name) for name in eeg_names]
+    full[eeg_rows] = merged
+    destination = write_corrected_recording(pair.corrected_vhdr, output_root, full)
 
     check = mne.io.read_raw_brainvision(destination, preload=True, verbose="ERROR")
-    deviation = float(np.max(np.abs(check.get_data() * 1e6 - merged)))
-    scale = float(np.max(np.abs(merged)))
+    deviation = float(np.max(np.abs(check.get_data() * 1e6 - full)))
+    scale = float(np.max(np.abs(full)))
     if deviation > ROUNDTRIP_RELATIVE_TOLERANCE * scale:
         raise RuntimeError(
             f"{destination.name}: written data differs by {deviation:.3e} uV, "
@@ -318,6 +323,7 @@ def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
         "gap_seconds_after": recovery.quality.gap_seconds_after,
         "gap_fraction_replaced": sum(e - s for s, e in gaps) / (unc.shape[1] / sfreq),
         "roundtrip_max_deviation_uv": deviation,
+        "markers_preserved": int(len(check.annotations)),
         "output": str(destination),
     }
 
