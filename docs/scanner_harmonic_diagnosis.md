@@ -6,6 +6,8 @@
 **Control:** gradient-free EEG at the head of all 104 source recordings.
 **Reproduce:** `studies/pain_study/scripts/diagnose_scanner_harmonics.py`, then
 `studies/pain_study/scripts/plot_scanner_harmonics.py`.
+**Removal:** [`scanner_harmonic_removal.md`](scanner_harmonic_removal.md) acts on what this
+document measures.
 
 ---
 

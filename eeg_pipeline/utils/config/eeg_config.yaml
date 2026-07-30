@@ -278,6 +278,38 @@ preprocessing:
   h_freq: 100
   notch_freq: 60
   line_freq: 60
+
+  # STUDY-SPECIFIC. Removal of the scanner room's line comb, applied to the BIDS runs by
+  # studies/pain_study/scripts/remove_line_comb.py before this pipeline reads them. It is
+  # not a stage of this pipeline: MNE-BIDS-Pipeline's notch is FIR, and fifty narrow FIR
+  # notches would take the surrounding band with them. The settings live here so the one
+  # script that performs the removal is configured like everything else.
+  #
+  # What is being removed is documented in docs/scanner_harmonic_diagnosis.md: a comb at
+  # multiples of about 1.2 Hz that is mains-synchronous, independent of the imaging
+  # gradients, and present before the scanner starts, plus four lines that drift on their
+  # own. Every run gets its own frequency estimate; the values below are only where the
+  # search starts. They describe one scanner room and mean nothing for another site.
+  line_comb_removal:
+    enabled: false  # the cleaned dataset is written to its own BIDS root; point paths.bids_root at it to use it
+    nominal_fundamental_hz: 1.2      # search seed only; each run is measured
+    harmonic_range: [24, 79]         # 28.8-94.8 Hz, the span detected across the cohort
+    isolated_hz: [47.0362, 57.2247, 58.1807, 94.0748]  # not on the comb, and they drift
+    search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
+    isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
+    min_prominence_db: 1.0           # a harmonic weaker than this does not join the fit
+    filter_length: "20s"             # 4 s windows cannot resolve a 1.2 Hz spacing and fail the gate
+    mt_bandwidth: 0.6                # +/-0.3 Hz, half the distance to the neighbouring line
+    # How much spectrum each line costs. spectrum_fit subtracts a sinusoid at every bin
+    # inside this window, so it, not mt_bandwidth, sets the size of the hole. The width is
+    # freq/ratio because a mains-locked comb wanders in proportion to harmonic number.
+    # MNE's own default is freq/200, which would empty a quarter of 28-95 Hz; freq/450 is
+    # the narrowest setting measured to push every line below background, at 12% of the
+    # band. Raising the ratio further leaves the high harmonics standing.
+    notch_width_ratio: 450
+    notch_width_min_hz: 0.05         # one bin at the 20 s working resolution
+    low_hz: 3.0
+    high_hz: 95.0
   # Worker count for PyPREP's loop over recordings and for MNE-BIDS-Pipeline's loop over
   # subjects and runs, including the autoreject threshold search that ica.reject and
   # epochs.reject both request. It selects how the work is executed, not what is
@@ -634,6 +666,20 @@ report:
     # time" section, in seconds. Short enough to localise a movement to a few seconds,
     # long enough that a single window's RMS is a stable estimate.
     continuity_window_seconds: 1.0
+  analysis:
+    # Frequency interval used for the robust log-log aperiodic fit. Keep its upper edge
+    # below line noise so the notch and its skirts cannot determine the slope.
+    aperiodic_fit_range_hz: [2.0, 45.0]
+    # Post-stimulus interval used for split-half evoked reliability.
+    response_window_s: [0.0, 1.0]
+    # Posterior rhythm band used as signal-preservation evidence.
+    alpha_band_hz: [7.0, 14.0]
+  acquisition:
+    # Exact annotation descriptions written by the scanner and Analyzer acquisition.
+    volume_marker_description: "Volume/V  1"
+    pulse_marker_description: "Pulse Artifact/R"
+    # Electrode names eligible for the posterior-rhythm measurement.
+    posterior_channel_pattern: '^(P[0-9z]|PO[0-9z]|O[0-9z]|Oz|POz|Pz)'
 
 # 4.2a ICA Component Time-Frequency Analysis
 component_time_frequency:
