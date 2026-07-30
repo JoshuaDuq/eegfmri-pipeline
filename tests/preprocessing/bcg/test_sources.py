@@ -106,6 +106,11 @@ def _write_vectorized_brainvision(root: Path, stem: str, data_uv, sfreq=1000.0):
         "[Channel Infos]",
     ]
     header += [f"Ch{i + 1}={name},,,µV" for i, name in enumerate(names)]
+    # Analyzer also writes a [Coordinates] section whose lines start `Ch<N>=` but carry
+    # three comma-separated numbers rather than four fields. A channel pattern that does
+    # not exclude newlines runs one of these into the next and parses "-72\nCh2=1".
+    header += ["[Coordinates]"]
+    header += [f"Ch{i + 1}=1,-90,-72" for i in range(len(names))]
     (root / f"{stem}.vhdr").write_text("\n".join(header) + "\n", encoding="utf-8")
     (root / f"{stem}.vmrk").write_text(
         "Brain Vision Data Exchange Marker File, Version 1.0\n"

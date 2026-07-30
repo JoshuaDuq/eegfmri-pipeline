@@ -15,7 +15,10 @@ from pathlib import Path
 
 import numpy as np
 
-CHANNEL_PATTERN = re.compile(r"^Ch(\d+)=([^,]*),([^,]*),([^,]*)(?:,(.*))?$", re.MULTILINE)
+# Channel definitions carry four comma-separated fields: name, reference, resolution, unit.
+# The classes exclude newlines and the trailing comma is required, so the three-field lines
+# of the [Coordinates] section cannot match -- and cannot be run together across lines.
+CHANNEL_PATTERN = re.compile(r"^Ch(\d+)=([^,\n]*),([^,\n]*),([^,\n]*),", re.MULTILINE)
 SIDECAR_SUFFIXES = (".vhdr", ".vmrk")
 
 RUN_PATTERN = re.compile(r"_run(?P<run>\d+)_(?P<subject>sub\d+)_")
