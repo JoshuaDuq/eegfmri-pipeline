@@ -121,6 +121,40 @@ def test_scoring_data_excludes_non_eeg_channels():
     assert data.shape[0] == 2
 
 
+def test_quality_row_carries_every_beat_quality_field():
+    """The spec's BeatQuality table is a report, not an internal structure.
+
+    Every field is a measurement the cohort report is supposed to publish, so the row must
+    not quietly drop any of them as the dataclass grows.
+    """
+    from dataclasses import fields
+
+    from eeg_pipeline.preprocessing.bcg.detect import BeatQuality
+
+    row = correct_cardiac_gaps.quality_row(
+        _recovery(30, gap_seconds_before=57.3),
+        crosscheck={
+            "status": "ok",
+            "agreement_fraction": 0.9,
+            "crosscheck_beats": 500.0,
+            "crosscheck_lock_ratio": 3.2,
+        },
+    )
+
+    for field in fields(BeatQuality):
+        assert field.name in row, f"BeatQuality.{field.name} missing from the report row"
+    assert row["crosscheck_agreement_fraction"] == 0.9
+    assert row["crosscheck_status"] == "ok"
+
+
+def test_quality_row_survives_an_unavailable_crosscheck():
+    """A cross-check that could not run is a missing measurement, not a missing row."""
+    row = correct_cardiac_gaps.quality_row(_recovery(30, gap_seconds_before=57.3), crosscheck=None)
+
+    assert row["crosscheck_status"] == "not_run"
+    assert row["recovered_beats"] == 30
+
+
 def test_provenance_round_trips(tmp_path):
     written = tmp_path / "run1_sub0009_corrected.vhdr"
     written.write_text("")

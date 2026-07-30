@@ -135,6 +135,26 @@ def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
     return "ok"
 
 
+def quality_row(recovery, crosscheck: dict | None) -> dict:
+    """Every per-run recovery measurement, flattened for the cohort report.
+
+    The fields are taken from `BeatQuality` by reflection rather than listed, so a field
+    added to the dataclass reaches the report instead of being silently dropped. None of
+    them is a verdict: the lock ratio of Analyzer's *own* beats is what separates a run
+    whose ECG cannot support detection from one where recovery simply failed.
+    """
+    from dataclasses import asdict
+
+    row = asdict(recovery.quality)
+    if crosscheck is None:
+        crosscheck = {"status": "not_run"}
+    row["crosscheck_status"] = crosscheck.get("status", "not_run")
+    row["crosscheck_agreement_fraction"] = crosscheck.get("agreement_fraction", float("nan"))
+    row["crosscheck_beats"] = crosscheck.get("crosscheck_beats", float("nan"))
+    row["crosscheck_lock_ratio"] = crosscheck.get("crosscheck_lock_ratio", float("nan"))
+    return row
+
+
 PROVENANCE_SUFFIX = ".gapfill.json"
 
 
@@ -262,6 +282,48 @@ def benchmark_run(pair, settings: BenchmarkSettings) -> list[dict]:
             }
         )
     return rows
+
+
+def report_run(pair, *, crosscheck: bool = True) -> dict:
+    """Measure one recording's gaps and recovery quality without correcting anything.
+
+    This is the cohort's inventory: how much of each run Analyzer left unmarked, how much
+    recovery closes, and whether the recovered beats sit on the QRS. It reads only the ECG
+    channel and the markers, so it runs over all 104 recordings cheaply.
+    """
+    import mne
+
+    mne.set_log_level("ERROR")
+    raw = mne.io.read_raw_brainvision(pair.uncorrected_vhdr, preload=True, verbose="ERROR")
+    sfreq = raw.info["sfreq"]
+    duration = raw.n_times / sfreq
+
+    if "ECG" not in raw.ch_names:
+        return {"subject": pair.subject, "run": pair.run, "status": "missing_ecg"}
+
+    ecg = raw.copy().pick(["ECG"]).get_data()[0] * 1e6
+    analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
+    recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
+
+    agreement = None
+    if crosscheck:
+        agreement = bcg_detect.crosscheck_agreement(recovery.combined_beats, ecg, sfreq)
+
+    gaps = bcg_detect.gap_summary(analyzer, duration)
+    row = {
+        "subject": pair.subject,
+        "run": pair.run,
+        "status": recovery_status(recovery),
+        "duration_s": duration,
+        "analyzer_beats": int(analyzer.size),
+        "combined_beats": int(recovery.combined_beats.size),
+        "n_gaps": gaps["n_gaps"],
+        "gap_fraction": gaps["gap_fraction"],
+        "max_rr_s": gaps["max_rr_s"],
+        "implied_missing_beats": gaps["implied_missing_beats"],
+    }
+    row.update(quality_row(recovery, agreement))
+    return row
 
 
 def _write_tsv(rows: list[dict], destination: Path) -> None:
@@ -426,7 +488,7 @@ def verify_run(pair, output_root: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["benchmark", "apply", "verify"])
+    parser.add_argument("command", choices=["report", "benchmark", "apply", "verify"])
     parser.add_argument("--uncorrected-root", type=Path, default=DEFAULT_UNCORRECTED)
     parser.add_argument("--corrected-root", type=Path, default=DEFAULT_CORRECTED)
     parser.add_argument(
@@ -465,6 +527,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     default_names = {
+        "report": "recovery_report.tsv",
         "benchmark": "benchmark.tsv",
         "apply": "apply.tsv",
         "verify": "verify.tsv",
@@ -475,7 +538,9 @@ def main(argv: list[str] | None = None) -> None:
     rows: list[dict] = []
     for pair in pairs:
         try:
-            if args.command == "benchmark":
+            if args.command == "report":
+                rows.append(report_run(pair))
+            elif args.command == "benchmark":
                 rows.extend(benchmark_run(pair, BenchmarkSettings()))
             elif args.command == "apply":
                 rows.append(apply_run(pair, args.output_root, apply_settings))
