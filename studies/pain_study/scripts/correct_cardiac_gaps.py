@@ -269,10 +269,11 @@ def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
     ecg = uncorrected.copy().pick(["ECG"]).get_data()[0] * 1e6
     analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
     recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
-    # `apply` corrects whatever the matcher found, so its floor is 1 beat rather than the
-    # 8 the referee needs to score a run; the status still separates "nothing to correct"
-    # from "gaps the matcher could not fill".
-    status = recovery_status(recovery, minimum=1)
+    # `apply` corrects whatever the matcher found rather than needing the 8 beats the
+    # referee wants to score a run -- but OBS cannot form a basis from fewer epochs than
+    # components, so the floor follows the method actually being applied.
+    minimum = settings.n_components + 1 if settings.method == "obs" else 1
+    status = recovery_status(recovery, minimum=minimum)
     if status != "ok":
         return {
             "subject": pair.subject,
