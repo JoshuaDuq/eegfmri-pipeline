@@ -47,6 +47,61 @@ def test_sham_retention_is_higher_than_real_when_artifact_present():
     assert rows[0]["sham_band_retained"] > rows[0]["real_band_retained"]
 
 
+def _recovery(recovered, gap_seconds_before, status="ok"):
+    """A BeatRecovery carrying only the fields the status decision reads."""
+    from eeg_pipeline.preprocessing.bcg.detect import BeatQuality, BeatRecovery
+
+    nan = float("nan")
+    quality = BeatQuality(
+        analyzer_lock_ratio=nan,
+        recovered_lock_ratio=nan,
+        combined_lock_ratio=nan,
+        rr_median_s=nan,
+        rr_min_s=nan,
+        rr_max_s=nan,
+        implied_bpm=nan,
+        refractory_violations=0,
+        recovered_beats=recovered,
+        gap_seconds_before=gap_seconds_before,
+        gap_seconds_after=nan,
+        status=status,
+    )
+    return BeatRecovery(
+        analyzer_beats=np.zeros(500),
+        recovered_beats=np.zeros(recovered),
+        combined_beats=np.zeros(500 + recovered),
+        quality=quality,
+    )
+
+
+def test_a_run_without_gaps_is_not_reported_as_a_recovery_failure():
+    """Nothing to correct is a different outcome from failing to correct.
+
+    Most skipped runs on this cohort are gap-free, which the cohort report must not read
+    as detector failure.
+    """
+    status = correct_cardiac_gaps.recovery_status(_recovery(0, gap_seconds_before=0.0))
+
+    assert status == "no_gaps"
+
+
+def test_gaps_that_yield_too_few_beats_stay_a_failure():
+    status = correct_cardiac_gaps.recovery_status(_recovery(3, gap_seconds_before=12.3))
+
+    assert status == "too_few_recovered (3)"
+
+
+def test_enough_recovered_beats_is_ok():
+    assert correct_cardiac_gaps.recovery_status(_recovery(30, gap_seconds_before=57.3)) == "ok"
+
+
+def test_insufficient_seed_beats_is_reported_as_itself():
+    """A run Analyzer barely marked is an ECG problem, not a gap-filling outcome."""
+    recovery = _recovery(0, gap_seconds_before=0.0, status="insufficient_seed_beats")
+
+    assert correct_cardiac_gaps.recovery_status(recovery) == "insufficient_seed_beats"
+
+
 def test_apply_only_changes_gap_stretches(tmp_path):
     """Everything outside a gap must survive byte-for-byte from Analyzer's output."""
     rng = np.random.default_rng(2)

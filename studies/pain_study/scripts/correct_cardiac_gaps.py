@@ -110,6 +110,27 @@ def benchmark_arrays(
     return rows
 
 
+MINIMUM_SCORABLE_BEATS = 8
+
+
+def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
+    """Why a run is or is not correctable, as a status rather than a bare count.
+
+    A run Analyzer marked without leaving gaps has nothing to correct, which is a different
+    outcome from one whose gaps the matcher could not fill. Most skipped runs on this
+    cohort are the former, and a report that calls both `too_few_recovered` reads a healthy
+    run as a detector failure.
+    """
+    if recovery.quality.status != "ok":
+        return recovery.quality.status
+    recovered = int(recovery.recovered_beats.size)
+    if recovery.quality.gap_seconds_before <= 0.0:
+        return "no_gaps"
+    if recovered < minimum:
+        return f"too_few_recovered ({recovered})"
+    return "ok"
+
+
 def _load_pair(pair):
     import mne
 
@@ -133,12 +154,16 @@ def benchmark_run(pair, settings: BenchmarkSettings) -> list[dict]:
 
     analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
     recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
-    if recovery.recovered_beats.size < 8:
+    status = recovery_status(recovery)
+    if status != "ok":
         return [
             {
                 "subject": pair.subject,
                 "run": pair.run,
-                "status": f"too_few_recovered ({recovery.recovered_beats.size})",
+                "status": status,
+                "analyzer_beats": int(analyzer.size),
+                "recovered_beats": int(recovery.recovered_beats.size),
+                "gap_seconds_before": recovery.quality.gap_seconds_before,
             }
         ]
 
@@ -244,11 +269,17 @@ def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
     ecg = uncorrected.copy().pick(["ECG"]).get_data()[0] * 1e6
     analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
     recovery = bcg_detect.recover_beats(ecg, analyzer, sfreq)
-    if recovery.recovered_beats.size == 0:
+    # `apply` corrects whatever the matcher found, so its floor is 1 beat rather than the
+    # 8 the referee needs to score a run; the status still separates "nothing to correct"
+    # from "gaps the matcher could not fill".
+    status = recovery_status(recovery, minimum=1)
+    if status != "ok":
         return {
             "subject": pair.subject,
             "run": pair.run,
-            "status": "no_recovered_beats",
+            "status": status,
+            "analyzer_beats": int(analyzer.size),
+            "recovered_beats": int(recovery.recovered_beats.size),
             "gap_seconds_before": recovery.quality.gap_seconds_before,
         }
 
@@ -345,9 +376,28 @@ def main(argv: list[str] | None = None) -> None:
 
     pairs = discover_run_pairs(args.uncorrected_root, args.corrected_root)
     if args.subjects:
-        pairs = [p for p in pairs if p.subject in set(args.subjects)]
+        requested = set(args.subjects)
+        pairs = [p for p in pairs if p.subject in requested]
+        missing = sorted(requested - {p.subject for p in pairs})
+        if missing:
+            print(f"warning: no paired recordings for {', '.join(missing)}", flush=True)
     if args.limit:
+        # Pairs sort by subject, so a limit smaller than one subject's run count silently
+        # drops every later subject. Say so rather than letting the TSV imply coverage.
+        dropped = {p.subject for p in pairs[args.limit :]} - {
+            p.subject for p in pairs[: args.limit]
+        }
         pairs = pairs[: args.limit]
+        if dropped:
+            print(
+                f"warning: --limit {args.limit} excludes {', '.join(sorted(dropped))} entirely",
+                flush=True,
+            )
+    print(
+        f"selected {len(pairs)} recordings across "
+        f"{len(sorted({p.subject for p in pairs}))} subjects",
+        flush=True,
+    )
 
     default_names = {
         "benchmark": "benchmark.tsv",
