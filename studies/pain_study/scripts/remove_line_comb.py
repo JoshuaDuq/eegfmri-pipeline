@@ -415,26 +415,27 @@ def verify_cohort(bids_root: Path, cleaned_root: Path, settings: RemovalSettings
             spectra[label].append(10 ** (spectrum_db / 10.0))
         rows.append(vhdr.stem)
 
-    grids = {
-        label: ds.build_grid(freqs, np.stack(values)) for label, values in spectra.items()
-    }
+    grids = {label: ds.build_grid(freqs, np.stack(values)) for label, values in spectra.items()}
     report = []
     for label, grid in grids.items():
         try:
             lines = ds.detect_cohort_lines(grid)
         except RuntimeError:
-            report.append({"stage": label, "n_lines": 0, "n_comb_lines": 0,
-                           "max_prominence_db": float("nan")})
+            report.append(
+                {"stage": label, "n_lines": 0, "n_comb_lines": 0, "max_prominence_db": float("nan")}
+            )
             continue
         classified = ds.classify_lines(lines, ds.comb_structure(lines))
-        report.append({
-            "stage": label,
-            "n_lines": int(len(classified)),
-            "n_comb_lines": int(classified.kind.isin(("comb", "comb_wide")).sum()),
-            "n_isolated": int((classified.kind == "isolated").sum()),
-            "max_prominence_db": float(classified.cohort_median_prominence_db.max()),
-            "median_prominence_db": float(classified.cohort_median_prominence_db.median()),
-        })
+        report.append(
+            {
+                "stage": label,
+                "n_lines": int(len(classified)),
+                "n_comb_lines": int(classified.kind.isin(("comb", "comb_wide")).sum()),
+                "n_isolated": int((classified.kind == "isolated").sum()),
+                "max_prominence_db": float(classified.cohort_median_prominence_db.max()),
+                "median_prominence_db": float(classified.cohort_median_prominence_db.median()),
+            }
+        )
     return pd.DataFrame(report), grids
 
 
@@ -453,9 +454,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--bids-root", type=Path, default=DEFAULT_BIDS_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
-    parser.add_argument(
-        "--stage", choices=("benchmark", "apply", "verify"), default="benchmark"
-    )
+    parser.add_argument("--stage", choices=("benchmark", "apply", "verify"), default="benchmark")
     parser.add_argument("--subjects", nargs="*", default=None)
     parser.add_argument("--limit", type=int, default=None, help="benchmark: runs to sample")
     parser.add_argument(
@@ -494,8 +493,9 @@ def main(argv: list[str] | None = None) -> None:
         sample = list(by_subject.values())
         print(f"Verifying on {len(sample)} runs, one per participant")
         report, grids = verify_cohort(args.bids_root, args.output_root, settings, sample)
-        report.to_csv(args.report_dir / "verification.tsv", sep="\t", index=False,
-                      float_format="%.6g")
+        report.to_csv(
+            args.report_dir / "verification.tsv", sep="\t", index=False, float_format="%.6g"
+        )
         print(report.to_string(index=False))
         np.savez_compressed(
             args.report_dir / "verification_spectra.npz",
