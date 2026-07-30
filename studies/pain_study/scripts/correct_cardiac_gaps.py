@@ -135,6 +135,40 @@ def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
     return "ok"
 
 
+PROVENANCE_SUFFIX = ".gapfill.json"
+
+
+def _provenance_path(written_vhdr: Path) -> Path:
+    return Path(written_vhdr).with_suffix(PROVENANCE_SUFFIX)
+
+
+def write_provenance(written_vhdr: Path, record: dict) -> Path:
+    """Record how a written recording was produced, beside the recording itself."""
+    import datetime
+
+    payload = dict(record)
+    payload["written_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    destination = _provenance_path(written_vhdr)
+    destination.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return destination
+
+
+def read_provenance(written_vhdr: Path) -> dict | None:
+    """What produced a written recording, or None when it carries no record.
+
+    `verify` scores whatever file it finds at the output path, which after a failed
+    `apply` is whatever an earlier run left there. Without this the two are
+    indistinguishable, and stale results get reported as current.
+    """
+    path = _provenance_path(written_vhdr)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def scoring_data(raw) -> tuple[np.ndarray, list[str]]:
     """EEG channels in microvolts, and their names.
 
@@ -324,7 +358,7 @@ def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
             f"above the {ROUNDTRIP_RELATIVE_TOLERANCE * scale:.3e} uV round-trip tolerance."
         )
 
-    return {
+    row = {
         "subject": pair.subject,
         "run": pair.run,
         "status": "ok",
@@ -338,6 +372,8 @@ def apply_run(pair, output_root: Path, settings: ApplySettings) -> dict:
         "markers_preserved": int(len(check.annotations)),
         "output": str(destination),
     }
+    write_provenance(destination, {**row, "source": str(pair.uncorrected_vhdr)})
+    return row
 
 
 def verify_run(pair, output_root: Path) -> dict:
@@ -352,6 +388,11 @@ def verify_run(pair, output_root: Path) -> dict:
     destination = output_root / pair.corrected_vhdr.name
     if not destination.exists():
         return {"subject": pair.subject, "run": pair.run, "status": "not_written"}
+
+    provenance = read_provenance(destination)
+    if provenance is None:
+        # Left by an earlier run, so it may not reflect the current code or settings.
+        return {"subject": pair.subject, "run": pair.run, "status": "no_provenance"}
 
     written = mne.io.read_raw_brainvision(destination, preload=True, verbose="ERROR")
     uncorrected, _ = _load_pair(pair)
@@ -372,6 +413,9 @@ def verify_run(pair, output_root: Path) -> dict:
         "status": "ok",
         "channels_scored": len(scored_names),
         "markers_present": int(len(written.annotations)),
+        "applied_method": provenance.get("method"),
+        "applied_n_components": provenance.get("n_components"),
+        "applied_utc": provenance.get("written_utc"),
         "recovered_removal_max": result.max_value,
         "recovered_null_max": result.null_max,
         "recovered_channels_above_null": result.channels_above_null,

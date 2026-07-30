@@ -121,6 +121,32 @@ def test_scoring_data_excludes_non_eeg_channels():
     assert data.shape[0] == 2
 
 
+def test_provenance_round_trips(tmp_path):
+    written = tmp_path / "run1_sub0009_corrected.vhdr"
+    written.write_text("")
+
+    correct_cardiac_gaps.write_provenance(
+        written, {"method": "obs", "n_components": 4, "recovered_beats": 44}
+    )
+    back = correct_cardiac_gaps.read_provenance(written)
+
+    assert back["method"] == "obs"
+    assert back["recovered_beats"] == 44
+    assert "written_utc" in back
+
+
+def test_missing_provenance_is_reported_not_assumed(tmp_path):
+    """A file with no provenance may predate the current code, so it must not be scored.
+
+    This bit for real: after `apply` failed on every run, `verify` re-scored the files a
+    previous run had left behind and reported them as current.
+    """
+    written = tmp_path / "run1_sub0009_corrected.vhdr"
+    written.write_text("")
+
+    assert correct_cardiac_gaps.read_provenance(written) is None
+
+
 def test_apply_only_changes_gap_stretches(tmp_path):
     """Everything outside a gap must survive byte-for-byte from Analyzer's output."""
     rng = np.random.default_rng(2)
