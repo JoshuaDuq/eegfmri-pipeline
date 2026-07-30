@@ -135,6 +135,18 @@ def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
     return "ok"
 
 
+def scoring_data(raw) -> tuple[np.ndarray, list[str]]:
+    """EEG channels in microvolts, and their names.
+
+    The referee must never see the ECG channel. It carries the cardiac signal itself, so
+    its R-locked reduction is near-total by construction -- 0.545 on sub0009 run 1 against
+    0.004 for the best EEG channel -- and scoring it reports the ECG rather than any
+    residual artifact.
+    """
+    names = raw.copy().pick("eeg").ch_names
+    return raw.copy().pick(names).get_data() * 1e6, names
+
+
 def _load_pair(pair):
     import mne
 
@@ -344,7 +356,7 @@ def verify_run(pair, output_root: Path) -> dict:
     written = mne.io.read_raw_brainvision(destination, preload=True, verbose="ERROR")
     uncorrected, _ = _load_pair(pair)
     sfreq = written.info["sfreq"]
-    data = written.get_data() * 1e6
+    data, scored_names = scoring_data(written)
 
     ecg = uncorrected.copy().pick(["ECG"]).get_data()[0] * 1e6
     analyzer = bcg_detect.read_analyzer_beats(pair.uncorrected_vhdr)
@@ -358,6 +370,8 @@ def verify_run(pair, output_root: Path) -> dict:
         "subject": pair.subject,
         "run": pair.run,
         "status": "ok",
+        "channels_scored": len(scored_names),
+        "markers_present": int(len(written.annotations)),
         "recovered_removal_max": result.max_value,
         "recovered_null_max": result.null_max,
         "recovered_channels_above_null": result.channels_above_null,

@@ -102,6 +102,25 @@ def test_insufficient_seed_beats_is_reported_as_itself():
     assert correct_cardiac_gaps.recovery_status(recovery) == "insufficient_seed_beats"
 
 
+def test_scoring_data_excludes_non_eeg_channels():
+    """The ECG must never reach the referee: it is the cardiac signal, not artifact.
+
+    Scoring it alongside EEG put R-locked reduction at 0.545 on sub0009 run 1 while the
+    best EEG channel sat at 0.004, so the reported figure described the ECG channel.
+    """
+    import mne
+
+    mne.set_log_level("ERROR")
+    names = ["Fp1", "Oz", "ECG"]
+    info = mne.create_info(names, 1000.0, ch_types=["eeg", "eeg", "misc"])
+    raw = mne.io.RawArray(np.zeros((3, 5000)), info, verbose="ERROR")
+
+    data, picked = correct_cardiac_gaps.scoring_data(raw)
+
+    assert picked == ["Fp1", "Oz"]
+    assert data.shape[0] == 2
+
+
 def test_apply_only_changes_gap_stretches(tmp_path):
     """Everything outside a gap must survive byte-for-byte from Analyzer's output."""
     rng = np.random.default_rng(2)
