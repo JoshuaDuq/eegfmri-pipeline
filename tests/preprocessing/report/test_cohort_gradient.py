@@ -73,9 +73,14 @@ def _runs(*, n_runs: int, repetition_time_s: float, jitter_s: float = 0.002) -> 
             "n_volumes": [300] * n_runs,
             "repetition_time_s": [repetition_time_s] * n_runs,
             "volume_jitter_s": [jitter_s] * n_runs,
-            "volume_locked_corrected_before_uv": [2.0] * n_runs,
-            "volume_locked_corrected_uv": [0.8] * n_runs,
-            "volume_locked_noise_floor_uv": [0.3] * n_runs,
+            "volume_locked_rms_before_uv": [np.sqrt(4.0 + 0.25)] * n_runs,
+            "volume_locked_floor_before_uv": [0.5] * n_runs,
+            "volume_locked_excess_power_before_uv2": [4.0] * n_runs,
+            "volume_locked_resolved_before": [True] * n_runs,
+            "volume_locked_rms_after_uv": [np.sqrt(0.64 + 0.09)] * n_runs,
+            "volume_locked_floor_after_uv": [0.3] * n_runs,
+            "volume_locked_excess_power_after_uv2": [0.64] * n_runs,
+            "volume_locked_resolved_after": [True] * n_runs,
         }
     )
 
@@ -404,24 +409,21 @@ def test_the_timing_table_pairs_the_locked_residual_before_and_after() -> None:
     assert "1.20" in table  # what the exclusions removed, distinct from either side
 
 
-def test_a_sidecar_without_the_before_column_still_reports_its_timing() -> None:
-    """A sidecar written before the pre-ICA amplitude was recorded is not a broken one.
-
-    Only the required columns are guaranteed. ``DataFrame.get`` returns ``None`` for an
-    absent one and ``pd.to_numeric(None)`` returns a bare float, so reading an optional
-    column that way fails on exactly the sidecars that predate it.
-    """
+def test_an_unresolved_locked_residual_is_not_rendered_as_zero() -> None:
     participant = _participant("0014")
+    runs = participant.runs.copy()
+    runs["volume_locked_excess_power_after_uv2"] = -0.04
+    runs["volume_locked_resolved_after"] = False
     participant = SubjectSidecar(
         subject=participant.subject,
         task=participant.task,
         context=participant.context,
         paradigm=participant.paradigm,
-        runs=participant.runs.drop(columns=["volume_locked_corrected_before_uv"]),
+        runs=runs,
         comb_curves=participant.comb_curves,
     )
 
     table = timing_table(_cohort(participant))
 
-    assert "0014" in table
-    assert "0.80" in table  # the after-ICA amplitude, which is present
+    assert "unresolved" in table
+    assert ">0.00" not in table

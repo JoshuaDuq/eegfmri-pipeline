@@ -12,6 +12,7 @@ import pytest
 matplotlib.use("Agg")
 
 from eeg_pipeline.preprocessing.report.scanner import (  # noqa: E402
+    CombResidual,
     MINIMUM_VOLUMES,
     VOLUME_MARKER_DESCRIPTION,
     VolumeTiming,
@@ -108,6 +109,35 @@ def test_a_focal_comb_is_found_in_the_worst_channel_not_the_median() -> None:
     assert float(np.max(comb.before_worst_db)) > 20.0
     assert float(np.max(comb.before_typical_db)) < 6.0
     assert comb.worst_channel in {"C0", "C1"}
+
+
+def test_largest_line_value_frequency_and_channel_share_one_index() -> None:
+    """A table row must not combine two different definitions of "worst"."""
+    timing = VolumeTiming(n_volumes=100, repetition_time_s=1.0, interval_jitter_s=0.0)
+    comb = CombResidual(
+        recording_id="run-1",
+        timing=timing,
+        harmonic_frequencies_hz=np.asarray([20.0, 21.0, 22.0]),
+        channel_names=("global-maximum", "persistent-comb"),
+        before_excess_db=np.zeros((2, 3)),
+        after_excess_db=np.asarray([[20.0, -10.0, -10.0], [8.0, 8.0, 8.0]]),
+    )
+
+    assert comb.worst_excess_db == pytest.approx(20.0)
+    assert comb.worst_harmonic_hz == pytest.approx(20.0)
+    assert comb.worst_channel == "global-maximum"
+    assert comb.persistent_worst_channel == "persistent-comb"
+
+    document = scanner_residual_html([comb], [])
+    assert "20.0 at 20.0 Hz (global-maximum)" in document
+
+
+def test_comb_plot_names_the_channelwise_maximum_as_an_envelope() -> None:
+    figure = plot_comb_residual(_combs_for(1))
+
+    labels = figure.axes[0].get_legend_handles_labels()[1]
+    assert "After ICA, channelwise maximum envelope" in labels
+    assert "0 dB: peak and background statistics are equal" in labels
 
 
 def test_a_clean_recording_shows_no_comb() -> None:
@@ -285,6 +315,27 @@ def test_the_section_reports_both_measurements() -> None:
     assert plot_volume_locked_average([locked]).axes
 
 
+def test_the_locked_table_censors_amplitude_below_the_measured_floor() -> None:
+    locked = _averages_for(1)[0]
+    unresolved = replace(
+        locked,
+        before_locked_rms_uv=0.41,
+        before_noise_floor_uv=0.64,
+        before_excess_power_uv2=-0.24,
+        after_locked_rms_uv=0.14,
+        after_noise_floor_uv=0.25,
+        after_excess_power_uv2=-0.04,
+    )
+
+    document = scanner_residual_html([], [unresolved])
+
+    assert "Observed locked RMS" in document
+    assert "Noise floor" in document
+    assert "Signed excess power" in document
+    assert document.count("unresolved") >= 2
+    assert "Locked residual before ICA (µV p-p)" not in document
+
+
 def test_rebuilding_the_section_replaces_rather_than_accumulates() -> None:
     raw = _raw()
     timing = measure_volume_timing(raw)
@@ -407,7 +458,8 @@ def test_the_volume_locked_panel_draws_the_floor_its_residual_has_to_clear() -> 
     """
     averages = _averages_for(2)
     assert all(
-        average.after_noise_floor_uv is not None for average in averages
+        average.before_noise_floor_uv is not None and average.after_noise_floor_uv is not None
+        for average in averages
     ), "fixture carries no measured floor"
 
     figure = plot_volume_locked_average(averages)
@@ -416,9 +468,22 @@ def test_the_volume_locked_panel_draws_the_floor_its_residual_has_to_clear() -> 
         levels = [line.get_ydata()[0] for line in axis.lines if len(set(line.get_ydata())) == 1]
         assert any(
             abs(level - average.after_noise_floor_uv) < 1e-9 for level in levels
-        ), "the measured noise floor is not drawn on the panel"
+        ), "the after-ICA noise floor is not drawn on the panel"
+        assert any(
+            abs(level - average.before_noise_floor_uv) < 1e-9 for level in levels
+        ), "the before-ICA noise floor is not drawn on the panel"
     labels = {text.get_text() for text in figure.legends[0].get_texts()}
-    assert any("floor" in label.lower() for label in labels)
+    assert "Before ICA noise floor" in labels
+    assert "After ICA noise floor" in labels
+
+
+def test_the_volume_locked_title_reports_resolution_not_only_envelope_range() -> None:
+    locked = replace(_averages_for(1)[0], after_excess_power_uv2=-0.1)
+
+    title = plot_volume_locked_average([locked]).axes[0].get_title().lower()
+
+    assert "after unresolved" in title
+    assert "p-p" not in title
 
 
 def test_the_volume_locked_figure_does_not_assert_what_the_floor_qualifies() -> None:
@@ -458,7 +523,7 @@ def test_the_zero_line_is_explained_off_the_data() -> None:
     figure = plot_comb_residual(_combs_for(2))
 
     legend_labels = {text.get_text() for text in figure.legends[0].get_texts()}
-    assert any("indistinguishable from background" in label for label in legend_labels)
+    assert any("peak and background statistics are equal" in label for label in legend_labels)
     assert not figure.axes[0].texts
 
 

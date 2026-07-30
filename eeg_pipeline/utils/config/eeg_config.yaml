@@ -293,7 +293,12 @@ preprocessing:
   line_comb_removal:
     enabled: false  # the cleaned dataset is written to its own BIDS root; point paths.bids_root at it to use it
     nominal_fundamental_hz: 1.2      # search seed only; each run is measured
-    harmonic_range: [24, 79]         # 28.8-94.8 Hz, the span detected across the cohort
+    harmonic_range: [24, 79]         # harmonics used to FIT the fundamental (well-determined ones)
+    # Harmonics actually removed. Reaches lower than the fit: the diagnosis found comb
+    # membership at harmonics 22 and 23 (26.40 and 27.60 Hz), each within 5 mHz of its comb
+    # position, which is far too precise to be coincidence. Harmonic 11 (13.23 Hz) is left
+    # alone -- 30 mHz off, in 2 of 15 participants, and sitting where alpha meets beta.
+    removal_harmonic_range: [22, 79]
     isolated_hz: [47.0362, 57.2247, 58.1807, 94.0748]  # not on the comb, and they drift
     search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
     isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39

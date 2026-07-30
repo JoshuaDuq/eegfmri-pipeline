@@ -8,6 +8,8 @@ evidence, and the places where a missing measurement must stay missing.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -85,10 +87,12 @@ def _locked(recording_id: str = RUN) -> VolumeLockedAverage:
         before_rms_uv=np.full(5, 3.0),
         after_rms_uv=np.full(5, 1.0),
         n_volumes=300,
-        before_amplitude_uv=2.8,
-        after_amplitude_uv=0.6,
+        before_locked_rms_uv=3.0,
+        after_locked_rms_uv=1.0,
         before_noise_floor_uv=0.5,
         after_noise_floor_uv=0.4,
+        before_excess_power_uv2=8.75,
+        after_excess_power_uv2=-0.2,
     )
 
 
@@ -125,9 +129,17 @@ def _alpha(*, prominence: float, residual: float, peak: float = 10.0) -> Posteri
 # --------------------------------------------------------------------------------------
 
 
-def test_measurable_volume_timing_means_the_recording_was_in_a_scanner() -> None:
-    assert acquisition_context_of({RUN: _timing()}) is AcquisitionContext.IN_SCANNER
-    assert acquisition_context_of({}) is AcquisitionContext.OUT_OF_SCANNER
+def test_observed_volume_markers_mean_the_recording_was_in_a_scanner() -> None:
+    observed = replace(_continuity(), has_volume_markers=True)
+
+    assert acquisition_context_of([observed]) is AcquisitionContext.IN_SCANNER
+    assert acquisition_context_of([_continuity()]) is AcquisitionContext.OUT_OF_SCANNER
+
+
+def test_too_few_volume_markers_for_timing_still_mean_in_scanner() -> None:
+    observed = replace(_continuity(), has_volume_markers=True)
+
+    assert acquisition_context_of([observed]) is AcquisitionContext.IN_SCANNER
 
 
 def test_task_events_decide_the_paradigm() -> None:
@@ -143,7 +155,7 @@ def test_task_events_decide_the_paradigm() -> None:
 def test_the_run_table_carries_every_column_its_context_requires() -> None:
     frame = run_table(
         spectra=[_spectra()],
-        continuity=[_continuity()],
+        continuity=[replace(_continuity(), has_volume_markers=True)],
         timings={RUN: _timing()},
         locked_averages=[_locked()],
         context=AcquisitionContext.IN_SCANNER,
@@ -165,7 +177,7 @@ def test_the_residual_column_is_accompanied_by_the_coverage_it_was_measured_over
 
     frame = run_table(
         spectra=[_spectra()],
-        continuity=[_continuity()],
+        continuity=[replace(_continuity(), has_volume_markers=True)],
         timings={RUN: _timing()},
         locked_averages=[_locked()],
         cardiac_residuals=[
@@ -199,8 +211,7 @@ def test_continuity_reductions_are_transcribed_not_recomputed() -> None:
     assert frame.loc[0, "duration_s"] == pytest.approx(600.0)
 
 
-def test_the_pooled_gradient_column_is_the_cleaned_amplitude() -> None:
-    """What survived cleaning is the QC question; the uncleaned figure rides beside it."""
+def test_the_gradient_contract_preserves_observed_floor_and_signed_excess() -> None:
     frame = run_table(
         spectra=[_spectra()],
         continuity=[_continuity()],
@@ -209,9 +220,14 @@ def test_the_pooled_gradient_column_is_the_cleaned_amplitude() -> None:
         context=AcquisitionContext.IN_SCANNER,
     )
 
-    assert frame.loc[0, "volume_locked_corrected_uv"] == pytest.approx(0.6)
-    assert frame.loc[0, "volume_locked_corrected_before_uv"] == pytest.approx(2.8)
-    assert frame.loc[0, "volume_locked_noise_floor_uv"] == pytest.approx(0.4)
+    assert frame.loc[0, "volume_locked_rms_before_uv"] == pytest.approx(3.0)
+    assert frame.loc[0, "volume_locked_floor_before_uv"] == pytest.approx(0.5)
+    assert frame.loc[0, "volume_locked_excess_power_before_uv2"] == pytest.approx(8.75)
+    assert frame.loc[0, "volume_locked_resolved_before"]
+    assert frame.loc[0, "volume_locked_rms_after_uv"] == pytest.approx(1.0)
+    assert frame.loc[0, "volume_locked_floor_after_uv"] == pytest.approx(0.4)
+    assert frame.loc[0, "volume_locked_excess_power_after_uv2"] == pytest.approx(-0.2)
+    assert not frame.loc[0, "volume_locked_resolved_after"]
     assert frame.loc[0, "volume_jitter_s"] == pytest.approx(0.004)
 
 
@@ -223,7 +239,7 @@ def test_an_eeg_only_run_has_no_gradient_columns_at_all() -> None:
         context=AcquisitionContext.OUT_OF_SCANNER,
     )
 
-    assert "volume_locked_corrected_uv" not in frame.columns
+    assert "volume_locked_rms_after_uv" not in frame.columns
     assert "n_volumes" not in frame.columns
 
 
@@ -267,6 +283,7 @@ def test_beat_and_marker_measurements_are_transcribed_when_present() -> None:
     assert frame.loc[0, "median_bpm"] == pytest.approx(60.0)
     assert frame.loc[0, "n_beats"] == pytest.approx(61)
     assert frame.loc[0, "marker_matched_fraction"] == pytest.approx(57 / 60)
+    assert frame.loc[0, "n_matched_beats"] == pytest.approx(57)
 
 
 # --------------------------------------------------------------------------------------
@@ -343,7 +360,7 @@ def test_a_scanner_participant_assembles_a_complete_sidecar() -> None:
         subject="0014",
         task="thermalactive",
         spectra=[_spectra()],
-        continuity=[_continuity()],
+        continuity=[replace(_continuity(), has_volume_markers=True)],
         timings={RUN: _timing()},
         locked_averages=[_locked()],
         combs=[_comb()],

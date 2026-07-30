@@ -53,12 +53,18 @@ def _parser() -> argparse.ArgumentParser:
     fmri.add_argument("--overwrite", action="store_true")
     fmri.add_argument("--no-events", action="store_true")
     fmri.add_argument("--event-granularity", choices=["trial", "phases"], default="phases")
-    fmri.add_argument("--onset-reference", choices=["as_is", "first_iti_start", "first_stim_start"], default="first_iti_start")
+    fmri.add_argument(
+        "--onset-reference",
+        choices=["as_is", "first_iti_start", "first_stim_start"],
+        default="first_iti_start",
+    )
     fmri.add_argument("--onset-offset-s", type=float, default=0.0)
     fmri.add_argument("--dcm2niix-path", default=None)
     fmri.add_argument("--dcm2niix-arg", action="append", default=None)
 
-    merge = sub.add_parser("merge-psychopy", help="Merge PsychoPy TrialSummary into BIDS EEG events.tsv")
+    merge = sub.add_parser(
+        "merge-psychopy", help="Merge PsychoPy TrialSummary into BIDS EEG events.tsv"
+    )
     merge.add_argument("--source-root", required=True)
     merge.add_argument("--bids-root", required=True)
     merge.add_argument("--task", required=True)
@@ -73,7 +79,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, args.log_level), format="%(levelname)s %(name)s: %(message)s"
+    )
 
     if args.command == "eeg-raw-to-bids":
         n = run_raw_to_bids(

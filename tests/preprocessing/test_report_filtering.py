@@ -35,6 +35,15 @@ def test_the_filter_is_described_by_its_length_in_seconds() -> None:
     assert "33" in filter_response_html(description)
 
 
+def test_the_filter_exposes_its_exact_half_support_for_edge_exclusion() -> None:
+    description = _description()
+
+    assert description.edge_support_s == pytest.approx(
+        (description.n_taps - 1) / (2.0 * description.sfreq)
+    )
+    assert "Edge support" in filter_response_html(description)
+
+
 def test_the_measured_corners_are_reported_rather_than_the_requested_ones() -> None:
     """MNE places the requested frequency in the passband and the -6 dB point below it,
     so the number in the configuration table is not where the filter actually turns over."""

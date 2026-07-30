@@ -38,9 +38,7 @@ def require_font_family(font_family: str) -> str:
             fallback_to_default=False,
         )
     except ValueError as exc:
-        raise ValueError(
-            f"Required figure font '{font_family}' is unavailable."
-        ) from exc
+        raise ValueError(f"Required figure font '{font_family}' is unavailable.") from exc
     return font_family
 
 

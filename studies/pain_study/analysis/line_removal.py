@@ -35,6 +35,25 @@ from studies.pain_study.analysis.harmonic_diagnosis import refine_peak_frequency
 
 NOMINAL_FUNDAMENTAL_HZ = 1.2
 COMB_HARMONIC_RANGE = (24, 79)
+"""Harmonics used to fit the fundamental: the span the cohort fit was built on.
+
+Only well-determined harmonics belong here. Including weak ones would let a poorly
+localised peak pull the fundamental, which every other harmonic then inherits.
+"""
+REMOVAL_HARMONIC_RANGE = (22, 79)
+"""Harmonics actually projected out, which reaches lower than the fit does.
+
+The diagnosis detected comb membership down to harmonic 22 (26.40 Hz) and 23 (27.60 Hz),
+below the span the fundamental was fitted on. Both sit within 5 mHz of their comb position
+-- a coincidence that precise has probability under one per cent per detection -- so they
+are lines, and their rhythm-like measured width is the low-amplitude broadening that
+half-power width shows at any low signal-to-noise ratio.
+
+Harmonic 11 (13.23 Hz) is deliberately left in place. It sits 30 mHz off its comb position
+rather than 5, appears in only two of fifteen participants, and lands at the alpha-beta
+boundary where real rhythms live; removing it would risk taking signal for an artifact
+that may not be there.
+"""
 ISOLATED_NOMINAL_HZ = (47.0362, 57.2247, 58.1807, 94.0748)
 MAINS_NOTCH_HZ = (59.5, 60.5)
 

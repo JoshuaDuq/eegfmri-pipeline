@@ -35,6 +35,8 @@ RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "std_dvars": "hrf_weighted_std_dvars",
     "fp1_fp2_high_frequency_power": "hrf_weighted_fp1_fp2_high_frequency_power",
 }
+
+
 def _study1_output_root(config: Any) -> Path:
     root_name = str(get_config_value(config, "study1.outputs.root_name", "study1")).strip()
     if not root_name:
@@ -829,6 +831,7 @@ def _compute_convolved_nuisance_columns(
 
         tr = float(get_tr_from_bold(bold_path))
         import nibabel as nib  # type: ignore
+
         n_scans = int(nib.load(str(bold_path)).shape[3])
         frame_times = np.arange(n_scans, dtype=float) * tr
 
@@ -871,9 +874,9 @@ def _compute_convolved_nuisance_columns(
                         )
                     onset_idx = int(round(float(row["onset"]) / tr))
                     dur_idx = int(round(float(row["duration"]) / tr))
-                    raw_values[
-                        max(0, onset_idx) : min(n_scans, onset_idx + max(1, dur_idx))
-                    ] = float(raw_pow)
+                    raw_values[max(0, onset_idx) : min(n_scans, onset_idx + max(1, dur_idx))] = (
+                        float(raw_pow)
+                    )
             else:
                 raise ValueError(f"Unsupported convolved continuous column: {col}")
 

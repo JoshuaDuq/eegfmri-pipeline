@@ -19,7 +19,10 @@ from typing import Any, Iterable, List, Optional, Sequence
 
 import pandas as pd
 
-from eeg_pipeline.utils.data.preprocessing import ensure_dataset_description, find_behavior_csv_for_run
+from eeg_pipeline.utils.data.preprocessing import (
+    ensure_dataset_description,
+    find_behavior_csv_for_run,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +164,7 @@ def _classify_fieldmap_outputs(tmp_dir: Path) -> tuple[list[tuple[str, Path, Pat
         outputs.append(("magnitude1", primary, _sidecar_json_for_nifti(primary)))
 
     return outputs, intended_jsons
+
 
 def _safe_write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -386,7 +390,12 @@ def _write_events_tsv_for_run(
         elif event_granularity == "phases":
             add_event("stimulation", stim_start, 3.0, stim_phase="ramp_up")
             add_event("stimulation", stim_start + 3.0, 7.5, stim_phase="plateau")
-            add_event("stimulation", stim_start + 10.5, max(0.0, stim_end - (stim_start + 10.5)), stim_phase="ramp_down")
+            add_event(
+                "stimulation",
+                stim_start + 10.5,
+                max(0.0, stim_end - (stim_start + 10.5)),
+                stim_phase="ramp_down",
+            )
         else:
             raise ValueError("event_granularity must be one of: trial, phases")
 
@@ -468,7 +477,11 @@ def ensure_task_events_json(bids_root: Path, task: str) -> Path:
         },
         "stim_phase": {
             "Description": "Stimulation sub-phase (only when event_granularity=phases).",
-            "Levels": {"ramp_up": "3 s ramp", "plateau": "7.5 s plateau", "ramp_down": "2 s ramp down"},
+            "Levels": {
+                "ramp_up": "3 s ramp",
+                "plateau": "7.5 s plateau",
+                "ramp_down": "2 s ramp down",
+            },
         },
         "stimulus_temp": {"Description": "Thermode target temperature (°C)."},
         "selected_surface": {"Description": "Stimulus surface index (experiment-defined)."},
@@ -592,7 +605,9 @@ def run_fmri_raw_to_bids(
                             _safe_write_json(dest_json, {})
                         if suffix == "phasediff":
                             meta = _load_json(dest_json)
-                            if ("EchoTime1" not in meta or "EchoTime2" not in meta) and len(all_tes) >= 2:
+                            if ("EchoTime1" not in meta or "EchoTime2" not in meta) and len(
+                                all_tes
+                            ) >= 2:
                                 meta["EchoTime1"] = all_tes[0]
                                 meta["EchoTime2"] = all_tes[-1]
                                 _safe_write_json(dest_json, meta)

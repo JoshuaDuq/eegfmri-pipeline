@@ -27,7 +27,9 @@ def _deep_regression_time_window(epochs: mne.Epochs, config: Any) -> tuple[float
     if raw_window is None:
         return None
     if not isinstance(raw_window, (list, tuple)) or len(raw_window) != 2:
-        raise ValueError("study1.deep_regression.time_window must be a two-element [start, end] range.")
+        raise ValueError(
+            "study1.deep_regression.time_window must be a two-element [start, end] range."
+        )
 
     try:
         start = float(raw_window[0])

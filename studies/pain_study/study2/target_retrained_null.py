@@ -215,9 +215,7 @@ def assemble_permuted_scores(
         scores[np.asarray(test_idx, dtype=int)] = np.asarray(
             prediction_result.residual_prediction,
             dtype=float,
-        )[
-            np.asarray(test_idx, dtype=int)
-        ]
+        )[np.asarray(test_idx, dtype=int)]
 
     if not np.all(np.isfinite(scores)):
         raise InvalidPermutationDraw(

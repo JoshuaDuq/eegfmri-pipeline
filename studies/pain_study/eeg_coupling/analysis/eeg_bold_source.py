@@ -41,8 +41,7 @@ def _stabilize_covariance(
     psd_tolerance = max(float(np.finfo(float).eps), largest * _PSD_REL_TOL)
     if smallest < -psd_tolerance:
         raise ValueError(
-            f"{label} covariance is not positive semidefinite "
-            f"(min eigenvalue={smallest:.3e})."
+            f"{label} covariance is not positive semidefinite " f"(min eigenvalue={smallest:.3e})."
         )
     clipped_eigenvalues = np.maximum(eigenvalues, 0.0)
     keep_mask = clipped_eigenvalues > psd_tolerance
@@ -230,9 +229,7 @@ def _compute_minimum_norm_source_estimates(
         "wmne": "MNE",
     }
     if method not in method_map:
-        raise ValueError(
-            "Source method must be one of {'lcmv','eloreta','dspm','wmne'}."
-        )
+        raise ValueError("Source method must be one of {'lcmv','eloreta','dspm','wmne'}.")
 
     baseline_epochs = epochs.copy().crop(
         tmin=float(baseline_window[0]),

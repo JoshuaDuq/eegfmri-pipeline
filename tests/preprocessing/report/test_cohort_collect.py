@@ -41,8 +41,26 @@ def _runs(*, in_scanner: bool) -> pd.DataFrame:
     if in_scanner:
         frame["n_volumes"] = [360]
         frame["repetition_time_s"] = [2.0]
-        frame["volume_locked_corrected_uv"] = [1.2]
-        frame["volume_locked_noise_floor_uv"] = [0.4]
+        frame["volume_jitter_s"] = [0.003]
+        frame["volume_locked_rms_before_uv"] = [2.1]
+        frame["volume_locked_floor_before_uv"] = [0.5]
+        frame["volume_locked_excess_power_before_uv2"] = [4.16]
+        frame["volume_locked_resolved_before"] = [True]
+        frame["volume_locked_rms_after_uv"] = [1.26]
+        frame["volume_locked_floor_after_uv"] = [0.4]
+        frame["volume_locked_excess_power_after_uv2"] = [1.44]
+        frame["volume_locked_resolved_after"] = [True]
+        frame["median_bpm"] = [62.0]
+        frame["n_beats"] = [700.0]
+        frame["beat_dropouts"] = [2.0]
+        frame["marker_matched_fraction"] = [0.96]
+        frame["n_markers"] = [704.0]
+        frame["n_detected_beats"] = [700.0]
+        frame["n_matched_beats"] = [672.0]
+        frame["pulse_marker_count"] = [704.0]
+        frame["beat_source"] = ["ECG"]
+        frame["bcg_residual_uv"] = [0.8]
+        frame["bcg_beat_train_coverage"] = [0.98]
     return frame
 
 

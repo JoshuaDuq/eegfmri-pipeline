@@ -19,7 +19,6 @@ from eeg_pipeline.utils.data.fmri_signature_targets import parse_run_label_to_in
 from studies.pain_study.study1.config import load_study1_config
 from studies.pain_study.study1.temporal_controls import resolve_temporal_control_windows
 
-
 TRIAL_INDEX_COLUMNS = ("trial_number", "trial_index", "epoch")
 TARGET_COLUMNS = (
     "subject_id",
@@ -57,7 +56,11 @@ def main() -> None:
     config["paths.bids_fmri_root"] = str(args.bids_fmri_root)
 
     targets = read_targets(args.study1_root)
-    subjects = normalize_subjects(args.subjects) if args.subjects else sorted(targets["subject_id"].unique())
+    subjects = (
+        normalize_subjects(args.subjects)
+        if args.subjects
+        else sorted(targets["subject_id"].unique())
+    )
     events_by_subject = {
         subject_id: read_clean_events(subject_id, task=args.task, config=config)
         for subject_id in subjects
@@ -71,8 +74,7 @@ def main() -> None:
         for subject_id in subjects
     }
     temporal_features_by_subject = {
-        subject_id: read_temporal_features(args.study1_root, subject_id)
-        for subject_id in subjects
+        subject_id: read_temporal_features(args.study1_root, subject_id) for subject_id in subjects
     }
 
     summary, trials = build_timing_audit(
@@ -274,7 +276,9 @@ def audit_subject(
             fmri_plateau_row = indexed_fmri_plateaus.loc[alignment_key]
             fmri_plateau_onset = float(fmri_plateau_row["onset"])
             fmri_plateau_duration = float(fmri_plateau_row["duration"])
-            fmri_plateau_start_delta = round(fmri_plateau_onset - float(row.onset) - PLATEAU_START_S, 6)
+            fmri_plateau_start_delta = round(
+                fmri_plateau_onset - float(row.onset) - PLATEAU_START_S, 6
+            )
             fmri_plateau_duration_delta = round(fmri_plateau_duration - PLATEAU_DURATION_S, 6)
             if (
                 abs(fmri_plateau_start_delta) > TIMING_TOLERANCE_S
@@ -293,7 +297,9 @@ def audit_subject(
             lss_plateau_row = indexed_lss_plateaus.loc[alignment_key]
             lss_plateau_onset = float(lss_plateau_row["onset"])
             lss_plateau_duration = float(lss_plateau_row["duration"])
-            lss_plateau_start_delta = round(lss_plateau_onset - float(row.onset) - PLATEAU_START_S, 6)
+            lss_plateau_start_delta = round(
+                lss_plateau_onset - float(row.onset) - PLATEAU_START_S, 6
+            )
             lss_plateau_duration_delta = round(lss_plateau_duration - PLATEAU_DURATION_S, 6)
             if (
                 abs(lss_plateau_start_delta) > TIMING_TOLERANCE_S
@@ -390,9 +396,7 @@ def fmri_plateau_alignment_keys(fmri_events: pd.DataFrame, *, subject_id: str) -
 
     trial_type = fmri_events["trial_type"].astype(str).str.strip()
     stim_phase = fmri_events["stim_phase"].astype(str).str.strip()
-    plateau_rows = fmri_events.loc[
-        trial_type.eq("stimulation") & stim_phase.eq("plateau")
-    ].copy()
+    plateau_rows = fmri_events.loc[trial_type.eq("stimulation") & stim_phase.eq("plateau")].copy()
     if plateau_rows.empty:
         raise ValueError(f"{subject_id} fMRI events contain no stimulation plateau rows.")
 

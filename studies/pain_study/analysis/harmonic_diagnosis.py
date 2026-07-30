@@ -642,6 +642,66 @@ def band_power_db(
     return float(10.0 * np.log10(max(power, np.finfo(float).tiny)))
 
 
+def line_excess_fraction(
+    freqs: Sequence[float],
+    psd: Sequence[float],
+    *,
+    low_hz: float,
+    high_hz: float,
+    line_freqs: Sequence[float],
+    half_width_bins: int,
+    line_half_width_hz: float = 0.15,
+) -> float:
+    """Fraction of a band's power that sits *above the local background* at the lines.
+
+    This is the honest way to ask how much of a band is artifact, and it is not what
+    dropping the line bins and comparing band powers measures. Excluding bins removes
+    their background along with their line, so the difference counts ordinary spectrum as
+    contamination: on a flat spectrum, masking a fifth of the bins reads as a fifth of the
+    power being artifact when none of it is. Over the comb that inflation is large -- the
+    gamma share it produced was 47% against a true 35%.
+
+    Here each line bin contributes only its excess over the running-median background,
+    clipped at zero so a bin the removal has dug below its surroundings cannot count as
+    negative artifact.
+    """
+    frequency_array = np.asarray(freqs, dtype=float)
+    spectrum = np.asarray(psd, dtype=float)
+    if frequency_array.shape != spectrum.shape:
+        raise ValueError("freqs and psd must have the same shape.")
+    if low_hz >= high_hz:
+        raise ValueError("low_hz must be below high_hz.")
+    if line_half_width_hz <= 0:
+        raise ValueError("line_half_width_hz must be positive.")
+
+    inside = (frequency_array >= low_hz) & (frequency_array <= high_hz)
+    if not np.any(inside):
+        raise ValueError("No frequency bin falls inside the band.")
+
+    bin_width = float(frequency_array[1] - frequency_array[0])
+    total = float(np.sum(spectrum[inside])) * bin_width
+    if total <= 0:
+        raise ValueError("The band carries no power.")
+
+    at_a_line = np.zeros(frequency_array.size, dtype=bool)
+    for frequency in line_freqs:
+        if low_hz <= frequency <= high_hz:
+            at_a_line |= np.abs(frequency_array - frequency) <= line_half_width_hz
+    if not np.any(at_a_line & inside):
+        return 0.0
+
+    # A background is only needed where a line is. Bands sitting too close to DC for a
+    # symmetric window -- delta, here -- hold no lines anyway and must not fail for it.
+    background = 10.0 ** (
+        local_background_db(to_db(spectrum), half_width_bins=half_width_bins) / 10.0
+    )
+    selected = at_a_line & inside & np.isfinite(background)
+    if not np.any(selected):
+        raise ValueError("Lines fall inside the band but none has a usable background.")
+    excess = float(np.sum(np.clip(spectrum[selected] - background[selected], 0.0, None)))
+    return excess * bin_width / total
+
+
 def line_exclusion_windows(
     line_freqs: Sequence[float],
     *,

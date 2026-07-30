@@ -12,7 +12,6 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-
 TEMPORAL_WINDOWS = (
     "prestimulus_wide",
     "immediate_prestimulus",
@@ -172,8 +171,7 @@ def read_temporal_models(study1_root: Path) -> dict[tuple[str, str], pd.DataFram
 
 def read_source_qc(study2_root: Path) -> dict[str, pd.DataFrame]:
     return {
-        band: read_tsv(study2_root / "source_stage" / f"qc_{band}.tsv")
-        for band in SOURCE_BANDS
+        band: read_tsv(study2_root / "source_stage" / f"qc_{band}.tsv") for band in SOURCE_BANDS
     }
 
 
@@ -186,7 +184,9 @@ def read_source_power_shapes(study2_root: Path) -> dict[str, SourcePowerShape]:
             for band in SOURCE_BANDS
         ]
         if len(set(band_shapes)) != 1:
-            raise ValueError(f"Source-power shapes differ across bands for {subject_id}: {band_shapes}")
+            raise ValueError(
+                f"Source-power shapes differ across bands for {subject_id}: {band_shapes}"
+            )
         rows, vertices = band_shapes[0]
         shapes[subject_id] = SourcePowerShape(rows=int(rows), vertices=int(vertices))
     return shapes
@@ -213,10 +213,7 @@ def _anatomy_label(has_trans: bool, has_bem: bool) -> str:
 
 def build_subject_qc(inputs: SubjectQcInputs) -> SubjectQcSummary:
     validate_inputs(inputs)
-    subject_rows = [
-        build_subject_row(subject_id, inputs)
-        for subject_id in inputs.subjects
-    ]
+    subject_rows = [build_subject_row(subject_id, inputs) for subject_id in inputs.subjects]
     temporal_rows = build_temporal_rows(inputs)
     timing_alignment_rows = build_timing_alignment_rows(inputs)
     mask_rows = build_mask_rows(inputs.study1_targets)
@@ -471,7 +468,10 @@ def source_qc_bands_disagree(rows: list[pd.Series]) -> bool:
 def build_mask_rows(targets: pd.DataFrame) -> list[dict[str, object]]:
     rows = []
     for signature in ("NPS", "SIIPS1"):
-        hashes = sorted(str(value) for value in targets[f"{signature}_fmri_scoring_mask_sha256"].dropna().unique())
+        hashes = sorted(
+            str(value)
+            for value in targets[f"{signature}_fmri_scoring_mask_sha256"].dropna().unique()
+        )
         voxels = sorted(targets[f"{signature}_fmri_n_voxels"].dropna().unique())
         rows.append(
             {

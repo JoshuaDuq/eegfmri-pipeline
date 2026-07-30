@@ -162,6 +162,21 @@ def test_bad_spans_are_reported_as_a_fraction_of_the_run() -> None:
     assert run.bad_fraction == pytest.approx(12.0 / DURATION, rel=0.01)
 
 
+def test_overlapping_bad_annotations_count_their_union_once() -> None:
+    raw = _raw()
+    raw.set_annotations(
+        mne.Annotations(
+            onset=[20.0, 25.0],
+            duration=[10.0, 10.0],
+            description=["BAD_movement", "BAD_gradient"],
+        )
+    )
+
+    run = compute_run_continuity(raw, recording_id="run-1")
+
+    assert run.bad_fraction == pytest.approx(15.0 / DURATION)
+
+
 def test_an_interruption_in_the_volume_train_is_found() -> None:
     onsets = list(np.arange(0.0, 50.0, TR)) + list(np.arange(70.0, 110.0, TR))
 
@@ -234,30 +249,50 @@ def test_an_empty_section_is_an_error_rather_than_a_blank_panel() -> None:
 
 def test_the_onset_transient_does_not_become_the_reported_excursion() -> None:
     """All six runs of one subject reported "+25 dB at 0.0 min", which is the high-pass
-    filter settling rather than anything that happened to the participant. It also hid
-    every real excursion, because nothing later in the run could beat it."""
+    boundary response rather than anything that happened to the participant. It also
+    hid every real excursion, because nothing later in the run could beat it."""
     rng = np.random.default_rng(0)
     data = rng.normal(0, 1e-5, (8, int(SFREQ * DURATION)))
-    # A settling transient at the run start, and a smaller real disturbance later.
+    # A filter-edge response at the run start, and a smaller real disturbance later.
     data[:, : int(SFREQ * 2)] *= 40.0
     data[:, int(SFREQ * 60) : int(SFREQ * 62)] *= 6.0
     info = mne.create_info([f"C{index}" for index in range(8)], SFREQ, "eeg")
     raw = mne.io.RawArray(data, info, verbose="ERROR")
-    with raw.info._unlock():
-        raw.info["highpass"] = 0.1
-
-    run = compute_run_continuity(raw, recording_id="run-1")
+    run = compute_run_continuity(
+        raw,
+        recording_id="run-1",
+        edge_support_seconds=5.0,
+    )
 
     assert run.worst_window_s > 30.0
     # The transient is still drawn: it is excluded from the statistic, not from the data.
     assert float(np.max(run.excursion_db)) > run.worst_excursion_db
-    assert run.settling_s > 0.0
+    assert run.edge_support_s > 0.0
+
+
+def test_the_terminal_edge_response_is_also_excluded() -> None:
+    rng = np.random.default_rng(0)
+    data = rng.normal(0, 1e-5, (8, int(SFREQ * DURATION)))
+    data[:, int(SFREQ * 60) : int(SFREQ * 62)] *= 6.0
+    data[:, -int(SFREQ * 2) :] *= 40.0
+    info = mne.create_info([f"C{index}" for index in range(8)], SFREQ, "eeg")
+    raw = mne.io.RawArray(data, info, verbose="ERROR")
+
+    run = compute_run_continuity(
+        raw,
+        recording_id="run-1",
+        edge_support_seconds=5.0,
+    )
+
+    assert run.worst_window_s < DURATION - 5.0
+    assert not run.full_support_mask[-1]
+    assert float(np.max(run.excursion_db)) > run.worst_excursion_db
 
 
 def test_the_excursion_axis_is_not_scaled_by_the_transient_it_excludes() -> None:
     """Excluding the transient from the statistic while letting it set the axis leaves the
-    figure disagreeing with its own caption: the caption reports the worst settled moment,
-    and the panel devotes four fifths of its height to the span that moment is not in."""
+    figure disagreeing with its own caption: the caption reports the worst full-support
+    moment, and the panel devotes four fifths of its height to the edge span."""
     from eeg_pipeline.preprocessing.report.continuity import plot_run_continuity
 
     rng = np.random.default_rng(0)
@@ -266,18 +301,20 @@ def test_the_excursion_axis_is_not_scaled_by_the_transient_it_excludes() -> None
     data[:, int(SFREQ * 60) : int(SFREQ * 62)] *= 6.0
     info = mne.create_info([f"C{index}" for index in range(8)], SFREQ, "eeg")
     raw = mne.io.RawArray(data, info, verbose="ERROR")
-    with raw.info._unlock():
-        raw.info["highpass"] = 0.1
-    run = compute_run_continuity(raw, recording_id="run-1")
+    run = compute_run_continuity(
+        raw,
+        recording_id="run-1",
+        edge_support_seconds=5.0,
+    )
 
     figure = plot_run_continuity(run)
     trace_axis = figure.axes[1]
     low, high = trace_axis.get_ylim()
 
-    # The settled range fits, with the transient left to run off the top of the axis.
+    # The full-support range fits, with the edge response left to run off the top.
     assert high < float(np.max(run.excursion_db))
     assert high >= run.worst_excursion_db
-    assert low <= float(np.min(run.excursion_db[run.settled_mask]))
+    assert low <= float(np.min(run.excursion_db[run.full_support_mask]))
     # Zero is the reference every value on this axis is measured against.
     assert low <= 0.0 <= high
 
@@ -315,8 +352,8 @@ def test_a_resting_state_run_has_no_event_rug() -> None:
     assert figure.axes[1].get_legend() is None
 
 
-def test_the_settling_window_follows_the_recording_highpass() -> None:
-    """A slower high-pass takes longer to settle, so the excluded span is not a constant."""
+def test_the_filter_edge_exclusion_is_supplied_by_the_realised_filter() -> None:
+    """A cutoff alone does not define a filter's impulse-response support."""
     info = mne.create_info(["C0", "C1"], SFREQ, "eeg")
     raw = mne.io.RawArray(
         np.random.default_rng(0).normal(0, 1e-5, (2, int(SFREQ * DURATION))),
@@ -325,16 +362,17 @@ def test_the_settling_window_follows_the_recording_highpass() -> None:
     )
     with raw.info._unlock():
         raw.info["highpass"] = 0.1
-    slow = compute_run_continuity(raw, recording_id="run-1")
-    with raw.info._unlock():
-        raw.info["highpass"] = 1.0
-    fast = compute_run_continuity(raw, recording_id="run-1")
+    run = compute_run_continuity(
+        raw,
+        recording_id="run-1",
+        edge_support_seconds=16.5,
+    )
 
-    assert slow.settling_s > fast.settling_s
+    assert run.edge_support_s == 16.5
 
 
-def test_a_run_without_a_highpass_excludes_nothing() -> None:
-    """Unfiltered data has no settling transient to attribute the onset to."""
+def test_no_filter_description_means_no_edge_exclusion() -> None:
+    """The report must not infer an impulse response from a scalar cutoff."""
     info = mne.create_info(["C0", "C1"], SFREQ, "eeg")
     raw = mne.io.RawArray(
         np.random.default_rng(0).normal(0, 1e-5, (2, int(SFREQ * DURATION))),
@@ -342,12 +380,31 @@ def test_a_run_without_a_highpass_excludes_nothing() -> None:
         verbose="ERROR",
     )
     with raw.info._unlock():
-        raw.info["highpass"] = 0.0
+        raw.info["highpass"] = 0.1
 
     run = compute_run_continuity(raw, recording_id="run-1")
 
-    assert run.settling_s == 0.0
+    assert run.edge_support_s == 0.0
     assert run.worst_excursion_db == float(np.max(run.excursion_db))
+
+
+@pytest.mark.parametrize("edge_support_seconds", [-1.0, float("nan")])
+def test_invalid_filter_edge_exclusions_are_rejected(edge_support_seconds) -> None:
+    with pytest.raises(ValueError, match="edge-support span"):
+        compute_run_continuity(
+            _raw(),
+            recording_id="run-1",
+            edge_support_seconds=edge_support_seconds,
+        )
+
+
+def test_filter_support_cannot_consume_both_ends_of_the_run() -> None:
+    with pytest.raises(ValueError, match="leaves no continuity windows"):
+        compute_run_continuity(
+            _raw(),
+            recording_id="run-1",
+            edge_support_seconds=DURATION / 2.0,
+        )
 
 
 def test_the_section_sits_with_the_other_raw_input_evidence() -> None:
@@ -424,8 +481,8 @@ def test_a_scanner_run_with_no_gaps_still_gets_the_column() -> None:
     assert "Volume-marker gaps" in document
 
 
-def test_volume_markers_are_recorded_when_a_description_is_configured() -> None:
-    """The flag follows the configuration, not whether any gap happened to be found."""
+def test_volume_markers_are_recorded_only_when_the_run_contains_them() -> None:
+    """A configured label is a search instruction, not evidence of a scanner."""
     from eeg_pipeline.preprocessing.report.continuity import compute_run_continuity
 
     raw = _raw(volume_onsets=np.arange(0.0, DURATION, 0.9))
@@ -434,6 +491,32 @@ def test_volume_markers_are_recorded_when_a_description_is_configured() -> None:
         raw, recording_id="run-1", volume_description="Volume/V  1"
     )
     without_markers = compute_run_continuity(raw, recording_id="run-1")
+    absent = compute_run_continuity(
+        _raw(),
+        recording_id="run-2",
+        volume_description="Volume/V  1",
+    )
 
     assert with_markers.has_volume_markers
     assert not without_markers.has_volume_markers
+    assert not absent.has_volume_markers
+
+
+def test_acquisition_markers_are_not_drawn_as_task_events() -> None:
+    raw = _raw()
+    raw.set_annotations(
+        mne.Annotations(
+            onset=[5.0, 10.0, 20.0],
+            duration=[0.0, 0.0, 0.0],
+            description=["Scanner/Volume", "Cardiac/R", "stimulus/heat"],
+        )
+    )
+
+    run = compute_run_continuity(
+        raw,
+        recording_id="run-1",
+        volume_description="Scanner/Volume",
+        pulse_description="Cardiac/R",
+    )
+
+    assert run.event_onsets == (20.0,)

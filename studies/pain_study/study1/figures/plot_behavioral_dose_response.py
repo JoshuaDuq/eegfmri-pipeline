@@ -54,9 +54,7 @@ def write_behavioral_dose_response(
 
 
 def main(argv: Sequence[str] | None = None) -> Path:
-    parser = argparse.ArgumentParser(
-        description="Write the Study 1 behavioral dose-response SVG."
-    )
+    parser = argparse.ArgumentParser(description="Write the Study 1 behavioral dose-response SVG.")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--study1-config", type=Path)
     parser.add_argument("--task", required=True)

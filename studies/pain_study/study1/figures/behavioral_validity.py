@@ -61,9 +61,7 @@ def require_behavioral_validity_target(
         ("cohort estimates", summary.cohort_estimates),
     ):
         if frame.empty or "target" not in frame.columns:
-            raise ValueError(
-                f"Behavioral validity {table_name} must contain target-labelled rows."
-            )
+            raise ValueError(f"Behavioral validity {table_name} must contain target-labelled rows.")
         observed_targets.update(frame["target"].astype(str).unique().tolist())
     if observed_targets != {expected_target}:
         raise ValueError(

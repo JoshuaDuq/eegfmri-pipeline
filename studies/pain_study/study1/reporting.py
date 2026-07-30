@@ -272,8 +272,8 @@ def _derive_temporal_negative_controls(frame: pd.DataFrame) -> pd.Series:
     is_control = (lane == "feature_benchmark") & (partition == TEMPORAL_CONTROL_PARTITION)
     is_primary = (lane == "feature_benchmark") & (partition == "primary")
 
-    negative_control = frame["temporal_control_kind"].astype(str).isin(
-        TEMPORAL_NEGATIVE_CONTROL_KINDS
+    negative_control = (
+        frame["temporal_control_kind"].astype(str).isin(TEMPORAL_NEGATIVE_CONTROL_KINDS)
     )
     controls = frame.loc[is_control & negative_control]
     criterion_values = pd.Series(pd.NA, index=frame.index, dtype="object")
@@ -724,9 +724,7 @@ def _write_full_picture_tables(
     manifest = {
         "source_report": str(report_path),
         "target_table": str(primary_targets_parquet_path(config)),
-        "supplementary_figures": {
-            name: str(path) for name, path in supplementary_figures.items()
-        },
+        "supplementary_figures": {name: str(path) for name, path in supplementary_figures.items()},
         "tables": {
             name: {"tsv": str(paths["tsv"]), "parquet": str(paths["parquet"])}
             for name, paths in table_paths.items()
@@ -1289,9 +1287,7 @@ def _split_half_temperature_reliability(
             half = values.size // 2
             half_a[cell_idx] = values[order[:half]].mean()
             half_b[cell_idx] = values[order[half : 2 * half]].mean()
-        sb = _spearman_brown_corrected(
-            _series_correlation(pd.Series(half_a), pd.Series(half_b))
-        )
+        sb = _spearman_brown_corrected(_series_correlation(pd.Series(half_a), pd.Series(half_b)))
         if np.isfinite(sb):
             corrected.append(sb)
 

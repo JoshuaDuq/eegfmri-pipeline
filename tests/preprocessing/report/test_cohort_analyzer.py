@@ -35,12 +35,20 @@ def _participant(
     in_scanner: bool = True,
     matched: list[float] | None = None,
     markers: list[float] | None = None,
+    detected: list[float] | None = None,
+    matched_counts: list[float] | None = None,
     bpm: list[float] | None = None,
     beats: list[float] | None = None,
     dropouts: list[float] | None = None,
 ) -> SubjectSidecar:
     matched = [0.97, 0.96] if matched is None else matched
     markers = [600.0, 600.0] if markers is None else markers
+    detected = markers if detected is None else detected
+    matched_counts = (
+        [fraction * count for fraction, count in zip(matched, detected, strict=True)]
+        if matched_counts is None
+        else matched_counts
+    )
     n_runs = len(markers)
     frame = pd.DataFrame(
         {
@@ -52,6 +60,8 @@ def _participant(
             "continuity_max_db": [5.0] * n_runs,
             "marker_matched_fraction": matched,
             "n_markers": markers,
+            "n_detected_beats": detected,
+            "n_matched_beats": matched_counts,
             "median_bpm": bpm if bpm is not None else [62.0] * n_runs,
             "n_beats": beats if beats is not None else [600.0] * n_runs,
             "beat_dropouts": dropouts if dropouts is not None else [3.0] * n_runs,
@@ -60,8 +70,14 @@ def _participant(
     if in_scanner:
         frame["n_volumes"] = [300] * n_runs
         frame["repetition_time_s"] = [2.0] * n_runs
-        frame["volume_locked_corrected_uv"] = [0.7] * n_runs
-        frame["volume_locked_noise_floor_uv"] = [0.3] * n_runs
+        frame["volume_locked_rms_before_uv"] = [1.2] * n_runs
+        frame["volume_locked_floor_before_uv"] = [0.4] * n_runs
+        frame["volume_locked_excess_power_before_uv2"] = [1.28] * n_runs
+        frame["volume_locked_resolved_before"] = [True] * n_runs
+        frame["volume_locked_rms_after_uv"] = [0.76] * n_runs
+        frame["volume_locked_floor_after_uv"] = [0.3] * n_runs
+        frame["volume_locked_excess_power_after_uv2"] = [0.49] * n_runs
+        frame["volume_locked_resolved_after"] = [True] * n_runs
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
@@ -78,7 +94,7 @@ def _cohort(*participants) -> Cohort:
 
 
 def test_agreement_is_a_rate_over_the_session() -> None:
-    """A short run cannot outvote a long one; every presented marker counts once."""
+    """A short run cannot outvote a long one; every detected beat counts once."""
     analyzer = analyzer_cohort(
         _cohort(_participant("0014", matched=[0.0, 1.0], markers=[10.0, 990.0]))
     )
@@ -88,6 +104,29 @@ def test_agreement_is_a_rate_over_the_session() -> None:
     assert row["marker_agreement"] == 990.0 / 1000.0
     # A median of the per-run fractions would have reported 50%.
     assert row["marker_agreement"] > 0.9
+
+
+def test_sensitivity_and_precision_use_their_own_denominators() -> None:
+    analyzer = analyzer_cohort(
+        _cohort(
+            _participant(
+                "0014",
+                matched=[0.8, 0.9],
+                matched_counts=[80.0, 90.0],
+                detected=[100.0, 100.0],
+                markers=[200.0, 100.0],
+            )
+        )
+    )
+
+    row = analyzer.frame.iloc[0]
+
+    assert row["marker_agreement"] == 170.0 / 200.0
+    assert row["marker_precision"] == 170.0 / 300.0
+
+    document = analyzer_table(analyzer)
+    assert "Beat sensitivity" in document
+    assert "Marker precision" in document
 
 
 def test_the_worst_run_travels_beside_the_pooled_figure() -> None:

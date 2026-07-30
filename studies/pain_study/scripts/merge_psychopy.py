@@ -9,7 +9,10 @@ from typing import List, Optional
 
 import pandas as pd
 
-from eeg_pipeline.analysis.utilities.bids_metadata import ensure_events_sidecar, ensure_task_events_json
+from eeg_pipeline.analysis.utilities.bids_metadata import (
+    ensure_events_sidecar,
+    ensure_task_events_json,
+)
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.utils.data.preprocessing import (
     combine_runs_for_subject,
@@ -158,7 +161,10 @@ def merge_psychopy_to_events(
 
     if run_num is not None and "run_id" in psychopy_df.columns:
         unique_runs = sorted(
-            {int(r) for r in pd.to_numeric(psychopy_df["run_id"], errors="coerce").dropna().unique()}
+            {
+                int(r)
+                for r in pd.to_numeric(psychopy_df["run_id"], errors="coerce").dropna().unique()
+            }
         )
         if unique_runs and unique_runs != [int(run_num)]:
             message = f"Behavior run_id mismatch for {beh_csv.name}: found {unique_runs}, expected {run_num}"

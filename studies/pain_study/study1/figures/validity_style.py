@@ -42,14 +42,14 @@ def publication_style(config: Any) -> Iterator[None]:
     rc_params = publication_rc_params(family, svg_hash_salt=SVG_HASH_SALT)
     rc_params.update(
         {
-        "font.size": float(font["tick_label_pt"]),
-        "axes.labelsize": float(font["axis_label_pt"]),
-        "xtick.labelsize": float(font["tick_label_pt"]),
-        "ytick.labelsize": float(font["tick_label_pt"]),
-        "legend.fontsize": float(font["legend_pt"]),
-        "axes.linewidth": float(style["axis_line_width_pt"]),
-        "xtick.major.width": float(style["axis_line_width_pt"]),
-        "ytick.major.width": float(style["axis_line_width_pt"]),
+            "font.size": float(font["tick_label_pt"]),
+            "axes.labelsize": float(font["axis_label_pt"]),
+            "xtick.labelsize": float(font["tick_label_pt"]),
+            "ytick.labelsize": float(font["tick_label_pt"]),
+            "legend.fontsize": float(font["legend_pt"]),
+            "axes.linewidth": float(style["axis_line_width_pt"]),
+            "xtick.major.width": float(style["axis_line_width_pt"]),
+            "ytick.major.width": float(style["axis_line_width_pt"]),
         }
     )
     with mpl.rc_context(rc_params):

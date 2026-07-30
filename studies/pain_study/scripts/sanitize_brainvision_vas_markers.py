@@ -392,8 +392,7 @@ def run_sanitization(
     succeeded = False
     try:
         rows = [
-            stage_recording(recording, source_data_root, temporary_root)
-            for recording in recordings
+            stage_recording(recording, source_data_root, temporary_root) for recording in recordings
         ]
         published_rows = []
         for row in rows:

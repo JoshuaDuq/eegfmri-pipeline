@@ -42,12 +42,8 @@ DEFAULT_SOURCE_DIRECTORY = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v2/"
     "sub-0015/eeg/brainvision_processed_1khz"
 )
-DEFAULT_EVENTS_DIRECTORY = Path(
-    "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg/sub-0015/eeg"
-)
-DEFAULT_OUTPUT_DIRECTORY = Path(
-    "outputs/matlab_exports/sub-0015/brainvision_processed_1khz"
-)
+DEFAULT_EVENTS_DIRECTORY = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg/sub-0015/eeg")
+DEFAULT_OUTPUT_DIRECTORY = Path("outputs/matlab_exports/sub-0015/brainvision_processed_1khz")
 DEFAULT_CLEAN_MNE_DIRECTORY = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/"
     "brainvision_analyzer_mne_preprocessing_sub-0015/preprocessed/eeg/sub-0015/eeg"
@@ -70,9 +66,7 @@ def select_trials(events: pd.DataFrame, run_id: int) -> pd.DataFrame:
         )
 
     trials["run_id"] = pd.to_numeric(trials["run_id"], errors="raise").astype(int)
-    trials["trial_number"] = pd.to_numeric(
-        trials["trial_number"], errors="raise"
-    ).astype(int)
+    trials["trial_number"] = pd.to_numeric(trials["trial_number"], errors="raise").astype(int)
     if not trials["run_id"].eq(run_id).all():
         raise ValueError(f"Run {run_id} events contain a different run_id.")
 
@@ -91,9 +85,7 @@ def epoch_bounds(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return inclusive epoch bounds as half-open sample intervals."""
     if not np.isclose(sampling_frequency, SAMPLING_FREQUENCY, atol=1e-12):
-        raise ValueError(
-            f"Expected {SAMPLING_FREQUENCY:g} Hz, got {sampling_frequency:g} Hz."
-        )
+        raise ValueError(f"Expected {SAMPLING_FREQUENCY:g} Hz, got {sampling_frequency:g} Hz.")
 
     start_offset = int(round(EPOCH_TMIN_S * sampling_frequency))
     stop_offset = int(round(EPOCH_TMAX_S * sampling_frequency)) + 1
@@ -101,7 +93,9 @@ def epoch_bounds(
     stops = np.asarray(trigger_samples, dtype=np.int64) + stop_offset
     invalid = np.flatnonzero((starts < 0) | (stops > recording_samples))
     if invalid.size:
-        raise ValueError(f"Epochs extend outside the recording at trial indices {invalid.tolist()}.")
+        raise ValueError(
+            f"Epochs extend outside the recording at trial indices {invalid.tolist()}."
+        )
     return starts, stops
 
 
@@ -407,9 +401,7 @@ def _export_clean_mne_epochs(
         raise ValueError("Clean events contain a run without first-volume timing.")
 
     data = clean_epochs.get_data(copy=False).astype(np.float32, copy=False)
-    output_path = output_directory / (
-        f"{SUBJECT}_task-{TASK}_desc-icaclean_fieldtrip.mat"
-    )
+    output_path = output_directory / (f"{SUBJECT}_task-{TASK}_desc-icaclean_fieldtrip.mat")
     _write_matlab(
         output_path,
         "data",
@@ -491,9 +483,7 @@ def export_subject(
         raise RuntimeError("No BrainVision runs were loaded.")
 
     export_timestamp = datetime.now(UTC).isoformat()
-    data_path = output_directory / (
-        f"{SUBJECT}_task-{TASK}_desc-brainvisionprocessed_epochs.mat"
-    )
+    data_path = output_directory / (f"{SUBJECT}_task-{TASK}_desc-brainvisionprocessed_epochs.mat")
     trial_info_path = output_directory / f"{SUBJECT}_task-{TASK}_trial_info.mat"
     _write_matlab(
         data_path,

@@ -81,6 +81,7 @@ class RemovalSettings:
 
     nominal_fundamental_hz: float = lr.NOMINAL_FUNDAMENTAL_HZ
     harmonic_range: tuple[int, int] = lr.COMB_HARMONIC_RANGE
+    removal_harmonic_range: tuple[int, int] = lr.REMOVAL_HARMONIC_RANGE
     isolated_hz: tuple[float, ...] = lr.ISOLATED_NOMINAL_HZ
     search_hz: float = 0.25
     isolated_search_hz: float = 0.15
@@ -98,11 +99,13 @@ class RemovalSettings:
         defaults = cls()
         block = config.get("preprocessing.line_comb_removal") or {}
         harmonic_range = block.get("harmonic_range", list(defaults.harmonic_range))
+        removal_range = block.get("removal_harmonic_range", list(defaults.removal_harmonic_range))
         return cls(
             nominal_fundamental_hz=float(
                 block.get("nominal_fundamental_hz", defaults.nominal_fundamental_hz)
             ),
             harmonic_range=(int(harmonic_range[0]), int(harmonic_range[1])),
+            removal_harmonic_range=(int(removal_range[0]), int(removal_range[1])),
             isolated_hz=tuple(float(f) for f in block.get("isolated_hz", defaults.isolated_hz)),
             search_hz=float(block.get("search_hz", defaults.search_hz)),
             isolated_search_hz=float(block.get("isolated_search_hz", defaults.isolated_search_hz)),
@@ -220,7 +223,7 @@ def estimate_and_targets(
     )
     targets = lr.removal_frequencies(
         estimate,
-        harmonic_range=settings.harmonic_range,
+        harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
     )
@@ -346,7 +349,7 @@ def apply_run(
     _, _, prominence_before = run_spectrum(raw)
     targets = lr.removal_frequencies(
         estimate,
-        harmonic_range=settings.harmonic_range,
+        harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
     )

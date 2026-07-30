@@ -115,13 +115,9 @@ def _finite_array(
     if array.size == 0:
         raise InvalidPermutationDraw(f"Study 2 target-retrained {name} is empty.")
     if not np.all(np.isfinite(array)):
-        raise InvalidPermutationDraw(
-            f"Study 2 target-retrained {name} contains non-finite values."
-        )
+        raise InvalidPermutationDraw(f"Study 2 target-retrained {name} contains non-finite values.")
     if require_variance and float(np.std(array, ddof=0)) <= 1.0e-12:
-        raise InvalidPermutationDraw(
-            f"Study 2 target-retrained {name} has zero variance."
-        )
+        raise InvalidPermutationDraw(f"Study 2 target-retrained {name} has zero variance.")
     return array
 
 

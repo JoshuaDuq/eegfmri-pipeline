@@ -18,12 +18,21 @@ plus four lines that drift on their own. Converted to amplitude, across 15 parti
 | All 50 artifact lines together | **1.52 µV RMS** (0.93–2.12 across participants) |
 | Largest single line, 57.22 Hz | 1.45 µV (up to 2.38) |
 | Share of broadband 1–95 Hz power | 2.4% |
-| Share of **gamma** 30.1–80 Hz power | **47.4%** (31.5–63.0 across participants) |
+| Share of **gamma** 30.1–80 Hz power | **34.9%** (14.7–54.7 across participants) |
 
-So this matters for gamma and essentially nothing else: beta carries 2.2%, and delta
-through alpha carry none. About half of the gamma power in this dataset is a machine in
-the scanner room, and because the coupling is a participant-level property (ICC 0.75) it
+So this matters for gamma and essentially nothing else: beta carries 0.6%, and delta
+through alpha carry none. A third of the gamma power in this dataset is a machine in the
+scanner room, and because the coupling is a participant-level property (ICC 0.75) it
 enters between-participant comparisons as a systematic offset, not as noise.
+
+> **Correction.** These shares were first reported about a third too high — gamma as 47.4%
+> rather than 34.9% — because the estimator dropped the line bins and compared band powers.
+> Dropping a bin removes its background along with its line, so ordinary spectrum was being
+> counted as contamination: on a flat spectrum, masking a fifth of the bins reads as a fifth
+> of the power being artifact when none of it is. The share is now the excess over the local
+> background at the line bins, in `harmonic_diagnosis.line_excess_fraction`. Every share in
+> this document and in the diagnosis uses the corrected estimator. The conclusions do not
+> change — gamma is dominated by the artifact either way — but the numbers do.
 
 ---
 
@@ -156,40 +165,77 @@ the code rather than quietly applied.
 
 ## Cohort result
 
-All 90 runs, session-pooled frequencies, `freq/450` widths:
+All 90 runs, session-pooled frequencies, harmonics 22–79 plus the four isolated lines
+(61 targets per run), `freq/450` widths.
 
 | | |
 |---|---|
-| Median suppression | **24.1 dB** (20.3–27.6 across runs) |
-| Median residual prominence | **−16.1 dB** (worst run −13.8 dB) |
-| Session fundamental | 1.1999816 Hz, SD **115 µHz** across 15 participants |
+| Median suppression | **23.7 dB** (20.0–26.6 across runs) |
+| Median residual prominence, over all lines | **−17.0 dB** |
+| Session fundamental | 1.1999827 Hz, SD **115 µHz** across 15 participants |
 | Per-run estimates before pooling | SD 180 µHz |
-| Band touched | 12.1% (12.1–12.2) |
-| Binary round-trip | ≤ 5.5 × 10⁻⁸ relative, every run |
+| Band touched | 12.1% of 28–95 Hz |
+| Binary round-trip | ≤ 5.7 × 10⁻⁸ relative, every run |
 
-**Individual runs are not uniformly clean.** Twenty-nine of 90 retain at least one line
-above their own local background, eleven above 6 dB, and sub-0000 run-1 leaves one at
-14 dB. This is not explained by the session pooling: the correlation between a run's
-distance from its session median and its worst residual is 0.089. Some lines are simply
-harder to fit in some runs, and the gate did not catch it because it reads the median.
+### What each band gained
 
-**At cohort level nothing survives.** Re-running the diagnosis's own detector — a blind
-FDR-controlled sweep of 3–95 Hz with no knowledge of where the lines were, on one run per
-participant:
+Measured on the continuous BIDS runs, one per participant, as excess above the local
+background. "Bins removed" is the share of the band the removal touches at all.
+
+| Band | Lines | Artifact before | Artifact after | Bins removed |
+|---|---:|---:|---:|---:|
+| delta 1–4 | 0 | 0.00% | 0.00% | 0% |
+| theta 4–8 | 0 | 0.00% | 0.00% | 0% |
+| alpha 8–13 | 0 | 0.00% | 0.00% | 0% |
+| beta 13–30 | 2 | 1.18% | **0.20%** | 0.7% |
+| gamma 30–45 | 10 | 9.19% | **2.57%** | 5.6% |
+| gamma 45–58 | 10 | 43.35% | **4.28%** | 8.8% |
+| gamma 62–95 | 25 | 30.49% | **2.11%** | 13.8% |
+| gamma 30–95 | 48 | 26.59% | **3.11%** | 10.7% |
+
+Gamma is where the work was needed and where it paid: 45–58 Hz falls from 43% artifact to
+4%, and 62–95 Hz from 30% to 2%. Below 30 Hz there was almost nothing to remove and almost
+nothing was touched.
+
+### The blind test
+
+Re-running the diagnosis's own detector — an FDR-controlled sweep of 3–95 Hz that knows
+nothing about where the lines are — on one run per participant:
 
 | Stage | Lines detected at *q* < 0.05 | On the comb | Max prominence |
 |---|---:|---:|---:|
 | Original | **82** | 44 | 16.8 dB |
 | Cleaned | **0** | 0 | — |
 
-That is the level at which the contamination mattered. The comb was a problem because it
-was consistent across participants and therefore a systematic between-participant offset;
-after removal no line is consistent enough to be detected at all. A residual line in one
-run of one participant is run-level noise, not a confound — but it is there, and anyone
-running a single-run analysis should read `removal_manifest.tsv` rather than assume
-uniform suppression.
+Nothing is detectable anywhere in the band afterwards. That is the level at which the
+contamination mattered: it was a confound because it was consistent across participants,
+and no line is now consistent enough to be found.
 
-Reproduce with `--stage verify`.
+### What is left, and where
+
+Four of the 50 lines still exceed 1 dB in at least one participant:
+
+| Hz | Median residual | Worst participant | Participants above 1 dB |
+|---:|---:|---:|---:|
+| **57.2247** | +2.6 dB | **+18.3 dB** | 8 / 15 |
+| 43.2029 | −11.6 dB | +14.0 dB | 1 / 15 |
+| 86.3970 | −18.7 dB | +5.6 dB | 1 / 15 |
+| 47.0362 | −7.8 dB | +2.0 dB | 4 / 15 |
+
+Per run, 25 of 90 keep at least one line above their own background and 11 keep one above
+6 dB. **57.2 Hz is the recurring one**, and the reason is that it is the largest line in
+the dataset to begin with — up to 26 dB in a single run — so a uniform ~24 dB of suppression
+still leaves several decibels standing.
+
+It is not the pooling. The isolated lines do drift within a session, and monotonically:
+sub-0000's 47.04 Hz climbs from 46.9656 to 46.9839 Hz across runs 1 to 6, and its second
+harmonic at 94.07 Hz climbs exactly twice as far (35.0 against 18.3 mHz), which is what a
+single source warming up over an hour looks like. But that drift is at most 46 mHz, well
+inside the ±64 mHz the notch spans at 57 Hz, so the target was never off the line.
+
+The practical consequence is confined to 55–59 Hz: a residual there is participant-specific
+and can reach 18 dB in one run. Anyone analysing that neighbourhood specifically should read
+`per_line_residual.tsv` rather than assume it is clean.
 
 ## Running it
 
@@ -223,6 +269,62 @@ run, and `removal_manifest.tsv` with each run's estimated frequencies, session-p
 fundamental, suppression achieved and round-trip deviation.
 
 ---
+
+## Which frequency bands are usable
+
+Three hard edges bound any band definition on this dataset, independently of the removal:
+
+- **59.5–60.5 Hz** is a −54.9 dB mains notch applied by the pipeline. Any band spanning it
+  contains a hole.
+- **Above 95 Hz the comb is still there.** The removal ceiling is 95 Hz because the
+  background estimator needs ±4.6 Hz of valid support and beyond that it runs into the
+  100 Hz low-pass. Harmonics 80–83 sit at 96.0, 97.2, 98.4 and 99.6 Hz with 5.3–9.1 dB
+  prominence, untouched.
+- **Below 26 Hz nothing was ever contaminated**, and the removal does not reach there.
+
+On that basis, after the cleaned dataset has been through MNE-BIDS-Pipeline:
+
+| Band | Recommended range | Artifact after removal | Note |
+|---|---|---:|---|
+| delta | 1–4 Hz | 0.00% | untouched by the removal |
+| theta | 4–8 Hz | 0.00% | untouched |
+| alpha | 8–13 Hz | 0.00% | untouched |
+| **beta** | **13–30 Hz** | 0.20% | now continuous; see below |
+| gamma low | 30–45 Hz | 2.6% | |
+| gamma mid | 45–58 Hz | 4.3% | stops below the mains notch |
+| gamma high | 62–95 Hz | 2.1% | starts above the notch, ends at the ceiling |
+
+**Beta should become one continuous 13–30 Hz band.** The present configuration splits it
+into 13–17.9 and 23.1–30 with a hole cut around 20 Hz, on the assumption of a scanner line
+there. The diagnosis found no line anywhere in 13–26 Hz, and the two that do exist — 26.4
+and 27.6 Hz — are now removed. The 20 Hz slice-excitation rate is the one place gradient
+left any trace at all (within-run phase resultant 0.377 against a 0.27 null) but it
+produced no detectable spectral line, so it does not warrant carving the band. Dropping the
+exclusion recovers 5 Hz of bandwidth that was being discarded for a reason that no longer
+holds.
+
+**The three "clean" gamma windows should be retired.** `gamma_low_clean` (30.1–38),
+`gamma_mid_clean` (43–56) and `gamma_high_clean` (67–77) were drawn to dodge a 20 Hz-spaced
+scanner comb that does not exist, and together they discard about 25 Hz of usable spectrum
+while still admitting 4, 10 and 8 comb lines respectively. The ranges above replace them.
+
+Two caveats that belong in a methods section rather than in a band definition:
+
+- 12.1% of the bins in 28–95 Hz were removed with the lines, so gamma band power is an
+  average over the surviving 88%. It is applied identically to every participant, so it
+  does not create a between-participant confound, but the absolute value is biased low and
+  any genuine narrowband activity at a comb frequency is gone with the artifact.
+- A residual near 57.2 Hz remains in some participants, up to 18 dB in the worst run. It
+  sits inside the 45–58 Hz window. If that neighbourhood carries the hypothesis, check
+  `per_line_residual.tsv` per participant before relying on it.
+
+**This is a projection, not a measurement of the final epochs.** The numbers above come
+from the cleaned continuous BIDS runs; MNE-BIDS-Pipeline has not yet been re-run on them.
+Its remaining operations — band-pass, mains notch, resampling, ICA, epoching — do not
+reintroduce narrowband lines, and the blind detector finding nothing in the cleaned
+continuous data is the strongest available evidence short of producing the epochs. Confirm
+by re-running `diagnose_scanner_harmonics --stage all` against the new derivatives once
+they exist.
 
 ## What has to happen afterwards
 

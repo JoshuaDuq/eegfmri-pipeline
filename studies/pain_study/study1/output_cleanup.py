@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-
 WINDOWED_RANGE_SUFFIXES = ("active", "baseline")
 
 

@@ -109,8 +109,7 @@ def build_sensor_power_data(
     if not expected_channels:
         raise ValueError("Power feature tables have no channels shared across subjects.")
     power_frames = [
-        frame.loc[frame["channel"].isin(expected_channels)].copy()
-        for frame in power_frames
+        frame.loc[frame["channel"].isin(expected_channels)].copy() for frame in power_frames
     ]
     power = pd.concat(power_frames, ignore_index=True)
     trials = power.merge(

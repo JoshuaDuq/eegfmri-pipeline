@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 _SINGULAR_TOL = 1.0e-8
 
 
@@ -98,18 +97,14 @@ def _r_backend_script_path() -> Path:
 
 def _resolve_rscript_path(configured: str) -> str:
     if not configured:
-        raise ValueError(
-            "eeg_bold_coupling.statistics.rscript_path must not be blank."
-        )
+        raise ValueError("eeg_bold_coupling.statistics.rscript_path must not be blank.")
     if Path(configured).is_absolute():
         if not Path(configured).exists():
             raise FileNotFoundError(f"Rscript executable not found: {configured}")
         return configured
     resolved = shutil.which(configured)
     if resolved is None:
-        raise FileNotFoundError(
-            f"Rscript executable {configured!r} is not available on PATH."
-        )
+        raise FileNotFoundError(f"Rscript executable {configured!r} is not available on PATH.")
     return resolved
 
 
@@ -129,9 +124,11 @@ def _invalid_fit_row(
         "outcome_column": cell.outcome_column,
         "n_trials": int(len(model_table)),
         "n_subjects": int(model_table["subject"].nunique()) if not model_table.empty else 0,
-        "n_runs": int(model_table[["subject", "run_num"]].drop_duplicates().shape[0])
-        if not model_table.empty
-        else 0,
+        "n_runs": (
+            int(model_table[["subject", "run_num"]].drop_duplicates().shape[0])
+            if not model_table.empty
+            else 0
+        ),
         "beta": np.nan,
         "se": np.nan,
         "z_value": np.nan,
@@ -172,14 +169,10 @@ class CouplingStatisticsConfig:
         )
         backend = str(raw.get("backend", "nlme_lme_ar1")).strip().lower()
         if backend != "nlme_lme_ar1":
-            raise ValueError(
-                "eeg_bold_coupling.statistics.backend must be 'nlme_lme_ar1'."
-            )
+            raise ValueError("eeg_bold_coupling.statistics.backend must be 'nlme_lme_ar1'.")
         fit_method = str(raw.get("fit_method", "reml")).strip().lower()
         if fit_method != "reml":
-            raise ValueError(
-                "eeg_bold_coupling.statistics.fit_method must be 'reml'."
-            )
+            raise ValueError("eeg_bold_coupling.statistics.fit_method must be 'reml'.")
         return cls(
             backend=backend,
             min_trials_per_subject=int(raw.get("min_trials_per_subject", 20)),
@@ -191,9 +184,7 @@ class CouplingStatisticsConfig:
             fit_method=fit_method,
             max_iterations=int(raw.get("max_iterations", 200)),
             em_iterations=int(raw.get("em_iterations", 50)),
-            singular_tolerance=float(
-                raw.get("singular_tolerance", _SINGULAR_TOL)
-            ),
+            singular_tolerance=float(raw.get("singular_tolerance", _SINGULAR_TOL)),
         )
 
 
@@ -221,10 +212,7 @@ def summarize_subject_cells(
     rows: List[Dict[str, Any]] = []
     for cell in cell_specs:
         required_columns = [cell.predictor_column, cell.outcome_column, *cell.model_terms]
-        if (
-            stats_cfg.use_outcome_variance
-            and cell.outcome_variance_column is not None
-        ):
+        if stats_cfg.use_outcome_variance and cell.outcome_variance_column is not None:
             required_columns.append(cell.outcome_variance_column)
         subset = merged_table[required_columns + ["run_num"]].copy()
         subset = subset.dropna().reset_index(drop=True)
@@ -244,10 +232,7 @@ def summarize_subject_cells(
                 subset[cell.outcome_column],
                 errors="coerce",
             ).to_numpy(dtype=float)
-            if (
-                np.nanstd(predictor_values, ddof=0) <= 0
-                or np.nanstd(outcome_values, ddof=0) <= 0
-            ):
+            if np.nanstd(predictor_values, ddof=0) <= 0 or np.nanstd(outcome_values, ddof=0) <= 0:
                 status = "insufficient_variance"
         rows.append(
             {
@@ -287,9 +272,7 @@ def _prepare_model_table(
     out = table.copy()
     out["subject"] = out["subject"].astype(str)
     if "trial_position" not in out.columns:
-        raise ValueError(
-            "Pooled table is missing trial_position required for AR(1) spacing."
-        )
+        raise ValueError("Pooled table is missing trial_position required for AR(1) spacing.")
     out["trial_position"] = pd.to_numeric(
         out["trial_position"],
         errors="coerce",
@@ -298,15 +281,13 @@ def _prepare_model_table(
         raise ValueError("Pooled table trial_position contains non-finite values.")
     out["trial_time"] = pd.to_numeric(out["onset"], errors="coerce")
     if not np.all(np.isfinite(out["trial_time"].to_numpy(dtype=float))):
-        raise ValueError("Pooled table onset contains non-finite values for continuous-time correlation.")
+        raise ValueError(
+            "Pooled table onset contains non-finite values for continuous-time correlation."
+        )
     duplicate_time = out.duplicated(subset=["subject", "run_num", "trial_time"])
     if bool(duplicate_time.any()):
-        raise ValueError(
-            "Within-run trial onsets must be unique for continuous-time correlation."
-        )
-    out = out.sort_values(
-        ["subject", "run_num", "trial_time", "duration"]
-    ).reset_index(drop=True)
+        raise ValueError("Within-run trial onsets must be unique for continuous-time correlation.")
+    out = out.sort_values(["subject", "run_num", "trial_time", "duration"]).reset_index(drop=True)
 
     categorical = set(str(term) for term in categorical_terms)
     nonstandardized = set(str(term) for term in nonstandardized_terms)
@@ -348,21 +329,17 @@ def _prepare_model_table(
     variance_column: Optional[str] = None
     if use_outcome_variance and outcome_variance_column is not None:
         if outcome_variance_column not in out.columns:
-            raise ValueError(
-                f"Outcome variance column {outcome_variance_column!r} is missing."
-            )
+            raise ValueError(f"Outcome variance column {outcome_variance_column!r} is missing.")
         out[outcome_variance_column] = pd.to_numeric(
             out[outcome_variance_column],
             errors="coerce",
         )
         scale_values = out["subject"].astype(str).map(outcome_scale_by_subject)
-        out[outcome_variance_column] = (
-            out[outcome_variance_column].to_numpy(dtype=float)
-            / np.square(pd.to_numeric(scale_values, errors="coerce").to_numpy(dtype=float))
-        )
-        positive_mask = (
-            np.isfinite(out[outcome_variance_column].to_numpy(dtype=float))
-            & (out[outcome_variance_column].to_numpy(dtype=float) > 0)
+        out[outcome_variance_column] = out[outcome_variance_column].to_numpy(
+            dtype=float
+        ) / np.square(pd.to_numeric(scale_values, errors="coerce").to_numpy(dtype=float))
+        positive_mask = np.isfinite(out[outcome_variance_column].to_numpy(dtype=float)) & (
+            out[outcome_variance_column].to_numpy(dtype=float) > 0
         )
         out = out.loc[positive_mask].reset_index(drop=True)
         variance_column = outcome_variance_column
@@ -434,9 +411,7 @@ def _run_nlme_backend(
             detail = stderr or stdout or f"exit code {completed.returncode}"
             raise RuntimeError(f"R nlme backend failed: {detail}")
         if not output_path.exists():
-            raise RuntimeError(
-                "R nlme backend did not produce an output file."
-            )
+            raise RuntimeError("R nlme backend did not produce an output file.")
         out = pd.read_csv(output_path, sep="\t")
         if out.empty:
             raise RuntimeError("R nlme backend returned an empty result.")
@@ -495,11 +470,7 @@ def fit_mixedlm_cell(
     se = result["se"]
     z_value = beta / se if np.isfinite(beta) and np.isfinite(se) and se > 0 else np.nan
     status = result["status"] or "model_not_interpretable"
-    interpretable = (
-        status == "ok"
-        and bool(result["converged"])
-        and not bool(result["singular"])
-    )
+    interpretable = status == "ok" and bool(result["converged"]) and not bool(result["singular"])
     return {
         "analysis_id": cell.analysis_id,
         "family": cell.family,
@@ -538,9 +509,11 @@ def finalize_group_results(
 ) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
-    out = pd.DataFrame(rows).sort_values(
-        ["family", "roi", "band", "analysis_id"]
-    ).reset_index(drop=True)
+    out = (
+        pd.DataFrame(rows)
+        .sort_values(["family", "roi", "band", "analysis_id"])
+        .reset_index(drop=True)
+    )
     out["p_holm"] = np.nan
     valid_mask = (
         (out["family"].astype(str) == "confirmatory")
@@ -552,9 +525,8 @@ def finalize_group_results(
             pd.to_numeric(out.loc[valid_mask, "p_value"], errors="coerce").to_numpy(dtype=float)
         )
         out.loc[valid_mask, "p_holm"] = adjusted
-    out["significant_holm"] = (
-        out["interpretable"].astype(bool)
-        & (pd.to_numeric(out["p_holm"], errors="coerce") < float(alpha))
+    out["significant_holm"] = out["interpretable"].astype(bool) & (
+        pd.to_numeric(out["p_holm"], errors="coerce") < float(alpha)
     )
     return out
 

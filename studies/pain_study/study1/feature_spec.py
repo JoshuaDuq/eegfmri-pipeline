@@ -6,7 +6,6 @@ from typing import Any
 
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 PRIMARY_FEATURE_FAMILY = "power"
 SUPPORTED_EXPLORATORY_FEATURE_FAMILIES = (
     "spectral",
@@ -51,9 +50,7 @@ def resolve_exploratory_feature_families(config: Any) -> list[str]:
     )
     resolved = _coerce_family_list(configured)
     unsupported = [
-        family
-        for family in resolved
-        if family not in SUPPORTED_EXPLORATORY_FEATURE_FAMILIES
+        family for family in resolved if family not in SUPPORTED_EXPLORATORY_FEATURE_FAMILIES
     ]
     if unsupported:
         raise ValueError(

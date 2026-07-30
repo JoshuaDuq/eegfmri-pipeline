@@ -39,9 +39,9 @@ def compute_source_power_association_map(
     valid_vertices = source_norms > float(variance_tolerance)
 
     partial_r = np.full(source_arr.shape[1], np.nan, dtype=float)
-    partial_r[valid_vertices] = (
-        score_centered @ source_centered[:, valid_vertices]
-    ) / (score_norm * source_norms[valid_vertices])
+    partial_r[valid_vertices] = (score_centered @ source_centered[:, valid_vertices]) / (
+        score_norm * source_norms[valid_vertices]
+    )
     partial_r[valid_vertices] = np.clip(partial_r[valid_vertices], -0.999999, 0.999999)
 
     fisher_z = np.full(source_arr.shape[1], np.nan, dtype=float)
@@ -55,9 +55,7 @@ def compute_source_power_association_map(
 
 def _validate_inputs(source_power: np.ndarray, score: np.ndarray, design: np.ndarray) -> None:
     if source_power.ndim != 2:
-        raise ValueError(
-            f"Study 2 source_power must be 2D, got shape {source_power.shape}."
-        )
+        raise ValueError(f"Study 2 source_power must be 2D, got shape {source_power.shape}.")
     if score.ndim != 1:
         raise ValueError(f"Study 2 source-stage score must be 1D, got shape {score.shape}.")
     if design.ndim != 2:

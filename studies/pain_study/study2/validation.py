@@ -7,7 +7,6 @@ from typing import Any, Mapping
 
 from eeg_pipeline.utils.config.loader import get_config_value
 
-
 _MISSING = object()
 
 

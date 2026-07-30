@@ -399,31 +399,38 @@ Power that the 50 artifact lines add to each analysis band, integrated in the po
 per participant. Rhythms and the six ambiguous wide members are not masked, so this is
 contamination only.
 
-| Band | Hz | Artifact lines inside | Median inflation | Range over 15 participants |
+| Band | Hz | Artifact lines inside | Median artifact share | Range over 15 participants |
 |---|---|---:|---:|---|
-| delta | 1.0–3.9 | 0 | 0.00 dB | — |
-| theta | 4.0–7.9 | 0 | 0.00 dB | — |
-| alpha | 8.0–12.9 | 0 | 0.00 dB | — |
-| beta | 13.0–30.0 | 2 | 0.10 dB | [0.05, 0.13] |
-| beta_low_clean | 13.0–17.9 | 0 | 0.00 dB | — |
-| beta_high_clean | 23.1–30.0 | 2 | 0.44 dB | [0.29, 0.69] |
-| **gamma** | 30.1–80.0 | **34** | **2.79 dB** | [1.64, 4.31] |
-| gamma_low_clean | 30.1–38.0 | 4 | 0.84 dB | [0.71, 0.95] |
-| gamma_mid_clean | 43.0–56.0 | 9 | 2.56 dB | [1.83, 3.85] |
-| gamma_high_clean | 67.0–77.0 | 8 | 2.78 dB | [1.22, 3.45] |
+| delta | 1.0–3.9 | 0 | 0.00% | — |
+| theta | 4.0–7.9 | 0 | 0.00% | — |
+| alpha | 8.0–12.9 | 0 | 0.00% | — |
+| beta | 13.0–30.0 | 2 | 0.62% | [0.15, 1.77] |
+| beta_low_clean | 13.0–17.9 | 0 | 0.00% | — |
+| beta_high_clean | 23.1–30.0 | 2 | 2.79% | [0.92, 8.62] |
+| **gamma** | 30.1–80.0 | **35** | **34.86%** | [14.67, 54.68] |
+| gamma_low_clean | 30.1–38.0 | 4 | 4.51% | [2.05, 7.40] |
+| gamma_mid_clean | 43.0–56.0 | 10 | 29.17% | [16.39, 47.15] |
+| gamma_high_clean | 67.0–77.0 | 8 | 32.18% | [3.64, 42.12] |
 
-Delta through alpha are untouched: the comb does not start until harmonic 24 (28.8 Hz).
-Beta is nearly untouched at 0.10 dB, and `beta_low_clean` contains no artifact line at all.
+The share is the power sitting **above the local background** at the line bins, divided by
+total band power. An earlier version of this table dropped the line bins and compared band
+powers, which also drops their background and so charged ordinary spectrum to the artifact;
+it read gamma as 47.4% against the 34.9% here. The correction lowers every figure and
+changes no conclusion.
+
+Delta through alpha are untouched: the comb's lowest detected member is harmonic 22
+(26.4 Hz) and its lowest confirmed one harmonic 23 (27.6 Hz). Beta is nearly untouched at
+0.62%, and `beta_low_clean` contains no artifact line at all.
 The existing beta restriction around 20 Hz was designed against a gradient comb that is not
 there; beta is clean, but for a different reason than the one on record.
 
 Every gamma window carries lines, including all three named "clean". Those three were
 chosen to dodge a 20 Hz-spaced scanner comb. Against a 1.2 Hz comb running continuously
 from 28.8 to 94.8 Hz, no 10 Hz-wide window in the gamma range can avoid contamination:
-`gamma_low_clean` admits 4 lines, `gamma_mid_clean` 9, `gamma_high_clean` 8. The inflation
-is 0.8 to 2.8 dB at the median and reaches 4.3 dB in the worst participant, and because it
-is a participant-level property (median ICC 0.746) it enters between-participant
-comparisons as a systematic offset rather than as noise.
+`gamma_low_clean` admits 4 lines, `gamma_mid_clean` 10, `gamma_high_clean` 8. The share is
+4.5% to 32% at the median and reaches 47% in the worst participant, and because it is a
+participant-level property (median ICC 0.746) it enters between-participant comparisons as
+a systematic offset rather than as noise.
 
 These are measurements, not a verdict on whether any given analysis is admissible. What
 they establish is the size and the structure of the term.
@@ -434,7 +441,8 @@ line across bins four times its width and makes the comb nearly invisible; it mu
 read as evidence the spectrum is clean. Second, the `gamma_masked_minus_full_db` column in
 the existing cohort QC averages decibels, which is a geometric mean over power and
 understates narrow high-amplitude bins — its own docstring puts the discrepancy near 11 dB
-on synthetic data. The table above integrates power and converts once at the end.
+on synthetic data. The table above measures excess over the local background instead, which
+neither understates the lines nor charges their background to them.
 
 ---
 

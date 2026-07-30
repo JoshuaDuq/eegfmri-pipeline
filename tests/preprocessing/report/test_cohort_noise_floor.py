@@ -37,7 +37,7 @@ def _epochs(n_epochs: int, *, amplitude_v=ARTIFACT_AMPLITUDE_V, seed: int = 0) -
     return data - data.mean(axis=2, keepdims=True)
 
 
-def test_the_corrected_amplitude_does_not_depend_on_the_number_of_epochs() -> None:
+def test_the_resolved_amplitude_does_not_depend_on_the_number_of_epochs() -> None:
     """The property the whole correction exists for."""
     short = measure_locked_average(_epochs(50))
     long = measure_locked_average(_epochs(400))
@@ -49,15 +49,17 @@ def test_the_corrected_amplitude_does_not_depend_on_the_number_of_epochs() -> No
     assert short.locked_rms_uv > 1.7 * long.locked_rms_uv
 
     # The corrected amplitude recovers the injected artifact at both counts.
-    assert short.corrected_amplitude_uv == pytest.approx(TRUTH_UV, rel=0.25)
-    assert long.corrected_amplitude_uv == pytest.approx(TRUTH_UV, rel=0.10)
+    assert short.resolved_amplitude_uv == pytest.approx(TRUTH_UV, rel=0.25)
+    assert long.resolved_amplitude_uv == pytest.approx(TRUTH_UV, rel=0.10)
 
 
-def test_a_recording_with_no_locked_artifact_corrects_to_about_nothing() -> None:
-    """Under the null the average is the floor and nothing survives removing it."""
+def test_a_recording_below_the_floor_is_unresolved_not_zero() -> None:
+    """A negative noisy estimate is censored evidence, not an exact zero."""
     measured = measure_locked_average(_epochs(400, amplitude_v=0.0, seed=2))
 
-    assert measured.corrected_amplitude_uv < 0.1 * TRUTH_UV
+    assert measured.excess_power_uv2 < 0.0
+    assert not measured.is_resolved
+    assert measured.resolved_amplitude_uv is None
 
     # The raw figure, by contrast, is the noise floor wearing the units of an artifact:
     # a reader given it has no way to see the recording contains none at all.
@@ -85,7 +87,7 @@ def test_the_locked_waveform_cancels_in_the_split_however_large_it_is() -> None:
     loud = measure_locked_average(_epochs(200, amplitude_v=200e-6, seed=5))
 
     assert loud.noise_floor_uv == pytest.approx(quiet.noise_floor_uv, rel=0.05)
-    assert loud.corrected_amplitude_uv == pytest.approx(200e-6 / np.sqrt(2.0) * 1e6, rel=0.02)
+    assert loud.resolved_amplitude_uv == pytest.approx(200e-6 / np.sqrt(2.0) * 1e6, rel=0.02)
 
 
 def test_the_estimator_is_deterministic() -> None:
@@ -101,7 +103,16 @@ def test_an_odd_epoch_count_pairs_all_but_one() -> None:
 
     assert measured.n_epochs == 61
     assert measured.n_paired_epochs == 60
-    assert measured.corrected_amplitude_uv == pytest.approx(TRUTH_UV, rel=0.25)
+    assert measured.resolved_amplitude_uv == pytest.approx(TRUTH_UV, rel=0.25)
+
+
+def test_an_odd_count_scales_the_paired_floor_to_the_full_average() -> None:
+    data = np.asarray([1.0, -1.0, 0.0], dtype=float).reshape(3, 1, 1) * 1e-6
+
+    measured = measure_locked_average(data)
+
+    assert measured.n_paired_epochs == 2
+    assert measured.noise_floor_uv == pytest.approx(np.sqrt(2.0 / 3.0))
 
 
 def test_a_single_epoch_cannot_be_corrected() -> None:

@@ -129,8 +129,7 @@ def _ensure_phasediff_echo_times(fmri_root: Path) -> int:
             continue
         fmap_dirs: List[Path] = [sub_dir / "fmap"] if (sub_dir / "fmap").is_dir() else []
         fmap_dirs.extend(
-            d for d in sub_dir.glob("ses-*/fmap")
-            if d.is_dir() and not d.name.startswith("._")
+            d for d in sub_dir.glob("ses-*/fmap") if d.is_dir() and not d.name.startswith("._")
         )
         for fmap_dir in fmap_dirs:
             all_tes: List[float] = []
@@ -220,7 +219,9 @@ def _volume_markers_from_eeg_events(eeg_events_path: Path) -> Tuple[int, float]:
         if onset > last_onset:
             last_onset = onset
     if parse_failures:
-        print(f"Warning: ignored {parse_failures} malformed Volume/* onset row(s) in {eeg_events_path}")
+        print(
+            f"Warning: ignored {parse_failures} malformed Volume/* onset row(s) in {eeg_events_path}"
+        )
     return count, last_onset
 
 
@@ -513,7 +514,12 @@ def _write_eeg_phase_events(
                 "trial_number": str(_trial_number),
             }
             # Copy core behavioral columns if present
-            for k in ("stimulus_temp", "selected_surface", "pain_binary_coded", "vas_final_coded_rating"):
+            for k in (
+                "stimulus_temp",
+                "selected_surface",
+                "pain_binary_coded",
+                "vas_final_coded_rating",
+            ):
                 if k in _row and str(_row.get(k) or "").strip() != "":
                     row[k] = str(_row.get(k))
             out_rows.append(row)
@@ -530,8 +536,24 @@ def _write_eeg_phase_events(
             f"Warning: skipped {id_parse_failures} Trig_therm row(s) with malformed run/trial identifiers in {eeg_events_path}"
         )
 
-    out_rows.sort(key=lambda rr: (float(rr["onset"]), int(rr.get("trial_number") or "0"), rr.get("trial_type") or ""))
-    out_fields = ["onset", "duration", "trial_type", "run_id", "trial_number", "stimulus_temp", "selected_surface", "pain_binary_coded", "vas_final_coded_rating"]
+    out_rows.sort(
+        key=lambda rr: (
+            float(rr["onset"]),
+            int(rr.get("trial_number") or "0"),
+            rr.get("trial_type") or "",
+        )
+    )
+    out_fields = [
+        "onset",
+        "duration",
+        "trial_type",
+        "run_id",
+        "trial_number",
+        "stimulus_temp",
+        "selected_surface",
+        "pain_binary_coded",
+        "vas_final_coded_rating",
+    ]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     _write_tsv(out_path, out_fields, out_rows)
 
@@ -580,7 +602,12 @@ def main() -> int:
         fmri_events, fmri_bold = _fmri_paths(fmri_root, sub_label, task, run)
         eeg_events, eeg_json = _eeg_paths(eeg_root, sub_label, task, run)
 
-        if not (fmri_events.exists() and fmri_bold.exists() and eeg_events.exists() and eeg_json.exists()):
+        if not (
+            fmri_events.exists()
+            and fmri_bold.exists()
+            and eeg_events.exists()
+            and eeg_json.exists()
+        ):
             continue
 
         eeg_meta = _load_json(eeg_json)
@@ -634,8 +661,12 @@ def main() -> int:
         stim_diff = _stim_alignment_max_diff_s(fmri_events, eeg_events)
 
         # Write optional derived EEG phase events in scan time base (for analysis convenience).
-        phase_out = qc_out / "eeg_phase_events" / f"{sub_label}_task-{task}_run-{run:02d}_events.tsv"
-        _write_eeg_phase_events(eeg_events_path=eeg_events, out_path=phase_out, offset_s=abs_offset_s)
+        phase_out = (
+            qc_out / "eeg_phase_events" / f"{sub_label}_task-{task}_run-{run:02d}_events.tsv"
+        )
+        _write_eeg_phase_events(
+            eeg_events_path=eeg_events, out_path=phase_out, offset_s=abs_offset_s
+        )
 
         run_qc_rows.append(
             RunQC(
@@ -703,7 +734,11 @@ def main() -> int:
                     "n_trials_incomplete_in_eeg": r.n_trials_incomplete_in_eeg,
                     "n_trials_incomplete_in_bold": r.n_trials_incomplete_in_bold,
                     "max_trial_end_time": f"{r.max_trial_end_time:.6f}",
-                    "stim_alignment_max_diff_s": f"{r.stim_alignment_max_diff_s:.6f}" if r.stim_alignment_max_diff_s >= 0 else "",
+                    "stim_alignment_max_diff_s": (
+                        f"{r.stim_alignment_max_diff_s:.6f}"
+                        if r.stim_alignment_max_diff_s >= 0
+                        else ""
+                    ),
                     "psychopy_to_scan_offset_s": f"{r.psychopy_to_scan_offset_s:.6f}",
                     "fmri_events_path": r.fmri_events_path,
                     "fmri_bold_path": r.fmri_bold_path,
@@ -721,10 +756,15 @@ def main() -> int:
     n_incomplete_b = sum(r.n_trials_incomplete_in_bold for r in run_qc_rows)
     if n_incomplete_b > 0:
         print(f"Note: {n_incomplete_b} trial(s) extend past BOLD end (truncation QC).")
-    stim_diffs = [r.stim_alignment_max_diff_s for r in run_qc_rows if r.stim_alignment_max_diff_s >= 0]
+    stim_diffs = [
+        r.stim_alignment_max_diff_s for r in run_qc_rows if r.stim_alignment_max_diff_s >= 0
+    ]
     if stim_diffs:
         max_stim = max(stim_diffs)
-        print(f"Stimulation alignment: max |fMRI stimulation onset − EEG Trig_therm onset| = {max_stim:.6f} s across runs (< 0.01 s ⇒ aligned).")
+        print(
+            f"Stimulation alignment: max |fMRI stimulation onset − EEG Trig_therm onset| = {max_stim:.6f} s across runs (< 0.01 s ⇒ aligned)."
+        )
+
     def _bold_end_in_eeg(r: RunQC) -> float:
         o = max(0.0, (r.fmri_nvols - r.eeg_volume_markers) * r.fmri_tr)
         return r.fmri_duration - o

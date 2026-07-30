@@ -614,26 +614,31 @@ def topography_reproducibility(
 
 
 def band_impact(grid: Grid, subjects: list[str], lines: pd.DataFrame) -> pd.DataFrame:
-    """Band power with and without the narrow line bins, integrated over power.
+    """Fraction of each band's power that is artifact, per participant.
 
-    Comb members and isolated narrow lines are masked. The remaining detections are
-    broad, weak and present in only a few participants; masking those would be masking
-    the brain rhythms the band exists to measure and calling them contamination.
+    Measured as excess over the local background at the line bins. Dropping the line bins
+    and comparing band powers -- the first version of this -- also drops their background
+    and so counts ordinary spectrum as contamination; it put gamma at 47% against a true
+    35%. See :func:`harmonic_diagnosis.line_excess_fraction`.
+
+    Only comb members and isolated narrow lines count. The remaining detections are broad,
+    weak and present in a few participants; charging those to the artifact would be
+    charging it for the brain rhythms the band exists to measure.
     """
     narrow = lines.loc[lines["kind"].isin(("comb", "isolated"))]
-    windows = hd.line_exclusion_windows(
-        list(narrow["refined_hz"]), half_width_hz=LINE_MASK_HALF_WIDTH_HZ
-    )
+    artifact = list(narrow["refined_hz"])
     rows = []
     for position, subject in enumerate(subjects):
         spectrum = grid.subject_psd[position]
         for name, (low, high) in BANDS.items():
-            inside = [window for window in windows if window[1] > low and window[0] < high]
-            full = hd.band_power_db(grid.freqs, spectrum, low_hz=low, high_hz=high)
-            masked = (
-                hd.band_power_db(grid.freqs, spectrum, low_hz=low, high_hz=high, excluded_hz=inside)
-                if inside
-                else full
+            fraction = hd.line_excess_fraction(
+                grid.freqs,
+                spectrum,
+                low_hz=low,
+                high_hz=high,
+                line_freqs=artifact,
+                half_width_bins=grid.half_width_bins,
+                line_half_width_hz=LINE_MASK_HALF_WIDTH_HZ,
             )
             rows.append(
                 {
@@ -641,11 +646,11 @@ def band_impact(grid: Grid, subjects: list[str], lines: pd.DataFrame) -> pd.Data
                     "band": name,
                     "low_hz": low,
                     "high_hz": high,
-                    "n_lines_inside": len(inside),
+                    "n_lines_inside": sum(1 for f in artifact if low <= f <= high),
                     "n_artifact_lines_total": int(len(narrow)),
-                    "full_power_db": full,
-                    "line_masked_power_db": masked,
-                    "line_contribution_db": full - masked,
+                    "artifact_share": fraction,
+                    "artifact_share_percent": 100.0 * fraction,
+                    "line_contribution_db": float(-10.0 * np.log10(max(1.0 - fraction, 1e-12))),
                 }
             )
     return pd.DataFrame(rows)

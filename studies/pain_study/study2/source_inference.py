@@ -45,10 +45,7 @@ def compute_group_source_inference(
     t_values, p_values = _one_sample_t(observed)
     threshold = float(stats.t.ppf(1.0 - cluster_forming_p / 2.0, observed.shape[0] - 1))
     null_max_masses = np.asarray(
-        [
-            _max_cluster_mass(_one_sample_t(draw)[0], threshold, adjacency_arr)
-            for draw in null
-        ],
+        [_max_cluster_mass(_one_sample_t(draw)[0], threshold, adjacency_arr) for draw in null],
         dtype=float,
     )
     clusters = tuple(

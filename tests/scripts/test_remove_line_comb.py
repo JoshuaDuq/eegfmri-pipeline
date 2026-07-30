@@ -31,6 +31,7 @@ class TestRemovalSettings:
         settings = rlc.RemovalSettings.from_config(load_config())
         assert settings.nominal_fundamental_hz == pytest.approx(1.2)
         assert settings.harmonic_range == (24, 79)
+        assert settings.removal_harmonic_range == (22, 79)
         assert settings.filter_length == "20s"
         assert settings.mt_bandwidth == pytest.approx(0.6)
 
@@ -52,9 +53,15 @@ class TestRemovalSettings:
         # MNE's own default would empty a quarter of the band.
         assert settings.notch_width_ratio > 200.0
 
+    def test_removal_reaches_below_the_fit_but_spares_harmonic_11(self):
+        settings = rlc.RemovalSettings.from_config(load_config())
+        assert settings.removal_harmonic_range[0] < settings.harmonic_range[0]
+        assert settings.removal_harmonic_range[0] == 22  # 26.40 Hz
+        assert settings.removal_harmonic_range[0] > 11  # 13.23 Hz stays
+
     def test_the_configured_width_keeps_the_band_inside_the_gate(self):
         settings = rlc.RemovalSettings.from_config(load_config())
-        low, high = settings.harmonic_range
+        low, high = settings.removal_harmonic_range
         targets = [
             settings.nominal_fundamental_hz * k
             for k in range(low, high + 1)

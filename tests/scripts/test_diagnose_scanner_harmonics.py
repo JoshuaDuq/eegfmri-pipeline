@@ -116,8 +116,8 @@ class TestBandImpact:
         lines = ds.detect_cohort_lines(grid)
         classified = ds.classify_lines(lines, ds.comb_structure(lines))
         impact = ds.band_impact(grid, [f"sub-{i:04d}" for i in range(15)], classified)
-        mid = impact.loc[impact["band"] == "gamma_mid_clean", "line_contribution_db"]
-        assert mid.min() > 0.5
+        mid = impact.loc[impact["band"] == "gamma_mid_clean", "artifact_share_percent"]
+        assert mid.min() > 5.0
 
     def test_band_without_lines_is_untouched(self):
         freqs, spectra = synthetic_cohort([51.574])
@@ -127,7 +127,18 @@ class TestBandImpact:
         impact = ds.band_impact(grid, [f"sub-{i:04d}" for i in range(15)], classified)
         alpha = impact.loc[impact["band"] == "alpha"]
         assert (alpha["n_lines_inside"] == 0).all()
-        assert np.allclose(alpha["line_contribution_db"], 0.0)
+        assert np.allclose(alpha["artifact_share"], 0.0)
+
+    def test_a_band_of_pure_background_reports_no_artifact(self):
+        # The estimator error this replaced: dropping line bins made an empty band look
+        # contaminated in proportion to how many bins were dropped.
+        freqs, spectra = synthetic_cohort([51.574])
+        grid = ds.build_grid(freqs, spectra)
+        lines = ds.detect_cohort_lines(grid)
+        classified = ds.classify_lines(lines, ds.comb_structure(lines))
+        impact = ds.band_impact(grid, [f"sub-{i:04d}" for i in range(15)], classified)
+        theta = impact.loc[impact["band"] == "theta", "artifact_share"]
+        assert np.allclose(theta, 0.0)
 
 
 class TestCombStructure:

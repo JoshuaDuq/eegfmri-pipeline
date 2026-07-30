@@ -443,6 +443,70 @@ class TestBandPower:
             )
 
 
+class TestLineExcessFraction:
+    def _spectrum(self, line_gain_db=0.0, line_hz=(50.0,)):
+        freqs = np.arange(0, 110, 1 / 21.6)
+        psd = np.full(freqs.size, 1e-12)
+        for frequency in line_hz:
+            psd[int(np.argmin(np.abs(freqs - frequency)))] *= 10 ** (line_gain_db / 10)
+        return freqs, psd
+
+    def test_a_flat_band_with_no_line_is_zero(self):
+        # The failure the old estimator had: dropping bins made this large.
+        freqs, psd = self._spectrum(line_gain_db=0.0)
+        fraction = hd.line_excess_fraction(
+            freqs,
+            psd,
+            low_hz=30.0,
+            high_hz=80.0,
+            line_freqs=[1.2 * k for k in range(26, 66)],
+            half_width_bins=100,
+        )
+        assert fraction == pytest.approx(0.0, abs=1e-9)
+
+    def test_dropping_bins_would_have_reported_a_large_share_instead(self):
+        freqs, psd = self._spectrum(line_gain_db=0.0)
+        lines = [1.2 * k for k in range(26, 66)]
+        windows = hd.line_exclusion_windows(lines, half_width_hz=0.15)
+        full = hd.band_power_db(freqs, psd, low_hz=30.0, high_hz=80.0)
+        masked = hd.band_power_db(freqs, psd, low_hz=30.0, high_hz=80.0, excluded_hz=windows)
+        assert 1 - 10 ** (-(full - masked) / 10) > 0.15  # the inflation being corrected
+
+    def test_a_known_line_is_recovered(self):
+        freqs, psd = self._spectrum(line_gain_db=30.0, line_hz=(50.0,))
+        bin_width = freqs[1] - freqs[0]
+        band = (freqs >= 30.0) & (freqs <= 80.0)
+        expected = (1e-12 * (10**3 - 1)) * bin_width / (float(np.sum(psd[band])) * bin_width)
+        fraction = hd.line_excess_fraction(
+            freqs, psd, low_hz=30.0, high_hz=80.0, line_freqs=[50.0], half_width_bins=100
+        )
+        assert fraction == pytest.approx(expected, rel=0.02)
+
+    def test_a_bin_dug_below_background_does_not_count_as_negative(self):
+        freqs, psd = self._spectrum()
+        psd[int(np.argmin(np.abs(freqs - 50.0)))] = 1e-18  # a hole, as removal leaves
+        fraction = hd.line_excess_fraction(
+            freqs, psd, low_hz=30.0, high_hz=80.0, line_freqs=[50.0], half_width_bins=100
+        )
+        assert fraction == pytest.approx(0.0, abs=1e-12)
+
+    def test_no_line_inside_the_band_gives_zero(self):
+        freqs, psd = self._spectrum(line_gain_db=30.0, line_hz=(50.0,))
+        assert (
+            hd.line_excess_fraction(
+                freqs, psd, low_hz=8.0, high_hz=12.9, line_freqs=[50.0], half_width_bins=100
+            )
+            == 0.0
+        )
+
+    def test_rejects_an_inverted_band(self):
+        freqs, psd = self._spectrum()
+        with pytest.raises(ValueError, match="low_hz must be below"):
+            hd.line_excess_fraction(
+                freqs, psd, low_hz=80.0, high_hz=30.0, line_freqs=[50.0], half_width_bins=100
+            )
+
+
 class TestLineExclusionWindows:
     def test_merges_overlapping_windows(self):
         windows = hd.line_exclusion_windows([57.10, 57.18, 57.22], half_width_hz=0.15)
