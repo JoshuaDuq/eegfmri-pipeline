@@ -1,6 +1,12 @@
 import numpy as np
 
-from eeg_pipeline.preprocessing.bcg.metrics import epoch_stack, held_out_reduction
+from eeg_pipeline.preprocessing.bcg.metrics import (
+    ReductionResult,
+    epoch_stack,
+    held_out_reduction,
+    naive_peak_to_peak,
+    rlocked_reduction,
+)
 
 SFREQ = 1000.0
 WINDOW = (-0.3, 0.7)
@@ -62,3 +68,39 @@ def test_held_out_reduction_recovers_injected_artifact():
 
     assert np.nanmax(reduction) > 0.20
     assert np.nanmax(template_pp) > 15.0
+
+
+def test_rlocked_reduction_reports_nothing_above_null_on_clean_data():
+    data = _noise(8, 240, seed=5)
+    beats = _beats(250, seed=6)
+
+    result = rlocked_reduction(data, beats, SFREQ, window=WINDOW, n_surrogate=15, seed=0)
+
+    assert isinstance(result, ReductionResult)
+    assert result.channels_above_null == 0
+
+
+def test_rlocked_reduction_flags_every_channel_when_artifact_present():
+    beats = _beats(250, seed=7)
+    data = _inject(_noise(8, 240, seed=8), beats, SFREQ, amplitude_uv=60.0)
+
+    result = rlocked_reduction(data, beats, SFREQ, window=WINDOW, n_surrogate=15, seed=0)
+
+    assert result.channels_above_null == 8
+    assert result.max_value > 0.20
+
+
+def test_naive_peak_to_peak_fails_where_held_out_statistic_does_not():
+    """The naive statistic must stay in the codebase only as a documented failure.
+
+    On artifact-free data it returns several microvolts, which is what made an earlier
+    reported BCG amplitude meaningless.
+    """
+    data = _noise(32, 240, seed=9)
+    onsets = np.round(_beats(250, seed=10) * SFREQ).astype(int)
+
+    naive = naive_peak_to_peak(data, onsets, SFREQ, WINDOW, measure=(0.0, 0.6))
+    reduction, _ = held_out_reduction(data, onsets, SFREQ, WINDOW)
+
+    assert np.nanmax(naive) > 1.0
+    assert np.nanmax(reduction) < 0.02
