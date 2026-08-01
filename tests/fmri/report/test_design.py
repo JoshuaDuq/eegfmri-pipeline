@@ -288,9 +288,17 @@ def test_vif_figure_draws_one_bar_per_modelled_regressor() -> None:
         plt.close(figure)
 
 
-def test_figures_drop_label_clutter_for_wide_designs() -> None:
+def test_figures_drop_label_clutter_only_past_a_screen_width() -> None:
+    # These panels used to drop every name past a couple of dozen columns. This
+    # pipeline's designs carry 47, so in practice the VIF panel drew 46 unlabelled
+    # bars: a reader could see something inflated by a factor of 130 and had no way
+    # to find out what. The panels widen instead, and only fall back on role bands
+    # past a width no screen carries.
     rng = np.random.default_rng(5)
-    wide = pd.DataFrame({f"a_comp_cor_{i:02d}": rng.normal(size=80) for i in range(70)})
+    n_over = design.MAX_LABELLED_REGRESSORS + 10
+    wide = pd.DataFrame(
+        {f"a_comp_cor_{i:03d}": rng.normal(size=n_over + 20) for i in range(n_over)}
+    )
     wide["constant"] = 1.0
 
     matrix_fig = design.design_matrix_figure(wide)
@@ -301,6 +309,39 @@ def test_figures_drop_label_clutter_for_wide_designs() -> None:
     finally:
         plt.close(matrix_fig)
         plt.close(corr_fig)
+
+
+def test_a_realistic_confound_design_keeps_every_regressor_name() -> None:
+    # 47 regressors is this study's own design: six task columns, a motion-24 block,
+    # eight drift terms, and a constant.
+    rng = np.random.default_rng(6)
+    columns = {f"task_{i}": rng.normal(size=120) for i in range(6)}
+    columns.update({f"trans_{i:02d}": rng.normal(size=120) for i in range(32)})
+    columns.update({f"drift_{i}": rng.normal(size=120) for i in range(8)})
+    columns["constant"] = np.ones(120)
+    frame = pd.DataFrame(columns)
+    assert frame.shape[1] == 47
+
+    figure = design.variance_inflation_figure(frame)
+    figure.canvas.draw()
+    labels = {t.get_text() for t in figure.axes[0].get_xticklabels() if t.get_text()}
+    assert "trans_31" in labels and "drift_7" in labels and "task_0" in labels
+    plt.close(figure)
+
+
+def test_the_vif_panel_marks_the_contrast_s_own_regressors_in_its_labels() -> None:
+    # Inflation on a regressor the contrast weights is what costs the comparison its
+    # precision; inflation on a motion derivative's square is ordinary. A reader
+    # scanning names should not have to match a bar back to a colour swatch.
+    frame = _wide_frame()
+    figure = design.variance_inflation_figure(frame, contrast={"task_0": 1.0})
+    figure.canvas.draw()
+    weighted = [
+        t for t in figure.axes[0].get_xticklabels() if t.get_text() == "task_0"
+    ]
+    assert weighted, "the weighted regressor lost its label"
+    assert weighted[0].get_fontweight() == "bold"
+    plt.close(figure)
 
 
 # --------------------------------------------------------------------------- #
@@ -390,15 +431,35 @@ def test_the_regressor_labels_a_reader_sees_are_rotated() -> None:
     plt.close(figure)
 
 
-def test_a_wide_design_labels_its_task_regressors_and_not_its_nuisance_block() -> None:
+def test_a_wide_design_names_its_nuisance_block_too() -> None:
+    # The panel exists to say which weight lands on which regressor. A confound the
+    # reader cannot name is one they cannot check the model for, so the figure
+    # widens rather than dropping the nuisance labels.
     columns = {f"task_{i}": np.linspace(0, 1, 40) for i in range(3)}
     columns.update({f"trans_{i}": np.linspace(0, 1, 40) for i in range(30)})
     columns["constant"] = np.ones(40)
     figure = design.design_matrix_figure(pd.DataFrame(columns))
     texts = {text for text, _rotation in _visible_tick_labels(figure)}
     assert {"task_0", "task_1", "task_2"} <= texts
-    assert not any(text.startswith("trans_") for text in texts)
+    assert any(text.startswith("trans_") for text in texts)
     plt.close(figure)
+
+
+def test_a_wider_design_gets_a_wider_figure() -> None:
+    # Width is what buys the labels; without it they overlap into a smear.
+    def frame(n_confound: int) -> pd.DataFrame:
+        columns = {"task_0": np.linspace(0, 1, 40)}
+        columns.update({f"trans_{i}": np.linspace(0, 1, 40) for i in range(n_confound)})
+        columns["constant"] = np.ones(40)
+        return pd.DataFrame(columns)
+
+    narrow = design.design_matrix_figure(frame(4))
+    wide = design.design_matrix_figure(frame(44))
+    try:
+        assert wide.get_size_inches()[0] > narrow.get_size_inches()[0]
+    finally:
+        plt.close(narrow)
+        plt.close(wide)
 
 
 def test_the_contrast_weight_is_written_on_the_cell_it_belongs_to() -> None:
@@ -546,14 +607,24 @@ def test_the_vif_panel_survives_an_intercept_only_design() -> None:
     plt.close(figure)
 
 
-def test_the_correlation_panel_bands_a_wide_design_by_role() -> None:
+def test_the_correlation_panel_bands_a_design_too_wide_to_label() -> None:
     # A hot off-diagonal block among the confounds is ordinary -- a motion parameter
     # and its own square are correlated by construction. The same block reaching the
     # task regressors is what costs the contrast its variance, and unbanded the two
-    # are indistinguishable.
-    figure = design.regressor_correlation_figure(_wide_frame())
+    # are indistinguishable. Reached only once the design outgrows its labels.
+    figure = design.regressor_correlation_figure(
+        _wide_frame(n_confound=design.MAX_LABELLED_REGRESSORS + 10, n=140)
+    )
     labels = " ".join(t.get_text() for t in figure.axes[0].texts)
     assert "Task" in labels and "Confound" in labels
+    plt.close(figure)
+
+
+def test_the_correlation_panel_names_a_realistic_design() -> None:
+    figure = design.regressor_correlation_figure(_wide_frame())
+    figure.canvas.draw()
+    ticks = {t.get_text() for t in figure.axes[0].get_yticklabels() if t.get_text()}
+    assert "task_0" in ticks and "trans_29" in ticks
     plt.close(figure)
 
 
@@ -570,4 +641,359 @@ def test_a_narrow_design_keeps_its_regressor_names_instead_of_bands() -> None:
     figure.canvas.draw()
     ticks = {t.get_text() for t in figure.axes[0].get_yticklabels() if t.get_text()}
     assert {"cond_a", "cond_b", "trans_x"} <= ticks
+    plt.close(figure)
+
+
+# --- the per-run summary as one table -------------------------------------
+#
+# Six runs produced six stacked key-value blocks of the same seven labels, and
+# comparing a condition number across runs meant scrolling between them -- while
+# comparison across runs is the entire reason those numbers are reported per run.
+
+
+def _summaries(n: int = 3):
+    frame = _design_frame()
+    return [
+        design.summarize_design(frame, contrast={"cond_a": 1.0, "cond_b": -1.0})
+        for _ in range(n)
+    ]
+
+
+def test_one_row_per_run() -> None:
+    table, rows = design.design_summary_table(
+        _summaries(3), run_labels=["run-01", "run-02", "run-03"]
+    )
+    assert table.count("<tr>") == 4  # header plus three runs
+    assert len(rows) == 4
+    assert "run-02" in table
+
+
+def test_the_table_carries_the_conditioning_and_the_efficiency() -> None:
+    table, _rows = design.design_summary_table(_summaries(1), run_labels=["run-01"])
+    for column in ("Condition number", "Largest VIF", "Efficiency", "Residual dof"):
+        assert column in table
+
+
+def test_a_rank_deficient_design_is_named_as_one() -> None:
+    # A design whose columns are linearly dependent carries fewer parameters than it
+    # appears to, and no other line in the report says so.
+    summary = design.DesignSummary(
+        n_scans=100,
+        n_regressors=5,
+        condition_number=1e9,
+        max_vif=None,
+        max_vif_regressor="",
+        efficiency=None,
+        rank=4,
+        residual_dof=96,
+    )
+    table, _rows = design.design_summary_table([summary], run_labels=["run-01"])
+    assert "4 (deficient)" in table
+
+
+def test_an_inestimable_quantity_says_so_rather_than_showing_zero() -> None:
+    summary = design.DesignSummary(
+        n_scans=100,
+        n_regressors=5,
+        condition_number=float("inf"),
+        max_vif=None,
+        max_vif_regressor="",
+        efficiency=None,
+        rank=5,
+        residual_dof=95,
+    )
+    table, _rows = design.design_summary_table([summary], run_labels=["run-01"])
+    assert "not estimable" in table
+    assert "∞" in table
+
+
+# --- how much data the contrast rests on ----------------------------------
+
+
+def test_events_are_counted_from_the_convolved_regressor() -> None:
+    # The report described the model in every other respect and never said how much
+    # data the contrast rested on.
+    frame = pd.DataFrame(
+        {
+            "cond_a": np.concatenate([np.zeros(5), np.ones(4), np.zeros(6), np.ones(4), np.zeros(5)]),
+            "cond_b": np.concatenate([np.zeros(12), np.ones(4), np.zeros(8)]),
+            "constant": np.ones(24),
+        }
+    )
+    counts = design.count_events(frame, ["cond_a", "cond_b"])
+    assert counts == {"cond_a": 2, "cond_b": 1}
+
+
+def test_a_condition_absent_from_a_run_is_not_counted_as_zero() -> None:
+    # A run that never presented a condition is a different fact from a run that
+    # presented it zero times, and the table shows "n/a" for the first.
+    frame = pd.DataFrame({"cond_a": np.ones(10), "constant": np.ones(10)})
+    assert design.count_events(frame, ["cond_a", "cond_b"]) == {"cond_a": 1}
+
+    table, _rows = design.design_summary_table(
+        _summaries(1),
+        run_labels=["run-01"],
+        event_counts=[{"cond_a": 5}],
+        condition_names=["cond_a", "cond_b"],
+    )
+    assert "Events: cond_a" in table and "Events: cond_b" in table
+    assert "n/a" in table
+
+
+def test_event_counts_join_the_summary_table() -> None:
+    table, rows = design.design_summary_table(
+        _summaries(2),
+        run_labels=["run-01", "run-02"],
+        event_counts=[{"cond_a": 6}, {"cond_a": 5}],
+        condition_names=["cond_a"],
+    )
+    assert "Events: cond_a" in table
+    assert rows[1].endswith("\t6")
+    assert rows[2].endswith("\t5")
+
+
+def test_a_condition_high_from_the_first_frame_still_counts_as_an_event() -> None:
+    # Such an event began at or before the first modelled frame: the design drops
+    # non-steady-state volumes, so a run whose first trial starts immediately loses
+    # its rising edge with them. Reporting no event would say the run contained none.
+    assert list(design.onset_rows(np.concatenate([np.ones(4), np.zeros(6)]))) == [0]
+    assert list(
+        design.onset_rows(np.concatenate([np.ones(4), np.zeros(6), np.ones(4)]))
+    ) == [0, 10]
+
+
+# --- event timing ----------------------------------------------------------
+#
+# The summary table counts the events; it cannot show where they fell. Timing decides
+# whether two conditions are separable at all, and no count or condition number
+# reveals it.
+
+
+def test_the_raster_draws_one_lane_per_run() -> None:
+    onsets = [
+        {"cond_a": np.array([10, 50]), "cond_b": np.array([30, 70])},
+        {"cond_a": np.array([12, 52]), "cond_b": np.array([32])},
+    ]
+    figure = design.event_raster_figure(
+        onsets, run_labels=["run-01", "run-02"], condition_names=["cond_a", "cond_b"]
+    )
+    figure.canvas.draw()
+    ticks = [t.get_text() for t in figure.axes[0].get_yticklabels() if t.get_text()]
+    assert ticks == ["run-01", "run-02"]
+    plt.close(figure)
+
+
+def test_the_raster_totals_each_condition() -> None:
+    onsets = [
+        {"cond_a": np.array([10, 50]), "cond_b": np.array([30])},
+        {"cond_a": np.array([12]), "cond_b": np.array([32, 72])},
+    ]
+    figure = design.event_raster_figure(
+        onsets, run_labels=["run-01", "run-02"], condition_names=["cond_a", "cond_b"]
+    )
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "cond_a: 3" in text and "cond_b: 3" in text
+    plt.close(figure)
+
+
+def test_the_raster_puts_its_axis_in_seconds_when_it_knows_the_tr() -> None:
+    onsets = [{"cond_a": np.array([10])}]
+    with_tr = design.event_raster_figure(
+        onsets, run_labels=["run-01"], condition_names=["cond_a"], tr_seconds=2.0
+    )
+    without = design.event_raster_figure(
+        onsets, run_labels=["run-01"], condition_names=["cond_a"]
+    )
+    assert "Time (s)" in with_tr.get_axes()[0].get_xlabel()
+    assert "row" in without.get_axes()[0].get_xlabel().lower()
+    plt.close(with_tr)
+    plt.close(without)
+
+
+def test_a_run_missing_a_condition_still_draws() -> None:
+    onsets = [{"cond_a": np.array([10])}, {"cond_b": np.array([30])}]
+    figure = design.event_raster_figure(
+        onsets, run_labels=["run-01", "run-02"], condition_names=["cond_a", "cond_b"]
+    )
+    assert figure.axes
+    plt.close(figure)
+
+
+def test_a_raster_without_conditions_is_refused() -> None:
+    with pytest.raises(ValueError, match="at least one condition"):
+        design.event_raster_figure([{}], run_labels=["run-01"], condition_names=[])
+
+
+# --- one panel over all runs, not one per run ------------------------------
+#
+# Six runs drew six near-identical bar charts and six correlation matrices, and a
+# reader comparing a regressor between them had to hold six pictures in mind. The
+# between-run comparison is the reading, so it belongs on one axis -- and the spread
+# across runs, which distinguishes a property of the design from a property of one
+# run, was never shown at all.
+
+
+def _run_frames(n: int = 4, seed: int = 11):
+    rng = np.random.default_rng(seed)
+    frames = []
+    # Conditions as separate boxcars rather than a ramp and its reverse: the latter
+    # are perfectly anti-correlated by construction, so they, not the pair injected
+    # below, would always be the worst pair on the panel.
+    cond_a = np.zeros(80)
+    cond_a[5:15] = cond_a[35:45] = 1.0
+    cond_b = np.zeros(80)
+    cond_b[20:30] = cond_b[55:65] = 1.0
+    for index in range(n):
+        columns = {
+            "cond_a": cond_a.copy(),
+            "cond_b": cond_b.copy(),
+            "trans_x": rng.standard_normal(80),
+            "trans_y": rng.standard_normal(80),
+            "constant": np.ones(80),
+        }
+        # One run alone carries a near-duplicate pair.
+        if index == 2:
+            columns["trans_y"] = columns["trans_x"] * 1.0 + 1e-6 * rng.standard_normal(80)
+        frames.append(pd.DataFrame(columns))
+    return frames
+
+
+def test_the_vif_panel_covers_every_run_on_one_axis() -> None:
+    figure = design.variance_inflation_across_runs_figure(
+        _run_frames(), contrast={"cond_a": 1.0, "cond_b": -1.0}
+    )
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "4 run(s)" in text
+    assert "median across runs" in text and "range" in text
+    plt.close(figure)
+
+
+def test_the_vif_panel_shows_the_spread_across_runs() -> None:
+    # A regressor inflated in one run only must be distinguishable from one inflated
+    # in all of them, which a per-run panel could never show.
+    figure = design.variance_inflation_across_runs_figure(_run_frames())
+    spans = [
+        line.get_ydata()
+        for line in figure.axes[0].lines
+        if len(line.get_ydata()) == 2
+    ]
+    assert any(high > 10 * low for low, high in spans)
+    plt.close(figure)
+
+
+def test_the_vif_panel_names_its_worst_regressor() -> None:
+    figure = design.variance_inflation_across_runs_figure(_run_frames())
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "largest median VIF:" in text
+    plt.close(figure)
+
+
+def test_only_regressors_present_in_every_run_are_compared() -> None:
+    # A regressor one run lacks has no value to compare across runs, and padding it
+    # would put a gap in a panel whose entire reading is between-run variation.
+    frames = _run_frames(n=2)
+    frames[1] = frames[1].drop(columns=["trans_y"])
+    figure = design.variance_inflation_across_runs_figure(frames)
+    figure.canvas.draw()
+    labels = {t.get_text() for t in figure.axes[0].get_xticklabels() if t.get_text()}
+    assert "trans_x" in labels and "trans_y" not in labels
+    plt.close(figure)
+
+
+def test_the_correlation_panel_takes_the_strongest_across_runs() -> None:
+    # A pair collinear in a single run costs the contrast its precision in that run,
+    # and an average across runs would dilute exactly that away.
+    figure = design.regressor_correlation_across_runs_figure(_run_frames())
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "largest |r| off the diagonal: 1.00" in text
+    assert "trans_x" in text and "trans_y" in text
+    plt.close(figure)
+
+
+def test_the_correlation_panel_is_a_magnitude_not_a_signed_value() -> None:
+    # A sign taken from whichever run was most extreme would name a number no single
+    # run holds, so the scale runs from zero.
+    figure = design.regressor_correlation_across_runs_figure(_run_frames())
+    image = figure.axes[0].get_images()[0]
+    assert image.get_clim() == (0.0, 1.0)
+    plt.close(figure)
+
+
+def test_a_single_shared_regressor_leaves_nothing_to_correlate() -> None:
+    frames = [pd.DataFrame({"cond_a": np.linspace(0, 1, 30), "constant": np.ones(30)})]
+    figure = design.regressor_correlation_across_runs_figure(frames)
+    text = " ".join(a.get_text() for ax in figure.axes for a in ax.texts)
+    assert "nothing to correlate" in text
+    plt.close(figure)
+
+
+def test_no_shared_regressor_is_refused_rather_than_drawn_empty() -> None:
+    frames = [
+        pd.DataFrame({"a": np.linspace(0, 1, 20), "constant": np.ones(20)}),
+        pd.DataFrame({"b": np.linspace(0, 1, 20), "constant": np.ones(20)}),
+    ]
+    with pytest.raises(ValueError, match="present in every run"):
+        design.variance_inflation_across_runs_figure(frames)
+
+
+def _vif_axis(figure, label):
+    return next((ax for ax in figure.axes if ax.get_label() == label), None)
+
+
+def test_the_contrast_regressors_get_their_own_axis() -> None:
+    """VIF on the two regressors the contrast weights is what costs it precision.
+
+    On sub-0001 those two sit at VIF 8-9 among 45 other bars, indistinguishable from
+    regressors whose inflation costs the comparison nothing.
+    """
+    figure = design.variance_inflation_across_runs_figure(
+        _run_frames(), contrast={"cond_a": 1.0, "cond_b": -1.0}
+    )
+    figure.canvas.draw()
+    contrast_axis = _vif_axis(figure, "vif-contrast")
+    assert contrast_axis is not None
+    labels = {t.get_text() for t in contrast_axis.get_xticklabels() if t.get_text()}
+    assert labels == {"cond_a", "cond_b"}
+    plt.close(figure)
+
+
+def test_the_weighted_regressors_are_absent_from_the_nuisance_axis() -> None:
+    figure = design.variance_inflation_across_runs_figure(
+        _run_frames(), contrast={"cond_a": 1.0, "cond_b": -1.0}
+    )
+    figure.canvas.draw()
+    labels = {
+        t.get_text() for t in _vif_axis(figure, "vif-rest").get_xticklabels() if t.get_text()
+    }
+    assert "cond_a" not in labels and "cond_b" not in labels
+    assert "trans_x" in labels
+    plt.close(figure)
+
+
+def test_both_vif_axes_share_one_scale() -> None:
+    """Split across two axes with different scales, the numbers stop being comparable."""
+    figure = design.variance_inflation_across_runs_figure(
+        _run_frames(), contrast={"cond_a": 1.0, "cond_b": -1.0}
+    )
+    figure.canvas.draw()
+    top = _vif_axis(figure, "vif-contrast")
+    rest = _vif_axis(figure, "vif-rest")
+    assert top.get_yscale() == rest.get_yscale() == "log"
+    assert top.get_ylim() == rest.get_ylim()
+    plt.close(figure)
+
+
+def test_no_split_without_a_contrast() -> None:
+    """Unchanged single-axis panel when the contrast's columns are unknown."""
+    figure = design.variance_inflation_across_runs_figure(_run_frames())
+    assert _vif_axis(figure, "vif-contrast") is None
+    plt.close(figure)
+
+
+def test_no_split_when_the_contrast_weights_every_regressor() -> None:
+    """An empty remainder axis would be a blank panel with a role band over it."""
+    frames = _run_frames()
+    contrast = {name: 1.0 for name in frames[0].columns}
+    figure = design.variance_inflation_across_runs_figure(frames, contrast=contrast)
+    assert _vif_axis(figure, "vif-contrast") is None
     plt.close(figure)

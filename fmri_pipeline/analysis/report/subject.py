@@ -2359,13 +2359,15 @@ def build_design_section(
                         dense=False,
                         caption=(
                             "Variance inflation per regressor, every run on one axis. "
-                            "A regressor inflated in every run is a property of the "
-                            "design; one inflated in a single run is a property of "
-                            "that run — a lost condition, a censored block — and the "
-                            "two call for different responses. Reported as a "
-                            "measurement; no cutoff is applied. The regressors this "
-                            "contrast weights are marked, since inflation on those is "
-                            "what costs the comparison its precision."
+                            "The regressors this contrast weights are drawn separately "
+                            "above, on the same scale: inflation on those is what "
+                            "costs the comparison its precision, and inflation "
+                            "elsewhere costs it nothing. A regressor inflated in every "
+                            "run is a property of the design; one inflated in a single "
+                            "run is a property of that run — a lost condition, a "
+                            "censored block — and the two call for different "
+                            "responses. Reported as a measurement; no cutoff is "
+                            "applied."
                         ),
                     )
                 )
