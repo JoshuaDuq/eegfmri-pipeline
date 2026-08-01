@@ -1242,6 +1242,63 @@ def cluster_table_source(manifest: ContrastManifest) -> ClusterTableSource:
     )
 
 
+def companion_manifest(manifest: ContrastManifest) -> Optional[ContrastManifest]:
+    """Describe the standard-space fit as a contrast in its own right.
+
+    The pipeline refits each contrast against fMRIPrep's standard-space BOLD rather
+    than resampling the fitted statistic, so the companion is a second analysis of the
+    same data, not a second view of the same numbers. Reported as its own section for
+    that reason: every panel in a section then describes one fit, and the coordinates
+    in its table are referable to an atlas and to published work, which scanner-native
+    millimetres never are.
+
+    Everything the companion does not itself possess is cleared rather than inherited,
+    because inheriting it would be wrong in a way nothing in the output would show:
+
+    - per-run maps, the sign-flip null and the run-influence table are properties of
+      the fitted model, and sampling them at this section's coordinates would read
+      native maps at standard-space millimetres;
+    - the BOLD and residual series likewise, which is what disables the peak-response
+      and model-fit panels here;
+    - the analysis mask, which was written for the fitted grid and does not share this
+      one. The distribution helpers fall back on excluding exact zeros and say so, and
+      on these maps that recovers the fitted extent exactly.
+
+    ``None`` when no companion was written -- the common case, since producing one
+    depends on ``fmri_stats.space`` including a standard space.
+    """
+    import dataclasses
+
+    companion = _mni_companion(Path(manifest.stat_map))
+    if companion is None:
+        return None
+
+    return dataclasses.replace(
+        manifest,
+        contrast_name=f"{manifest.contrast_name} · MNI152NLin2009cAsym",
+        space="mni",
+        stat_map=companion.stat_map,
+        effect_map=companion.effect_map,
+        variance_map=companion.variance_map,
+        mask=None,
+        mask_is_analysis_mask=False,
+        run_effect_map=None,
+        run_variance_map=None,
+        sign_flip_null_tsv=None,
+        run_influence_tsv=None,
+        sign_flip_fwe_height=None,
+        sign_flip_fwe_survivors=None,
+        sign_flip_global_p=None,
+        sign_flip_p_floor=None,
+        sign_flip_n_patterns=None,
+        sign_flip_n_runs=None,
+        sign_flip_observed_max=None,
+        bold_paths=(),
+        residual_paths=(),
+        predicted_paths=(),
+    )
+
+
 def build_cluster_table(
     *,
     manifest: ContrastManifest,
@@ -2921,6 +2978,24 @@ def build_subject_report(
                 deriv_root=Path(deriv_root),
             )
         )
+        # The standard-space refit of the same contrast, if one was written, as its
+        # own section directly beneath. Adjacent because the comparison between the
+        # two fits is the reading; separate because they are two fits, and a section
+        # that mixed one fit's coordinates with the other's per-run maps would sample
+        # each at the other's millimetres.
+        companion = companion_manifest(manifest)
+        if companion is not None:
+            with _panel(f"standard-space section for {manifest.contrast_name}"):
+                sections.append(
+                    build_contrast_section(
+                        manifest=companion,
+                        out_dir=out_dir,
+                        cfg=cfg,
+                        background=None,
+                        facts=facts,
+                        deriv_root=Path(deriv_root),
+                    )
+                )
         if cfg.include_design_qc:
             design_section = build_design_section(
                 manifest=manifest, out_dir=out_dir, cfg=cfg

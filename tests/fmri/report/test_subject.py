@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import nibabel as nib
@@ -1406,3 +1407,127 @@ def test_a_native_stat_map_is_not_its_own_companion(tmp_path):
     already_mni = tmp_path / f"{stem}_space-MNI152NLin2009cAsym_stat-z_score_abc.nii.gz"
     already_mni.touch()
     assert _mni_companion(already_mni) is None
+
+
+def _manifest_with_companion(tmp_path):
+    """A fitted manifest whose contrast also has a standard-space companion on disk."""
+    import dataclasses
+
+    import nibabel as nib
+    from fmri_pipeline.analysis.report.manifest import read_manifest, write_report_manifest
+
+    stem = "sub-01_task-heat_contrast-c"
+    rng = np.random.default_rng(0)
+    for name in (
+        f"{stem}_stat-z_score_abc.nii.gz",
+        f"{stem}_space-MNI152NLin2009cAsym_stat-z_score_abc.nii.gz",
+        f"{stem}_space-MNI152NLin2009cAsym_stat-effect_size_abc.nii.gz",
+        f"{stem}_space-MNI152NLin2009cAsym_stat-effect_variance_abc.nii.gz",
+    ):
+        nib.save(
+            nib.Nifti1Image(rng.standard_normal((6, 6, 6)).astype(np.float32), np.eye(4)),
+            str(tmp_path / name),
+        )
+    native = tmp_path / f"{stem}_stat-z_score_abc.nii.gz"
+    written = write_report_manifest(
+        contrast_dir=tmp_path,
+        subject="sub-01",
+        task="heat",
+        contrast_name="c",
+        stat_map=native,
+        mask=native,
+        mask_is_analysis_mask=True,
+        run_meta={
+            "analysis_space": "T1w",
+            "tr": 2.0,
+            "included_bold_paths": [str(tmp_path / "sub-01_run-01_bold.nii.gz")],
+            "included_confounds_paths": [],
+            "retained_frame_indices": [[0]],
+        },
+        contrast_cfg=SimpleNamespace(hrf_model="spm"),
+        residual_paths=(native,),
+        predicted_paths=(native,),
+        run_effect_map=None,
+        sign_flip_null_tsv=None,
+    )
+    return read_manifest(written)
+
+
+def test_companion_manifest_points_at_the_standard_space_maps(tmp_path):
+    from fmri_pipeline.analysis.report.subject import companion_manifest
+
+    companion = companion_manifest(_manifest_with_companion(tmp_path))
+    assert companion is not None
+    assert companion.space == "mni"
+    assert "space-MNI152NLin2009cAsym" in Path(companion.stat_map).name
+    assert "space-MNI152NLin2009cAsym" in Path(companion.effect_map).name
+
+
+def test_companion_gets_its_own_plot_directory(tmp_path):
+    """Sharing a slug would have the companion's plots overwrite the fitted ones."""
+    from fmri_pipeline.analysis.report.subject import _slug, companion_manifest
+
+    manifest = _manifest_with_companion(tmp_path)
+    assert _slug(companion_manifest(manifest)) != _slug(manifest)
+
+
+def test_companion_drops_every_fitted_space_artifact(tmp_path):
+    """Inherited, each of these would be read at coordinates from a different fit."""
+    from fmri_pipeline.analysis.report.subject import companion_manifest
+
+    companion = companion_manifest(_manifest_with_companion(tmp_path))
+    assert companion.run_effect_map is None
+    assert companion.run_variance_map is None
+    assert companion.sign_flip_null_tsv is None
+    assert companion.sign_flip_fwe_height is None
+    assert companion.run_influence_tsv is None
+    assert companion.bold_paths == ()
+    assert companion.residual_paths == ()
+    assert companion.predicted_paths == ()
+    assert companion.mask is None
+    assert companion.mask_is_analysis_mask is False
+
+
+def test_companion_is_atlas_referable_where_the_fit_is_not(tmp_path):
+    """The whole point: the fitted section cannot carry labels and this one can."""
+    from fmri_pipeline.analysis.report import atlas
+    from fmri_pipeline.analysis.report.subject import (
+        cluster_table_source,
+        companion_manifest,
+    )
+
+    manifest = _manifest_with_companion(tmp_path)
+    companion = companion_manifest(manifest)
+    assert not atlas.atlas_applies_to(cluster_table_source(manifest).space)
+    assert atlas.atlas_applies_to(cluster_table_source(companion).space)
+
+
+def test_no_companion_manifest_without_companion_maps(tmp_path):
+    import nibabel as nib
+    from fmri_pipeline.analysis.report.manifest import read_manifest, write_report_manifest
+    from fmri_pipeline.analysis.report.subject import companion_manifest
+
+    native = tmp_path / "sub-01_task-heat_contrast-c_stat-z_score_abc.nii.gz"
+    nib.save(nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.float32), np.eye(4)), str(native))
+    manifest = read_manifest(
+        write_report_manifest(
+            contrast_dir=tmp_path,
+            subject="sub-01",
+            task="heat",
+            contrast_name="c",
+            stat_map=native,
+            mask=native,
+            mask_is_analysis_mask=True,
+            run_meta={
+                "analysis_space": "T1w",
+                "tr": 2.0,
+                "included_bold_paths": [str(tmp_path / "b.nii.gz")],
+                "included_confounds_paths": [],
+                "retained_frame_indices": [[0]],
+            },
+            contrast_cfg=SimpleNamespace(hrf_model="spm"),
+            residual_paths=(native,),
+            predicted_paths=(native,),
+        )
+    )
+    assert companion_manifest(manifest) is None

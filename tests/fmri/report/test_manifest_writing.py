@@ -573,3 +573,73 @@ def test_a_height_without_its_null_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="sign_flip_null_tsv and sign_flip_fwe_height"):
         validate_manifest(dataclasses.replace(manifest, sign_flip_fwe_height=None))
+
+
+def test_a_manifest_written_before_a_field_existed_still_reads(tmp_path: Path) -> None:
+    """Adding a diagnostic must not make every existing derivatives tree unreadable.
+
+    The report's whole point is rendering from a tree an earlier run produced. A
+    reader that requires every field means any additive change silently invalidates
+    every manifest already on disk, and the only recovery is refitting the model.
+    """
+    import json
+
+    contrast_dir = tmp_path / "c"
+    contrast_dir.mkdir()
+    stat_map = contrast_dir / "z.nii.gz"
+    stat_map.touch()
+
+    written = write_report_manifest(
+        contrast_dir=contrast_dir,
+        subject="sub-01",
+        task="heat",
+        contrast_name="c",
+        stat_map=stat_map,
+        mask=stat_map,
+        mask_is_analysis_mask=True,
+        run_meta=_run_meta(),
+        contrast_cfg=_contrast_cfg(),
+    )
+
+    payload = json.loads(written.read_text())
+    for field in (
+        "sign_flip_null_tsv",
+        "sign_flip_fwe_height",
+        "sign_flip_p_floor",
+        "run_influence_tsv",
+        "run_effect_map",
+    ):
+        payload.pop(field, None)
+    written.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    manifest = read_manifest(written)
+    assert manifest.sign_flip_fwe_height is None
+    assert manifest.run_effect_map is None
+
+
+def test_a_manifest_missing_an_essential_field_is_still_rejected(tmp_path: Path) -> None:
+    """The leniency is for fields with defaults, not for the ones that carry meaning."""
+    import json
+
+    contrast_dir = tmp_path / "c"
+    contrast_dir.mkdir()
+    stat_map = contrast_dir / "z.nii.gz"
+    stat_map.touch()
+
+    written = write_report_manifest(
+        contrast_dir=contrast_dir,
+        subject="sub-01",
+        task="heat",
+        contrast_name="c",
+        stat_map=stat_map,
+        mask=stat_map,
+        mask_is_analysis_mask=True,
+        run_meta=_run_meta(),
+        contrast_cfg=_contrast_cfg(),
+    )
+    payload = json.loads(written.read_text())
+    payload.pop("stat_map")
+    written.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    with pytest.raises(ValueError, match="Missing report manifest field"):
+        read_manifest(written)

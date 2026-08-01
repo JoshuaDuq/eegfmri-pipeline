@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, fields
+from dataclasses import MISSING, asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -496,7 +496,17 @@ def read_manifest(path: Path) -> ContrastManifest:
     unknown = sorted(set(payload) - known)
     if unknown:
         raise ValueError(f"Unknown report manifest field(s) in {path}: {unknown}.")
-    missing = sorted(known - set(payload))
+    # Required means "has no default on the dataclass", not "is a field". A manifest
+    # missing its stat map or its TR describes nothing and must fail; one missing a
+    # field added after it was written is simply older, and refusing it would make
+    # every derivatives tree unreadable the moment a diagnostic is added -- which is
+    # the opposite of what recording the manifest is for.
+    required = {
+        field.name
+        for field in fields(ContrastManifest)
+        if field.default is MISSING and field.default_factory is MISSING
+    }
+    missing = sorted(required - set(payload))
     if missing:
         raise ValueError(f"Missing report manifest field(s) in {path}: {missing}.")
     data = dict(payload)
