@@ -31,68 +31,90 @@ def sign_flip_figure(
     if values.size == 0:
         raise ValueError("The sign-flip panel requires at least one enumerated maximum.")
 
-    with style.plot_context():
-        figure, axis = plt.subplots(figsize=(7.0, 2.1), constrained_layout=True)
+    # Ranked rather than piled on one row. Every pattern gets its own line, so no
+    # marker hides another and no jitter is invented to separate them; the shape of
+    # the climb is the null's distribution, and the gap at the top is the observed
+    # value's separation from it. Both readings are lost in a rug and faked in a
+    # 32-point histogram.
+    order = np.argsort(values)
+    ranked = values[order]
+    ranks = np.arange(1, ranked.size + 1)
+    observed_rank = int(np.argmin(np.abs(ranked - summary.observed_max))) + 1
 
-        axis.plot(
-            values,
-            np.zeros_like(values),
-            marker="|",
-            linestyle="none",
-            markersize=18,
-            markeredgewidth=1.1,
-            color="0.45",
-            label=f"{values.size} sign patterns",
-        )
+    with style.plot_context():
+        height_in = max(2.0, 0.085 * ranked.size + 1.0)
+        figure, axis = plt.subplots(figsize=(6.0, height_in), constrained_layout=True)
+
         axis.axvline(
             summary.height,
             color=style.OKABE_ITO["blue"],
-            linewidth=1.4,
-            label=f"FWE 5%: |z| > {summary.height:.2f}",
+            linewidth=1.3,
+            zorder=2,
         )
-        axis.plot(
-            [summary.observed_max],
-            [0.0],
-            marker="v",
-            markersize=9,
+        # Mid-height, not at the top: the ranked points crowd the top of the line,
+        # which is exactly where a threshold label wants to sit.
+        axis.annotate(
+            f"familywise 5%\n|z| > {summary.height:.2f}",
+            xy=(summary.height, ranked.size * 0.45),
+            xytext=(-6, 0),
+            textcoords="offset points",
+            ha="right",
+            va="center",
+            fontsize=7,
+            color=style.OKABE_ITO["blue"],
+        )
+
+        is_observed = ranks == observed_rank
+        axis.scatter(
+            ranked[~is_observed],
+            ranks[~is_observed],
+            s=16,
+            facecolor="white",
+            edgecolor="0.4",
+            linewidth=0.8,
+            zorder=3,
+        )
+        axis.scatter(
+            ranked[is_observed],
+            ranks[is_observed],
+            s=34,
             color=style.OKABE_ITO["vermillion"],
-            linestyle="none",
-            label=f"observed: {summary.observed_max:.2f}",
             zorder=4,
         )
-
-        axis.set_yticks([])
-        axis.set_ylim(-0.5, 0.5)
-        for side in ("left", "top", "right"):
-            axis.spines[side].set_visible(False)
-        axis.set_xlabel("max |z| over the analysis mask")
-        axis.set_title(title or "Run sign-flip null", pad=26)
-        # Anchored by its lower edge, so the legend clears the axes entirely. Anchored
-        # by its upper edge it sits inside them, and the familywise line runs through
-        # its own label.
-        axis.legend(
-            loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, fontsize=7
+        axis.annotate(
+            f"observed  {summary.observed_max:.2f}",
+            xy=(summary.observed_max, observed_rank),
+            xytext=(-8, 0),
+            textcoords="offset points",
+            ha="right",
+            va="center",
+            fontsize=7.5,
+            fontweight="bold",
+            color=style.OKABE_ITO["vermillion"],
         )
 
+        axis.set_xlabel("max |z| over the analysis mask")
+        axis.set_ylabel("sign patterns, ranked")
+        axis.set_ylim(0.3, ranked.size + 1.8)
+        axis.set_yticks([1, ranked.size])
+        axis.set_title(title or "Run sign-flip null", pad=10)
+        for side in ("top", "right"):
+            axis.spines[side].set_visible(False)
+
+        # Short lines only. The helper joins them into a single 6.5pt strip, so a
+        # sentence here becomes an unreadable ribbon; the reasoning belongs in the
+        # caption, and only what must travel with the figure belongs on it.
         notes = [
-            f"{summary.n_patterns} exact sign patterns over {summary.n_runs} runs, "
-            "exchangeable by run",
+            f"{summary.n_patterns} sign patterns over {summary.n_runs} runs",
             f"{summary.survivors:,} voxel(s) at the familywise height",
+            f"p = {summary.global_p:.3f}"
+            + (
+                f" (its floor for {summary.n_runs} runs)"
+                if summary.floor_limited
+                else f" (floor {summary.p_floor:.3f})"
+            ),
+            "no criterion applied",
         ]
-        if summary.floor_limited:
-            notes.append(
-                f"global p = {summary.global_p:.3f}, the smallest this test can "
-                f"return: the unflipped pattern is always in the null and always ties "
-                f"the observed maximum, so {summary.n_runs} runs cannot reach below "
-                f"{summary.p_floor:.3f}"
-            )
-            notes.append("the height is unaffected by that floor")
-        else:
-            notes.append(
-                f"global p = {summary.global_p:.3f} against a floor of "
-                f"{summary.p_floor:.3f}"
-            )
-        notes.append("no threshold here is scored against a criterion")
         style.annotate_provenance(figure, notes)
         return figure
 
