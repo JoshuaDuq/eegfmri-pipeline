@@ -1357,3 +1357,52 @@ def test_coordinates_travel_with_their_own_peak():
         ("3", (10.0, 10.0, 10.0)),
         ("1", (-50.0, 23.0, -2.0)),
     )
+
+
+def test_mni_companion_is_discovered_beside_the_native_map(tmp_path):
+    """Deterministic naming: _space-MNI152NLin2009cAsym goes in front of _stat-."""
+    from fmri_pipeline.analysis.report.subject import _mni_companion
+
+    stem = "sub-01_task-heat_contrast-c"
+    native = tmp_path / f"{stem}_stat-z_score_abc.nii.gz"
+    native.touch()
+    for quantity in ("z_score", "effect_size", "effect_variance"):
+        (tmp_path / f"{stem}_space-MNI152NLin2009cAsym_stat-{quantity}_abc.nii.gz").touch()
+
+    found = _mni_companion(native)
+    assert found is not None
+    assert found.stat_map.name.endswith("space-MNI152NLin2009cAsym_stat-z_score_abc.nii.gz")
+    assert found.effect_map is not None and found.variance_map is not None
+    assert found.space == "mni"
+
+
+def test_no_companion_when_the_mni_z_map_is_absent(tmp_path):
+    from fmri_pipeline.analysis.report.subject import _mni_companion
+
+    native = tmp_path / "sub-01_task-heat_contrast-c_stat-z_score_abc.nii.gz"
+    native.touch()
+    assert _mni_companion(native) is None
+
+
+def test_companion_tolerates_missing_effect_maps(tmp_path):
+    """A z map alone still buys MNI coordinates and atlas labels."""
+    from fmri_pipeline.analysis.report.subject import _mni_companion
+
+    stem = "sub-01_task-heat_contrast-c"
+    native = tmp_path / f"{stem}_stat-z_score_abc.nii.gz"
+    native.touch()
+    (tmp_path / f"{stem}_space-MNI152NLin2009cAsym_stat-z_score_abc.nii.gz").touch()
+
+    found = _mni_companion(native)
+    assert found is not None
+    assert found.effect_map is None and found.variance_map is None
+
+
+def test_a_native_stat_map_is_not_its_own_companion(tmp_path):
+    """Guards against matching an already-MNI stat map and recursing on itself."""
+    from fmri_pipeline.analysis.report.subject import _mni_companion
+
+    stem = "sub-01_task-heat_contrast-c"
+    already_mni = tmp_path / f"{stem}_space-MNI152NLin2009cAsym_stat-z_score_abc.nii.gz"
+    already_mni.touch()
+    assert _mni_companion(already_mni) is None

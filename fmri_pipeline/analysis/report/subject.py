@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -1071,6 +1072,7 @@ def enrich_cluster_frame(
     manifest: ContrastManifest,
     peaks: Sequence[Tuple[str, Tuple[float, float, float]]],
     labeller: Any = None,
+    source: Optional["ClusterTableSource"] = None,
 ) -> Tuple[Any, List[str]]:
     """Add the effect, its standard error, and an anatomical label at each peak.
 
@@ -1105,15 +1107,21 @@ def enrich_cluster_frame(
             for position in row_index
         ]
 
-    if manifest.effect_map and Path(manifest.effect_map).exists():
+    # Read the effect at each peak from the same maps the table's coordinates came
+    # from. Sampling the native effect map at an MNI coordinate would return the
+    # value at those millimetres in a different brain.
+    if source is None:
+        source = cluster_table_source(manifest)
+
+    if source.effect_map and Path(source.effect_map).exists():
         with _panel("peak effect sizes"):
-            effects = _peak_values(nib.load(str(manifest.effect_map)), coords)
+            effects = _peak_values(nib.load(str(source.effect_map)), coords)
             frame[f"Peak effect ({_unit_name(manifest)})"] = _column(effects)
             notes.append("peak effect and error are the value at the peak voxel")
 
-    if manifest.variance_map and Path(manifest.variance_map).exists():
+    if source.variance_map and Path(source.variance_map).exists():
         with _panel("peak standard errors"):
-            variances = _peak_values(nib.load(str(manifest.variance_map)), coords)
+            variances = _peak_values(nib.load(str(source.variance_map)), coords)
             errors = [float(np.sqrt(v)) if v >= 0 else float("nan") for v in variances]
             frame["Peak SE"] = _column(errors)
 
@@ -1125,10 +1133,113 @@ def enrich_cluster_frame(
                 for position in row_index
             ]
             notes.append(f"regions from {labeller.source}")
-    elif not atlas.atlas_applies_to(manifest.space):
-        notes.append(atlas.space_refusal(manifest.space))
+    elif not atlas.atlas_applies_to(source.space):
+        notes.append(atlas.space_refusal(source.space))
 
     return frame, notes
+
+
+#: BIDS space entity of the standard-space companion the pipeline writes.
+_MNI_ENTITY = "space-MNI152NLin2009cAsym"
+
+
+@dataclass(frozen=True)
+class ClusterTableSource:
+    """The maps a cluster table is built from, and the space its coordinates are in.
+
+    Usually the fitted maps themselves. When a standard-space companion exists it is
+    preferred, because a table of scanner-native millimetres is not referable to any
+    atlas and not comparable to any published coordinate -- which is most of what a
+    peak table is read for.
+    """
+
+    stat_map: Path
+    effect_map: Optional[Path]
+    variance_map: Optional[Path]
+    space: str
+    #: Whether these maps come from a different fit than the report's own.
+    separately_fitted: bool = False
+
+
+def _mni_companion(stat_map: Path) -> Optional[ClusterTableSource]:
+    """Find the standard-space maps the pipeline writes beside a fitted contrast.
+
+    Discovered by naming convention rather than read from the manifest, for two
+    reasons. The maps are produced after the manifest is written, in the plotting
+    path, so no manifest recorded them. And discovery works on a derivatives tree
+    built by an earlier run, which is the case this report is meant to serve.
+
+    The companion is a *separate fit* -- the pipeline refits the contrast against
+    fMRIPrep's standard-space BOLD rather than resampling the native statistic. That
+    is the stronger choice statistically, and it is why the caption has to say the
+    table and the maps above it describe two fits of the same contrast rather than
+    one map shown twice.
+    """
+    stat_map = Path(stat_map)
+    name = stat_map.name
+    if _MNI_ENTITY in name or "_stat-" not in name:
+        return None
+
+    head = name.partition("_stat-")[0]
+    # The config hash, so a directory holding two configurations does not cross them.
+    # Taken from the native name's own trailing token; when there is none, the glob
+    # still matches and the first candidate is used.
+    stem = name
+    for extension in (".nii.gz", ".nii"):
+        if stem.endswith(extension):
+            stem = stem[: -len(extension)]
+            break
+    wanted_hash = stem.rsplit("_", 1)[-1]
+
+    def _beside(quantity: str) -> Optional[Path]:
+        # Globbed rather than reconstructed: the quantity token itself contains
+        # underscores -- "z_score", "effect_size" -- so splitting the name on "_" to
+        # recover the trailing hash silently truncates it.
+        candidates = sorted(
+            stat_map.parent.glob(f"{head}_{_MNI_ENTITY}_stat-{quantity}_*.nii*")
+        )
+        if not candidates:
+            return None
+        for candidate in candidates:
+            if wanted_hash in candidate.name:
+                return candidate
+        return candidates[0]
+
+    z_map = _beside("z_score")
+    if z_map is None:
+        return None
+    return ClusterTableSource(
+        stat_map=z_map,
+        effect_map=_beside("effect_size"),
+        variance_map=_beside("effect_variance"),
+        space="mni",
+        separately_fitted=True,
+    )
+
+
+def cluster_table_source(manifest: ContrastManifest) -> ClusterTableSource:
+    """The maps the cluster table is built from: the fitted ones.
+
+    A standard-space companion is *not* preferred here, though one is often present
+    and :func:`_mni_companion` will find it. The peaks this table returns are not only
+    labels: the run-consistency panel samples the per-run maps at them and the
+    peak-response panel samples the BOLD series at them, and both of those are in the
+    fitted space. The companion is a separate fit with its own clusters, so its peaks
+    have no one-to-one correspondence with the fitted map's -- substituting them would
+    make the forest panel's "peak 1" a different location from the table's "cluster 1"
+    while both kept the same number, and would sample native maps at standard-space
+    millimetres.
+
+    Reporting standard-space coordinates therefore needs the companion presented as
+    its own contrast rather than spliced into this one's table. Until then this
+    returns the fitted maps and the caption says the coordinates are not referable.
+    """
+    return ClusterTableSource(
+        stat_map=Path(manifest.stat_map),
+        effect_map=Path(manifest.effect_map) if manifest.effect_map else None,
+        variance_map=Path(manifest.variance_map) if manifest.variance_map else None,
+        space=manifest.space,
+    )
 
 
 def build_cluster_table(
@@ -1172,8 +1283,9 @@ def build_cluster_table(
         return None, ()
 
     plots_dir = out_dir / "plots" / _slug(manifest)
+    source = cluster_table_source(manifest)
     frame = reporting.get_clusters_table(
-        nib.load(str(manifest.stat_map)),
+        nib.load(str(source.stat_map)),
         stat_threshold=float(threshold),
         cluster_threshold=manifest.cluster_min_voxels or 0,
         two_sided=manifest.two_sided,
@@ -1181,7 +1293,7 @@ def build_cluster_table(
 
     peaks = _cluster_peaks(frame)
     frame, enrichment_notes = enrich_cluster_frame(
-        frame, manifest=manifest, peaks=peaks, labeller=labeller
+        frame, manifest=manifest, peaks=peaks, labeller=labeller, source=source
     )
 
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -1191,7 +1303,7 @@ def build_cluster_table(
     caption_parts = [
         "two-sided" if manifest.two_sided else "one-sided",
         f"height threshold: {threshold_label or f'|z| > {threshold:.2f}'}",
-        coordinate_space_label(manifest.space),
+        coordinate_space_label(source.space),
     ]
     caption_parts.extend(enrichment_notes)
     caption_parts.extend(str(fact) for fact in extra_facts if fact)
@@ -1216,13 +1328,16 @@ def build_cluster_table(
 def resolve_labeller(manifest: ContrastManifest, cfg: FmriReportConfig) -> Any:
     """Load the configured atlas, if it may be read at this contrast's coordinates.
 
-    Gated on space rather than merely on configuration. An MNI atlas sampled at a
-    native-space coordinate returns the name of whatever structure sits at those
-    millimetres in a different brain, and the result is indistinguishable from a
-    correct label -- so a native-space contrast gets no column and a caption saying
-    why.
+    Gated on the space of the *table's coordinates* rather than on the space the model
+    was fitted in. Those differ whenever a standard-space companion exists: the fit is
+    native, the table is not, and it is the table the atlas is sampled at.
+
+    Still gated, though. An MNI atlas sampled at a native-space coordinate returns the
+    name of whatever structure sits at those millimetres in a different brain, and the
+    result is indistinguishable from a correct label -- so a contrast with no
+    standard-space companion gets no column and a caption saying why.
     """
-    if not atlas.atlas_applies_to(manifest.space):
+    if not atlas.atlas_applies_to(cluster_table_source(manifest).space):
         return None
     return atlas.load_atlas(
         labels_img=getattr(cfg, "atlas_labels_img", None),
