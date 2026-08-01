@@ -199,7 +199,7 @@ def test_the_pipeline_writes_named_run_level_maps(split_model, tmp_path) -> None
             f"/data/sub-01_task-heat_run-{i:02d}_bold.nii.gz" for i in (1, 2, 3, 4)
         ]
     }
-    effect, variance, labels = FmriAnalysisPipeline._run_level_maps(
+    fields = FmriAnalysisPipeline._run_level_maps(
         _Stub(),
         glm_result=_GlmResult(),
         contrast_def="task",
@@ -208,12 +208,54 @@ def test_the_pipeline_writes_named_run_level_maps(split_model, tmp_path) -> None
         stem="sub-01_task-heat_contrast-x",
         cfg_hash="abc123",
     )
-    assert effect is not None and variance is not None
+    effect = fields["run_effect_map"]
+    assert effect is not None and fields["run_variance_map"] is not None
     assert "desc-perrun" in effect.name and "abc123" in effect.name
-    # Run names come from the BIDS entities, so the forest plot's rows match the
-    # motion table and the design section.
-    assert labels == ["run-01", "run-02", "run-03", "run-04"]
     assert nib.load(str(effect)).shape[3] == 4
+
+    # Run names come from the BIDS entities, so the forest plot's rows match the
+    # motion table and the design section. Checked where they actually surface.
+    influence = pd.read_csv(fields["run_influence_tsv"], sep="\t")
+    assert list(influence["dropped_run"]) == ["run-01", "run-02", "run-03", "run-04"]
+
+
+def test_the_pipeline_writes_the_sign_flip_null_and_run_influence(
+    split_model, tmp_path
+) -> None:
+    """Both diagnostics ride along with the per-run maps, from the same fitted model."""
+    import logging
+
+    from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
+
+    class _Stub:
+        logger = logging.getLogger("test")
+
+    class _GlmResult:
+        flm = split_model
+
+    fields = FmriAnalysisPipeline._run_level_maps(
+        _Stub(),
+        glm_result=_GlmResult(),
+        contrast_def="task",
+        run_meta={
+            "included_bold_paths": [
+                f"/data/sub-01_task-heat_run-{i:02d}_bold.nii.gz" for i in (1, 2, 3, 4)
+            ]
+        },
+        out_dir=tmp_path,
+        stem="sub-01_task-heat_contrast-x",
+        cfg_hash="abc123",
+    )
+
+    assert "desc-signflipnull" in fields["sign_flip_null_tsv"].name
+    assert "desc-runinfluence" in fields["run_influence_tsv"].name
+
+    # Four runs give 2**3 distinct sign patterns, and the floor is 2/(8+1).
+    assert fields["sign_flip_n_runs"] == 4
+    assert fields["sign_flip_n_patterns"] == 8
+    assert fields["sign_flip_p_floor"] == pytest.approx(2 / 9)
+    assert fields["sign_flip_global_p"] >= fields["sign_flip_p_floor"]
+    assert len(pd.read_csv(fields["sign_flip_null_tsv"], sep="\t")) == 8
 
 
 def test_a_pipeline_without_a_fitted_model_writes_nothing(tmp_path) -> None:
@@ -227,12 +269,15 @@ def test_a_pipeline_without_a_fitted_model_writes_nothing(tmp_path) -> None:
     class _GlmResult:
         flm = None
 
-    assert FmriAnalysisPipeline._run_level_maps(
-        _Stub(),
-        glm_result=_GlmResult(),
-        contrast_def="task",
-        run_meta={},
-        out_dir=tmp_path,
-        stem="s",
-        cfg_hash="h",
-    ) == (None, None, [])
+    assert (
+        FmriAnalysisPipeline._run_level_maps(
+            _Stub(),
+            glm_result=_GlmResult(),
+            contrast_def="task",
+            run_meta={},
+            out_dir=tmp_path,
+            stem="s",
+            cfg_hash="h",
+        )
+        == {}
+    )

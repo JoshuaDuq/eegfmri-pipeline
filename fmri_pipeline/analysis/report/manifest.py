@@ -32,6 +32,8 @@ _PATH_FIELDS = (
     "mask",
     "run_effect_map",
     "run_variance_map",
+    "sign_flip_null_tsv",
+    "run_influence_tsv",
 )
 #: Fields holding a tuple of paths.
 _PATH_TUPLE_FIELDS = (
@@ -126,6 +128,30 @@ class ContrastManifest:
     #:
     run_effect_map: Optional[Path] = None
     run_variance_map: Optional[Path] = None
+
+    #: The enumerated run sign-flip null, one row per sign pattern, and the
+    #: leave-one-run-out table. Both are diagnostics of the same thing -- how much of
+    #: this contrast is a property of which runs were labelled positive -- so they are
+    #: written together or not at all.
+    sign_flip_null_tsv: Optional[Path] = None
+    run_influence_tsv: Optional[Path] = None
+
+    #: The sign-flip null's summary, duplicated out of the TSV so a panel that only
+    #: needs the height does not have to reopen and parse the enumeration.
+    #:
+    #: ``sign_flip_p_floor`` is stored rather than recomputed because it is the number
+    #: that makes ``sign_flip_global_p`` readable: the unflipped pattern is always a
+    #: member of the null and always ties the observed maximum, so the p can never fall
+    #: below ``2 / (2**(n_runs-1) + 1)``. Six runs floor at 0.061, and a p of 0.061
+    #: printed without its floor reads as a near-miss when it is the smallest value the
+    #: test can return.
+    sign_flip_fwe_height: Optional[float] = None
+    sign_flip_fwe_survivors: Optional[int] = None
+    sign_flip_global_p: Optional[float] = None
+    sign_flip_p_floor: Optional[float] = None
+    sign_flip_n_patterns: Optional[int] = None
+    sign_flip_n_runs: Optional[int] = None
+    sign_flip_observed_max: Optional[float] = None
 
     #: Retained-frame model residuals and predictions reconstructed as ``Y - X beta``
     #: and ``X beta`` from the fitted design and coefficients.
@@ -252,6 +278,13 @@ def validate_manifest(manifest: ContrastManifest) -> None:
             "run_effect_map and run_variance_map must either both be present or " "both be absent."
         )
 
+    if (manifest.sign_flip_null_tsv is None) != (manifest.sign_flip_fwe_height is None):
+        raise ValueError(
+            "sign_flip_null_tsv and sign_flip_fwe_height must either both be present "
+            "or both be absent: a height with no enumerated null cannot be checked, "
+            "and a null with no height was never summarised."
+        )
+
 
 def validate_manifest_artifacts(manifest: ContrastManifest) -> None:
     """Require every recorded artifact to exist and share the fitted grid."""
@@ -263,6 +296,8 @@ def validate_manifest_artifacts(manifest: ContrastManifest) -> None:
         "mask": manifest.mask,
         "run_effect_map": manifest.run_effect_map,
         "run_variance_map": manifest.run_variance_map,
+        "sign_flip_null_tsv": manifest.sign_flip_null_tsv,
+        "run_influence_tsv": manifest.run_influence_tsv,
     }
     path_groups = {
         "design_matrices": manifest.design_matrices,
@@ -702,6 +737,15 @@ def write_report_manifest(
     mask: Optional[Path] = None,
     run_effect_map: Optional[Path] = None,
     run_variance_map: Optional[Path] = None,
+    sign_flip_null_tsv: Optional[Path] = None,
+    run_influence_tsv: Optional[Path] = None,
+    sign_flip_fwe_height: Optional[float] = None,
+    sign_flip_fwe_survivors: Optional[int] = None,
+    sign_flip_global_p: Optional[float] = None,
+    sign_flip_p_floor: Optional[float] = None,
+    sign_flip_n_patterns: Optional[int] = None,
+    sign_flip_n_runs: Optional[int] = None,
+    sign_flip_observed_max: Optional[float] = None,
     design_matrices: Sequence[Path] = (),
     contrast_vector: Optional[Sequence[float]] = None,
     contrast_columns: Sequence[str] = (),
@@ -760,6 +804,25 @@ def write_report_manifest(
         mask=Path(mask) if mask else None,
         run_effect_map=Path(run_effect_map) if run_effect_map else None,
         run_variance_map=Path(run_variance_map) if run_variance_map else None,
+        sign_flip_null_tsv=Path(sign_flip_null_tsv) if sign_flip_null_tsv else None,
+        run_influence_tsv=Path(run_influence_tsv) if run_influence_tsv else None,
+        sign_flip_fwe_height=(
+            None if sign_flip_fwe_height is None else float(sign_flip_fwe_height)
+        ),
+        sign_flip_fwe_survivors=(
+            None if sign_flip_fwe_survivors is None else int(sign_flip_fwe_survivors)
+        ),
+        sign_flip_global_p=(
+            None if sign_flip_global_p is None else float(sign_flip_global_p)
+        ),
+        sign_flip_p_floor=(None if sign_flip_p_floor is None else float(sign_flip_p_floor)),
+        sign_flip_n_patterns=(
+            None if sign_flip_n_patterns is None else int(sign_flip_n_patterns)
+        ),
+        sign_flip_n_runs=(None if sign_flip_n_runs is None else int(sign_flip_n_runs)),
+        sign_flip_observed_max=(
+            None if sign_flip_observed_max is None else float(sign_flip_observed_max)
+        ),
         threshold_mode=threshold_mode,
         z_threshold=float(z_threshold),
         fdr_q=float(fdr_q),

@@ -339,13 +339,27 @@ class FmriAnalysisPipeline(PipelineBase):
         out_dir: Path,
         stem: str,
         cfg_hash: str,
-    ) -> tuple[Optional[Path], Optional[Path], list[str]]:
-        """Write each run's own estimate of this contrast, from the fitted model.
+        z_threshold: float = 2.3,
+    ) -> dict[str, Any]:
+        """Write what each run contributes to this contrast, from the fitted model.
+
+        Returns manifest keyword arguments rather than a tuple: this produces three
+        related artifacts and seven scalars, and a tuple that long makes the call site
+        depend on positions nobody can read.
+
+        Three measurements, all from the model already fitted:
+
+        - each run's own estimate of the contrast, which the forest panel draws;
+        - the run sign-flip null, which is the only familywise correction available
+          here that does not assume every voxel is N(0, 1) -- a single-subject map
+          combined across runs is routinely over-dispersed relative to that;
+        - leave-one-run-out influence, which answers a question the forest panel
+          cannot: a run can carry the largest peak estimates while a different run
+          moves the map more.
 
         A fixed-effects combination across runs is weighted equally per run, so an
         effect resting on one run and an effect present in all of them produce the same
-        map and the same cluster table. These maps are what let the report tell the two
-        apart.
+        map and the same cluster table.
 
         No refit: nilearn keeps ``labels_`` and ``results_`` per run and combines them
         at ``compute_contrast`` time, so the per-run estimates already exist inside the
@@ -353,13 +367,17 @@ class FmriAnalysisPipeline(PipelineBase):
         which is on disk by the time this runs.
         """
         from fmri_pipeline.analysis.run_level import (
+            compute_run_influence,
             compute_run_level_contrast,
+            compute_sign_flip_null,
+            write_run_influence,
             write_run_level_maps,
+            write_sign_flip_null,
         )
 
         flm = getattr(glm_result, "flm", None)
         if flm is None:
-            return None, None, []
+            return {}
 
         # The manifest's own labeller, so the forest plot's rows carry the same run
         # names as the motion table and the design section.
@@ -372,9 +390,9 @@ class FmriAnalysisPipeline(PipelineBase):
             result = compute_run_level_contrast(flm, contrast_def, run_labels=labels)
         except Exception as exc:
             self.logger.warning("Could not compute run-level contrasts (%s)", exc)
-            return None, None, []
+            return {}
         if result is None:
-            return None, None, []
+            return {}
 
         effect_path, variance_path = write_run_level_maps(
             result, out_dir=out_dir, stem=stem, cfg_hash=cfg_hash
@@ -383,7 +401,62 @@ class FmriAnalysisPipeline(PipelineBase):
             self.logger.info(
                 "Saved run-level maps for %d run(s): %s", result.n_runs, effect_path.name
             )
-        return effect_path, variance_path, list(result.run_labels)
+        fields: dict[str, Any] = {
+            "run_effect_map": effect_path,
+            "run_variance_map": variance_path,
+        }
+
+        try:
+            null = compute_sign_flip_null(flm, contrast_def)
+        except Exception as exc:
+            self.logger.warning("Could not compute the sign-flip null (%s)", exc)
+            null = None
+        if null is not None:
+            sign_flip_path = write_sign_flip_null(
+                null, out_dir=out_dir, stem=stem, cfg_hash=cfg_hash
+            )
+            if sign_flip_path is not None:
+                fields.update(
+                    sign_flip_null_tsv=sign_flip_path,
+                    sign_flip_fwe_height=null.fwe_height,
+                    sign_flip_fwe_survivors=null.fwe_survivors,
+                    sign_flip_global_p=null.global_p,
+                    sign_flip_p_floor=null.p_floor,
+                    sign_flip_n_patterns=null.n_patterns,
+                    sign_flip_n_runs=null.n_runs,
+                    sign_flip_observed_max=null.observed_max,
+                )
+                self.logger.info(
+                    "Sign-flip null over %d run(s): FWE height %.2f, %d voxel(s), "
+                    "p = %.3f (floor %.3f)",
+                    null.n_runs,
+                    null.fwe_height,
+                    null.fwe_survivors,
+                    null.global_p,
+                    null.p_floor,
+                )
+
+        try:
+            influence = compute_run_influence(
+                flm, contrast_def, run_labels=labels, threshold=float(z_threshold)
+            )
+        except Exception as exc:
+            self.logger.warning("Could not compute run influence (%s)", exc)
+            influence = None
+        if influence:
+            influence_path = write_run_influence(
+                influence, out_dir=out_dir, stem=stem, cfg_hash=cfg_hash
+            )
+            if influence_path is not None:
+                fields["run_influence_tsv"] = influence_path
+                worst = max(influence, key=lambda row: abs(row.delta))
+                self.logger.info(
+                    "Run influence: dropping %s moves the survivor count by %+d",
+                    worst.dropped_run,
+                    worst.delta,
+                )
+
+        return fields
 
     def _discover_tissue_segmentation(self, *, sub_label: str, space: str) -> Optional[Path]:
         """Discrete GM/WM/CSF segmentation used to order carpet-plot rows."""
@@ -594,13 +667,14 @@ class FmriAnalysisPipeline(PipelineBase):
             len(model_fit_paths.residuals),
         )
 
-        run_effect_path, run_variance_path, run_level_labels = self._run_level_maps(
+        run_level_fields = self._run_level_maps(
             glm_result=glm_result,
             contrast_def=contrast_def,
             run_meta=run_meta,
             out_dir=out_dir,
             stem=stem,
             cfg_hash=cfg_hash,
+            z_threshold=float(getattr(plotting_cfg, "z_threshold", 2.3) or 2.3),
         )
 
         # Record what was fit, beside what was fit. This is what lets `fmri-analysis
@@ -624,8 +698,7 @@ class FmriAnalysisPipeline(PipelineBase):
             predicted_paths=model_fit_paths.predicted,
             effect_map=effect_path,
             variance_map=variance_path,
-            run_effect_map=run_effect_path,
-            run_variance_map=run_variance_path,
+            **run_level_fields,
             mask=mask_path,
             mask_is_analysis_mask=analysis_mask_img is not None and mask_path is not None,
             design_matrices=(
