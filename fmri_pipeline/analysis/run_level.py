@@ -306,11 +306,132 @@ def write_sign_flip_null(
     return path
 
 
+@dataclass(frozen=True)
+class RunInfluence:
+    """What dropping one run does to the combined map."""
+
+    dropped_run: str
+    survivors: int
+    delta: int
+    max_abs_z: float
+    correlation: float
+
+
+def compute_run_influence(
+    flm: Any,
+    contrast_def: Any,
+    *,
+    run_labels: Sequence[str] = (),
+    threshold: float = 2.3,
+) -> Optional[Tuple[RunInfluence, ...]]:
+    """Recombine the contrast with each run dropped in turn.
+
+    A dropped run is expressed as an all-zero contrast vector, which nilearn's
+    ``compute_fixed_effect_contrast`` skips outright while dividing by the count of
+    *surviving* contrasts. That is what makes this exact rather than a second pooling
+    rule: the all-runs case is the stored map, so the deltas reconcile with the cluster
+    table instead of merely resembling it.
+
+    The forest panel answers a related but different question -- how each run estimates
+    the contrast at the chosen peaks. A run can carry the largest peak estimates while
+    another run moves the map more, because peak estimates and map-wide survivor counts
+    are not the same measurement.
+
+    ``None`` for a single-run model, which has nothing to drop.
+    """
+    designs = list(getattr(flm, "design_matrices_", []) or [])
+    masker = getattr(flm, "masker_", None)
+    if masker is None or len(designs) < 2:
+        return None
+
+    try:
+        vectors = _contrast_vectors(flm, contrast_def)
+    except Exception as exc:
+        logger.warning("Could not expand the contrast for run influence (%s)", exc)
+        return None
+
+    def _z(vecs: List[np.ndarray]) -> Optional[np.ndarray]:
+        try:
+            img = flm.compute_contrast(vecs, output_type="z_score")
+        except Exception as exc:
+            logger.warning("Could not recombine the contrast (%s)", exc)
+            return None
+        values = np.asarray(masker.transform(img), dtype=float).ravel()
+        return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+
+    combined = _z(vectors)
+    if combined is None:
+        return None
+    baseline = int(np.sum(np.abs(combined) > threshold))
+
+    labels = [
+        str(run_labels[i]) if i < len(run_labels) else f"run-{i + 1:02d}"
+        for i in range(len(vectors))
+    ]
+
+    rows: List[RunInfluence] = []
+    for index, label in enumerate(labels):
+        held_out = [
+            np.zeros_like(vector) if i == index else vector
+            for i, vector in enumerate(vectors)
+        ]
+        reduced = _z(held_out)
+        if reduced is None:
+            return None
+        if np.std(reduced) == 0 or np.std(combined) == 0:
+            correlation = float("nan")
+        else:
+            correlation = float(np.corrcoef(reduced, combined)[0, 1])
+        survivors = int(np.sum(np.abs(reduced) > threshold))
+        rows.append(
+            RunInfluence(
+                dropped_run=label,
+                survivors=survivors,
+                delta=survivors - baseline,
+                max_abs_z=float(np.abs(reduced).max()),
+                correlation=correlation,
+            )
+        )
+    return tuple(rows)
+
+
+def write_run_influence(
+    rows: Sequence[RunInfluence], *, out_dir: Path, stem: str, cfg_hash: str
+) -> Optional[Path]:
+    """Write one row per dropped run."""
+    import pandas as pd
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{stem}_desc-runinfluence_{cfg_hash}.tsv"
+    frame = pd.DataFrame(
+        [
+            {
+                "dropped_run": row.dropped_run,
+                "survivors": row.survivors,
+                "delta": row.delta,
+                "max_abs_z": row.max_abs_z,
+                "correlation": row.correlation,
+            }
+            for row in rows
+        ]
+    )
+    try:
+        frame.to_csv(path, sep="\t", index=False)
+    except Exception as exc:
+        logger.warning("Could not write %s (%s)", path.name, exc)
+        return None
+    return path
+
+
 __all__ = [
+    "RunInfluence",
     "RunLevelContrast",
     "SignFlipNull",
+    "compute_run_influence",
     "compute_run_level_contrast",
     "compute_sign_flip_null",
+    "write_run_influence",
     "write_run_level_maps",
     "write_sign_flip_null",
 ]
