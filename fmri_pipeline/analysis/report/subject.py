@@ -834,6 +834,17 @@ def _cluster_peaks(frame: Any) -> Tuple[Tuple[str, Tuple[float, float, float]], 
 
     Labels are the table's own cluster IDs rather than a fresh count, so the two
     agree even if this filter ever changes.
+
+    Ordered by ``|Peak Stat|`` descending rather than by the table's own order. nilearn
+    sorts clusters by the *signed* statistic, so every negative cluster sorts below
+    every positive one no matter how strong: on this study's data the largest effect in
+    the map peaks at z = -8.81 over 138,213 mm3 and lands last, which kept it out of
+    every panel that caps at three or six peaks. The table itself keeps nilearn's order
+    and lists every cluster, so nothing is hidden there; this ordering decides only
+    which peaks the capped panels spend their space on.
+
+    Alignment is unaffected: ``enrich_cluster_frame`` matches rows by ``Cluster ID``
+    rather than by position.
     """
     if not {"X", "Y", "Z", "Cluster ID"} <= set(frame.columns):
         return ()
@@ -843,14 +854,35 @@ def _cluster_peaks(frame: Any) -> Tuple[Tuple[str, Tuple[float, float, float]], 
     # dtype -- turning cluster 1 into "1.0", which no longer looks like an integer.
     identifiers = list(frame["Cluster ID"])
     xs, ys, zs = list(frame["X"]), list(frame["Y"]), list(frame["Z"])
+    stats = (
+        list(frame["Peak Stat"]) if "Peak Stat" in frame.columns else [None] * len(xs)
+    )
 
     peaks: List[Tuple[str, Tuple[float, float, float]]] = []
-    for identifier, x, y, z in zip(identifiers, xs, ys, zs):
+    strengths: List[float] = []
+    for identifier, x, y, z, stat in zip(identifiers, xs, ys, zs, stats):
         label = _cluster_identifier(identifier)
         if label is None:
             continue
         peaks.append((label, (float(x), float(y), float(z))))
-    return tuple(peaks)
+        try:
+            strength = abs(float(stat))
+        except (TypeError, ValueError):
+            strength = float("nan")
+        strengths.append(strength)
+
+    if not any(np.isfinite(strength) for strength in strengths):
+        # No usable statistic: the caller's order is better than an arbitrary one.
+        return tuple(peaks)
+
+    order = sorted(
+        range(len(peaks)),
+        key=lambda i: (
+            -strengths[i] if np.isfinite(strengths[i]) else float("inf"),
+            i,
+        ),
+    )
+    return tuple(peaks[i] for i in order)
 
 
 def _cluster_identifier(value: Any) -> Optional[str]:

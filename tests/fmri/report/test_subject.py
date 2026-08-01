@@ -1293,3 +1293,67 @@ def test_sign_flip_summary_recomputes_a_missing_floor():
         sign_flip_observed_max = 8.87
 
     assert _sign_flip_summary(_M()).p_floor == pytest.approx(2 / 33)
+
+
+def _cluster_frame(rows):
+    """A minimal clusters table in nilearn's own column shape."""
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {"Cluster ID": cid, "X": x, "Y": y, "Z": z, "Peak Stat": stat}
+            for cid, x, y, z, stat in rows
+        ]
+    )
+
+
+def test_peaks_are_ordered_by_absolute_stat():
+    """nilearn orders clusters by signed stat, so a map's largest effect can be last.
+
+    On sub-0001 the strongest cluster peaks at z = -8.81 over 138,213 mm3 and sorts
+    below every positive cluster, which kept it out of every panel that caps.
+    """
+    from fmri_pipeline.analysis.report.subject import _cluster_peaks
+
+    frame = _cluster_frame(
+        [(1, -50, 23, -2, 6.26), (2, 55, -7, 31, 6.07), (177, 13, -28, 58, -8.81)]
+    )
+    assert [label for label, _ in _cluster_peaks(frame)] == ["177", "1", "2"]
+
+
+def test_subpeak_rows_are_still_skipped_when_ordering():
+    from fmri_pipeline.analysis.report.subject import _cluster_peaks
+
+    frame = _cluster_frame(
+        [(1, -50, 23, -2, 6.26), ("1a", -44, 20, -2, 5.10), (2, 55, -7, 31, -9.0)]
+    )
+    assert [label for label, _ in _cluster_peaks(frame)] == ["2", "1"]
+
+
+def test_peak_order_is_stable_without_a_stat_column():
+    """A frame lacking Peak Stat must keep the table's own order, not an arbitrary one."""
+    import pandas as pd
+
+    from fmri_pipeline.analysis.report.subject import _cluster_peaks
+
+    frame = pd.DataFrame(
+        [
+            {"Cluster ID": 1, "X": 0, "Y": 0, "Z": 0},
+            {"Cluster ID": 2, "X": 1, "Y": 1, "Z": 1},
+        ]
+    )
+    assert [label for label, _ in _cluster_peaks(frame)] == ["1", "2"]
+
+
+def test_coordinates_travel_with_their_own_peak():
+    """Reordering must not shear labels away from coordinates."""
+    from fmri_pipeline.analysis.report.subject import _cluster_peaks
+
+    frame = _cluster_frame(
+        [(1, -50, 23, -2, 3.0), (2, 55, -7, 31, -9.0), (3, 10, 10, 10, 5.0)]
+    )
+    assert _cluster_peaks(frame) == (
+        ("2", (55.0, -7.0, 31.0)),
+        ("3", (10.0, 10.0, 10.0)),
+        ("1", (-50.0, 23.0, -2.0)),
+    )
