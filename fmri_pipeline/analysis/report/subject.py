@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 import numpy as np
 
 from fmri_pipeline.analysis.plotting_config import FmriReportConfig
-from fmri_pipeline.analysis.report import atlas, html
+from fmri_pipeline.analysis.report import atlas, html, inference
 from fmri_pipeline.analysis.report.figures import carpet as carpet_figures
 from fmri_pipeline.analysis.report.figures import coverage as coverage_figures
 from fmri_pipeline.analysis.report.figures import distributions as distribution_figures
@@ -1422,6 +1422,7 @@ def build_contrast_section(
             fdr_q=float(manifest.fdr_q),
             alpha=0.05,
             two_sided=manifest.two_sided,
+            sign_flip=_sign_flip_summary(manifest),
         )
         path = _save(
             distribution_figures.null_calibration_figure(
@@ -1447,14 +1448,7 @@ def build_contrast_section(
                 title="Thresholds and survivors",
                 html=table_html,
                 tsv_path=tsv_path,
-                caption=(
-                    "Every count is stated against both nulls where both apply: the "
-                    "count expected under N(0, 1) is what an over-dispersed map makes "
-                    "look like enrichment, and the count expected under the map's own "
-                    "fitted null is what the observed survivors have to exceed to be a "
-                    "finding. This pipeline applies no cluster-level correction, so "
-                    "none of these heights is familywise-corrected for extent."
-                ),
+                caption=_threshold_table_caption(context),
             )
         )
 
@@ -1464,13 +1458,7 @@ def build_contrast_section(
                     title="Threshold calibration",
                     path=path,
                     dense=False,
-                    caption=(
-                        "Where each threshold in the table above falls on the map's "
-                        "own distribution, with the fitted null beside the theoretical "
-                        "N(0, 1) the threshold assumes. A single-subject GLM with "
-                        "unmodelled autocorrelation is routinely over-dispersed, and "
-                        "nothing in a thresholded mosaic reveals it."
-                    ),
+                    caption=CALIBRATION_CAPTION,
                 )
             )
 
@@ -1480,6 +1468,90 @@ def build_contrast_section(
         slug=_slug(manifest),
         title=f"Contrast: {manifest.contrast_name}",
         blocks=tuple(blocks),
+    )
+
+
+#: What the calibration panel says about why the map is over-dispersed.
+#:
+#: The previous wording blamed "unmodelled autocorrelation", which this study's own
+#: data contradicts: median residual ACF(1) runs 0.05-0.07 across runs, far too small
+#: to widen a null to sigma 1.51. Naming a cause the report elsewhere measures and
+#: refutes is worse than naming none, so this points at the three panels that carry
+#: the evidence instead of asserting a mechanism.
+CALIBRATION_CAPTION = (
+    "Where each threshold in the table above falls on the map's own distribution, "
+    "with the fitted null beside the theoretical N(0, 1) the threshold assumes. "
+    "Over-dispersion relative to N(0, 1) is a measurement, not an assumption: this "
+    "panel states the fitted null's centre and width, the residual autocorrelation "
+    "panel states what the residuals do, and the run-level panels state what each run "
+    "contributes. Nothing in a thresholded mosaic reveals any of the three."
+)
+
+
+def _sign_flip_summary(
+    manifest: ContrastManifest,
+) -> Optional[inference.SignFlipSummary]:
+    """Build the report-side view of the sign-flip null from the manifest scalars.
+
+    Read from the manifest rather than from the analysis package: importing
+    ``run_level`` here would pull the fitting stack into the report's import path,
+    which a test forbids and which is what lets a report render from a derivatives
+    tree with no model present.
+    """
+    height = manifest.sign_flip_fwe_height
+    if height is None or manifest.sign_flip_n_runs is None:
+        return None
+    return inference.SignFlipSummary(
+        height=float(height),
+        survivors=int(manifest.sign_flip_fwe_survivors or 0),
+        global_p=float(manifest.sign_flip_global_p or 0.0),
+        p_floor=float(
+            manifest.sign_flip_p_floor
+            if manifest.sign_flip_p_floor is not None
+            else inference.sign_flip_p_floor(int(manifest.sign_flip_n_runs))
+        ),
+        n_runs=int(manifest.sign_flip_n_runs),
+        n_patterns=int(manifest.sign_flip_n_patterns or 0),
+        observed_max=float(manifest.sign_flip_observed_max or 0.0),
+    )
+
+
+def _threshold_table_caption(context: inference.ThresholdContext) -> str:
+    """Describe the table, including what the sign-flip row is and is not worth."""
+    caption = (
+        "Every count is stated against both nulls where both apply: the count "
+        "expected under N(0, 1) is what an over-dispersed map makes look like "
+        "enrichment, and the count expected under the map's own fitted null is what "
+        "the observed survivors have to exceed to be a finding."
+    )
+
+    sign_flip = context.sign_flip
+    if sign_flip is None:
+        return caption + (
+            " No familywise correction over runs is available for this contrast, and "
+            "no cluster-extent correction is applied, so none of these heights is "
+            "corrected for extent."
+        )
+
+    caption += (
+        f" The sign-flip row is the one whose null is this data's own: "
+        f"{sign_flip.n_patterns} exact sign patterns over {sign_flip.n_runs} runs, "
+        f"exchangeable by run, assuming nothing about the distribution the other rows "
+        f"assume. Global p = {sign_flip.global_p:.3f}"
+    )
+    if sign_flip.floor_limited:
+        caption += (
+            f", which is the smallest value this test can return: the unflipped "
+            f"pattern is always a member of the null and always ties the observed "
+            f"maximum, so with {sign_flip.n_runs} runs no map-level p below "
+            f"{sign_flip.p_floor:.3f} is reachable. The height is unaffected by that "
+            f"floor."
+        )
+    else:
+        caption += f" against a floor of {sign_flip.p_floor:.3f}."
+    return caption + (
+        " No cluster-extent correction is applied; the sign-flip height is "
+        "familywise-corrected over voxels, not over extent."
     )
 
 

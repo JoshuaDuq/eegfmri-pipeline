@@ -6,18 +6,41 @@ from unittest.mock import patch
 
 import nibabel as nib
 import numpy as np
+import pandas as pd
 import pytest
 
 from fmri_pipeline.analysis.plotting_config import FmriReportConfig
 from fmri_pipeline.analysis.report import subject
-from fmri_pipeline.analysis.report.manifest import ContrastManifest
+from fmri_pipeline.analysis.report.manifest import (
+    REPORT_MANIFEST_SCHEMA_VERSION,
+    ContrastManifest,
+    validate_manifest_artifacts,
+)
 
 
 def _bold(tmp_path: Path, name: str, n_frames: int = 20) -> Path:
     rng = np.random.default_rng(0)
-    data = (100.0 + rng.standard_normal((6, 6, 6, n_frames))).astype(np.float32)
+    data = (100.0 + rng.standard_normal((12, 12, 12, n_frames))).astype(np.float32)
     path = tmp_path / name
     nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
+    return path
+
+
+def _model_series(
+    tmp_path: Path,
+    name: str,
+    *,
+    shape: tuple[int, int, int] = (12, 12, 12),
+    n_frames: int = 20,
+) -> Path:
+    time = np.arange(n_frames, dtype=np.float32)
+    values = 0.1 * time if "predicted" in name else np.where(time.astype(int) % 2 == 0, 0.25, -0.25)
+    data = np.broadcast_to(values, (*shape, n_frames)).copy()
+    path = tmp_path / name
+    nib.save(
+        nib.Nifti1Image(data, np.eye(4)),
+        str(path),
+    )
     return path
 
 
@@ -30,8 +53,18 @@ def _stat(tmp_path: Path, name: str, seed: int = 0) -> Path:
     return path
 
 
+def _mask(tmp_path: Path, name: str) -> Path:
+    path = tmp_path / name
+    nib.save(
+        nib.Nifti1Image(np.ones((12, 12, 12), dtype=np.uint8), np.eye(4)),
+        str(path),
+    )
+    return path
+
+
 def _manifest(tmp_path: Path, name: str = "heat-warm", **overrides) -> ContrastManifest:
     base = dict(
+        schema_version=REPORT_MANIFEST_SCHEMA_VERSION,
         subject="sub-01",
         task="heat",
         contrast_name=name,
@@ -39,7 +72,7 @@ def _manifest(tmp_path: Path, name: str = "heat-warm", **overrides) -> ContrastM
         stat_map=_stat(tmp_path, f"{name}_z.nii.gz"),
         effect_map=_stat(tmp_path, f"{name}_eff.nii.gz", 1),
         variance_map=None,
-        mask=None,
+        mask=_mask(tmp_path, f"{name}_mask.nii.gz"),
         threshold_mode="z",
         z_threshold=2.3,
         fdr_q=0.05,
@@ -51,12 +84,25 @@ def _manifest(tmp_path: Path, name: str = "heat-warm", **overrides) -> ContrastM
         contrast_columns=(),
         included_runs=("run-01", "run-02"),
         excluded_runs=(("run-03", "fewer events than the contrast requires"),),
-        bold_paths=(_bold(tmp_path, "r1.nii.gz"), _bold(tmp_path, "r2.nii.gz")),
+        bold_paths=(
+            _bold(tmp_path, "run-01_bold.nii.gz"),
+            _bold(tmp_path, "run-02_bold.nii.gz"),
+        ),
         confounds_paths=(),
         t_r=2.0,
         smoothing_fwhm=6.0,
         signal_scaling=False,
         confound_strategy="motion+compcor",
+        mask_is_analysis_mask=True,
+        residual_paths=(
+            _model_series(tmp_path, "run-01_residual.nii.gz"),
+            _model_series(tmp_path, "run-02_residual.nii.gz"),
+        ),
+        predicted_paths=(
+            _model_series(tmp_path, "run-01_predicted.nii.gz"),
+            _model_series(tmp_path, "run-02_predicted.nii.gz"),
+        ),
+        retained_frame_indices=(tuple(range(20)), tuple(range(20))),
     )
     base.update(overrides)
     return ContrastManifest(**base)
@@ -93,9 +139,7 @@ def test_the_header_declines_to_claim_percent_signal_change(tmp_path: Path) -> N
 
 def test_qc_is_built_once_for_a_subject_with_several_contrasts(tmp_path: Path) -> None:
     manifests = [_manifest(tmp_path, "a"), _manifest(tmp_path, "b")]
-    with patch(
-        "fmri_pipeline.analysis.report.figures.volumes.compute_tsnr"
-    ) as mock_tsnr:
+    with patch("fmri_pipeline.analysis.report.figures.volumes.compute_tsnr") as mock_tsnr:
         mock_tsnr.side_effect = RuntimeError("stop here")
         subject.build_qc_sections(
             manifests=manifests, deriv_root=tmp_path, out_dir=tmp_path, cfg=_cfg()
@@ -105,15 +149,20 @@ def test_qc_is_built_once_for_a_subject_with_several_contrasts(tmp_path: Path) -
 
 
 def test_qc_returns_a_section_even_when_every_panel_fails(tmp_path: Path) -> None:
-    with patch(
-        "fmri_pipeline.analysis.report.figures.volumes.compute_tsnr",
-        side_effect=RuntimeError("boom"),
-    ), patch(
-        "fmri_pipeline.analysis.report.figures.carpet.carpet_figure",
-        side_effect=RuntimeError("boom"),
+    with (
+        patch(
+            "fmri_pipeline.analysis.report.figures.volumes.compute_tsnr",
+            side_effect=RuntimeError("boom"),
+        ),
+        patch(
+            "fmri_pipeline.analysis.report.figures.carpet.carpet_figure",
+            side_effect=RuntimeError("boom"),
+        ),
     ):
         sections = subject.build_qc_sections(
-            manifests=[_manifest(tmp_path)], deriv_root=tmp_path, out_dir=tmp_path,
+            manifests=[_manifest(tmp_path)],
+            deriv_root=tmp_path,
+            out_dir=tmp_path,
             cfg=_cfg(),
         )
     assert sections
@@ -121,10 +170,36 @@ def test_qc_returns_a_section_even_when_every_panel_fails(tmp_path: Path) -> Non
 
 def test_qc_is_labelled_as_modelled_not_as_preprocessed(tmp_path: Path) -> None:
     sections = subject.build_qc_sections(
-        manifests=[_manifest(tmp_path)], deriv_root=tmp_path, out_dir=tmp_path,
+        manifests=[_manifest(tmp_path)],
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
         cfg=_cfg(),
     )
     assert "as modelled" in " ".join(str(s) for s in sections).lower()
+
+
+def test_qc_uses_the_exact_retained_frame_indices(tmp_path: Path) -> None:
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        retained_frame_indices=(tuple(range(1, 20)), source.retained_frame_indices[1]),
+    )
+    captured = {}
+
+    def _record(_series, *, sample_mask=None):
+        captured.setdefault("sample_masks", []).append(sample_mask)
+        raise RuntimeError("stop once the call is recorded")
+
+    with patch("fmri_pipeline.analysis.report.figures.carpet.standardise_carpet", _record):
+        subject.build_qc_sections(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_dir=tmp_path,
+            cfg=_cfg(include_tsnr_qc=False),
+        )
+
+    first_mask = captured["sample_masks"][0]
+    assert first_mask.tolist() == [False, *([True] * 19)]
 
 
 # --- results --------------------------------------------------------------
@@ -140,12 +215,94 @@ def test_a_contrast_section_leads_with_the_dual_coded_panel(tmp_path: Path) -> N
 
 def test_diagnostics_are_collapsed_not_deleted(tmp_path: Path) -> None:
     section = subject.build_diagnostics_section(
-        manifest=_manifest(tmp_path), out_dir=tmp_path,
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
         cfg=_cfg(include_unthresholded=True),
     )
     assert section.collapsed is True
     titles = " ".join(b.title for b in section.blocks if hasattr(b, "title")).lower()
     assert "unthresholded" in titles
+
+
+def test_diagnostics_include_the_exact_model_fit_measurement_table(
+    tmp_path: Path,
+) -> None:
+    section = subject.build_diagnostics_section(
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(include_unthresholded=False),
+    )
+
+    table = section.blocks[0]
+    assert table.title == "Model-fit measurements by run"
+    assert "Median residual ACF(1)" in table.html
+    assert table.tsv_path == (
+        tmp_path / "plots" / "contrast-heat-warm" / "model_fit_measurements.tsv"
+    )
+    assert table.tsv_path.is_file()
+    assert "unwhitened model-response" in table.caption
+
+
+def test_diagnostics_include_the_exact_model_response_residual_carpet(
+    tmp_path: Path,
+) -> None:
+    section = subject.build_diagnostics_section(
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(include_unthresholded=False),
+    )
+
+    carpet = section.blocks[1]
+    assert carpet.title == "Model-response residual carpet"
+    assert carpet.path == (tmp_path / "plots" / "contrast-heat-warm" / "residual_carpet.png")
+    assert carpet.path.is_file()
+    assert "Y − Xβ" in carpet.caption
+    assert "unwhitened model-response" in carpet.caption
+
+
+def test_diagnostics_include_the_pooled_residual_standard_deviation_map(
+    tmp_path: Path,
+) -> None:
+    section = subject.build_diagnostics_section(
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(include_unthresholded=False),
+    )
+
+    residual_sd = section.blocks[2]
+    artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
+    assert residual_sd.title == "Pooled residual standard deviation"
+    assert residual_sd.path == artifact_dir / "residual_standard_deviation.png"
+    assert residual_sd.path.is_file()
+    assert (artifact_dir / "residual_standard_deviation.nii.gz").is_file()
+    assert "Σ(e − ē)² / N" in residual_sd.caption
+    assert "unwhitened model-response" in residual_sd.caption
+    assert "No criterion is applied" in residual_sd.caption
+
+
+def test_diagnostics_include_residual_autocorrelation_at_acquired_lags(
+    tmp_path: Path,
+) -> None:
+    section = subject.build_diagnostics_section(
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(include_unthresholded=False),
+    )
+
+    residual_acf = section.blocks[3]
+    artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
+    assert residual_acf.title == "Residual autocorrelation by run"
+    assert residual_acf.path == artifact_dir / "residual_autocorrelation.svg"
+    assert residual_acf.path.is_file()
+    assert (artifact_dir / "residual_autocorrelation.tsv").is_file()
+    assert "original acquired-frame indices differ by k" in residual_acf.caption
+    assert "unwhitened model-response" in residual_acf.caption
+    assert "No criterion is applied" in residual_acf.caption
 
 
 def test_each_contrast_gets_its_own_anchor(tmp_path: Path) -> None:
@@ -162,7 +319,9 @@ def test_the_document_covers_every_contrast(tmp_path: Path) -> None:
     out = tmp_path / "report.html"
     subject.build_subject_report(
         manifests=[_manifest(tmp_path, "heat-warm"), _manifest(tmp_path, "heat-rest")],
-        deriv_root=tmp_path, out_path=out, cfg=_cfg(),
+        deriv_root=tmp_path,
+        out_path=out,
+        cfg=_cfg(),
     )
     text = out.read_text()
     assert "heat-warm" in text and "heat-rest" in text
@@ -174,7 +333,9 @@ def test_the_document_has_one_qc_section_regardless_of_contrast_count(
     out = tmp_path / "report.html"
     subject.build_subject_report(
         manifests=[_manifest(tmp_path, "a"), _manifest(tmp_path, "b")],
-        deriv_root=tmp_path, out_path=out, cfg=_cfg(),
+        deriv_root=tmp_path,
+        out_path=out,
+        cfg=_cfg(),
     )
     assert out.read_text().count('id="qc"') == 1
 
@@ -186,13 +347,247 @@ def test_building_a_report_with_no_contrasts_raises_clearly(tmp_path: Path) -> N
         )
 
 
+def test_report_assembly_rejects_a_manifest_outside_the_contract(
+    tmp_path: Path,
+) -> None:
+    manifest = replace(_manifest(tmp_path), mask_is_analysis_mask=False)
+
+    with pytest.raises(ValueError, match="fitted analysis mask"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_a_missing_artifact(tmp_path: Path) -> None:
+    manifest = replace(_manifest(tmp_path), stat_map=tmp_path / "missing_z.nii.gz")
+
+    with pytest.raises(FileNotFoundError, match="stat_map"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_mixed_subject_task_inputs(tmp_path: Path) -> None:
+    first = _manifest(tmp_path, "heat-warm")
+    second = replace(_manifest(tmp_path, "heat-rest"), task="rest")
+
+    with pytest.raises(ValueError, match="same subject and task"):
+        subject.build_subject_report(
+            manifests=[first, second],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_mixed_run_inputs(tmp_path: Path) -> None:
+    first = _manifest(tmp_path, "heat-warm")
+    second_source = _manifest(tmp_path, "heat-rest")
+    second = replace(
+        second_source,
+        included_runs=("run-02", "run-01"),
+        bold_paths=tuple(reversed(second_source.bold_paths)),
+    )
+
+    with pytest.raises(ValueError, match="same run inputs"):
+        subject.build_subject_report(
+            manifests=[first, second],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_misaligned_image_geometry(tmp_path: Path) -> None:
+    wrong_mask = tmp_path / "wrong_mask.nii.gz"
+    nib.save(
+        nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.uint8), np.eye(4)),
+        str(wrong_mask),
+    )
+    manifest = replace(_manifest(tmp_path), mask=wrong_mask)
+
+    with pytest.raises(ValueError, match="mask geometry"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_a_missing_model_fit_series(tmp_path: Path) -> None:
+    manifest = replace(
+        _manifest(tmp_path),
+        residual_paths=(tmp_path / "missing_residual.nii.gz",) * 2,
+    )
+
+    with pytest.raises(FileNotFoundError, match="residual_paths"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_model_fit_shape_disagreement(tmp_path: Path) -> None:
+    wrong_prediction = _model_series(
+        tmp_path,
+        "wrong_predicted.nii.gz",
+        n_frames=19,
+    )
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        predicted_paths=(wrong_prediction, source.predicted_paths[1]),
+    )
+
+    with pytest.raises(ValueError, match="matching shapes"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_model_fit_spatial_misalignment(tmp_path: Path) -> None:
+    wrong_residual = _model_series(
+        tmp_path,
+        "wrong_residual.nii.gz",
+        shape=(4, 4, 4),
+    )
+    wrong_prediction = _model_series(
+        tmp_path,
+        "wrong_predicted.nii.gz",
+        shape=(4, 4, 4),
+    )
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        residual_paths=(wrong_residual, source.residual_paths[1]),
+        predicted_paths=(wrong_prediction, source.predicted_paths[1]),
+    )
+
+    with pytest.raises(ValueError, match="BOLD geometry"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_wrong_model_fit_timepoints(tmp_path: Path) -> None:
+    short_residual = _model_series(
+        tmp_path,
+        "short_residual.nii.gz",
+        n_frames=19,
+    )
+    short_prediction = _model_series(
+        tmp_path,
+        "short_predicted.nii.gz",
+        n_frames=19,
+    )
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        residual_paths=(short_residual, source.residual_paths[1]),
+        predicted_paths=(short_prediction, source.predicted_paths[1]),
+    )
+
+    with pytest.raises(ValueError, match="retained timepoints"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_retained_indices_that_disagree_with_fit_series(
+    tmp_path: Path,
+) -> None:
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        retained_frame_indices=(tuple(range(19)), source.retained_frame_indices[1]),
+    )
+
+    with pytest.raises(ValueError, match="retained frame indices"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_report_assembly_rejects_confounds_length_that_disagrees_with_bold(
+    tmp_path: Path,
+) -> None:
+    design_path = tmp_path / "run-01_design.tsv"
+    confounds_path = tmp_path / "run-01_confounds.tsv"
+    pd.DataFrame({"constant": np.ones(20)}).to_csv(design_path, sep="\t", index=False)
+    pd.DataFrame({"trans_x": np.zeros(19)}).to_csv(confounds_path, sep="\t", index=False)
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        included_runs=("run-01",),
+        bold_paths=(source.bold_paths[0],),
+        design_matrices=(design_path,),
+        confounds_paths=(confounds_path,),
+        residual_paths=(source.residual_paths[0],),
+        predicted_paths=(source.predicted_paths[0],),
+        retained_frame_indices=(source.retained_frame_indices[0],),
+    )
+
+    with pytest.raises(ValueError, match="confounds.*BOLD timepoints"):
+        subject.build_subject_report(
+            manifests=[manifest],
+            deriv_root=tmp_path,
+            out_path=tmp_path / "r.html",
+            cfg=_cfg(),
+        )
+
+
+def test_unused_confounds_do_not_define_censoring_for_a_none_strategy(
+    tmp_path: Path,
+) -> None:
+    confounds_path = tmp_path / "unused_confounds.tsv"
+    outliers = np.zeros(20)
+    outliers[0] = 1
+    pd.DataFrame({"motion_outlier00": outliers}).to_csv(
+        confounds_path,
+        sep="\t",
+        index=False,
+    )
+    source = _manifest(tmp_path)
+    manifest = replace(
+        source,
+        included_runs=("run-01",),
+        bold_paths=(source.bold_paths[0],),
+        confounds_paths=(confounds_path,),
+        residual_paths=(source.residual_paths[0],),
+        predicted_paths=(source.predicted_paths[0],),
+        retained_frame_indices=(source.retained_frame_indices[0],),
+        confound_strategy="none",
+    )
+
+    validate_manifest_artifacts(manifest)
+
+
 # --- cluster peaks --------------------------------------------------------
 
 
 def test_a_cluster_table_is_produced_with_peak_coordinates(tmp_path: Path) -> None:
-    table, peaks = subject.build_cluster_table(
-        manifest=_manifest(tmp_path), out_dir=tmp_path
-    )
+    table, peaks = subject.build_cluster_table(manifest=_manifest(tmp_path), out_dir=tmp_path)
     assert table is not None
     assert len(peaks) >= 1
     label, coord = peaks[0]
@@ -201,9 +596,7 @@ def test_a_cluster_table_is_produced_with_peak_coordinates(tmp_path: Path) -> No
 
 
 def test_the_table_caption_separates_threshold_from_extent(tmp_path: Path) -> None:
-    table, _ = subject.build_cluster_table(
-        manifest=_manifest(tmp_path), out_dir=tmp_path
-    )
+    table, _ = subject.build_cluster_table(manifest=_manifest(tmp_path), out_dir=tmp_path)
     caption = table.caption.lower()
     assert "height threshold" in caption
     assert "cluster-level significan" not in caption
@@ -222,9 +615,7 @@ def test_the_cluster_tsv_is_written_beside_the_report(tmp_path: Path) -> None:
 
 def test_an_empty_map_yields_no_peaks_rather_than_an_error(tmp_path: Path) -> None:
     flat = tmp_path / "flat.nii.gz"
-    nib.save(
-        nib.Nifti1Image(np.zeros((12, 12, 12), dtype=np.float32), np.eye(4)), str(flat)
-    )
+    nib.save(nib.Nifti1Image(np.zeros((12, 12, 12), dtype=np.float32), np.eye(4)), str(flat))
     manifest = replace(_manifest(tmp_path), stat_map=flat)
     _table, peaks = subject.build_cluster_table(manifest=manifest, out_dir=tmp_path)
     assert peaks == ()
@@ -334,13 +725,9 @@ def test_the_analysis_mask_reaches_the_colour_limit(tmp_path: Path) -> None:
     nib.save(nib.Nifti1Image(mask, np.eye(4)), str(mask_path))
 
     manifest = _manifest(tmp_path, mask=mask_path)
-    with patch(
-        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic"
-    ) as mosaic:
+    with patch("fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic") as mosaic:
         mosaic.return_value = None
-        subject.build_contrast_section(
-            manifest=manifest, out_dir=tmp_path, cfg=_cfg()
-        )
+        subject.build_contrast_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
 
     assert mosaic.called
     passed = [call.kwargs.get("mask_img") for call in mosaic.call_args_list]
@@ -399,9 +786,7 @@ def test_the_analysis_mask_reaches_the_tsnr_computation(tmp_path: Path) -> None:
     nib.save(nib.Nifti1Image(mask, np.eye(4)), str(mask_path))
 
     manifest = _manifest(tmp_path, "masked-qc", mask=mask_path)
-    with patch(
-        "fmri_pipeline.analysis.report.figures.volumes.compute_tsnr"
-    ) as compute:
+    with patch("fmri_pipeline.analysis.report.figures.volumes.compute_tsnr") as compute:
         compute.side_effect = RuntimeError("stop after the call is inspected")
         subject.build_qc_sections(
             manifests=[manifest],
@@ -432,9 +817,7 @@ def _signature_tsv(directory: Path) -> Path:
 def test_a_signature_section_is_built_from_the_expression_table(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path, "sig")
     _signature_tsv(Path(manifest.stat_map).parent)
-    section = subject.build_signature_section(
-        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
-    )
+    section = subject.build_signature_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
     assert section is not None
     titles = " ".join(getattr(b, "title", "") for b in section.blocks).lower()
     assert "signature" in titles
@@ -456,3 +839,457 @@ def test_the_signature_section_reaches_the_document(tmp_path: Path) -> None:
         manifests=[manifest], deriv_root=tmp_path, out_path=out, cfg=_cfg()
     )
     assert "NPS" in out.read_text()
+
+
+# --- cluster peaks: what the row actually says ----------------------------
+#
+# nilearn's table carries a peak z and a size: how strong the evidence is and how far
+# it spreads, but not how large the effect *is*. Two peaks at z = 4 can differ tenfold
+# in percent signal change, and only one of them is worth reporting.
+
+
+def _peaks() -> tuple:
+    return (("1", (6.0, 6.0, 6.0)), ("2", (2.0, 2.0, 2.0)))
+
+
+def _frame(cluster_ids=("1", "2")):
+    import pandas as pd
+
+    return pd.DataFrame(
+        {
+            "Cluster ID": list(cluster_ids),
+            "X": [6.0, 2.0],
+            "Y": [6.0, 2.0],
+            "Z": [6.0, 2.0],
+            "Peak Stat": [5.1, 3.2],
+            "Cluster Size (mm3)": [800, 300],
+        }
+    )
+
+
+def test_the_cluster_table_carries_the_effect_at_each_peak(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean")
+    frame, notes = subject.enrich_cluster_frame(_frame(), manifest=manifest, peaks=_peaks())
+    effect_columns = [c for c in frame.columns if c.startswith("Peak effect")]
+    assert effect_columns, "the peak effect column is missing"
+    assert "% signal change" in effect_columns[0]
+    assert any("peak effect" in note for note in notes)
+
+
+def test_the_peak_effect_is_the_value_at_the_peak_voxel(tmp_path: Path) -> None:
+    # Nearest voxel, not interpolation: a peak is a voxel, and interpolating between
+    # it and its neighbours reports a number no voxel in the map carries.
+    manifest = _manifest(tmp_path)
+    effect = np.asarray(nib.load(str(manifest.effect_map)).get_fdata())
+    frame, _notes = subject.enrich_cluster_frame(_frame(), manifest=manifest, peaks=_peaks())
+    column = next(c for c in frame.columns if c.startswith("Peak effect"))
+    assert frame[column].iloc[0] == pytest.approx(effect[6, 6, 6])
+
+
+def test_the_cluster_table_carries_the_standard_error_at_each_peak(
+    tmp_path: Path,
+) -> None:
+    # What distinguishes a large effect from an imprecise one.
+    variance = tmp_path / "var.nii.gz"
+    nib.save(
+        nib.Nifti1Image(np.full((12, 12, 12), 4.0, dtype=np.float32), np.eye(4)),
+        str(variance),
+    )
+    manifest = _manifest(tmp_path, variance_map=variance)
+    frame, _notes = subject.enrich_cluster_frame(_frame(), manifest=manifest, peaks=_peaks())
+    assert "Peak SE" in frame.columns
+    # The standard error is the root of the variance.
+    assert frame["Peak SE"].iloc[0] == pytest.approx(2.0)
+
+
+def test_a_subpeak_row_gets_no_peak_columns(tmp_path: Path) -> None:
+    # nilearn writes secondary local maxima as 1a, 1b. They are not clusters, and
+    # `peaks` holds one entry per cluster.
+    manifest = _manifest(tmp_path)
+    frame, _notes = subject.enrich_cluster_frame(
+        _frame(cluster_ids=("1", "1a")), manifest=manifest, peaks=(("1", (6.0, 6.0, 6.0)),)
+    )
+    column = next(c for c in frame.columns if c.startswith("Peak effect"))
+    assert frame[column].iloc[0] != ""
+    assert frame[column].iloc[1] == ""
+
+
+def test_a_native_space_table_says_why_it_has_no_region_names(tmp_path: Path) -> None:
+    # An MNI atlas read at a native coordinate names whatever structure sits at those
+    # millimetres in a different brain, and the output looks entirely correct.
+    manifest = _manifest(tmp_path, space="native")
+    frame, notes = subject.enrich_cluster_frame(_frame(), manifest=manifest, peaks=_peaks())
+    assert "Region" not in frame.columns
+    assert any("no anatomical labels" in note for note in notes)
+
+
+def test_an_mni_table_carries_region_names_when_an_atlas_is_configured(
+    tmp_path: Path,
+) -> None:
+    labels = np.zeros((12, 12, 12), dtype=np.int16)
+    labels[4:9, 4:9, 4:9] = 1
+    atlas_path = tmp_path / "atlas.nii.gz"
+    nib.save(nib.Nifti1Image(labels, np.eye(4)), str(atlas_path))
+
+    from fmri_pipeline.analysis.report import atlas as atlas_module
+
+    labeller = atlas_module.load_atlas(labels_img=atlas_path)
+    manifest = _manifest(tmp_path, space="mni")
+    frame, notes = subject.enrich_cluster_frame(
+        _frame(), manifest=manifest, peaks=_peaks(), labeller=labeller
+    )
+    assert list(frame["Region"]) == ["1", "unlabelled"]
+    assert any("atlas.nii.gz" in note for note in notes)
+
+
+def test_an_atlas_is_not_read_for_a_native_space_contrast(tmp_path: Path) -> None:
+    atlas_path = tmp_path / "atlas.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((12, 12, 12), dtype=np.int16), np.eye(4)), str(atlas_path))
+    cfg = _cfg(atlas_labels_img=str(atlas_path))
+    assert subject.resolve_labeller(_manifest(tmp_path, space="native"), cfg) is None
+    assert subject.resolve_labeller(_manifest(tmp_path, space="mni"), cfg) is not None
+
+
+def test_a_table_without_peaks_is_returned_unchanged(tmp_path: Path) -> None:
+    frame = _frame()
+    returned, notes = subject.enrich_cluster_frame(frame, manifest=_manifest(tmp_path), peaks=())
+    assert returned is frame
+    assert notes == []
+
+
+def test_the_displayed_table_rounds_to_the_precision_the_grid_supports() -> None:
+    # nilearn writes a peak coordinate as 54.884781, claiming about a thousandth of a
+    # millimetre on a 3 mm grid.
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "Cluster ID": ["1"],
+            "X": [54.884781],
+            "Y": [-6.542206],
+            "Z": [30.777603],
+            "Peak Stat": [6.074831216163631],
+            "Peak effect (% signal change)": [0.41983116688701305],
+            "Peak SE": [0.06890086135368591],
+        }
+    )
+    shown = subject.for_display(frame)
+    assert shown["X"].iloc[0] == pytest.approx(55.0)
+    assert shown["Peak Stat"].iloc[0] == pytest.approx(6.07)
+    assert shown["Peak effect (% signal change)"].iloc[0] == pytest.approx(0.42)
+    # Significant figures, not decimal places: an effect of 0.42 and an error of
+    # 0.0689 need different decimal counts to carry the same information.
+    assert shown["Peak SE"].iloc[0] == pytest.approx(0.0689)
+
+
+def test_rounding_for_display_leaves_the_source_frame_untouched() -> None:
+    # The TSV is written from the unrounded frame: it is read by machines, and
+    # rounding it would lose real information.
+    import pandas as pd
+
+    frame = pd.DataFrame({"Cluster ID": ["1"], "X": [54.884781]})
+    subject.for_display(frame)
+    assert frame["X"].iloc[0] == pytest.approx(54.884781)
+
+
+def test_rounding_leaves_text_columns_alone() -> None:
+    import pandas as pd
+
+    frame = pd.DataFrame({"Cluster ID": ["1a"], "Region": ["Left insula"], "X": [1.234]})
+    shown = subject.for_display(frame)
+    assert shown["Region"].iloc[0] == "Left insula"
+    assert shown["Cluster ID"].iloc[0] == "1a"
+
+
+def test_rounding_never_touches_an_identifier_or_a_count() -> None:
+    # An integer in this table is a cluster's number or its size in cubic
+    # millimetres. Three significant figures turned cluster 2 into "2.0" and a
+    # 5,211 mm3 cluster into 5,210 -- a fabricated measurement.
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "Cluster ID": [2],
+            "Cluster Size (mm3)": [5211],
+            "Peak Stat": [6.074831],
+        }
+    )
+    shown = subject.for_display(frame)
+    assert shown["Cluster ID"].iloc[0] == 2
+    assert shown["Cluster Size (mm3)"].iloc[0] == 5211
+    assert shown["Peak Stat"].iloc[0] == pytest.approx(6.07)
+
+
+# --- run consistency in the document --------------------------------------
+
+
+def _run_level_maps(tmp_path: Path, n_runs: int = 4):
+    """Per-run effect and variance volumes matching the _stat fixture's geometry."""
+    rng = np.random.default_rng(3)
+    effect = rng.normal(0.0, 0.05, (12, 12, 12, n_runs)).astype(np.float32)
+    effect[4:8, 4:8, 4:8, :] = 0.4
+    variance = np.full((12, 12, 12, n_runs), 0.01, dtype=np.float32)
+    effect_path = tmp_path / "perrun_effect.nii.gz"
+    variance_path = tmp_path / "perrun_variance.nii.gz"
+    nib.save(nib.Nifti1Image(effect, np.eye(4)), str(effect_path))
+    nib.save(nib.Nifti1Image(variance, np.eye(4)), str(variance_path))
+    return effect_path, variance_path
+
+
+def test_the_contrast_section_carries_a_run_consistency_panel(tmp_path: Path) -> None:
+    effect_path, variance_path = _run_level_maps(tmp_path)
+    manifest = _manifest(
+        tmp_path,
+        run_effect_map=effect_path,
+        run_variance_map=variance_path,
+        included_runs=("run-01", "run-02", "run-03", "run-04"),
+    )
+    section = subject.build_contrast_section(
+        manifest=manifest, out_dir=tmp_path / "out", cfg=_cfg()
+    )
+    titles = [getattr(block, "title", "") for block in section.blocks]
+    assert "Run consistency at each peak" in titles
+
+
+def test_a_contrast_without_run_level_maps_simply_has_no_such_panel(
+    tmp_path: Path,
+) -> None:
+    # A single-run contrast has nothing to compare, and a manifest written before
+    # run-level maps existed carries none. Neither is a fault, so neither gets a note.
+    section = subject.build_contrast_section(
+        manifest=_manifest(tmp_path), out_dir=tmp_path / "out", cfg=_cfg()
+    )
+    titles = [getattr(block, "title", "") for block in section.blocks]
+    assert "Run consistency at each peak" not in titles
+    assert not any(
+        "run" in getattr(block, "text", "").lower()
+        and "consist" in getattr(block, "text", "").lower()
+        for block in section.blocks
+    )
+
+
+def test_missing_run_level_files_cost_the_panel_and_not_the_section(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(
+        tmp_path,
+        run_effect_map=tmp_path / "absent_effect.nii.gz",
+        run_variance_map=tmp_path / "absent_variance.nii.gz",
+    )
+    section = subject.build_contrast_section(
+        manifest=manifest, out_dir=tmp_path / "out", cfg=_cfg()
+    )
+    assert section.blocks
+
+
+# --- the summary ----------------------------------------------------------
+#
+# Deciding whether a subject's result is usable meant scrolling eight sections: the
+# censoring is in the motion table, the tSNR in a QC panel, the survivor count in a
+# calibration figure. Across ninety subjects that is the difference between triage
+# and reading ninety documents.
+
+
+def test_facts_are_collected_in_the_order_they_were_measured() -> None:
+    facts = subject.SummaryFacts()
+    facts.add("Runs modelled", 6)
+    facts.add("Median tSNR", "60.0")
+    assert facts.items == (("Runs modelled", "6"), ("Median tSNR", "60.0"))
+
+
+def test_a_repeated_label_replaces_rather_than_duplicates() -> None:
+    # Several contrasts write the same subject-level fact.
+    facts = subject.SummaryFacts()
+    facts.add("Runs modelled", 6)
+    facts.add("Runs modelled", 5)
+    assert facts.items == (("Runs modelled", "5"),)
+
+
+def test_an_empty_summary_produces_no_section() -> None:
+    # An empty block would claim the document had been summarised.
+    assert subject.build_summary_section(subject.SummaryFacts()) is None
+
+
+def test_the_summary_says_it_scores_nothing() -> None:
+    # Which censoring fraction makes a subject usable is a study's decision.
+    facts = subject.SummaryFacts()
+    facts.add("Median tSNR", "60.0")
+    section = subject.build_summary_section(facts)
+    notes = " ".join(getattr(b, "text", "") for b in section.blocks)
+    assert "scored against" in notes
+
+
+def test_the_contrast_section_reports_its_threshold_and_survivors(
+    tmp_path: Path,
+) -> None:
+    facts = subject.SummaryFacts()
+    subject.build_contrast_section(
+        manifest=_manifest(tmp_path),
+        out_dir=tmp_path / "out",
+        cfg=_cfg(),
+        facts=facts,
+    )
+    labels = dict(facts.items)
+    assert any("height threshold" in key for key in labels)
+    survivors = next(k for k in labels if "voxels above the threshold" in k)
+    assert " of " in labels[survivors]
+
+
+def test_the_summary_appears_near_the_top_of_the_document(tmp_path: Path) -> None:
+    out = tmp_path / "report" / "r.html"
+    subject.build_subject_report(
+        manifests=[_manifest(tmp_path)],
+        deriv_root=tmp_path,
+        out_path=out,
+        cfg=_cfg(),
+    )
+    html = out.read_text(encoding="utf-8")
+    assert html.index("At a glance") < html.index("Contrast:")
+
+
+def test_a_contrast_section_without_a_summary_still_builds(tmp_path: Path) -> None:
+    # facts is optional: existing callers pass nothing.
+    section = subject.build_contrast_section(
+        manifest=_manifest(tmp_path), out_dir=tmp_path / "out", cfg=_cfg()
+    )
+    assert section.blocks
+
+
+def test_a_summary_fact_recorded_late_in_a_contrast_section_survives(
+    tmp_path: Path,
+) -> None:
+    # A local named `facts` once shadowed the SummaryFacts parameter with a list of
+    # smoothness strings, so every panel after the cluster table raised
+    # AttributeError -- swallowed by the panel guard, which removed the panel from
+    # the document and left only a log line.
+    facts = subject.SummaryFacts()
+    subject.build_contrast_section(
+        manifest=_manifest(tmp_path),
+        out_dir=tmp_path / "out",
+        cfg=_cfg(),
+        facts=facts,
+        deriv_root=tmp_path,
+    )
+    assert isinstance(facts, subject.SummaryFacts)
+    assert facts.items
+
+
+# --- vector where vector belongs -------------------------------------------
+#
+# style.figure_format existed, was documented, and was tested, and nothing called it:
+# every panel was rasterised at 150 dpi regardless of the `dense` flag each caller
+# was carefully setting on its html.Figure.
+
+
+def test_a_line_figure_is_embedded_as_vector(tmp_path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    figure = plt.figure()
+    figure.add_subplot(111).plot([0, 1], [0, 1])
+    path = subject._save(figure, out_dir=tmp_path, stem="line", formats=("png",), dense=False)
+    assert path.suffix == ".svg"
+    # The configured format is still written beside it.
+    assert (tmp_path / "line.png").exists()
+
+
+def test_a_dense_figure_stays_raster(tmp_path: Path) -> None:
+    # Wrapping the same pixels in base64 inside an SVG costs more bytes while only
+    # sharpening the axis text.
+    import matplotlib.pyplot as plt
+
+    figure = plt.figure()
+    figure.add_subplot(111).imshow(np.random.default_rng(0).random((40, 40)))
+    path = subject._save(figure, out_dir=tmp_path, stem="dense", formats=("png",), dense=True)
+    assert path.suffix == ".png"
+    assert not (tmp_path / "dense.svg").exists()
+
+
+def test_the_vector_figures_of_a_real_document_are_the_line_figures(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "report" / "r.html"
+    subject.build_subject_report(
+        manifests=[_manifest(tmp_path)],
+        deriv_root=tmp_path,
+        out_path=out,
+        cfg=_cfg(),
+    )
+    written = {p.name for p in (out.parent).rglob("*.svg")}
+    # The calibration panel is a histogram with curves: vector.
+    assert any("threshold_calibration" in name for name in written)
+    # The mosaics are dense image layers: they must not have produced one.
+    assert not any("stat_thresholded" in name for name in written)
+
+
+def test_calibration_caption_does_not_blame_autocorrelation():
+    """This study's median residual ACF(1) is 0.05-0.07; it cannot widen a null to 1.51."""
+    from fmri_pipeline.analysis.report.subject import CALIBRATION_CAPTION
+
+    assert "autocorrelation" in CALIBRATION_CAPTION.lower()
+    assert "unmodelled autocorrelation is routinely" not in CALIBRATION_CAPTION.lower()
+    assert "measurement, not an assumption" in CALIBRATION_CAPTION
+
+
+def test_threshold_caption_names_the_p_floor_when_it_binds():
+    from fmri_pipeline.analysis.report import inference
+    from fmri_pipeline.analysis.report.subject import _threshold_table_caption
+
+    summary = inference.SignFlipSummary(
+        height=7.02, survivors=38, global_p=0.0606, p_floor=0.0606,
+        n_runs=6, n_patterns=32, observed_max=8.87,
+    )
+    caption = _threshold_table_caption(
+        inference.threshold_context(
+            np.random.default_rng(0).standard_normal(5000),
+            applied_threshold=2.3, fdr_q=0.05, alpha=0.05, two_sided=True,
+            sign_flip=summary,
+        )
+    )
+    assert "0.061" in caption
+    assert "smallest value this test can return" in caption
+    assert "no map-level p below" in caption
+
+
+def test_threshold_caption_drops_the_stale_no_correction_claim():
+    """A sign-flip height IS familywise-corrected over voxels."""
+    from fmri_pipeline.analysis.report import inference
+    from fmri_pipeline.analysis.report.subject import _threshold_table_caption
+
+    caption = _threshold_table_caption(
+        inference.threshold_context(
+            np.random.default_rng(0).standard_normal(5000),
+            applied_threshold=2.3, fdr_q=0.05, alpha=0.05, two_sided=True,
+            sign_flip=inference.SignFlipSummary(
+                height=7.02, survivors=38, global_p=0.0606, p_floor=0.0606,
+                n_runs=6, n_patterns=32, observed_max=8.87,
+            ),
+        )
+    )
+    assert "none of these heights is familywise-corrected" not in caption
+    assert "familywise-corrected over voxels, not over extent" in caption
+
+
+def test_sign_flip_summary_is_none_without_manifest_scalars():
+    from fmri_pipeline.analysis.report.subject import _sign_flip_summary
+
+    class _M:
+        sign_flip_fwe_height = None
+        sign_flip_n_runs = None
+
+    assert _sign_flip_summary(_M()) is None
+
+
+def test_sign_flip_summary_recomputes_a_missing_floor():
+    """An older manifest may carry the height without the floor; derive it."""
+    from fmri_pipeline.analysis.report.subject import _sign_flip_summary
+
+    class _M:
+        sign_flip_fwe_height = 7.02
+        sign_flip_fwe_survivors = 38
+        sign_flip_global_p = 0.0606
+        sign_flip_p_floor = None
+        sign_flip_n_patterns = 32
+        sign_flip_n_runs = 6
+        sign_flip_observed_max = 8.87
+
+    assert _sign_flip_summary(_M()).p_floor == pytest.approx(2 / 33)

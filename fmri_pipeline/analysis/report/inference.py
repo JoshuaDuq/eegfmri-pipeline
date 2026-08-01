@@ -91,6 +91,52 @@ class EmpiricalCalibration:
 
 
 @dataclass(frozen=True)
+class SignFlipSummary:
+    """A familywise height from run exchangeability, and what it is worth.
+
+    The report-side view of the null enumerated during analysis. Only the scalars a
+    panel needs, so the report never imports the fitting package to draw this.
+
+    Why it belongs beside Bonferroni and FDR rather than replacing them: those two ask
+    what a threshold is worth if every voxel is N(0, 1), and this map's fitted null is
+    measurably not that. This one assumes nothing about the distribution -- it asks how
+    large a maximum the same data produces when the only thing changed is which runs
+    were labelled positive.
+
+    ``p_floor`` travels with ``global_p`` because the two are not independent. The
+    unflipped pattern is always a member of the null and always ties the observed
+    maximum, so ``global_p`` can never fall below ``p_floor``. Printed alone, a p of
+    0.061 from six runs reads as a near-miss when it is the smallest value the test can
+    return.
+    """
+
+    height: float
+    survivors: int
+    global_p: float
+    p_floor: float
+    n_runs: int
+    n_patterns: int
+    observed_max: float
+
+    @property
+    def floor_limited(self) -> bool:
+        """Whether no map-level p below 0.05 is reachable with this many runs."""
+        return self.p_floor > 0.05
+
+
+def sign_flip_p_floor(n_runs: int) -> float:
+    """Smallest attainable global p for a run sign-flip test over ``n_runs`` runs.
+
+    ``2 / (2**(n_runs-1) + 1)``: the numerator is 2 rather than 1 because the
+    unflipped pattern is itself a member of the null and ties the observed maximum,
+    so it is counted on both sides of the ratio.
+    """
+    if n_runs < 2:
+        raise ValueError(f"A sign-flip null needs at least two runs, got {n_runs!r}.")
+    return 2.0 / (2 ** (n_runs - 1) + 1)
+
+
+@dataclass(frozen=True)
 class ThresholdContext:
     """The applied threshold beside the corrected ones, with survivor counts.
 
@@ -123,6 +169,9 @@ class ThresholdContext:
     #: on a null centred at -0.61 it reads as a sigma count that neither tail actually
     #: has. The tail probabilities below are what that number was reaching for.
     calibration: Optional[EmpiricalCalibration]
+    #: The run sign-flip null's summary, or ``None`` for a single-run contrast and for
+    #: a manifest written before the null existed.
+    sign_flip: Optional[SignFlipSummary] = None
 
 
 def _finite(values: np.ndarray) -> np.ndarray:
@@ -358,6 +407,7 @@ def threshold_context(
     fdr_q: float,
     alpha: float,
     two_sided: bool,
+    sign_flip: Optional[SignFlipSummary] = None,
 ) -> ThresholdContext:
     """Assemble everything the calibration panel states about a threshold.
 
@@ -413,13 +463,16 @@ def threshold_context(
         bonferroni_survivors=_survivors(finite, bonferroni, two_sided=two_sided),
         null=null,
         calibration=calibration,
+        sign_flip=sign_flip,
     )
 
 
 __all__ = [
     "EmpiricalCalibration",
     "EmpiricalNull",
+    "SignFlipSummary",
     "ThresholdContext",
+    "sign_flip_p_floor",
     "bonferroni_threshold",
     "empirical_calibration",
     "empirical_null",
