@@ -298,7 +298,9 @@ def test_the_panel_relates_effect_to_evidence() -> None:
     figure = distributions.effect_versus_evidence_figure(
         effect, stat, standard_error=error, threshold=2.3, effect_units="% signal change"
     )
-    assert "|z|" in figure.axes[0].get_xlabel()
+    # Signed z, not |z|: the statistic carries the effect's sign, so folding the axis
+    # would encode it twice and mirror the negative branch onto the positive side.
+    assert figure.axes[0].get_xlabel() == "z (evidence)"
     assert "% signal change" in figure.axes[0].get_ylabel()
     plt.close(figure)
 
@@ -552,3 +554,71 @@ def test_sign_flip_row_is_not_scored_against_the_others():
     table, _ = distributions.threshold_table(_context(_values(), sign_flip=_summary()))
     for word in ("recommended", "preferred", "correct choice", "should use", "best"):
         assert word not in table.lower()
+
+
+def test_effect_versus_evidence_plots_signed_evidence():
+    """z = effect / SE with SE > 0, so |z| folds the negative branch onto the positive.
+
+    Folded, the sign is encoded twice -- once in the effect's own sign and once
+    implicitly -- and the asymmetry between the tails, which on an over-dispersed map
+    is the map's most important feature, has to be judged by comparing two lobes
+    across the axis instead of being read directly.
+    """
+    rng = np.random.default_rng(0)
+    error = np.full(4000, 0.05)
+    effect = rng.standard_normal(4000) * 0.1 - 0.06
+    stat = effect / error
+
+    figure = distributions.effect_versus_evidence_figure(
+        effect, stat, standard_error=error, threshold=2.3, two_sided=True
+    )
+    drawn = np.concatenate(
+        [collection.get_offsets()[:, 0] for collection in figure.axes[0].collections]
+    )
+    assert drawn.min() < 0, "no negative evidence was drawn; the axis is folded"
+    plt.close(figure)
+
+
+def test_effect_and_evidence_keep_the_same_sign_when_drawn():
+    """A voxel's plotted point must sit in the quadrant its own numbers put it in."""
+    error = np.full(6, 0.05)
+    effect = np.array([-0.3, -0.2, -0.1, 0.1, 0.2, 0.3])
+    figure = distributions.effect_versus_evidence_figure(
+        effect, effect / error, standard_error=error, threshold=2.3, two_sided=True
+    )
+    points = np.concatenate(
+        [collection.get_offsets() for collection in figure.axes[0].collections]
+    )
+    assert np.all(np.sign(points[:, 0]) == np.sign(points[:, 1]))
+    plt.close(figure)
+
+
+def test_a_two_sided_threshold_is_drawn_on_both_tails():
+    rng = np.random.default_rng(1)
+    effect = rng.standard_normal(2000) * 0.1
+    figure = distributions.effect_versus_evidence_figure(
+        effect, effect / 0.05, threshold=2.3, two_sided=True
+    )
+    verticals = sorted(
+        round(float(line.get_xdata()[0]), 3)
+        for line in figure.axes[0].lines
+        if len(set(line.get_xdata())) == 1
+    )
+    assert -2.3 in verticals and 2.3 in verticals
+    plt.close(figure)
+
+
+def test_a_one_sided_threshold_is_drawn_once():
+    rng = np.random.default_rng(1)
+    effect = rng.standard_normal(2000) * 0.1
+    figure = distributions.effect_versus_evidence_figure(
+        effect, effect / 0.05, threshold=2.3, two_sided=False
+    )
+    verticals = [
+        round(float(line.get_xdata()[0]), 3)
+        for line in figure.axes[0].lines
+        if len(set(line.get_xdata())) == 1
+    ]
+    assert verticals.count(2.3) == 1
+    assert -2.3 not in verticals
+    plt.close(figure)

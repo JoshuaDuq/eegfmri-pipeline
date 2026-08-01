@@ -488,6 +488,7 @@ def effect_versus_evidence_figure(
     *,
     standard_error: Optional[np.ndarray] = None,
     threshold: Optional[float] = None,
+    two_sided: bool = True,
     effect_units: str = "effect",
     title: str = "",
     seed: int = 0,
@@ -544,7 +545,13 @@ def effect_versus_evidence_figure(
     else:
         picked = np.arange(effect.size)
 
-    x = np.abs(stat_values[picked])
+    # Signed, not folded. ``z = effect / SE`` with SE > 0, so a voxel's statistic
+    # always carries its effect's sign: plotting |z| against a signed effect encodes
+    # that sign twice and mirrors the negative branch onto the positive axis. The
+    # asymmetry between the tails then has to be judged by comparing two lobes across
+    # the axis -- and on a map whose fitted null is off-centre, that asymmetry is the
+    # first thing worth seeing.
+    x = stat_values[picked]
     y = effect[picked]
 
     with plot_context():
@@ -585,16 +592,30 @@ def effect_versus_evidence_figure(
         # "no difference" rather than against the middle of the cloud.
         ax.axhline(0.0, color=GUIDE_COLOR, linewidth=0.8, zorder=1)
         if threshold and threshold > 0:
-            ax.axvline(
-                float(threshold),
-                color=OKABE_ITO["vermillion"],
-                linestyle=(0, (4, 2)),
-                linewidth=1.1,
-                zorder=2,
+            # Both tails when the test is two-sided, because both were cut. One line
+            # over a signed axis would show half the rejection region and imply the
+            # other half was never tested.
+            heights = (
+                (-float(threshold), float(threshold))
+                if two_sided
+                else (float(threshold),)
+            )
+            for height in heights:
+                ax.axvline(
+                    height,
+                    color=OKABE_ITO["vermillion"],
+                    linestyle=(0, (4, 2)),
+                    linewidth=1.1,
+                    zorder=2,
+                )
+            label = (
+                f"drawn at |z| > {float(threshold):.2f}"
+                if two_sided
+                else f"drawn at z > {float(threshold):.2f}"
             )
             ax.annotate(
-                f"drawn at |z| > {float(threshold):.2f}",
-                xy=(float(threshold), 1.0),
+                label,
+                xy=(max(heights), 1.0),
                 xycoords=("data", "axes fraction"),
                 xytext=(4, -10),
                 textcoords="offset points",
@@ -602,7 +623,7 @@ def effect_versus_evidence_figure(
                 color=OKABE_ITO["vermillion"],
             )
 
-        ax.set_xlabel("|z| (evidence)")
+        ax.set_xlabel("z (evidence)")
         ax.set_ylabel(f"effect ({effect_units})")
         if title:
             ax.set_title(title)

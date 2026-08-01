@@ -15,6 +15,7 @@ makes acceptable is a study's decision, not this module's.
 from __future__ import annotations
 
 import logging
+from html import escape
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
@@ -30,6 +31,16 @@ from fmri_pipeline.analysis.report.style import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _escape(value: object) -> str:
+    """Escape a cell before it is interpolated into markup.
+
+    Cells carry values from the data: a rejection region reads "z < -6.57",
+    and a regressor name is whatever the design called it. Interpolated raw,
+    the first of those opened a tag and swallowed the cell that contained it.
+    """
+    return escape("" if value is None else str(value))
 
 #: Framewise-displacement levels worth locating a run against, with their source.
 #:
@@ -272,12 +283,25 @@ def _number(value: Optional[float], digits: int = 3) -> str:
     return "n/a" if value is None else f"{value:.{digits}f}"
 
 
-def motion_table(summaries: Sequence[RunMotion]) -> Tuple[str, List[str]]:
-    """Return the per-run motion numbers as an HTML table and its TSV rows.
+def motion_table(
+    summaries: Sequence[RunMotion],
+    *,
+    tsnr_median: Optional[Sequence[float]] = None,
+    tsnr_iqr: Optional[Sequence[Tuple[float, float]]] = None,
+) -> Tuple[str, List[str]]:
+    """Return the per-run QC numbers as an HTML table and its TSV rows.
 
     A table rather than a figure because these are the values a methods section
     quotes verbatim, and a number read off a dot plot is not quotable.
+
+    tSNR joins the motion columns rather than getting a panel of its own. It used to
+    have one, and the panel's own docstring recorded why it did not work: six runs
+    between 58.6 and 60.5 drew six visually indistinguishable marks. tSNR carries no
+    published reference level to compare against -- unlike framewise displacement,
+    which keeps its figure for exactly that reason -- so "is one run unlike the
+    others" is a comparison between six numbers, and six numbers are a column.
     """
+    with_tsnr = tsnr_median is not None and len(tsnr_median) == len(summaries)
     headers = [
         "Run",
         "Frames",
@@ -288,31 +312,45 @@ def motion_table(summaries: Sequence[RunMotion]) -> Tuple[str, List[str]]:
         "Max FD (mm)",
         *[f"% ≥ {level:g} mm" for level, _label in FD_REFERENCE_LEVELS],
     ]
+    if with_tsnr:
+        headers.extend(["Median tSNR", "tSNR IQR"])
 
     rows: List[List[str]] = []
-    for run in summaries:
+    for index, run in enumerate(summaries):
         fractions = run.fraction_above or tuple(
             None for _ in FD_REFERENCE_LEVELS
         )
-        rows.append(
-            [
-                run.label,
-                f"{run.n_frames:,}",
-                f"{run.n_censored:,}",
-                f"{run.n_retained:,}",
-                _number(run.median_fd),
-                _number(run.mean_fd),
-                _number(run.max_fd),
-                *[
-                    "n/a" if fraction is None else f"{100.0 * fraction:.1f}"
-                    for fraction in fractions
-                ],
-            ]
-        )
+        row = [
+            run.label,
+            f"{run.n_frames:,}",
+            f"{run.n_censored:,}",
+            f"{run.n_retained:,}",
+            _number(run.median_fd),
+            _number(run.mean_fd),
+            _number(run.max_fd),
+            *[
+                "n/a" if fraction is None else f"{100.0 * fraction:.1f}"
+                for fraction in fractions
+            ],
+        ]
+        if with_tsnr:
+            row.append(f"{float(tsnr_median[index]):.1f}")
+            quartiles = (
+                tsnr_iqr[index]
+                if tsnr_iqr is not None and index < len(tsnr_iqr)
+                else None
+            )
+            row.append(
+                "n/a"
+                if quartiles is None
+                else f"{float(quartiles[0]):.1f}–{float(quartiles[1]):.1f}"
+            )
+        rows.append(row)
 
-    head = "".join(f"<th>{header}</th>" for header in headers)
+    head = "".join(f"<th>{_escape(header)}</th>" for header in headers)
     body = "".join(
-        "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in rows
+        "<tr>" + "".join(f"<td>{_escape(cell)}</td>" for cell in row) + "</tr>"
+        for row in rows
     )
     table_html = f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
@@ -321,16 +359,212 @@ def motion_table(summaries: Sequence[RunMotion]) -> Tuple[str, List[str]]:
     return table_html, tsv
 
 
-def write_motion_tsv(summaries: Sequence[RunMotion], *, path: Path) -> Path:
-    """Write the motion table beside the report, for a cohort script to read."""
-    _html, rows = motion_table(summaries)
+def write_motion_tsv(
+    summaries: Sequence[RunMotion],
+    *,
+    path: Path,
+    tsnr_median: Optional[Sequence[float]] = None,
+    tsnr_iqr: Optional[Sequence[Tuple[float, float]]] = None,
+) -> Path:
+    """Write the run-level QC table beside the report, for a cohort script to read."""
+    _html, rows = motion_table(
+        summaries, tsnr_median=tsnr_median, tsnr_iqr=tsnr_iqr
+    )
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
     return path
 
 
+def _dvars_column(frame: Any) -> Tuple[Optional[np.ndarray], str]:
+    """Return a run's DVARS trace and the column it came from."""
+    for column, label in (("std_dvars", "std DVARS"), ("dvars", "DVARS")):
+        if column in getattr(frame, "columns", ()):
+            return frame[column].to_numpy(dtype=float), label
+    return None, "DVARS"
+
+
+def _raw_fd_column(frame: Any) -> Optional[np.ndarray]:
+    """A run's framewise displacement with its frames intact, gaps included.
+
+    Distinct from :func:`_fd_column`, which drops the undefined first frame because
+    its callers want summary statistics over real measurements. Anything pairing
+    framewise displacement against another per-frame trace needs the frames to still
+    line up, and dropping one array's gaps but not the other's silently pairs every
+    subsequent frame with its neighbour's value.
+    """
+    if "framewise_displacement" not in getattr(frame, "columns", ()):
+        return None
+    return frame["framewise_displacement"].to_numpy(dtype=float)
+
+
+def motion_coupling_figure(
+    confounds_paths: Sequence[Any],
+    *,
+    run_labels: Sequence[str] = (),
+    title: str = "",
+) -> plt.Figure:
+    """Framewise displacement against DVARS, frame by frame.
+
+    Both traces already share the carpet's time axis, where they answer "was there a
+    spike". They do not answer the question that decides whether motion contaminated
+    the result: how tightly the two move *together*. DVARS that tracks framewise
+    displacement is signal change driven by head motion; DVARS that moves independently
+    of it is something else -- a physiological or hardware source that motion
+    regressors will not remove and censoring on framewise displacement will not catch.
+
+    Nothing here is scored. The correlation is reported as a measurement, and the
+    reference levels are the same published conventions the per-run panel draws.
+    """
+    import pandas as pd
+
+    fd_parts: List[np.ndarray] = []
+    dvars_parts: List[np.ndarray] = []
+    dvars_label = "DVARS"
+
+    for path in confounds_paths:
+        try:
+            frame = pd.read_csv(str(path), sep="\t")
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not read confounds %s (%s)", path, exc)
+            continue
+        fd = _raw_fd_column(frame)
+        dvars, dvars_label = _dvars_column(frame)
+        if fd is None or dvars is None or fd.size != dvars.size:
+            continue
+        fd_parts.append(fd)
+        dvars_parts.append(dvars)
+
+    if not fd_parts:
+        raise ValueError(
+            "No run supplied both framewise displacement and DVARS; there is nothing "
+            "to relate."
+        )
+
+    # The first frame of a run has no defined framewise displacement, and fMRIPrep
+    # writes it as NaN. Pairing has to drop those frames from both traces at once.
+    paired: List[Tuple[np.ndarray, np.ndarray]] = []
+    for fd, dvars in zip(fd_parts, dvars_parts):
+        usable = np.isfinite(fd) & np.isfinite(dvars)
+        if int(usable.sum()) >= 3:
+            paired.append((fd[usable], dvars[usable]))
+    if not paired:
+        raise ValueError("Too few paired frames to relate motion to signal change.")
+
+    fd_all = np.concatenate([fd for fd, _dvars in paired])
+    dvars_all = np.concatenate([dvars for _fd, dvars in paired])
+    if fd_all.size < 3:
+        raise ValueError("Too few paired frames to relate motion to signal change.")
+
+    # Measured within runs, not across them. Concatenating first and correlating once
+    # mixes the coupling this panel is about with any difference in baseline between
+    # runs: two runs each with no internal coupling, offset from one another, produce
+    # a strong pooled correlation that describes only the offset. Centring each run
+    # removes the between-run component and leaves the within-run relationship.
+    centred_fd = np.concatenate([fd - fd.mean() for fd, _dvars in paired])
+    centred_dvars = np.concatenate([dvars - dvars.mean() for _fd, dvars in paired])
+    correlation = float(np.corrcoef(centred_fd, centred_dvars)[0, 1])
+
+    per_run = [
+        float(np.corrcoef(fd, dvars)[0, 1])
+        for fd, dvars in paired
+        if np.std(fd) > 0 and np.std(dvars) > 0
+    ]
+
+    with plot_context():
+        figure, ax = plt.subplots(figsize=(6.0, 4.4), constrained_layout=True)
+        ax.scatter(
+            fd_all,
+            dvars_all,
+            s=4.0,
+            alpha=0.35,
+            color=OKABE_ITO["blue"],
+            linewidths=0,
+        )
+        for level, label in FD_REFERENCE_LEVELS:
+            if level <= float(np.nanmax(fd_all)):
+                ax.axvline(
+                    level, color=GUIDE_COLOR, linestyle=":", linewidth=0.9, zorder=1
+                )
+                ax.annotate(
+                    label,
+                    xy=(level, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(3, -4),
+                    textcoords="offset points",
+                    rotation=90,
+                    va="top",
+                    fontsize=6.5,
+                    color=GUIDE_COLOR,
+                )
+        # The relationship this panel exists to show, drawn. Reported only in the
+        # provenance strip, the correlation was a number beside a cloud in which the
+        # reader could not see it -- and how tightly the two move together is the
+        # entire reading.
+        #
+        # Binned medians rather than a least-squares line: framewise displacement is
+        # spike-dominated and strongly right-skewed, so a line is levered by the few
+        # extreme frames it is least able to describe. The medians also show curvature,
+        # which a straight fit reports as a weaker linear relationship instead.
+        order = np.argsort(fd_all)
+        n_bins = int(np.clip(fd_all.size // 250, 4, 12))
+        bins = np.array_split(order, n_bins)
+        centres = np.array([float(np.median(fd_all[chunk])) for chunk in bins])
+        medians = np.array([float(np.median(dvars_all[chunk])) for chunk in bins])
+        ax.plot(
+            centres,
+            medians,
+            color=OKABE_ITO["vermillion"],
+            linewidth=1.6,
+            marker="o",
+            markersize=4.0,
+            zorder=3,
+            label=f"median {dvars_label} per displacement bin",
+        )
+        ax.legend(fontsize=7, loc="upper left", frameon=False)
+        ax.annotate(
+            f"within-run r = {correlation:+.2f}",
+            xy=(0.985, 0.03),
+            xycoords="axes fraction",
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            color=GUIDE_COLOR,
+        )
+
+        ax.set_xlabel("Framewise displacement (mm)")
+        ax.set_ylabel(dvars_label)
+        if title:
+            ax.set_title(title)
+
+        notes = [
+            f"{fd_all.size:,} paired frames across {len(paired)} run(s)",
+            f"within-run r = {correlation:+.2f} (each run centred first)",
+        ]
+        if len(per_run) > 1:
+            labels = [
+                str(run_labels[index]) if index < len(run_labels) else f"run-{index + 1:02d}"
+                for index in range(len(per_run))
+            ]
+            weakest = labels[int(np.argmin(per_run))]
+            strongest = labels[int(np.argmax(per_run))]
+            notes.append(
+                f"per run {min(per_run):+.2f} ({weakest}) to {max(per_run):+.2f} "
+                f"({strongest})"
+            )
+        notes.extend(
+            [
+                "frames without a defined framewise displacement are excluded from "
+                "both axes",
+                "reference levels are published conventions, not criteria applied here",
+            ]
+        )
+        annotate_provenance(figure, notes)
+        return figure
+
+
 __all__ = [
+    "motion_coupling_figure",
     "FD_REFERENCE_LEVELS",
     "RunMotion",
     "motion_table",

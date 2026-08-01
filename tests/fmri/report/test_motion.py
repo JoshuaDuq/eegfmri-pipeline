@@ -8,6 +8,7 @@ criterion in the field is written against.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -264,3 +265,251 @@ def test_retained_frames_are_stated_not_left_to_subtraction(tmp_path: Path) -> N
     table, _rows = motion.motion_table(summaries)
     assert "Retained" in table
     assert summaries[0].n_retained == 14
+
+
+# --- motion against signal change -----------------------------------------
+#
+# Both traces already share the carpet's time axis, where they answer "was there a
+# spike". Whether they move *together* is what decides whether motion contaminated
+# the result, and no panel said so.
+
+
+def _coupled_confounds(
+    tmp_path: Path,
+    name: str,
+    *,
+    n: int = 60,
+    coupling: float = 1.0,
+    seed: int = 0,
+    dvars_column: str = "std_dvars",
+) -> Path:
+    rng = np.random.default_rng(seed)
+    fd = np.abs(rng.normal(0.1, 0.04, size=n))
+    dvars = 1.0 + coupling * (fd - fd.mean()) + rng.normal(0, 0.01, size=n)
+    frame = pd.DataFrame(
+        {
+            # The first frame has no defined displacement; fMRIPrep writes n/a.
+            "framewise_displacement": np.concatenate([[np.nan], fd[1:]]),
+            dvars_column: dvars,
+        }
+    )
+    path = tmp_path / name
+    frame.to_csv(path, sep="\t", index=False, na_rep="n/a")
+    return path
+
+
+def test_the_coupling_panel_reports_the_correlation_it_measured(tmp_path: Path) -> None:
+    figure = motion.motion_coupling_figure(
+        [_coupled_confounds(tmp_path, "a.tsv", coupling=4.0)]
+    )
+    provenance = " ".join(artist.get_text() for artist in figure.texts)
+    assert "within-run r = +" in provenance
+    plt.close(figure)
+
+
+def test_tightly_coupled_motion_reads_higher_than_independent_motion(
+    tmp_path: Path,
+) -> None:
+    def correlation(coupling: float) -> float:
+        figure = motion.motion_coupling_figure(
+            [
+                _coupled_confounds(
+                    tmp_path, f"c{coupling}.tsv", coupling=coupling, n=400
+                )
+            ]
+        )
+        text = " ".join(artist.get_text() for artist in figure.texts)
+        plt.close(figure)
+        return float(re.search(r"within-run r = ([+-][\d.]+)", text).group(1))
+
+    assert correlation(8.0) > correlation(0.0)
+
+
+def test_the_undefined_first_frame_is_dropped_from_both_axes(tmp_path: Path) -> None:
+    # Dropping one trace's gaps but not the other's pairs every subsequent frame
+    # with its neighbour's value -- a scatter that looks entirely normal and is
+    # scrambled. This is the bug the raw-column reader exists to avoid.
+    figure = motion.motion_coupling_figure(
+        [_coupled_confounds(tmp_path, "a.tsv", n=60)]
+    )
+    provenance = " ".join(artist.get_text() for artist in figure.texts)
+    assert "59 paired frames" in provenance
+    plt.close(figure)
+
+
+def test_runs_are_pooled_and_counted(tmp_path: Path) -> None:
+    figure = motion.motion_coupling_figure(
+        [
+            _coupled_confounds(tmp_path, "a.tsv", n=40, seed=1),
+            _coupled_confounds(tmp_path, "b.tsv", n=40, seed=2),
+        ]
+    )
+    provenance = " ".join(artist.get_text() for artist in figure.texts)
+    assert "78 paired frames across 2 run(s)" in provenance
+    plt.close(figure)
+
+
+def test_plain_dvars_is_accepted_and_named_as_such(tmp_path: Path) -> None:
+    figure = motion.motion_coupling_figure(
+        [_coupled_confounds(tmp_path, "a.tsv", dvars_column="dvars")]
+    )
+    assert figure.axes[0].get_ylabel() == "DVARS"
+    plt.close(figure)
+
+
+def test_a_run_without_dvars_leaves_nothing_to_relate(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="nothing to relate"):
+        motion.motion_coupling_figure([_confounds(tmp_path, "a.tsv", _rising())])
+
+
+def test_the_coupling_panel_scores_no_run(tmp_path: Path) -> None:
+    # The reference levels are published conventions; which runs they make
+    # acceptable is a study's decision, not this module's.
+    figure = motion.motion_coupling_figure(
+        [_coupled_confounds(tmp_path, "a.tsv", coupling=4.0)]
+    )
+    provenance = " ".join(artist.get_text() for artist in figure.texts)
+    assert "not criteria applied here" in provenance
+    plt.close(figure)
+
+
+# --- tSNR joins the table rather than getting a panel ----------------------
+#
+# tSNR carries no published reference level to be located against -- unlike framewise
+# displacement, which keeps its figure for exactly that reason -- so "is one run
+# unlike the others" is a comparison between six numbers, and six numbers are a
+# column. The dot plot it used to have put six runs within 2 tSNR of each other.
+
+
+def test_the_table_carries_tsnr_when_it_is_supplied(tmp_path: Path) -> None:
+    summaries = motion.summarise_run_motion(
+        [_confounds(tmp_path, "a.tsv", _rising()), _confounds(tmp_path, "b.tsv", _rising())],
+        run_labels=("run-01", "run-02"),
+    )
+    table, rows = motion.motion_table(
+        summaries, tsnr_median=[60.4, 58.9], tsnr_iqr=[(42.0, 77.0), (41.5, 76.2)]
+    )
+    assert "Median tSNR" in table and "tSNR IQR" in table
+    assert "60.4" in table and "42.0–77.0" in table
+    assert rows[0].endswith("Median tSNR\ttSNR IQR")
+
+
+def test_the_table_omits_the_tsnr_columns_when_it_has_none(tmp_path: Path) -> None:
+    summaries = motion.summarise_run_motion(
+        [_confounds(tmp_path, "a.tsv", _rising())], run_labels=("run-01",)
+    )
+    table, _rows = motion.motion_table(summaries)
+    assert "Median tSNR" not in table
+
+
+def test_mismatched_tsnr_is_ignored_rather_than_misaligned(tmp_path: Path) -> None:
+    # A column shifted by one run would attribute every value to the wrong row.
+    summaries = motion.summarise_run_motion(
+        [_confounds(tmp_path, "a.tsv", _rising()), _confounds(tmp_path, "b.tsv", _rising())],
+        run_labels=("run-01", "run-02"),
+    )
+    table, _rows = motion.motion_table(summaries, tsnr_median=[60.4])
+    assert "Median tSNR" not in table
+
+
+def test_the_tsv_carries_the_same_columns_as_the_table(tmp_path: Path) -> None:
+    summaries = motion.summarise_run_motion(
+        [_confounds(tmp_path, "a.tsv", _rising())], run_labels=("run-01",)
+    )
+    path = motion.write_motion_tsv(
+        summaries,
+        path=tmp_path / "qc" / "run_qc.tsv",
+        tsnr_median=[60.4],
+        tsnr_iqr=[(42.0, 77.0)],
+    )
+    lines = path.read_text(encoding="utf-8").strip().split("\n")
+    assert lines[0].endswith("Median tSNR\ttSNR IQR")
+    assert lines[1].endswith("60.4\t42.0–77.0")
+
+
+def test_the_coupling_panel_draws_the_relationship_it_reports(tmp_path: Path) -> None:
+    # Reported only in the provenance strip, the correlation was a number beside a
+    # cloud in which the reader could not see it -- and how tightly the two move
+    # together is the entire reading.
+    figure = motion.motion_coupling_figure(
+        [_coupled_confounds(tmp_path, "a.tsv", coupling=6.0, n=600)]
+    )
+    axis = figure.axes[0]
+    assert axis.lines, "no trend is drawn"
+    trend = axis.lines[0].get_ydata()
+    # Binned medians rather than a least-squares line: framewise displacement is
+    # spike-dominated, so a line is levered by the few frames it least describes.
+    assert trend[-1] > trend[0]
+    on_plot = " ".join(artist.get_text() for artist in axis.texts)
+    assert "within-run r" in on_plot
+    plt.close(figure)
+
+
+def _coupling_confounds(tmp_path, name, *, fd, dvars):
+    import pandas as pd
+
+    path = tmp_path / name
+    pd.DataFrame(
+        {"framewise_displacement": fd, "std_dvars": dvars}
+    ).to_csv(path, sep="\t", index=False)
+    return path
+
+
+def test_coupling_is_measured_within_runs_not_across_them(tmp_path):
+    """Pooling runs mixes within-run coupling with between-run baseline differences.
+
+    Two runs each with zero internal coupling, offset from one another, produce a
+    strong pooled correlation that describes the offset rather than any coupling.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    low = rng.uniform(0.02, 0.04, 400)
+    high = rng.uniform(0.20, 0.22, 400)
+    paths = [
+        _coupling_confounds(tmp_path, "a.tsv", fd=low, dvars=rng.uniform(0.9, 1.0, 400)),
+        _coupling_confounds(tmp_path, "b.tsv", fd=high, dvars=rng.uniform(1.4, 1.5, 400)),
+    ]
+    figure = motion.motion_coupling_figure(paths, run_labels=("run-01", "run-02"))
+    text = " ".join(artist.get_text() for artist in figure.texts)
+
+    assert "within-run" in text
+    reported = float(
+        re.search(r"within-run r = ([+-]?\d+\.\d+)", text).group(1)
+    )
+    assert abs(reported) < 0.2, f"the reported r is the between-run offset: {reported}"
+    plt.close(figure)
+
+
+def test_the_per_run_spread_is_reported(tmp_path):
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    paths = [
+        _coupling_confounds(
+            tmp_path,
+            f"r{i}.tsv",
+            fd=rng.uniform(0.02, 0.15, 300),
+            dvars=rng.uniform(0.9, 1.2, 300),
+        )
+        for i in range(3)
+    ]
+    figure = motion.motion_coupling_figure(
+        paths, run_labels=("run-01", "run-02", "run-03")
+    )
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "per run" in text
+    plt.close(figure)
+
+
+def test_a_single_run_reports_its_own_correlation(tmp_path):
+    import numpy as np
+
+    rng = np.random.default_rng(2)
+    fd = rng.uniform(0.02, 0.2, 400)
+    path = _coupling_confounds(tmp_path, "solo.tsv", fd=fd, dvars=1.0 + 2.0 * fd)
+    figure = motion.motion_coupling_figure([path], run_labels=("run-01",))
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    reported = float(re.search(r"within-run r = ([+-]?\d+\.\d+)", text).group(1))
+    assert reported > 0.9
+    plt.close(figure)

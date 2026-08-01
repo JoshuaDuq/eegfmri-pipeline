@@ -2264,6 +2264,7 @@ def _effect_versus_evidence_block(
             statistic,
             standard_error=error,
             threshold=threshold,
+            two_sided=manifest.two_sided,
             effect_units=_unit_name(manifest),
             title=f"{manifest.contrast_name}: effect against evidence",
         ),
