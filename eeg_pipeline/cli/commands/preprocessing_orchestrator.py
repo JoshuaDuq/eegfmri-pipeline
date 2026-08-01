@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, List
 
-from eeg_pipeline.cli.common import create_progress_reporter, resolve_task
+from eeg_pipeline.cli.common import create_progress_reporter, report_dry_run, resolve_task
 from eeg_pipeline.cli.commands.preprocessing_overrides import (
     _resolve_n_jobs,
     _update_alignment_event_config,
@@ -37,6 +37,17 @@ def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any
     _update_alignment_event_config(args, config)
     apply_set_overrides(config, getattr(args, "set_overrides", None))
     task = resolve_task(args.task, config)
+
+    if report_dry_run(
+        args,
+        command="preprocessing",
+        subjects=subjects,
+        config=config,
+        mode=args.mode,
+        task=task,
+        use_pyprep=args.use_pyprep,
+    ):
+        return
 
     pipeline = PreprocessingPipeline(config=config)
     n_jobs = _resolve_n_jobs(args, config)

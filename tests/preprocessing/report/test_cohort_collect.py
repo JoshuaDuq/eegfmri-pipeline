@@ -54,6 +54,8 @@ def _runs(*, in_scanner: bool) -> pd.DataFrame:
         frame["n_beats"] = [700.0]
         frame["beat_dropouts"] = [2.0]
         frame["marker_matched_fraction"] = [0.96]
+        frame["marker_median_lag_s"] = [0.004]
+        frame["marker_lag_iqr_s"] = [0.010]
         frame["n_markers"] = [704.0]
         frame["n_detected_beats"] = [700.0]
         frame["n_matched_beats"] = [672.0]

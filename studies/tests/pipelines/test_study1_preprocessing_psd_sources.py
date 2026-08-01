@@ -75,6 +75,47 @@ def test_discovery_reads_labeled_source_data_directories(tmp_path: Path) -> None
     assert [source.header_path for source in processed_sources] == [processed_header]
 
 
+def test_processed_discovery_reads_the_gap_recovery_export_suffix(tmp_path: Path) -> None:
+    """The export that recovers Analyzer's missed beats ends at a differently named node.
+
+    Its files end `_scanner_artifact_step2` where the previous generation ended
+    `_scannerpulse_corrected`. Discovery has to read the current source tree, which now
+    carries only the newer name.
+    """
+    from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+        discover_processed_brainvision_runs,
+    )
+
+    header = _write_processed_triplet(
+        tmp_path,
+        participant_directory="sub-0001",
+        stem=f"{RAW_STEM}_scanner_artifact_step2",
+    )
+
+    sources = discover_processed_brainvision_runs(tmp_path, excluded_subjects=())
+
+    assert [source.header_path for source in sources] == [header]
+
+
+def test_processed_discovery_rejects_both_export_generations_of_one_run(
+    tmp_path: Path,
+) -> None:
+    """Two generations of the same run is an ambiguity, not a preference order."""
+    from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+        discover_processed_brainvision_runs,
+    )
+
+    _write_processed_triplet(tmp_path, participant_directory="sub-0001")
+    _write_processed_triplet(
+        tmp_path,
+        participant_directory="sub-0001",
+        stem=f"{RAW_STEM}_scanner_artifact_step2",
+    )
+
+    with pytest.raises(ValueError, match="run"):
+        discover_processed_brainvision_runs(tmp_path, excluded_subjects=())
+
+
 def test_raw_archive_discovery_rejects_participant_directory_mismatch(
     tmp_path: Path,
 ) -> None:

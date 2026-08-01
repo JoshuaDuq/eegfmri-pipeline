@@ -46,15 +46,67 @@ class TestEstimateComb:
     def test_does_not_lock_onto_the_comb_line_beside_an_isolated_one(self):
         # 47.036 Hz sits 0.24 Hz from comb harmonic 39 at 46.8 Hz. With only the comb
         # present, the narrow isolated window must not report the comb line as the
-        # isolated one.
+        # isolated one. Reporting nothing is the stronger outcome and the one the
+        # prominence floor now produces, so the check is that 46.8 never comes back.
         freqs, db, prom = synthetic_spectrum()
         est = lr.estimate_comb(freqs, db, prom, isolated_nominal_hz=(47.0362,))
-        assert abs(est.isolated_hz[0] - 46.8) > 0.1
+        position = est.isolated_hz[0]
+        assert np.isnan(position) or abs(position - 46.8) > 0.1
 
     def test_rejects_an_isolated_nominal_that_collides_with_the_comb(self):
         freqs, db, prom = synthetic_spectrum()
         with pytest.raises(ValueError, match="the search would find the comb"):
             lr.estimate_comb(freqs, db, prom, isolated_nominal_hz=(46.82,))
+
+    def test_reports_no_position_for_an_isolated_line_that_is_not_there(self):
+        # The isolated list is a cohort-level seed, so a participant who simply does not
+        # carry one of its lines is ordinary. Without a floor the search still returns the
+        # largest bin in its window, and that position becomes a removal target -- which
+        # digs a notch into clean spectrum on the strength of noise.
+        freqs, db, prom = synthetic_spectrum(extra=(57.22,))
+        est = lr.estimate_comb(
+            freqs, db, prom, isolated_nominal_hz=(57.2247, 42.6), min_prominence_db=3.0
+        )
+        assert est.isolated_hz[0] == pytest.approx(57.22, abs=0.03)
+        assert np.isnan(est.isolated_hz[1])
+
+    def test_a_weaker_nominal_does_not_take_a_stronger_ones_line(self):
+        # 57.2247 and 57.3485 sit 0.124 Hz apart, closer than the search half-width, so
+        # their windows overlap. On real data the 57.14 line is ~17 dB the stronger of the
+        # two, and a plain largest-peak search hands it to both nominals. The weaker
+        # nominal must look past a line another one has already claimed and find its own.
+        freqs, db, prom = synthetic_spectrum(extra=(57.14, 57.40), amplitude_db=12.0)
+        # Make the first line dominate, as it does in the recordings.
+        index = int(np.argmin(np.abs(freqs - 57.14)))
+        db = db.copy()
+        db[index] += 17.0
+        prom = hd.prominence_db(db, half_width_bins=100)
+        est = lr.estimate_comb(freqs, db, prom, isolated_nominal_hz=(57.2247, 57.3485))
+        assert est.isolated_hz[0] == pytest.approx(57.14, abs=0.04)
+        assert est.isolated_hz[1] == pytest.approx(57.40, abs=0.04)
+
+    def test_reports_nothing_for_a_nominal_whose_only_peak_is_already_claimed(self):
+        # One line, two nominals reaching for it: the second has nothing of its own, and
+        # saying so is the honest outcome. Removing the claimed line twice would widen the
+        # notch around it while telling the reader a second line was found.
+        freqs, db, prom = synthetic_spectrum(extra=(57.28,))
+        est = lr.estimate_comb(freqs, db, prom, isolated_nominal_hz=(57.2247, 57.3485))
+        assert np.isfinite(est.isolated_hz[0])
+        assert np.isnan(est.isolated_hz[1])
+
+    def test_allows_two_isolated_nominals_that_find_their_own_lines(self):
+        freqs, db, prom = synthetic_spectrum(extra=(57.14, 57.40))
+        est = lr.estimate_comb(freqs, db, prom, isolated_nominal_hz=(57.1432, 57.3485))
+        assert est.isolated_hz[0] == pytest.approx(57.14, abs=0.04)
+        assert est.isolated_hz[1] == pytest.approx(57.40, abs=0.04)
+
+    def test_an_absent_isolated_line_never_becomes_a_removal_target(self):
+        freqs, db, prom = synthetic_spectrum(extra=(57.22,))
+        est = lr.estimate_comb(
+            freqs, db, prom, isolated_nominal_hz=(57.2247, 42.6), min_prominence_db=3.0
+        )
+        targets = lr.removal_frequencies(est, harmonic_range=(24, 30))
+        assert not any(abs(t - 42.6) < 0.2 for t in targets)
 
     def test_ignores_harmonics_below_the_prominence_floor(self):
         freqs, db, prom = synthetic_spectrum(harmonics=range(24, 50))

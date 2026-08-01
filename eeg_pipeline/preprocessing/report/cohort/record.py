@@ -158,6 +158,16 @@ def run_table(
         row["n_markers"] = _finite(None if agreement is None else agreement.n_markers)
         row["n_detected_beats"] = _finite(None if agreement is None else agreement.n_detected)
         row["n_matched_beats"] = _finite(None if agreement is None else agreement.n_matched)
+        # The pair that says what a low matched fraction is made of. A train that sits a
+        # fixed distance from the beats the detector found is a delay between two
+        # detectors, and the in-scanner ECG produces one routinely: the magnetohydrodynamic
+        # deflection is larger than the R wave, so the detector locks onto it a few hundred
+        # milliseconds late and reports a marker train that drove a working correction as
+        # complete disagreement. A tight lag says that; a broad one says the markers really
+        # do not describe the heartbeat. The subject report prints both already, and
+        # without them here the cohort table cannot tell the two apart.
+        row["marker_median_lag_s"] = _finite(None if agreement is None else agreement.median_lag_s)
+        row["marker_lag_iqr_s"] = _finite(None if agreement is None else agreement.lag_iqr_s)
 
         if context is AcquisitionContext.IN_SCANNER:
             timing = timings.get(recording_id)

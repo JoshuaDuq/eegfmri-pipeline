@@ -38,6 +38,13 @@ FIELDTRIP_TRIALINFO_COLUMNS = (
     *TRIALINFO_COLUMNS,
     "trial_onset_relative_to_first_volume_s",
 )
+PROCESSED_EXPORT_SUFFIXES = ("scannerpulse_corrected", "scanner_artifact_step2")
+"""Analyzer's names for the final node of a processed export, oldest first.
+
+The export that recovers Analyzer's missed beats ends at `scanner_artifact_step2`; the one
+before it ended at `scannerpulse_corrected`. Both are searched, and finding a run under
+more than one of them is still an error rather than a preference order.
+"""
 DEFAULT_SOURCE_DIRECTORY = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v2/"
     "sub-0015/eeg/brainvision_processed_1khz"
@@ -137,8 +144,12 @@ def relative_volume_times(volume_onsets: np.ndarray) -> np.ndarray:
 
 
 def _require_run_header(source_directory: Path, run_id: int) -> Path:
-    pattern = f"ThermalPainEEGFMRI_run{run_id}_*_{'scannerpulse_corrected'}.vhdr"
-    headers = sorted(source_directory.glob(pattern))
+    headers = sorted(
+        header
+        for suffix in PROCESSED_EXPORT_SUFFIXES
+        for header in source_directory.glob(f"ThermalPainEEGFMRI_run{run_id}_*_{suffix}.vhdr")
+        if not header.name.startswith("._")
+    )
     if len(headers) != 1:
         raise FileNotFoundError(
             f"Expected one processed BrainVision header for run {run_id}, found {len(headers)}."

@@ -397,15 +397,28 @@ every row above.
 
 Under `/Volumes/KINGSTON/EEG_fMRI_data/source_data/`:
 
-| batch | folder |
-|---|---|
-| `Length = 15 s`, 45–80 bpm | `processed_trimmed_0-15s_marker_template/` |
-| `Length = 60 s`, 45–80 bpm | `processed_trimmed_0-60s_marker_template/` |
-| `Length = 400 s`, 45–80 bpm | `processed_trimmed_0-400s_marker_template/` |
-| `Length = 60 s`, 30–115 bpm | `processed_trimmed_0-60s_30-115bpm_marker_template/` |
+The four `Mark Found Template` sweep batches this section used to list were deleted on
+2026-07-31, once the window they were sweeping for had been chosen and their conclusions
+recorded above. Three are gone outright; the `Length = 60 s`, 30–115 bpm batch survives as
+`reference_bcg_pre_recovery/`, because it is the pre-recovery Analyzer correction this
+workflow measures against and `cardiac_gaps/config.yaml` still reads it as
+`corrected_root`. Step 3 cannot stand in for it: that correction already contains the
+beats this workflow recovered, so the comparison would be against its own output.
 
-All four carry `Mark Found Template` output. Per-run trimmed originals are in
-`sub-*/eeg/original_trimmed_5khz/`, untrimmed in `original_untrimmed_5khz/`.
+Source data now reads as one chain under
+`/Volumes/KINGSTON/EEG_fMRI_data/source_data/`:
+
+| stage | folder |
+|---|---|
+| raw 5 kHz, per participant | `sub-*/eeg/original_untrimmed_5khz/`, `original_trimmed_5khz/` |
+| 1 — scanner artifact corrected, R peaks marked only | `step1_scanner_artifact_pulse_marked/` |
+| 2 — missing beats recovered by this workflow | `step2_pulse_markers_recovered/` |
+| 3 — Analyzer re-run, BCG corrected from those markers | `step3_bcg_corrected/` |
+| 4 — room line comb removed | `data/bids_output/eeg_linecleaned/` (BIDS, not a batch) |
+
+Steps 1 and 2 carry the same Analyzer history chain, because step 2 rewrites the `.vmrk`
+markers rather than adding a processing node. They are told apart by marker count: 482
+against 524 on sub-0009 run 1.
 
 ---
 

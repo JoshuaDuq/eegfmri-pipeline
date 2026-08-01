@@ -11,6 +11,7 @@ from eeg_pipeline.cli.common import (
     add_path_args,
     add_task_arg,
     create_progress_reporter,
+    report_dry_run,
     resolve_task,
 )
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
@@ -119,6 +120,16 @@ def run_coupling(args: argparse.Namespace, subjects: List[str], config: Any) -> 
 
     task = resolve_task(getattr(args, "task", None), config)
     progress = create_progress_reporter(args)
+
+    if report_dry_run(
+        args,
+        command="coupling",
+        subjects=subjects,
+        config=config,
+        mode=args.mode,
+        task=task,
+    ):
+        return
 
     pipeline = EEGBOLDCouplingPipeline(config=config)
     ledger = pipeline.run_batch(

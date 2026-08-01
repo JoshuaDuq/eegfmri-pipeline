@@ -61,12 +61,18 @@ The chain that produced the analysed epochs, verified byte-for-byte at the Analy
 | MNE-BIDS-Pipeline | 0.1–100 Hz band-pass, 60 Hz notch, resample to 500 Hz, PyPREP bad channels, ICA |
 | Analysed here | 66 epochs per participant (11 trials × 6 runs), −7 to +15 s, 500 Hz |
 
-`brainvision_processed_1khz/…run1_sub0005….eeg` is byte-identical to the same file under
-`processed_trimmed_0-60s_30-115bpm_marker_template/`, and the BIDS `acq_time`
-(2026-05-13T11:01:58.685017Z) matches that file's `New Segment` timestamp. The epochs
-therefore descend from the re-exported *trimmed* Analyzer output described in
+The `…run1_sub0005….eeg` this diagnosis read was byte-identical to the same file under the
+batch now named `reference_bcg_pre_recovery/` (called
+`processed_trimmed_0-60s_30-115bpm_marker_template/` when this was written), and the BIDS
+`acq_time` (2026-05-13T11:01:58.685017Z) matches that file's `New Segment` timestamp. The
+epochs therefore descend from the re-exported *trimmed* Analyzer output described in
 [`pulse_artifact_correction_recovery.md`](pulse_artifact_correction_recovery.md), not from
 the native 5 kHz correction workflow.
+
+That is the *pre-recovery* correction. The source tree has since moved on to
+`step3_bcg_corrected/`, which corrects the BCG at the recovered beats as well; the comb
+measurements were re-run against it on 2026-07-31 and did not move (fundamental unchanged,
+line prominence +0.01 dB per run), which is what a room artifact should do.
 
 Acquisition is identical across all 90 runs: TR = 0.900 s (exactly 4500 samples at 5 kHz),
 54 slices, multiband 3, 545 volumes per run. Sessions span 2026-02-09 to 2026-07-13, one

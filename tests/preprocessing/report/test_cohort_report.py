@@ -79,6 +79,8 @@ def _runs(n_runs: int, *, in_scanner: bool) -> pd.DataFrame:
         frame["volume_locked_resolved_after"] = [True] * n_runs
         # The beat detectors only exist where there was a pulse correction to check.
         frame["marker_matched_fraction"] = [0.97] * n_runs
+        frame["marker_median_lag_s"] = [0.004] * n_runs
+        frame["marker_lag_iqr_s"] = [0.010] * n_runs
         frame["n_markers"] = [600.0] * n_runs
         frame["n_detected_beats"] = [608.0] * n_runs
         frame["median_bpm"] = [62.0] * n_runs

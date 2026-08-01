@@ -31,7 +31,7 @@ class TestRemovalSettings:
         settings = rlc.RemovalSettings.from_config(load_config())
         assert settings.nominal_fundamental_hz == pytest.approx(1.2)
         assert settings.harmonic_range == (24, 79)
-        assert settings.removal_harmonic_range == (22, 79)
+        assert settings.removal_harmonic_range == (22, 82)
         assert settings.filter_length == "20s"
         assert settings.mt_bandwidth == pytest.approx(0.6)
 

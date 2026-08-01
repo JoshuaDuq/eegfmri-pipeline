@@ -13,7 +13,11 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import MarkerAgreement, RrIntervals
+from eeg_pipeline.preprocessing.report.analyzer_qc import (
+    MarkerAgreement,
+    RrIntervals,
+    compute_marker_agreement,
+)
 from eeg_pipeline.preprocessing.report.cohort.record import (
     acquisition_context_of,
     alpha_measurements,
@@ -284,6 +288,33 @@ def test_beat_and_marker_measurements_are_transcribed_when_present() -> None:
     assert frame.loc[0, "n_beats"] == pytest.approx(61)
     assert frame.loc[0, "marker_matched_fraction"] == pytest.approx(57 / 60)
     assert frame.loc[0, "n_matched_beats"] == pytest.approx(57)
+
+
+def test_marker_lag_travels_with_the_matched_fraction() -> None:
+    """A share of zero means two different things, and only the lag separates them.
+
+    On sub-0012 runs 5 and 6 the markers describe the heartbeat exactly and sit a fixed
+    ~300 ms ahead of the ECG peak the detector settles on, which the share alone reports
+    as total disagreement. The subject report already prints the lag; without it here the
+    cohort table sends a sound run to manual review as a physiology outlier.
+    """
+    agreement = compute_marker_agreement(
+        recording_id=RUN,
+        marker_onsets_s=np.arange(60.0),
+        detected_onsets_s=np.arange(60.0) + 0.30,
+    )
+
+    frame = run_table(
+        spectra=[_spectra()],
+        continuity=[_continuity()],
+        timings={},
+        marker_agreements=[agreement],
+        context=AcquisitionContext.OUT_OF_SCANNER,
+    )
+
+    assert frame.loc[0, "marker_matched_fraction"] == pytest.approx(0.0)
+    assert frame.loc[0, "marker_median_lag_s"] == pytest.approx(0.30, abs=1e-6)
+    assert frame.loc[0, "marker_lag_iqr_s"] == pytest.approx(0.0, abs=1e-6)
 
 
 # --------------------------------------------------------------------------------------

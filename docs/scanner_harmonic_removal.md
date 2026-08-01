@@ -238,6 +238,23 @@ The practical consequence is confined to 55–59 Hz: a residual there is partici
 and can reach 18 dB in one run. Anyone analysing that neighbourhood specifically should read
 `per_line_residual.tsv` rather than assume it is clean.
 
+**Part of that 55–59 Hz residual turned out to be two lines nobody was aiming at.** Read on
+sub-0012's cleaned data on 2026-07-31 — the first participant to be measured after the
+removal rather than before it — two peaks stood at 57.40 and 58.33 Hz, 9.8 and 10.0 dB above
+background and carrying 0.31 and 0.25 µV, the two largest narrowband residuals left anywhere
+in the analysis band. Both are 0.05–0.07 Hz wide, which is the spectral resolution, so
+neither is a rhythm. They were invisible before removal because each sits about 0.2 Hz from
+a much stronger targeted line whose skirt raised the local background over it; taking the
+strong line out is what exposed them. They are now targeted as 57.3485 and 58.3442 Hz.
+
+Reading them **before** removal is what the cohort counts rest on, so those counts are
+weaker than they look: 12 of 15 participants for 57.3485 and 7 of 15 for 58.3442, measured
+in data where the neighbouring line is still present and could account for part of a
+detection. Only sub-0012 has been measured with the neighbour gone. The lines are not free
+to add, either — 57.2247 and 57.3485 are 0.124 Hz apart, closer than the search half-width,
+so their windows overlap and the stronger line was being handed to both nominals. Each line
+is now claimed once, strongest first, which is what lets the pair be separated at all.
+
 ## Running it
 
 ```bash
@@ -277,10 +294,13 @@ Three hard edges bound any band definition on this dataset, independently of the
 
 - **59.5–60.5 Hz** is a −54.9 dB mains notch applied by the pipeline. Any band spanning it
   contains a hole.
-- **Above 95 Hz the comb is still there.** The removal ceiling is 95 Hz because the
-  background estimator needs ±4.6 Hz of valid support and beyond that it runs into the
-  100 Hz low-pass. Harmonics 80–83 sit at 96.0, 97.2, 98.4 and 99.6 Hz with 5.3–9.1 dB
-  prominence, untouched.
+- **Above 99 Hz the comb is still there.** ~~The removal ceiling is 95 Hz~~ — that ceiling
+  was raised to 99 Hz on 2026-07-31, after sub-0012's cleaned data showed harmonics 80–82
+  (96.0, 97.2, 98.4 Hz) standing 7.0–9.2 dB above background having never been targeted.
+  97.2 Hz carries the comb in all 15 participants with no measurable frequency scatter.
+  These lie above every band this study analyses, so removing them is hygiene rather than
+  a result. Harmonic 83 at 99.6 Hz is still untouched: the background estimator needs
+  ±4.6 Hz of valid support and there it runs into the 100 Hz low-pass.
 - **Below 26 Hz nothing was ever contaminated**, and the removal does not reach there.
 
 On that basis, after the cleaned dataset has been through MNE-BIDS-Pipeline:

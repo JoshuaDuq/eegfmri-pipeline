@@ -99,6 +99,8 @@ SCANNER_RUN_COLUMNS = (
     "n_beats",
     "beat_dropouts",
     "marker_matched_fraction",
+    "marker_median_lag_s",
+    "marker_lag_iqr_s",
     "n_markers",
     "n_detected_beats",
     "n_matched_beats",

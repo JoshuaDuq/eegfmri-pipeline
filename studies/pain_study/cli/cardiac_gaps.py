@@ -17,6 +17,7 @@ while the signal is being destroyed.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any, List
 
 MODES = ("report", "markers", "benchmark", "apply", "verify")
@@ -71,6 +72,12 @@ def setup_cardiac_gaps(subparsers: argparse._SubParsersAction) -> argparse.Argum
     return parser
 
 
+#: Options the workflow treats as paths: it calls ``destination.parent`` and builds
+#: ``output_root / name``, so a string reaches those as an ``AttributeError`` only after
+#: the run has finished and the results are about to be written.
+_PATH_OPTIONS = ("output", "output_root", "config", "uncorrected_root", "corrected_root")
+
+
 def run_cardiac_gaps(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Dispatch one stage to the correction module."""
     from studies.pain_study.scripts.cardiac_gaps import correct
@@ -78,4 +85,9 @@ def run_cardiac_gaps(args: argparse.Namespace, subjects: List[str], config: Any)
     if subjects and not args.subjects:
         args.subjects = list(subjects)
     args.command = args.mode
+    # None is meaningful -- it means "take this from the config" -- so it is left alone.
+    for option in _PATH_OPTIONS:
+        value = getattr(args, option, None)
+        if value is not None:
+            setattr(args, option, Path(value))
     correct.run(args)

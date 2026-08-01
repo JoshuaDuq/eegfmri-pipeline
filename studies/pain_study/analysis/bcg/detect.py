@@ -48,20 +48,36 @@ def read_analyzer_beats(vhdr_path: Path | str) -> np.ndarray:
 def find_gaps(
     beat_seconds: np.ndarray,
     *,
-    minimum_seconds: float = 2.0,
-    factor: float = 2.0,
+    minimum_seconds: float = 1.2,
+    factor: float = 1.5,
+    baseline_percentile: float = 25.0,
 ) -> list[Gap]:
     """Intervals that are both absolutely long and long for this run.
 
     Both tests are required. The absolute floor alone flags ordinary bradycardia; the
-    relative test alone flags a run whose median RR is already inflated because detection
-    failed nearly everywhere.
+    relative test alone flags a run whose beat interval cannot be estimated at all.
+
+    **The relative test reads a low percentile of the intervals, not the median, and the
+    multiple is below two.** Both were wrong for the commonest failure. One missed beat
+    produces an interval of about twice the beat-to-beat interval, so a threshold at twice
+    the rate is placed exactly where it cannot see them; on sub-0012 that hid 87% of the
+    gaps and 85% of the missing time, and in five of its six runs it attempted nothing at
+    all. The median compounds it, because a run missing many beats has an inflated one --
+    sub-0012 run 1 reads 0.998 s against a true 0.85 s, which lifts the threshold past its
+    own gaps. That is the very condition the relative test exists to survive, so the
+    baseline is taken low in the distribution where consecutive marked beats still sit.
+    ``physiological_floor`` already caps against an inflated median for the same reason.
+
+    Being permissive here is cheap: this only proposes where to look, and a proposal with
+    no beat in it yields nothing, because ``recover_beats`` still requires a QRS template
+    correlation and a physiological floor before any beat is accepted.
     """
     beats = np.sort(np.asarray(beat_seconds, dtype=float))
     if beats.size < 3:
         return []
     intervals = np.diff(beats)
-    threshold = max(minimum_seconds, factor * float(np.median(intervals)))
+    baseline = float(np.percentile(intervals, baseline_percentile))
+    threshold = max(minimum_seconds, factor * baseline)
     return [
         Gap(
             start_s=float(beats[index]),
@@ -77,8 +93,8 @@ def gap_summary(
     beat_seconds: np.ndarray,
     duration_s: float,
     *,
-    minimum_seconds: float = 2.0,
-    factor: float = 2.0,
+    minimum_seconds: float = 1.2,
+    factor: float = 1.5,
 ) -> dict[str, float]:
     """Per-run gap totals, including how many beats the gaps imply are missing."""
     beats = np.sort(np.asarray(beat_seconds, dtype=float))
@@ -103,8 +119,11 @@ class RecoverySettings:
     correlation_threshold: float = 0.5
     refractory_fraction: float = 0.5
     iterations: int = 2
-    minimum_seconds: float = 2.0
-    factor: float = 2.0
+    #: Gap-detection thresholds, matching ``find_gaps``. Lowered from 2.0/2.0 once the
+    #: commonest gap turned out to be a single missed beat, which is about twice the beat
+    #: interval and so invisible to a threshold set at twice the rate.
+    minimum_seconds: float = 1.2
+    factor: float = 1.5
     refractory_percentile: float = 1.0
     refractory_cap_fraction: float = 0.75
 

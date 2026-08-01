@@ -40,8 +40,8 @@ COMB_HARMONIC_RANGE = (24, 79)
 Only well-determined harmonics belong here. Including weak ones would let a poorly
 localised peak pull the fundamental, which every other harmonic then inherits.
 """
-REMOVAL_HARMONIC_RANGE = (22, 79)
-"""Harmonics actually projected out, which reaches lower than the fit does.
+REMOVAL_HARMONIC_RANGE = (22, 82)
+"""Harmonics actually projected out, which reaches further than the fit does at both ends.
 
 The diagnosis detected comb membership down to harmonic 22 (26.40 Hz) and 23 (27.60 Hz),
 below the span the fundamental was fitted on. Both sit within 5 mHz of their comb position
@@ -53,9 +53,21 @@ Harmonic 11 (13.23 Hz) is deliberately left in place. It sits 30 mHz off its com
 rather than 5, appears in only two of fifteen participants, and lands at the alpha-beta
 boundary where real rhythms live; removing it would risk taking signal for an artifact
 that may not be there.
+
+At the top it now reaches harmonics 80-82 (96.0, 97.2, 98.4 Hz), which the earlier 95 Hz
+ceiling left in the delivered data. 97.2 Hz is present in all fifteen participants with no
+measurable frequency scatter. These sit above the bands this study analyses, so removing
+them is hygiene rather than a result.
 """
-ISOLATED_NOMINAL_HZ = (47.0362, 57.2247, 58.1807, 94.0748)
+ISOLATED_NOMINAL_HZ = (47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 94.0748)
 MAINS_NOTCH_HZ = (59.5, 60.5)
+
+#: How much spectrum a resolved isolated line claims for itself, so that a nominal with an
+#: overlapping window does not report the same peak again. Set to the 0.109 Hz half-power
+#: width the diagnosis measured: wide enough to cover a line and the skirt that makes it
+#: the tallest thing nearby, and narrower than the 0.124 Hz separating the closest pair of
+#: nominals in use, so a line that is really there can still be found beside a claimed one.
+_LINE_CLAIM_HZ = 0.109
 
 
 @dataclass(frozen=True)
@@ -227,12 +239,50 @@ def estimate_comb(
 
     # One entry per nominal, NaN where nothing was found, so estimates from different
     # runs stay aligned and can be combined position by position.
-    isolated, isolated_prominence = [], []
-    for nominal in isolated_nominal_hz:
+    #
+    # Nominals closer together than the search half-width have overlapping windows, and
+    # 57.2247 and 57.3485 are 0.124 Hz apart. On the recordings the first is about 17 dB
+    # the stronger, so its skirt is the tallest thing in the second's window too, and a
+    # plain largest-peak search hands one line to both nominals. Widths cannot separate
+    # them: the strong line drifts up to 147 mHz across the cohort, so its window has to
+    # stay wide enough to follow it.
+    #
+    # Each line is therefore claimed once. Nominals are resolved strongest first, and a
+    # later one skips the neighbourhood of a line already taken, which leaves it looking
+    # at the spectrum its own line would occupy.
+    claims = []
+    for order, nominal in enumerate(isolated_nominal_hz):
         found = _peak_near(frequency_array, spectrum, prominence_array, nominal, isolated_search_hz)
-        position, strength = found if found is not None else (float("nan"), float("nan"))
-        isolated.append(position)
-        isolated_prominence.append(strength)
+        strength = found[1] if found is not None else float("-inf")
+        claims.append((strength, order, nominal))
+
+    isolated = [float("nan")] * len(isolated_nominal_hz)
+    isolated_prominence = [float("nan")] * len(isolated_nominal_hz)
+    taken: list[float] = []
+    for _, order, nominal in sorted(claims, key=lambda item: -item[0]):
+        found = _peak_near(
+            frequency_array,
+            spectrum,
+            prominence_array,
+            nominal,
+            isolated_search_hz,
+            excluded_hz=taken,
+        )
+        if found is None:
+            continue
+        position, strength = found
+        # The prominence floor that admits a comb harmonic to the fit applies here too,
+        # and for a sharper reason. The isolated list is a cohort-level seed, and these
+        # lines are carried by some participants and not others, so "absent" is an
+        # ordinary outcome rather than a fault. The search returns the largest bin in its
+        # window whatever is in it, so without the floor a participant who lacks a line
+        # contributes its noise maximum as a removal target -- and the removal then digs a
+        # notch into clean spectrum. NaN keeps that position out of `removal_frequencies`.
+        if not np.isfinite(strength) or strength < min_prominence_db:
+            continue
+        isolated[order] = position
+        isolated_prominence[order] = strength
+        taken.append(position)
 
     return CombEstimate(
         fundamental_hz=fundamental,
@@ -250,12 +300,20 @@ def _peak_near(
     prominence: np.ndarray,
     target_hz: float,
     search_hz: float,
+    excluded_hz: Sequence[float] = (),
 ) -> tuple[float, float] | None:
-    """Refined position and prominence of the largest peak within a search window."""
+    """Refined position and prominence of the largest peak within a search window.
+
+    ``excluded_hz`` names lines another nominal has already claimed. Their neighbourhoods
+    are masked out, so an overlapping window looks past a peak that is already spoken for
+    rather than reporting it a second time.
+    """
     low, high = np.searchsorted(freqs, [target_hz - search_hz, target_hz + search_hz])
     if high <= low:
         return None
-    window = prominence[low:high]
+    window = np.array(prominence[low:high], dtype=float)
+    for claimed in excluded_hz:
+        window[np.abs(freqs[low:high] - claimed) <= _LINE_CLAIM_HZ] = np.nan
     if not np.any(np.isfinite(window)):
         return None
     index = low + int(np.nanargmax(window))

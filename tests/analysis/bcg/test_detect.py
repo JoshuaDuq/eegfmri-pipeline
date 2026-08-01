@@ -41,6 +41,38 @@ def test_ordinary_slow_rate_is_not_a_gap():
     assert find_gaps(beats) == []
 
 
+def test_finds_isolated_single_missed_beats():
+    """One beat dropped here and there is the commonest failure, not a long dropout.
+
+    On sub-0012 these are 87% of the gaps and 85% of the missing time: an interval of about
+    twice the beat-to-beat interval, every few seconds. A threshold set at twice the rate
+    cannot see them, because that is exactly what one missed beat produces.
+    """
+    beats = np.arange(5.0, 200.0, 0.85)
+    kept = np.delete(beats, np.arange(7, beats.size, 7))
+
+    gaps = find_gaps(kept)
+
+    assert len(gaps) >= 20
+    assert all(1.5 < g.duration_s < 1.9 for g in gaps)
+
+
+def test_a_sparsely_marked_run_is_judged_on_its_true_beat_interval():
+    """Half the beats missing inflates the median RR, which must not raise the threshold.
+
+    This is the failure the relative test exists to prevent, and a median-based one walks
+    straight into it: on sub-0012 run 1 the median RR reads 0.998 s against a true 0.85 s
+    precisely because so many beats are gone, which lifts the threshold past the gaps.
+    """
+    rng = np.random.default_rng(0)
+    beats = np.arange(5.0, 400.0, 0.85)
+    kept = np.sort(rng.choice(beats, size=beats.size // 2, replace=False))
+
+    gaps = find_gaps(kept)
+
+    assert len(gaps) >= 30
+
+
 def test_gap_summary_reports_time_and_implied_missing_beats():
     beats = np.arange(5.0, 100.0, 0.9)
     kept = beats[(beats < 40.0) | (beats > 52.0)]
@@ -99,6 +131,27 @@ def test_inflated_t_wave_does_not_create_extra_beats():
     assert result.quality.refractory_violations == 0
     assert result.combined_beats.size < beats.size * 1.15
     assert 55.0 < result.quality.implied_bpm < 75.0
+
+
+def test_recovery_does_not_leave_beats_a_second_pass_would_find():
+    """Recovery must search the gaps in its own output, not only the ones it started with.
+
+    The loop re-estimated the template from the growing train but always re-searched
+    ``find_gaps(analyzer)``, and replaced its result rather than accumulating it. Whatever a
+    pass under-filled was therefore never revisited. On sub-0012 that left 313 s of gaps
+    across six runs which simply calling the function again on its own output closed by 78%.
+    """
+    beats = np.arange(5.0, 190.0, 0.85)
+    ecg = _synthetic_ecg(beats, 200.0)
+    rng = np.random.default_rng(4)
+    # scattered single beats dropped, which is the commonest real failure
+    kept = np.delete(beats, rng.choice(np.arange(3, beats.size - 3), size=40, replace=False))
+
+    first = recover_beats(ecg, kept, SFREQ)
+    second = recover_beats(ecg, first.combined_beats, SFREQ)
+
+    assert first.recovered_beats.size >= 30
+    assert second.recovered_beats.size <= 3
 
 
 def test_recovery_leaves_analyzer_beats_untouched():

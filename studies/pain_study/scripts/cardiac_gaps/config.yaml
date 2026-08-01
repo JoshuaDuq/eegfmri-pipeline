@@ -12,8 +12,13 @@ paths:
 
   # The two Analyzer exports that get paired: same runs, one with pulse markers and no BCG
   # correction, one with Analyzer's correction applied.
-  uncorrected_root: "<source_data>/processed_scanner_artifact_with_pulse_markers_no_bcg_correction"
-  corrected_root: "<source_data>/processed_trimmed_0-60s_30-115bpm_marker_template"
+  #
+  # `corrected_root` must stay the *pre-recovery* correction. This workflow measures what
+  # Analyzer achieves where it marked a beat, so pointing it at step 3 -- the correction
+  # that already includes the beats this workflow recovered -- would compare the output
+  # against itself.
+  uncorrected_root: "<source_data>/step1_scanner_artifact_pulse_marked"
+  corrected_root: "<source_data>/reference_bcg_pre_recovery"
 
   # Corrected recordings and the report tables. Repo-relative, as they have always been.
   output_root: "outputs/cardiac_gap_fill/corrected"

@@ -385,10 +385,26 @@ pyprep:
   detection_low_pass: null
   ransac: true
   repeats: 3
-  bad_channel_sync_policy: "per_run"  # "per_run" or "subject_union"
+  # "subject_union": a channel bad in any run of a participant is excluded from all of them,
+  # so every run of a participant carries the same montage. "per_run" keeps run-specific
+  # bads. The default matches how the cohort was actually processed -- leaving it at
+  # "per_run" while every run passed --bad-channel-sync-policy subject_union made the
+  # delivered data depend on a flag someone had to remember.
+  bad_channel_sync_policy: "subject_union"  # "per_run" or "subject_union"
   average_reref: false
   file_extension: ".vhdr"
-  consider_previous_bads: true
+  # false: bad channels are PyPREP's verdict on this recording, every run, and nothing else.
+  #
+  # When true, a channel marked bad from outside the pipeline -- hand-edited into
+  # channels.tsv, or inherited from an upstream conversion -- is carried forward untouched.
+  # That state lives only in a regenerated file: a BIDS re-conversion on 2026-08-01 reset all
+  # 64 channels to "good" across the cohort and silently dropped sixteen such marks, and
+  # nothing failed. PyPREP's own marks are unaffected either way; they are re-measured on
+  # every run rather than assumed, which is what stops a once-flagged channel ratcheting.
+  #
+  # Measured before making the switch: on sub-0000, PyPREP independently flags AF4, F3 and
+  # FC6 -- every channel a human had marked -- and adds T8 that nobody had.
+  consider_previous_bads: false
   overwrite_chans_tsv: true
   delete_breaks: false
   breaks_min_length: 20
