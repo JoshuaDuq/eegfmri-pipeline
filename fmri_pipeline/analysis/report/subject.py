@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 import numpy as np
 
 from fmri_pipeline.analysis.plotting_config import FmriReportConfig
-from fmri_pipeline.analysis.report import html
+from fmri_pipeline.analysis.report import atlas, html
 from fmri_pipeline.analysis.report.figures import carpet as carpet_figures
 from fmri_pipeline.analysis.report.figures import coverage as coverage_figures
 from fmri_pipeline.analysis.report.figures import distributions as distribution_figures
@@ -26,11 +26,57 @@ from fmri_pipeline.analysis.report.figures import stat_maps as stat_map_figures
 from fmri_pipeline.analysis.report.figures import volumes as volume_figures
 from fmri_pipeline.analysis.report.manifest import (
     ContrastManifest,
-    sample_masks_from_confounds,
+    validate_manifest_artifacts,
+    validate_manifest_collection,
 )
-from fmri_pipeline.analysis.report.style import plot_context, savefig_kwargs
+from fmri_pipeline.analysis.report.style import (
+    figure_format,
+    plot_context,
+    savefig_kwargs,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class SummaryFacts:
+    """The numbers the top of the report states, collected as panels compute them.
+
+    A subject report runs to eight sections, and deciding whether a subject's result
+    is usable currently means scrolling all of them: the censoring is in the motion
+    table, the tSNR in a QC panel, the survivor count in a calibration figure, the
+    signature score in its own section. Across ninety subjects that is the difference
+    between triage and reading ninety documents.
+
+    Collected rather than recomputed. Every number here is already produced by a panel
+    -- a second pass over the 4D data to restate the tSNR would cost more than the rest
+    of the document put together, and a recomputation that drifted from its panel would
+    be worse than no summary at all.
+    """
+
+    def __init__(self) -> None:
+        self._items: List[Tuple[str, str]] = []
+
+    def add(self, label: str, value: Any) -> None:
+        """Record one fact. Later facts with the same label replace earlier ones."""
+        text = str(value)
+        for index, (existing, _value) in enumerate(self._items):
+            if existing == label:
+                self._items[index] = (label, text)
+                return
+        self._items.append((label, text))
+
+    @property
+    def items(self) -> Tuple[Tuple[str, str], ...]:
+        return tuple(self._items)
+
+    def __bool__(self) -> bool:
+        return bool(self._items)
+
+
+def _note(facts: Optional[SummaryFacts], label: str, value: Any) -> None:
+    """Record a summary fact when a summary is being collected."""
+    if facts is not None:
+        facts.add(label, value)
 
 
 @contextmanager
@@ -43,20 +89,40 @@ def _panel(description: str) -> Iterator[None]:
 
 
 def _save(
-    figure: Any, *, out_dir: Path, stem: str, formats: Sequence[str]
+    figure: Any,
+    *,
+    out_dir: Path,
+    stem: str,
+    formats: Sequence[str],
+    dense: bool = True,
 ) -> Optional[Path]:
     """Write a figure and return the path the report should embed.
+
+    ``dense`` decides which format is embedded, through
+    :func:`~fmri_pipeline.analysis.report.style.figure_format`: a brain mosaic or a
+    carpet is a dense image layer and stays raster, while a line or bar figure is
+    written as vector so its text stays legible at any zoom -- in a browser whose
+    width the author does not control, and in a manuscript where the figure is
+    scaled again.
+
+    That helper existed, was documented, and was tested, and nothing called it: every
+    panel in this report was rasterised at 150 dpi regardless of the ``dense`` flag
+    each caller was carefully setting. The preferred format is written first and
+    returned; anything else the config asks for is still written beside it.
 
     Saving happens inside the style context because ``svg.hashsalt`` and
     ``savefig.dpi`` are read at save time, not draw time.
     """
     import matplotlib.pyplot as plt
 
+    preferred = figure_format(dense=dense)
+    wanted = [preferred] + [fmt for fmt in formats if fmt != preferred]
+
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         primary: Optional[Path] = None
         with plot_context():
-            for fmt in formats:
+            for fmt in wanted:
                 path = out_dir / f"{stem}.{fmt}"
                 figure.savefig(path, **savefig_kwargs(path))
                 if primary is None:
@@ -216,6 +282,22 @@ def load_background(
         return None, "the discovered anatomical image could not be read"
 
 
+def _retained_frame_masks(
+    bold_imgs: Sequence[Any],
+    retained_frame_indices: Sequence[Sequence[int]],
+) -> List[np.ndarray]:
+    """Return exact boolean masks from the frame indices supplied to the GLM."""
+    if len(bold_imgs) != len(retained_frame_indices):
+        raise ValueError("Retained frame indices must align with loaded BOLD runs.")
+
+    masks: List[np.ndarray] = []
+    for image, retained_indices in zip(bold_imgs, retained_frame_indices):
+        mask = np.zeros(int(image.shape[3]), dtype=bool)
+        mask[np.asarray(retained_indices, dtype=int)] = True
+        masks.append(mask)
+    return masks
+
+
 def build_qc_sections(
     *,
     manifests: Sequence[ContrastManifest],
@@ -223,6 +305,7 @@ def build_qc_sections(
     out_dir: Path,
     cfg: FmriReportConfig,
     background: Any = None,
+    facts: Optional[SummaryFacts] = None,
 ) -> List[html.Section]:
     """Build the as-modelled QC section, once for the whole subject-task.
 
@@ -244,27 +327,35 @@ def build_qc_sections(
         nib.load(str(path)) for path in first.bold_paths if Path(path).exists()
     ]
 
-    # Read from the confounds alone. The imaging panels additionally need one mask per
-    # loaded run, which is checked separately below: gating the masks themselves on the
-    # BOLD being readable would cost the motion table its censored counts whenever the
-    # 4D data is not to hand, even though those counts come from the confounds.
-    censoring: Optional[List[np.ndarray]] = None
-    if first.confounds_paths:
-        with _panel("censoring masks"):
-            censoring = sample_masks_from_confounds(first.confounds_paths)
-
-    sample_masks = (
-        censoring if censoring is not None and len(censoring) == len(bold_imgs) else None
+    sample_masks = _retained_frame_masks(
+        bold_imgs,
+        first.retained_frame_indices,
     )
+
+    # tSNR is computed before the run-level table so its per-run medians can join the
+    # motion columns rather than getting a near-flat dot plot of their own.
+    tsnr_result = None
+    if bold_imgs and cfg.include_tsnr_qc:
+        with _panel("tSNR"):
+            tsnr_result = volume_figures.compute_tsnr(
+                bold_imgs,
+                # The mask keeps partial-volume rim voxels out of the median and the
+                # colour limit. Without it, `tsnr > 0` admits edge voxels sitting at
+                # very low tSNR and drags the reported value down.
+                mask_img=_load_mask(first),
+                sample_masks=sample_masks,
+            )
 
     if first.confounds_paths and cfg.include_motion_qc:
         with _panel("motion summary"):
             blocks.extend(
                 _motion_blocks(
                     manifest=first,
-                    sample_masks=censoring,
+                    sample_masks=sample_masks,
                     qc_dir=qc_dir,
                     cfg=cfg,
+                    facts=facts,
+                    tsnr=tsnr_result,
                 )
             )
 
@@ -281,47 +372,42 @@ def build_qc_sections(
                 )
             )
 
-    if bold_imgs and cfg.include_tsnr_qc:
-        with _panel("tSNR"):
-            # The mask keeps partial-volume rim voxels out of the median and the
-            # colour limit. Without it, `tsnr > 0` admits edge voxels sitting at
-            # very low tSNR and drags the reported value down.
-            result = volume_figures.compute_tsnr(
-                bold_imgs,
-                mask_img=_load_mask(first),
-                sample_masks=sample_masks,
-            )
+    if tsnr_result is not None:
+        # The map only. Per-run tSNR is a column of the run-level table above: it has
+        # no published reference level to be located against, so comparing six runs
+        # is comparing six numbers, and the dot plot this used to draw put them
+        # within 2 tSNR of each other and showed nothing.
+        with _panel("tSNR map"):
             path = _save(
                 volume_figures.tsnr_volume(
-                    result, bg_img=background, title="tSNR (as modelled)"
+                    tsnr_result,
+                    bg_img=background,
+                    # The same mask the median was computed inside. Omitted, the
+                    # colour limit came from a different population of voxels than
+                    # the number printed beside it.
+                    mask_img=_load_mask(first),
+                    radiological=first.radiological,
+                    title="tSNR (as modelled)",
                 ),
                 out_dir=qc_dir,
                 stem="tsnr_map",
                 formats=cfg.formats,
             )
             if path:
-                blocks.append(html.Figure(title="tSNR", path=path))
-            if len(result.per_run_median) > 1:
-                path = _save(
-                    volume_figures.per_run_tsnr_figure(
-                        result, run_labels=first.included_runs, title="tSNR by run"
-                    ),
-                    out_dir=qc_dir,
-                    stem="tsnr_by_run",
-                    formats=cfg.formats,
-                )
-                if path:
-                    blocks.append(
-                        html.Figure(
-                            title="tSNR by run",
-                            path=path,
-                            dense=False,
-                            caption=(
-                                "Shown per run because averaging maps across runs "
-                                "hides a single bad run."
-                            ),
-                        )
+                blocks.append(
+                    html.Figure(
+                        title="tSNR",
+                        path=path,
+                        caption=(
+                            "Where the measurement is precise enough to detect an "
+                            "effect. Per-run values are in the run-level table above."
+                        ),
                     )
+                )
+            tsnr_values = np.asarray(tsnr_result.mean_img.get_fdata())
+            measurable = tsnr_values[np.isfinite(tsnr_values) & (tsnr_values > 0)]
+            if measurable.size:
+                _note(facts, "Median tSNR", f"{float(np.median(measurable)):.1f}")
 
     if first.mask and Path(first.mask).exists():
         with _panel("coverage"):
@@ -339,6 +425,7 @@ def build_qc_sections(
                     nib.load(str(first.mask)),
                     bg_img=background,
                     extent_note=extent_note,
+                    radiological=first.radiological,
                     title="Analysis mask",
                 ),
                 out_dir=qc_dir,
@@ -370,12 +457,20 @@ def _motion_blocks(
     sample_masks: Optional[Sequence[np.ndarray]],
     qc_dir: Path,
     cfg: FmriReportConfig,
+    facts: Optional[SummaryFacts] = None,
+    tsnr: Any = None,
 ) -> List[html.Block]:
-    """Build the per-run motion panel and the table of numbers behind it.
+    """Build the run-level QC table, and the one motion panel worth drawing.
 
-    Both, because they are read for different things. The panel answers "is one run
-    unlike the others", which is a shape; the table carries the values a methods
-    section quotes, which a dot plot cannot be read to three decimals.
+    The framewise-displacement figure survives because displacement has published
+    reference levels -- Power et al. (2012, 2014) -- and locating a run against a
+    level is a comparison a reader makes by eye. It also separates the typical frame
+    from the single worst one, which are different measurements on a quantity
+    dominated by isolated spikes.
+
+    Everything else is a column. ``tsnr`` joins the table rather than getting a panel:
+    it carries no reference level, so "is one run unlike the others" is a comparison
+    between six numbers.
     """
     summaries = motion_figures.summarise_run_motion(
         manifest.confounds_paths,
@@ -393,6 +488,7 @@ def _motion_blocks(
             ),
             out_dir=qc_dir,
             stem="motion_by_run",
+            dense=False,
             formats=cfg.formats,
         )
         if path:
@@ -411,12 +507,65 @@ def _motion_blocks(
                 )
             )
 
-    table_html, _rows = motion_figures.motion_table(summaries)
-    tsv_path = motion_figures.write_motion_tsv(summaries, path=qc_dir / "motion.tsv")
+    with _panel("motion-signal coupling"):
+        path = _save(
+            motion_figures.motion_coupling_figure(
+                manifest.confounds_paths,
+                run_labels=manifest.included_runs,
+                title="Motion against signal change",
+            ),
+            out_dir=qc_dir,
+            stem="motion_coupling",
+            formats=cfg.formats,
+        )
+        if path:
+            blocks.append(
+                html.Figure(
+                    title="Motion against signal change",
+                    path=path,
+                    dense=True,
+                    caption=(
+                        "DVARS that tracks framewise displacement is signal change "
+                        "driven by head motion. DVARS that moves independently of it "
+                        "is another source, which motion regressors will not remove "
+                        "and censoring on displacement will not catch. The "
+                        "correlation is a measurement; no run is scored against it."
+                    ),
+                )
+            )
+
+    tsnr_median = list(getattr(tsnr, "per_run_median", ()) or ()) or None
+    tsnr_iqr = list(getattr(tsnr, "per_run_iqr", ()) or ()) or None
+    table_html, _rows = motion_figures.motion_table(
+        summaries, tsnr_median=tsnr_median, tsnr_iqr=tsnr_iqr
+    )
+    tsv_path = motion_figures.write_motion_tsv(
+        summaries,
+        path=qc_dir / "run_qc.tsv",
+        tsnr_median=tsnr_median,
+        tsnr_iqr=tsnr_iqr,
+    )
     censored = sum(run.n_censored for run in summaries)
+
+    acquired = sum(run.n_frames for run in summaries)
+    _note(facts, "Runs modelled", f"{len(summaries)}")
+    _note(
+        facts,
+        "Frames censored",
+        f"{censored:,} of {acquired:,}"
+        + (f" ({censored / acquired:.1%})" if acquired else ""),
+    )
+    medians = [run.median_fd for run in summaries if run.median_fd is not None]
+    if medians:
+        _note(
+            facts,
+            "Median framewise displacement",
+            f"{float(np.median(medians)):.3f} mm across runs "
+            f"(worst run {float(np.max(medians)):.3f} mm)",
+        )
     blocks.append(
         html.Table(
-            title="Motion and censoring by run",
+            title="Run-level quality control",
             html=table_html,
             tsv_path=tsv_path,
             caption=(
@@ -424,7 +573,8 @@ def _motion_blocks(
                 f"{censored:,} censored, "
                 f"{sum(run.n_retained for run in summaries):,} entered the model. "
                 "Censoring is the model's own, read from the confound columns the GLM "
-                "used, so these counts describe the analysis that ran."
+                "used, so these counts describe the analysis that ran. tSNR is "
+                "measured inside the analysis mask, after the same censoring."
             ),
         )
     )
@@ -530,6 +680,14 @@ def _carpet_blocks(
         if volume_codes is not None and voxel_mask is not None:
             codes = volume_codes[voxel_mask]
 
+    # The censoring the GLM applied, concatenated onto the carpet's own time axis so
+    # the frames that left the model can be read against the motion that removed them.
+    censored = None
+    if sample_masks is not None and len(sample_masks) == len(bold_imgs):
+        joined = np.concatenate([~np.asarray(m, dtype=bool) for m in sample_masks])
+        if joined.size == carpet.shape[1]:
+            censored = joined
+
     figure = carpet_figures.carpet_figure(
         carpet,
         tissue_codes=codes,
@@ -540,6 +698,7 @@ def _carpet_blocks(
         fd=fd,
         dvars=dvars,
         dvars_label=dvars_label,
+        censored=censored,
         voxel_source=mask_source,
         title="Carpet (as modelled)",
     )
@@ -799,6 +958,147 @@ def smoothness_facts(
     return facts
 
 
+def _peak_values(img: Any, coords: Sequence[Tuple[float, float, float]]) -> List[float]:
+    """Sample a volume at a list of world coordinates.
+
+    Nearest voxel, not interpolation: a peak is a voxel, and interpolating between it
+    and its neighbours would report a number no voxel in the map carries.
+    """
+    data = np.asarray(img.get_fdata())
+    inverse = np.linalg.inv(np.asarray(img.affine))
+    shape = np.asarray(data.shape[:3])
+
+    out: List[float] = []
+    for coord in coords:
+        voxel = np.rint(
+            (np.append(np.asarray(coord, dtype=float), 1.0) @ inverse.T)[:3]
+        ).astype(int)
+        if np.any(voxel < 0) or np.any(voxel >= shape):
+            out.append(float("nan"))
+            continue
+        out.append(float(data[tuple(voxel)]))
+    return out
+
+
+#: Digits kept per cluster-table column when the table is rendered for reading.
+#:
+#: A peak coordinate is a voxel centre on a 3 mm grid, so nilearn's
+#: ``54.884781`` claims a precision of about a thousandth of a millimetre that the
+#: acquisition does not have. Effects and their errors get three significant figures,
+#: which is what a methods section quotes. Full precision stays in the TSV beside the
+#: table: that file is read by machines, and rounding it would lose real information.
+_DISPLAY_DECIMALS = {"X": 0, "Y": 0, "Z": 0, "Peak Stat": 2}
+_DISPLAY_SIGNIFICANT = 3
+
+
+def _rounded(value: Any, *, decimals: Optional[int]) -> Any:
+    """Round one cell, leaving anything that is not a finite number untouched.
+
+    Element-wise rather than column-wise because the enriched columns are object
+    dtype: a sub-peak row carries an empty string where a cluster row carries a
+    float, so a whole-column ``round`` skips them and the table showed a peak effect
+    of 0.419831 beside a coordinate rounded to the millimetre.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
+        return value
+    if isinstance(value, (int, np.integer)):
+        # An integer in this table is an identifier or a count, and neither has a
+        # precision to reduce. Rounding them to three significant figures turned
+        # cluster 2 into "2.0" and a 5,211 mm3 cluster into 5,210.
+        return value
+    if not np.isfinite(value):
+        return value
+    if decimals is None:
+        # Significant figures rather than decimal places: a percent signal change of
+        # 0.42 and a standard error of 0.0689 need different decimal counts to carry
+        # the same information.
+        return float(f"%.{_DISPLAY_SIGNIFICANT}g" % float(value))
+    rounded = round(float(value), decimals)
+    return int(rounded) if decimals <= 0 else rounded
+
+
+def for_display(frame: Any) -> Any:
+    """Round a cluster table's numbers to the precision the measurement supports.
+
+    Applied to a copy. The TSV is written from the unrounded frame, so a reader gets
+    a legible table and a script gets the exact values.
+    """
+    shown = frame.copy()
+    for column in shown.columns:
+        decimals = _DISPLAY_DECIMALS.get(column)
+        if column in _DISPLAY_DECIMALS:
+            shown[column] = [_rounded(v, decimals=decimals) for v in shown[column]]
+        else:
+            shown[column] = [_rounded(v, decimals=None) for v in shown[column]]
+    return shown
+
+
+def enrich_cluster_frame(
+    frame: Any,
+    *,
+    manifest: ContrastManifest,
+    peaks: Sequence[Tuple[str, Tuple[float, float, float]]],
+    labeller: Any = None,
+) -> Tuple[Any, List[str]]:
+    """Add the effect, its standard error, and an anatomical label at each peak.
+
+    nilearn's cluster table carries a peak z and a size, which says how strong the
+    evidence is and how far it spreads but not how large the effect *is*. Two peaks at
+    z = 4 can differ tenfold in percent signal change, and only one of them is worth
+    reporting as a result. The standard error beside it is what distinguishes a large
+    effect from an imprecise one.
+
+    Sub-peak rows -- nilearn writes secondary local maxima as ``1a``, ``1b`` -- are
+    left untouched: ``peaks`` holds one entry per cluster, and the columns are aligned
+    on the table's own ``Cluster ID``.
+
+    Returns the frame and the notes the caption should carry. Best-effort: a map that
+    cannot be read costs its column and nothing else.
+    """
+    import nibabel as nib
+
+    notes: List[str] = []
+    if not peaks or "Cluster ID" not in getattr(frame, "columns", ()):
+        return frame, notes
+
+    labels = [label for label, _coord in peaks]
+    coords = [coord for _label, coord in peaks]
+    by_cluster = {label: index for index, label in enumerate(labels)}
+    row_index = [by_cluster.get(_cluster_identifier(v)) for v in frame["Cluster ID"]]
+
+    def _column(values: Sequence[float]) -> List[Any]:
+        return [
+            "" if position is None or not np.isfinite(values[position])
+            else values[position]
+            for position in row_index
+        ]
+
+    if manifest.effect_map and Path(manifest.effect_map).exists():
+        with _panel("peak effect sizes"):
+            effects = _peak_values(nib.load(str(manifest.effect_map)), coords)
+            frame[f"Peak effect ({_unit_name(manifest)})"] = _column(effects)
+            notes.append("peak effect and error are the value at the peak voxel")
+
+    if manifest.variance_map and Path(manifest.variance_map).exists():
+        with _panel("peak standard errors"):
+            variances = _peak_values(nib.load(str(manifest.variance_map)), coords)
+            errors = [float(np.sqrt(v)) if v >= 0 else float("nan") for v in variances]
+            frame["Peak SE"] = _column(errors)
+
+    if labeller is not None:
+        with _panel("anatomical labels"):
+            named = labeller.label_all(coords)
+            frame["Region"] = [
+                "" if position is None else (named[position] or "unlabelled")
+                for position in row_index
+            ]
+            notes.append(f"regions from {labeller.source}")
+    elif not atlas.atlas_applies_to(manifest.space):
+        notes.append(atlas.space_refusal(manifest.space))
+
+    return frame, notes
+
+
 def build_cluster_table(
     *,
     manifest: ContrastManifest,
@@ -806,6 +1106,7 @@ def build_cluster_table(
     threshold: Optional[float] = None,
     threshold_label: str = "",
     extra_facts: Sequence[str] = (),
+    labeller: Any = None,
 ) -> Tuple[Optional[html.Table], Tuple[Tuple[str, Tuple[float, float, float]], ...]]:
     """Return the cluster table and its peak coordinates.
 
@@ -847,6 +1148,9 @@ def build_cluster_table(
     )
 
     peaks = _cluster_peaks(frame)
+    frame, enrichment_notes = enrich_cluster_frame(
+        frame, manifest=manifest, peaks=peaks, labeller=labeller
+    )
 
     plots_dir.mkdir(parents=True, exist_ok=True)
     tsv_path = plots_dir / "clusters.tsv"
@@ -857,6 +1161,7 @@ def build_cluster_table(
         f"height threshold: {threshold_label or f'|z| > {threshold:.2f}'}",
         coordinate_space_label(manifest.space),
     ]
+    caption_parts.extend(enrichment_notes)
     caption_parts.extend(str(fact) for fact in extra_facts if fact)
     if manifest.cluster_min_voxels > 0:
         caption_parts.append(
@@ -868,11 +1173,28 @@ def build_cluster_table(
     return (
         html.Table(
             title="Clusters and peaks",
-            html=frame.to_html(index=False, border=0, classes=""),
+            html=for_display(frame).to_html(index=False, border=0, classes=""),
             tsv_path=tsv_path,
             caption="; ".join(caption_parts),
         ),
         peaks,
+    )
+
+
+def resolve_labeller(manifest: ContrastManifest, cfg: FmriReportConfig) -> Any:
+    """Load the configured atlas, if it may be read at this contrast's coordinates.
+
+    Gated on space rather than merely on configuration. An MNI atlas sampled at a
+    native-space coordinate returns the name of whatever structure sits at those
+    millimetres in a different brain, and the result is indistinguishable from a
+    correct label -- so a native-space contrast gets no column and a caption saying
+    why.
+    """
+    if not atlas.atlas_applies_to(manifest.space):
+        return None
+    return atlas.load_atlas(
+        labels_img=getattr(cfg, "atlas_labels_img", None),
+        labels_tsv=getattr(cfg, "atlas_labels_tsv", None),
     )
 
 
@@ -882,6 +1204,8 @@ def build_contrast_section(
     out_dir: Path,
     cfg: FmriReportConfig,
     background: Any = None,
+    facts: Optional[SummaryFacts] = None,
+    deriv_root: Optional[Path] = None,
 ) -> html.Section:
     """Build the results section for one contrast.
 
@@ -908,6 +1232,18 @@ def build_contrast_section(
     values, mask_source = masked_stat_values(stat_img, mask_img)
     threshold, threshold_label = resolve_threshold(manifest, values=values)
     blocks: List[html.Block] = []
+
+    prefix = f"{manifest.contrast_name}: "
+    _note(facts, f"{prefix}height threshold", threshold_label or "none")
+    if threshold:
+        compared = np.abs(values) if manifest.two_sided else values
+        surviving = int(np.count_nonzero(compared > float(threshold)))
+        _note(
+            facts,
+            f"{prefix}voxels above the threshold",
+            f"{surviving:,} of {values.size:,}"
+            + (f" ({surviving / values.size:.2%})" if values.size else ""),
+        )
 
     if manifest.effect_map and Path(manifest.effect_map).exists() and threshold:
         with _panel(f"dual-coded panel for {manifest.contrast_name}"):
@@ -941,7 +1277,12 @@ def build_contrast_section(
 
     table, peaks = (None, ())
     if threshold:
-        facts = smoothness_facts(
+        # Named for what it is. Called `facts`, this shadowed the SummaryFacts
+        # parameter of the same name with a list of strings for the rest of the
+        # function, so every later panel that recorded a summary fact raised
+        # AttributeError -- swallowed by _panel, which made the panel vanish from the
+        # document with only a log line to say why.
+        smoothness = smoothness_facts(
             stat_img,
             mask_img=mask_img,
             cluster_min_voxels=manifest.cluster_min_voxels,
@@ -953,7 +1294,8 @@ def build_contrast_section(
                 out_dir=out_dir,
                 threshold=threshold,
                 threshold_label=threshold_label,
-                extra_facts=facts,
+                extra_facts=smoothness,
+                labeller=resolve_labeller(manifest, cfg),
             )
 
         with _panel(f"thresholded panel for {manifest.contrast_name}"):
@@ -1030,6 +1372,49 @@ def build_contrast_section(
     if table is not None:
         blocks.append(table)
 
+    # Both key to the cluster table's rows, so both follow it.
+    with _panel(f"peak response for {manifest.contrast_name}"):
+        block = build_peak_response_block(
+            manifest=manifest, peaks=peaks, out_dir=out_dir, cfg=cfg
+        )
+        if block is not None:
+            blocks.append(block)
+
+    with _panel(f"run consistency for {manifest.contrast_name}"):
+        block = build_run_consistency_block(
+            manifest=manifest, peaks=peaks, out_dir=out_dir, cfg=cfg
+        )
+        if block is not None:
+            blocks.append(block)
+
+    if manifest.effect_map and Path(manifest.effect_map).exists():
+        with _panel(f"effect versus evidence for {manifest.contrast_name}"):
+            block = _effect_versus_evidence_block(
+                manifest=manifest,
+                mask_img=mask_img,
+                stat_img=stat_img,
+                threshold=threshold,
+                out_dir=out_dir,
+                cfg=cfg,
+            )
+            if block is not None:
+                blocks.append(block)
+
+    if threshold and deriv_root is not None:
+        with _panel(f"tissue distribution for {manifest.contrast_name}"):
+            block = build_tissue_block(
+                manifest=manifest,
+                stat_img=stat_img,
+                mask_img=mask_img,
+                threshold=threshold,
+                deriv_root=Path(deriv_root),
+                out_dir=out_dir,
+                cfg=cfg,
+                facts=facts,
+            )
+            if block is not None:
+                blocks.append(block)
+
     with _panel(f"threshold calibration for {manifest.contrast_name}"):
         context = inference.threshold_context(
             values,
@@ -1047,8 +1432,32 @@ def build_contrast_section(
             ),
             out_dir=plots_dir,
             stem="threshold_calibration",
+            dense=False,
             formats=cfg.formats,
         )
+        # The counts as a table. They rode in the figure's legend as four sentences of
+        # 7-point type occupying a third of the canvas -- a results table drawn in the
+        # wrong medium, beside the very lines it described.
+        table_html, rows = distribution_figures.threshold_table(context)
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        tsv_path = plots_dir / "thresholds.tsv"
+        tsv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        blocks.append(
+            html.Table(
+                title="Thresholds and survivors",
+                html=table_html,
+                tsv_path=tsv_path,
+                caption=(
+                    "Every count is stated against both nulls where both apply: the "
+                    "count expected under N(0, 1) is what an over-dispersed map makes "
+                    "look like enrichment, and the count expected under the map's own "
+                    "fitted null is what the observed survivors have to exceed to be a "
+                    "finding. This pipeline applies no cluster-level correction, so "
+                    "none of these heights is familywise-corrected for extent."
+                ),
+            )
+        )
+
         if path:
             blocks.append(
                 html.Figure(
@@ -1056,13 +1465,11 @@ def build_contrast_section(
                     path=path,
                     dense=False,
                     caption=(
-                        "The applied height beside the corrected ones, and the map's "
-                        "own fitted null beside the theoretical N(0, 1) the threshold "
-                        "assumes. Every survivor count is stated against both nulls: "
-                        "the count expected under N(0, 1) is what an over-dispersed "
-                        "map makes look like enrichment, and the count expected under "
-                        "the fitted null is what the observed survivors have to exceed "
-                        "to be a finding."
+                        "Where each threshold in the table above falls on the map's "
+                        "own distribution, with the fitted null beside the theoretical "
+                        "N(0, 1) the threshold assumes. A single-subject GLM with "
+                        "unmodelled autocorrelation is routinely over-dispersed, and "
+                        "nothing in a thresholded mosaic reveals it."
                     ),
                 )
             )
@@ -1076,9 +1483,294 @@ def build_contrast_section(
     )
 
 
+def build_run_consistency_block(
+    *,
+    manifest: ContrastManifest,
+    peaks: Sequence[Tuple[str, Tuple[float, float, float]]],
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> Optional[html.Figure]:
+    """Each cluster peak's estimate in each run, against the combined estimate.
+
+    Returns ``None`` when the manifest records no run-level maps -- a single-run
+    contrast has nothing to compare, and a manifest written before those maps existed
+    carries none. Neither is a fault, so neither produces a note.
+    """
+    if not (manifest.run_effect_map and manifest.run_variance_map):
+        return None
+    if not peaks:
+        return None
+    if not (
+        Path(manifest.run_effect_map).exists() and Path(manifest.run_variance_map).exists()
+    ):
+        return None
+
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import run_consistency
+
+    estimates = run_consistency.collect_peak_estimates(
+        peaks,
+        run_effect_img=nib.load(str(manifest.run_effect_map)),
+        run_variance_img=nib.load(str(manifest.run_variance_map)),
+        combined_effect_img=(
+            nib.load(str(manifest.effect_map))
+            if manifest.effect_map and Path(manifest.effect_map).exists()
+            else None
+        ),
+        combined_variance_img=(
+            nib.load(str(manifest.variance_map))
+            if manifest.variance_map and Path(manifest.variance_map).exists()
+            else None
+        ),
+    )
+    if not estimates:
+        return None
+
+    path = _save(
+        run_consistency.peak_forest_figure(
+            estimates,
+            run_labels=manifest.included_runs,
+            effect_units=_unit_name(manifest),
+            title=f"{manifest.contrast_name}: per-run estimates at each peak",
+        ),
+        out_dir=out_dir / "plots" / _slug(manifest),
+        stem="run_consistency",
+        dense=False,
+        formats=cfg.formats,
+    )
+    if path is None:
+        return None
+    return html.Figure(
+        title="Run consistency at each peak",
+        path=path,
+        dense=False,
+        caption=(
+            "A first-level contrast over several runs is a fixed-effects combination, "
+            "weighted equally per run: an effect resting on one run and an effect "
+            "present in all of them produce the same map and the same cluster table. "
+            "Each run's own estimate is shown against the combined one. Runs differing "
+            "is a measurement, not a fault — a task with habituation should show "
+            "exactly that."
+        ),
+    )
+
+
+def build_peak_response_block(
+    *,
+    manifest: ContrastManifest,
+    peaks: Sequence[Tuple[str, Tuple[float, float, float]]],
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> Optional[html.Figure]:
+    """The response shape at each peak, averaged over the events that drove it.
+
+    Returns ``None`` when the pieces are not on disk -- no design matrices, no TR, no
+    recorded contrast weights. Reading every run's 4D data again is the panel's real
+    cost, so it is skipped outright rather than half-built.
+    """
+    if not peaks or not manifest.design_matrices or not manifest.contrast_vector:
+        return None
+
+    from fmri_pipeline.analysis.report.figures import timeseries
+
+    responses = timeseries.collect_peak_responses(
+        peaks,
+        bold_paths=manifest.bold_paths,
+        design_paths=manifest.design_matrices,
+        contrast_columns=manifest.contrast_columns,
+        contrast_vector=manifest.contrast_vector,
+        t_r=manifest.t_r,
+    )
+    if not responses:
+        return None
+
+    path = _save(
+        timeseries.peak_response_figure(
+            responses,
+            title=f"{manifest.contrast_name}: response at each peak",
+        ),
+        out_dir=out_dir / "plots" / _slug(manifest),
+        stem="peak_response",
+        dense=False,
+        formats=cfg.formats,
+    )
+    if path is None:
+        return None
+    return html.Figure(
+        title="Response shape at each peak",
+        path=path,
+        dense=False,
+        caption=(
+            "The signal at each peak, averaged over the onsets of every condition the "
+            "contrast weights. A peak driven by the task carries a rise, a plateau, "
+            "and an undershoot, and the conditions separate in the direction the "
+            "contrast weights them; a peak driven by a few coincident frames carries "
+            "neither, and reaches the same z either way. Descriptive only — the map's "
+            "z is the test."
+        ),
+    )
+
+
+def build_tissue_block(
+    *,
+    manifest: ContrastManifest,
+    stat_img: Any,
+    mask_img: Any,
+    threshold: float,
+    deriv_root: Path,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+    facts: Optional[SummaryFacts] = None,
+) -> Optional[html.Figure]:
+    """Where in the brain the surviving voxels sit.
+
+    Returns ``None`` when no segmentation is available, which is a property of the
+    derivatives rather than a fault -- the carpet declines the same way when it cannot
+    order its rows by tissue.
+    """
+    from fmri_pipeline.analysis.report.assets import discover_plot_assets
+    from fmri_pipeline.analysis.report.figures import carpet as carpet_figures
+    from fmri_pipeline.analysis.report.figures import tissue as tissue_figures
+
+    assets = discover_plot_assets(
+        deriv_root=Path(deriv_root),
+        subject=manifest.subject,
+        task=manifest.task,
+        space=manifest.space,
+    )
+    codes, source = carpet_figures.resolve_tissue_codes(
+        np.asarray(stat_img.get_fdata()).shape[:3],
+        assets=assets,
+        reference_img=stat_img,
+    )
+    if codes is None:
+        return None
+
+    slices = tissue_figures.split_by_tissue(
+        stat_img, tissue_codes=codes, mask_img=mask_img
+    )
+    if not slices:
+        return None
+
+    rates = tissue_figures.enrichment(
+        slices, threshold=float(threshold), two_sided=manifest.two_sided
+    )
+    _note(
+        facts,
+        f"{manifest.contrast_name}: survival by tissue",
+        ", ".join(
+            f"{name} {100.0 * share:.1f}%"
+            for name, share, *_rest in sorted(rates, key=lambda entry: -entry[1])
+        ),
+    )
+
+    path = _save(
+        tissue_figures.tissue_distribution_figure(
+            slices,
+            threshold=float(threshold),
+            two_sided=manifest.two_sided,
+            tissue_source=source,
+            title=f"{manifest.contrast_name}: where the result sits",
+        ),
+        out_dir=out_dir / "plots" / _slug(manifest),
+        stem="tissue_distribution",
+        dense=False,
+        formats=cfg.formats,
+    )
+    if path is None:
+        return None
+    return html.Figure(
+        title="Where the result sits",
+        path=path,
+        dense=False,
+        caption=(
+            "A BOLD effect is a grey-matter phenomenon. Voxels surviving "
+            "disproportionately in white matter, in the ventricles, or around the "
+            "brain edge indicate residual motion, a coregistration shift, or "
+            "pulsatility — all of which reach the cluster table looking like a "
+            "result. How much grey-matter enrichment to expect depends on the "
+            "contrast and on the segmentation's accuracy at this resolution, so the "
+            "rates are reported without a criterion attached."
+        ),
+    )
+
+
+def _in_mask(img: Any, mask_img: Any) -> np.ndarray:
+    """Flatten a volume over the analysis mask, or over its finite voxels."""
+    data = np.asarray(img.get_fdata())
+    if mask_img is not None:
+        mask = np.asanyarray(mask_img.dataobj).astype(bool)
+        if mask.shape == data.shape:
+            return data[mask]
+    return data[np.isfinite(data)]
+
+
+def _effect_versus_evidence_block(
+    *,
+    manifest: ContrastManifest,
+    mask_img: Any,
+    stat_img: Any,
+    threshold: Optional[float],
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> Optional[html.Figure]:
+    """The panel that separates a large effect from a precisely measured one.
+
+    Both maps are already on disk, so this costs a read and no model fit.
+    """
+    import nibabel as nib
+
+    effect = _in_mask(nib.load(str(manifest.effect_map)), mask_img)
+    statistic = _in_mask(stat_img, mask_img)
+    if effect.size != statistic.size:
+        logger.info(
+            "Effect and statistic maps disagree on voxel count (%d vs %d); skipping "
+            "the effect-versus-evidence panel.",
+            effect.size,
+            statistic.size,
+        )
+        return None
+
+    error = None
+    if manifest.variance_map and Path(manifest.variance_map).exists():
+        variance = _in_mask(nib.load(str(manifest.variance_map)), mask_img)
+        if variance.size == effect.size:
+            error = np.sqrt(np.clip(variance, 0, None))
+
+    path = _save(
+        distribution_figures.effect_versus_evidence_figure(
+            effect,
+            statistic,
+            standard_error=error,
+            threshold=threshold,
+            effect_units=_unit_name(manifest),
+            title=f"{manifest.contrast_name}: effect against evidence",
+        ),
+        out_dir=out_dir / "plots" / _slug(manifest),
+        stem="effect_versus_evidence",
+        formats=cfg.formats,
+    )
+    if path is None:
+        return None
+    return html.Figure(
+        title="Effect against evidence",
+        path=path,
+        dense=True,
+        caption=(
+            "Every voxel in the analysis mask: its effect against the evidence for "
+            "it. A small effect measured precisely clears the threshold; a large one "
+            "measured in a dropout region does not. Neither is visible in a z map or "
+            "an effect map alone. Colour is the standard error, which is what "
+            "separates the two cases."
+        ),
+    )
+
+
 def build_diagnostics_section(
     *,
     manifest: ContrastManifest,
+    deriv_root: Path,
     out_dir: Path,
     cfg: FmriReportConfig,
     background: Any = None,
@@ -1098,7 +1790,30 @@ def build_diagnostics_section(
     plots_dir = out_dir / "plots" / _slug(manifest)
     stat_img = nib.load(str(manifest.stat_map))
     mask_img = _load_mask(manifest)
-    blocks: List[html.Block] = []
+    blocks: List[html.Block] = [
+        build_model_fit_measurement_block(
+            manifest=manifest,
+            out_dir=out_dir,
+        ),
+        build_residual_carpet_block(
+            manifest=manifest,
+            deriv_root=deriv_root,
+            out_dir=out_dir,
+            cfg=cfg,
+        ),
+        build_residual_standard_deviation_block(
+            manifest=manifest,
+            out_dir=out_dir,
+            cfg=cfg,
+            background=background,
+            mask_img=mask_img,
+        ),
+        build_residual_autocorrelation_block(
+            manifest=manifest,
+            out_dir=out_dir,
+            cfg=cfg,
+        ),
+    ]
 
     if cfg.include_unthresholded:
         with _panel(f"unthresholded panel for {manifest.contrast_name}"):
@@ -1164,6 +1879,244 @@ def build_diagnostics_section(
     )
 
 
+def build_model_fit_measurement_block(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+) -> html.Table:
+    """Tabulate direct measurements from the exact fitted-model series."""
+    if manifest.mask is None:
+        raise ValueError("Model-fit measurements require the fitted analysis mask.")
+
+    from fmri_pipeline.analysis.report.figures import model_fit
+
+    measurements = model_fit.summarize_model_fit(
+        run_labels=manifest.included_runs,
+        residual_paths=manifest.residual_paths,
+        predicted_paths=manifest.predicted_paths,
+        mask_path=manifest.mask,
+    )
+    response_units = _unit_name(manifest)
+    table_html, _rows = model_fit.model_fit_table(
+        measurements,
+        response_units=response_units,
+    )
+    tsv_path = model_fit.write_model_fit_tsv(
+        measurements,
+        path=(out_dir / "plots" / _slug(manifest) / "model_fit_measurements.tsv"),
+        response_units=response_units,
+    )
+    return html.Table(
+        title="Model-fit measurements by run",
+        html=table_html,
+        tsv_path=tsv_path,
+        caption=(
+            "Computed voxelwise inside the fitted analysis mask, then reported as "
+            "the median and 25th–75th percentiles across voxels. "
+            "R² = 1 − Σ(Y − Ŷ)² / Σ(Y − Ȳ)², with Y = Ŷ + e from the recorded "
+            "prediction and residual series. Residual SD uses population scaling "
+            "(ddof = 0). ACF(1) = Σ(eₜ − ē)(eₜ₊₁ − ē) / Σ(eₜ − ē)². "
+            f"Series space: {manifest.model_fit_series_space.replace('-', ' ', 1)}; "
+            "only the manifest's retained frames are present. No criterion is applied."
+        ),
+    )
+
+
+def build_residual_carpet_block(
+    *,
+    manifest: ContrastManifest,
+    deriv_root: Path,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> html.Figure:
+    """Draw exact fitted residuals on their acquired-frame axis."""
+    if manifest.mask is None:
+        raise ValueError("The residual carpet requires the fitted analysis mask.")
+
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.assets import discover_plot_assets
+    from fmri_pipeline.analysis.report.figures import model_fit
+
+    mask_image = nib.load(str(manifest.mask))
+    mask = np.asanyarray(mask_image.dataobj).astype(bool)
+    residual_reference = nib.load(str(manifest.residual_paths[0]))
+    assets = discover_plot_assets(
+        deriv_root=Path(deriv_root),
+        subject=manifest.subject,
+        task=manifest.task,
+        space=manifest.space,
+    )
+    tissue_volume, tissue_source = carpet_figures.resolve_tissue_codes(
+        tuple(mask_image.shape),
+        assets=assets,
+        reference_img=residual_reference,
+    )
+    tissue_codes = None if tissue_volume is None else tissue_volume[mask]
+    acquired_frame_counts = tuple(int(nib.load(str(path)).shape[3]) for path in manifest.bold_paths)
+    residual_carpet = model_fit.collect_residual_carpet(
+        residual_paths=manifest.residual_paths,
+        retained_frame_indices=manifest.retained_frame_indices,
+        acquired_frame_counts=acquired_frame_counts,
+        mask_path=manifest.mask,
+        tissue_codes=tissue_codes,
+    )
+    path = _save(
+        carpet_figures.carpet_figure(
+            residual_carpet.values,
+            tissue_codes=residual_carpet.tissue_codes,
+            tissue_source=tissue_source,
+            tr=float(manifest.t_r),
+            run_boundaries=residual_carpet.run_boundaries,
+            run_labels=manifest.included_runs,
+            not_retained=residual_carpet.not_retained,
+            voxel_source="fitted analysis mask",
+            voxel_count_total=residual_carpet.total_voxels,
+            title=f"{manifest.contrast_name}: model-response residuals",
+        ),
+        out_dir=out_dir / "plots" / _slug(manifest),
+        stem="residual_carpet",
+        formats=cfg.formats,
+    )
+    if path is None:
+        raise RuntimeError("The model-response residual carpet was not written.")
+    return html.Figure(
+        title="Model-response residual carpet",
+        path=path,
+        caption=(
+            "Residual = Y − Xβ, reconstructed in the unwhitened model-response "
+            "space. Each voxel is standardized within each run using only its "
+            "retained residual frames. Grey columns locate acquired frames without "
+            "a fitted-series value. No criterion is applied."
+        ),
+    )
+
+
+def build_residual_standard_deviation_block(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+    background: Any,
+    mask_img: Any,
+) -> html.Figure:
+    """Persist and draw pooled temporal SD of the exact fitted residuals."""
+    if manifest.mask is None:
+        raise ValueError("The residual SD map requires the fitted analysis mask.")
+
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import model_fit
+
+    result = model_fit.pooled_residual_standard_deviation(
+        residual_paths=manifest.residual_paths,
+        mask_path=manifest.mask,
+    )
+    artifact_dir = out_dir / "plots" / _slug(manifest)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    map_path = artifact_dir / "residual_standard_deviation.nii.gz"
+    nib.save(result.image, str(map_path))
+    if not map_path.is_file():
+        raise RuntimeError("The pooled residual SD map was not written.")
+
+    series_space = manifest.model_fit_series_space.replace("-", " ", 1)
+    response_units = _unit_name(manifest)
+    path = _save(
+        stat_map_figures.magnitude_mosaic(
+            result.image,
+            bg_img=background,
+            mask_img=mask_img,
+            radiological=manifest.radiological,
+            cbar_label=f"Residual SD ({response_units})",
+            title=f"{manifest.contrast_name}: pooled residual SD",
+            extra_provenance=(
+                f"{result.retained_frames:,} retained residual samples from "
+                f"{result.run_count} run(s)",
+                "population SD (ddof = 0)",
+                f"series space: {series_space}",
+            ),
+        ),
+        out_dir=artifact_dir,
+        stem="residual_standard_deviation",
+        formats=cfg.formats,
+    )
+    if path is None:
+        raise RuntimeError("The pooled residual SD figure was not written.")
+    return html.Figure(
+        title="Pooled residual standard deviation",
+        path=path,
+        caption=(
+            "At each fitted-mask voxel, SD(e) = √[Σ(e − ē)² / N] across all "
+            f"{result.retained_frames:,} retained samples from {result.run_count} "
+            f"run(s) (ddof = 0). Series space: {series_space}. Raw map: "
+            f"{map_path.name}. No criterion is applied."
+        ),
+    )
+
+
+def build_residual_autocorrelation_block(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> html.Figure:
+    """Measure and draw residual ACF at exact acquired-frame lags."""
+    if manifest.mask is None:
+        raise ValueError("Residual autocorrelation requires the fitted analysis mask.")
+
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import residual_autocorrelation
+
+    acquired_frame_counts = tuple(int(nib.load(str(path)).shape[3]) for path in manifest.bold_paths)
+    max_lag_frames = min(
+        residual_autocorrelation.DEFAULT_MAX_LAG_FRAMES,
+        min(acquired_frame_counts) - 1,
+    )
+    runs = residual_autocorrelation.collect_residual_autocorrelation(
+        run_labels=manifest.included_runs,
+        residual_paths=manifest.residual_paths,
+        retained_frame_indices=manifest.retained_frame_indices,
+        acquired_frame_counts=acquired_frame_counts,
+        mask_path=manifest.mask,
+        max_lag_frames=max_lag_frames,
+    )
+    artifact_dir = out_dir / "plots" / _slug(manifest)
+    tsv_path = residual_autocorrelation.write_residual_autocorrelation_tsv(
+        runs,
+        tr=float(manifest.t_r),
+        path=artifact_dir / "residual_autocorrelation.tsv",
+    )
+    path = _save(
+        residual_autocorrelation.residual_autocorrelation_figure(
+            runs,
+            tr=float(manifest.t_r),
+            title=f"{manifest.contrast_name}: residual autocorrelation",
+        ),
+        out_dir=artifact_dir,
+        stem="residual_autocorrelation",
+        formats=cfg.formats,
+        dense=False,
+    )
+    if path is None:
+        raise RuntimeError("The residual-autocorrelation figure was not written.")
+
+    series_space = manifest.model_fit_series_space.replace("-", " ", 1)
+    return html.Figure(
+        title="Residual autocorrelation by run",
+        path=path,
+        dense=False,
+        caption=(
+            "At each fitted-mask voxel and acquired-frame lag k, ACF(k) = "
+            "Σ(eₜ − ē)(eₜ₊ₖ − ē) / Σ(eₜ − ē)². A pair is included only when "
+            "both retained samples' original acquired-frame indices differ by k. "
+            "Lines are voxel medians; bands are the 25th–75th percentiles. "
+            f"Series space: {series_space}. Exact plotted values: {tsv_path.name}. "
+            "No criterion is applied."
+        ),
+    )
+
+
 def _contrast_for_run(
     manifest: ContrastManifest, columns: Sequence[str]
 ) -> Tuple[Optional[Dict[str, float]], List[str]]:
@@ -1189,54 +2142,19 @@ def _contrast_for_run(
     return (weights or None), dropped
 
 
-def _design_summary_items(summary: Any) -> Tuple[Tuple[str, str], ...]:
-    """Render a DesignSummary as label/value pairs.
-
-    Efficiency is stated without a threshold: it is comparable between designs for
-    the same contrast and meaningless as an absolute number, so a cutoff here would
-    be a verdict the pipeline invented.
-    """
-
-    def _number(value: Optional[float]) -> str:
-        if value is None:
-            return "not estimable"
-        if not np.isfinite(value):
-            return "∞ (exactly collinear)"
-        return f"{value:.3g}"
-
-    items = [
-        ("Scans", f"{summary.n_scans:,}"),
-        (
-            "Regressors",
-            # Rank beside the count, and only when they differ. A design whose columns
-            # are linearly dependent carries fewer parameters than it appears to, and
-            # no other line in the report says so.
-            str(summary.n_regressors)
-            if summary.rank == summary.n_regressors
-            else f"{summary.n_regressors} ({summary.rank} independent; design is rank deficient)",
-        ),
-        (
-            "Residual degrees of freedom",
-            # The denominator of every t this design produces. A map can look decisive
-            # on very few, and nothing else here would reveal it.
-            f"{summary.residual_dof:,}",
-        ),
-        ("Condition number", _number(summary.condition_number)),
-        ("Largest VIF", _number(summary.max_vif)),
-    ]
-    if summary.max_vif_regressor:
-        items.append(("Most inflated regressor", summary.max_vif_regressor))
-    items.append(("Contrast efficiency", _number(summary.efficiency)))
-    return tuple(items)
-
-
 def build_design_section(
     *,
     manifest: ContrastManifest,
     out_dir: Path,
     cfg: FmriReportConfig,
 ) -> Optional[html.Section]:
-    """Build the design matrix and collinearity panels, if a design was recorded."""
+    """Build the design matrix and collinearity panels, if a design was recorded.
+
+    The per-run scalars are one table rather than one key-value block per run. Six
+    runs produced six stacked blocks of the same seven labels, and comparing a
+    condition number across runs meant scrolling between them -- while comparison
+    across runs is the entire reason those numbers are reported per run.
+    """
     import pandas as pd
 
     from fmri_pipeline.analysis.report.figures import design as design_figures
@@ -1247,6 +2165,19 @@ def build_design_section(
 
     plots_dir = out_dir / "plots" / _slug(manifest)
     blocks: List[html.Block] = []
+    summaries: List[Any] = []
+    summary_labels: List[str] = []
+    event_counts: List[Dict[str, int]] = []
+    onsets_per_run: List[Dict[str, Any]] = []
+    frames: List[Any] = []
+    # The conditions this contrast weights, in the order it weights them.
+    weighted = [
+        str(name)
+        for name, weight in zip(
+            manifest.contrast_columns, manifest.contrast_vector or ()
+        )
+        if float(weight) != 0.0
+    ]
 
     for index, path in enumerate(existing):
         run_label = manifest.included_runs[index] if index < len(manifest.included_runs) else f"run-{index + 1:02d}"
@@ -1286,55 +2217,142 @@ def build_design_section(
                     )
                 )
 
-            saved = _save(
-                design_figures.regressor_correlation_figure(frame, run_label=run_label),
-                out_dir=plots_dir,
-                stem=f"design_correlation_{run_label}",
-                formats=cfg.formats,
+            # Collinearity is compared *between* runs, so both panels are drawn once
+            # over all of them rather than once per run. Six near-identical bar charts
+            # made a reader hold six pictures in mind to answer one question, and the
+            # spread across runs -- which distinguishes a property of the design from a
+            # property of one run -- was never shown at all.
+            frames.append(frame)
+            summaries.append(design_figures.summarize_design(frame, contrast=contrast))
+            summary_labels.append(run_label)
+            event_counts.append(design_figures.count_events(frame, weighted))
+            onsets_per_run.append(
+                {
+                    name: design_figures.onset_rows(frame[name].to_numpy(dtype=float))
+                    for name in weighted
+                    if name in frame.columns
+                }
             )
-            if saved:
-                blocks.append(
-                    html.Figure(
-                        title=f"Regressor correlation · {run_label}",
-                        path=saved,
-                        dense=False,
-                        caption=(
-                            "Correlation between design columns. Strong off-diagonal "
-                            "structure means the contrast's regressors share variance."
-                        ),
-                    )
-                )
 
+    if len(frames) > 1:
+        with _panel(f"variance inflation for {manifest.contrast_name}"):
             saved = _save(
-                design_figures.variance_inflation_figure(
-                    frame, contrast=contrast, run_label=run_label
+                design_figures.variance_inflation_across_runs_figure(
+                    frames,
+                    contrast=_contrast_for_run(manifest, list(frames[0].columns))[0],
+                    run_labels=summary_labels,
                 ),
                 out_dir=plots_dir,
-                stem=f"design_vif_{run_label}",
+                stem="design_vif",
+                dense=False,
                 formats=cfg.formats,
             )
             if saved:
                 blocks.append(
                     html.Figure(
-                        title=f"Variance inflation · {run_label}",
+                        title="Variance inflation",
                         path=saved,
                         dense=False,
                         caption=(
-                            "Variance inflation factor per regressor, reported as a "
-                            "measurement. No cutoff is applied. The regressors this "
+                            "Variance inflation per regressor, every run on one axis. "
+                            "A regressor inflated in every run is a property of the "
+                            "design; one inflated in a single run is a property of "
+                            "that run — a lost condition, a censored block — and the "
+                            "two call for different responses. Reported as a "
+                            "measurement; no cutoff is applied. The regressors this "
                             "contrast weights are marked, since inflation on those is "
-                            "what costs the comparison above its precision."
+                            "what costs the comparison its precision."
                         ),
                     )
                 )
 
-            summary = design_figures.summarize_design(frame, contrast=contrast)
-            blocks.append(
-                html.KeyValues(
-                    title=f"Design summary · {run_label}",
-                    items=_design_summary_items(summary),
-                )
+        with _panel(f"regressor correlation for {manifest.contrast_name}"):
+            saved = _save(
+                design_figures.regressor_correlation_across_runs_figure(
+                    frames, run_labels=summary_labels
+                ),
+                out_dir=plots_dir,
+                stem="design_correlation",
+                formats=cfg.formats,
             )
+            if saved:
+                blocks.append(
+                    html.Figure(
+                        title="Regressor correlation",
+                        path=saved,
+                        dense=True,
+                        caption=(
+                            "The strongest correlation each pair reaches in any run. "
+                            "A pair collinear in a single run costs the contrast its "
+                            "precision in that run, and averaging across runs would "
+                            "dilute exactly that away."
+                        ),
+                    )
+                )
+
+    if summaries:
+        table_html, rows = design_figures.design_summary_table(
+            summaries,
+            run_labels=summary_labels,
+            event_counts=event_counts,
+            condition_names=weighted,
+        )
+        tsv_path = plots_dir / "design_summary.tsv"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        tsv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        # The raster after the table: the table counts the events, the raster shows
+        # where they fell -- and timing is what decides whether two conditions are
+        # separable at all, which no count and no condition number reveals.
+        if any(onsets_per_run):
+            with _panel(f"event raster for {manifest.contrast_name}"):
+                raster_path = _save(
+                    design_figures.event_raster_figure(
+                        onsets_per_run,
+                        run_labels=summary_labels,
+                        condition_names=weighted,
+                        tr_seconds=manifest.t_r,
+                        title=f"{manifest.contrast_name}: event timing",
+                    ),
+                    out_dir=plots_dir,
+                    stem="event_raster",
+                    dense=False,
+                    formats=cfg.formats,
+                )
+                if raster_path:
+                    blocks.insert(
+                        0,
+                        html.Figure(
+                            title="Event timing",
+                            path=raster_path,
+                            dense=False,
+                            caption=(
+                                "Conditions that alternate are separable; conditions "
+                                "that block against one another share their variance "
+                                "with drift, and a run whose conditions are ordered "
+                                "rather than interleaved confounds the contrast with "
+                                "time-on-task. None of that shows in a count or a "
+                                "condition number."
+                            ),
+                        ),
+                    )
+
+        # First, before the per-run figures: it is the comparison across runs, and the
+        # figures are what a reader opens after the table sends them to one run.
+        blocks.insert(
+            0,
+            html.Table(
+                title="Design summary by run",
+                html=table_html,
+                tsv_path=tsv_path,
+                caption=(
+                    "Efficiency is comparable between designs for the same contrast "
+                    "and meaningless as an absolute number, so no cutoff is applied "
+                    "to it or to anything else here. Event counts are the onsets in "
+                    "each run's own convolved regressor, so a trial the model's "
+                    "scoping dropped is already absent."
+                ),
+            ),
+        )
 
     if not blocks:
         return None
@@ -1370,43 +2388,54 @@ def build_signature_section(
 
     plots_dir = out_dir / "plots" / _slug(manifest)
     blocks: List[html.Block] = []
-    with _panel(f"signature expression for {manifest.contrast_name}"):
-        path = _save(
-            signature_figures.signature_dot_plot(
-                points, title=f"{manifest.contrast_name}: signature expression"
-            ),
-            out_dir=plots_dir,
-            stem="signature_expression",
-            formats=cfg.formats,
-        )
-        if path:
-            blocks.append(
-                html.Figure(
-                    title="Signature expression",
-                    path=path,
-                    dense=False,
-                    caption=(
-                        "Cosine similarity between the unthresholded effect map and "
-                        "each signature's weight map. Sign carries the "
-                        "interpretation; no threshold is applied."
-                    ),
-                )
-            )
 
+    # The table always. It carries every quantity, and it is what a reader quotes.
+    #
+    # The download links the analysis run's own TSV rather than a copy written here.
+    # A copy would carry this table's *formatted* values, and writing it under the
+    # source's own name is one path collision away from overwriting the derivative.
+    table_html, _rows = signature_figures.signature_table(points)
     blocks.append(
-        html.KeyValues(
-            title="Expression values",
-            items=tuple(
-                (
-                    point.name,
-                    "cosine "
-                    + ("n/a" if point.cosine is None else f"{point.cosine:+.3f}")
-                    + f" · dot {point.dot:+.3g} · {point.n_voxels:,} voxels",
-                )
-                for point in points
+        html.Table(
+            title="Signature expression",
+            html=table_html,
+            tsv_path=tsv_path,
+            caption=(
+                "Similarity between the unthresholded effect map and each signature's "
+                "weight map. Sign carries the interpretation; no threshold is applied. "
+                "Cosine is bounded and unitless, so it compares across subjects; the "
+                "dot product is in the effect map's own units and does not. Voxels is "
+                "the overlap the score was computed over."
             ),
         )
     )
+
+    # The figure only once the ordering is the point. Two signatures on an axis are
+    # two numbers the table already gives, printed twice on one screen.
+    if len(points) >= signature_figures.MIN_SIGNATURES_FOR_A_PLOT:
+        with _panel(f"signature expression for {manifest.contrast_name}"):
+            path = _save(
+                signature_figures.signature_dot_plot(
+                    points, title=f"{manifest.contrast_name}: signature expression"
+                ),
+                out_dir=plots_dir,
+                stem="signature_expression",
+                dense=False,
+                formats=cfg.formats,
+            )
+            if path:
+                blocks.append(
+                    html.Figure(
+                        title="Signature expression · ordered",
+                        path=path,
+                        dense=False,
+                        caption=(
+                            "The same cosine similarities, ordered. Drawn because "
+                            f"{len(points)} signatures are more readily compared as a "
+                            "shape than as a column of numbers."
+                        ),
+                    )
+                )
 
     if not blocks:
         return None
@@ -1414,6 +2443,36 @@ def build_signature_section(
         slug=f"{_slug(manifest)}-signatures",
         title=f"Signatures: {manifest.contrast_name}",
         blocks=tuple(blocks),
+    )
+
+
+def build_summary_section(facts: SummaryFacts) -> Optional[html.Section]:
+    """The numbers that decide whether this subject's result is usable.
+
+    Every value here is restated from the panel that produced it, and every one of
+    them is a measurement. No threshold is applied and nothing is scored: which
+    censoring fraction or which tSNR makes a subject usable is a study's decision, and
+    a summary that answered it would be inventing the study's criteria.
+
+    Returns ``None`` when no panel reported anything, which happens when every QC
+    panel is switched off -- an empty summary block would claim the document had been
+    summarised.
+    """
+    if not facts:
+        return None
+    return html.Section(
+        slug="summary",
+        title="At a glance",
+        blocks=(
+            html.KeyValues(title="Measurements", items=facts.items),
+            html.Note(
+                text=(
+                    "Restated from the panels below, which is where each number's "
+                    "provenance is. Measurements only: nothing here is scored against "
+                    "a criterion."
+                )
+            ),
+        ),
     )
 
 
@@ -1589,6 +2648,9 @@ def build_subject_report(
     """Render one document covering every contrast of a subject and task."""
     if not manifests:
         raise ValueError("Cannot build a subject report with no contrasts.")
+    validate_manifest_collection(manifests)
+    for manifest in manifests:
+        validate_manifest_artifacts(manifest)
 
     first = manifests[0]
     out_path = Path(out_path)
@@ -1600,14 +2662,21 @@ def build_subject_report(
         deriv_root=Path(deriv_root), manifest=first
     )
 
-    # Trimmed to what was modelled. Nilearn chooses slice positions across the
-    # underlay's extent, so an untrimmed whole-head T1w put the vertex and the neck in
-    # every mosaic and left the brain occupying about half of each tile. The analysis
-    # mask is a property of the subject-task rather than of one contrast -- it is the
+    # Put on the analysis mask's own grid: axis-aligned, and bounded by what was
+    # modelled. Nilearn chooses slice positions across the underlay's extent, so an
+    # untrimmed whole-head T1w put the vertex and the neck in every mosaic; and this
+    # study's T1w is 10.7 degrees oblique against an axis-aligned mask, which rendered
+    # the head visibly tilted with black wedges in every tile. The analysis mask is a
+    # property of the subject-task rather than of one contrast -- it is the
     # intersection across the runs they all share -- so it is applied once here.
-    from fmri_pipeline.analysis.report.figures._display import crop_to_mask
+    from fmri_pipeline.analysis.report.figures._display import report_underlay
 
-    background = crop_to_mask(background, _load_mask(first))
+    background = report_underlay(background, _load_mask(first))
+
+    # Collected as the panels compute their numbers, then placed at the top. A summary
+    # that recomputed them would need a second pass over the 4D data for the tSNR
+    # alone, and could drift from the panel it claims to restate.
+    facts = SummaryFacts()
 
     sections = [build_header_section(manifests, background_source=background_source)]
     sections.extend(
@@ -1617,12 +2686,18 @@ def build_subject_report(
             out_dir=out_dir,
             cfg=cfg,
             background=background,
+            facts=facts,
         )
     )
     for manifest in manifests:
         sections.append(
             build_contrast_section(
-                manifest=manifest, out_dir=out_dir, cfg=cfg, background=background
+                manifest=manifest,
+                out_dir=out_dir,
+                cfg=cfg,
+                background=background,
+                facts=facts,
+                deriv_root=Path(deriv_root),
             )
         )
         if cfg.include_design_qc:
@@ -1638,11 +2713,21 @@ def build_subject_report(
             sections.append(signature_section)
         sections.append(
             build_diagnostics_section(
-                manifest=manifest, out_dir=out_dir, cfg=cfg, background=background
+                manifest=manifest,
+                deriv_root=Path(deriv_root),
+                out_dir=out_dir,
+                cfg=cfg,
+                background=background,
             )
         )
     sections.append(build_methods_section(manifests))
     sections.append(build_configuration_section(manifests))
+
+    # Second in the document, after the overview that names the subject. Built last
+    # because it restates what the panels above measured.
+    summary_section = build_summary_section(facts)
+    if summary_section is not None:
+        sections.insert(1, summary_section)
 
     with _panel("configuration sidecar"):
         write_configuration_json(manifests, out_path=out_dir / "config.json")
@@ -1669,6 +2754,7 @@ __all__ = [
     "build_header_section",
     "build_methods_section",
     "build_qc_sections",
+    "build_summary_section",
     "build_signature_section",
     "build_subject_report",
     "coordinate_space_label",

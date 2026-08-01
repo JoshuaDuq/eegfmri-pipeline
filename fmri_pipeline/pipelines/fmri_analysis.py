@@ -89,7 +89,9 @@ def _contrast_vector_for_design(
             values = np.asarray(contrast_def, dtype=float).ravel()
         except (TypeError, ValueError):
             return None, columns
-        return (list(map(float, values)), columns) if values.size == len(columns) else (None, columns)
+        return (
+            (list(map(float, values)), columns) if values.size == len(columns) else (None, columns)
+        )
 
     try:
         from nilearn.glm.contrasts import expression_to_contrast_vector
@@ -159,13 +161,23 @@ class FmriAnalysisPipeline(PipelineBase):
             if not d.exists():
                 continue
             if func_mask is None:
-                masks = sorted(d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_desc-brain_mask.nii.gz"))
+                masks = sorted(
+                    d.glob(
+                        f"{sub_label}_task-{task}_run-*_space-{space_tok}_desc-brain_mask.nii.gz"
+                    )
+                )
                 func_mask = masks[0] if masks else None
             if func_bg is None:
                 # fMRIPrep commonly writes *_desc-preproc_boldref.nii.gz.
-                boldrefs = sorted(d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_desc-preproc_boldref.nii.gz"))
+                boldrefs = sorted(
+                    d.glob(
+                        f"{sub_label}_task-{task}_run-*_space-{space_tok}_desc-preproc_boldref.nii.gz"
+                    )
+                )
                 if not boldrefs:
-                    boldrefs = sorted(d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_boldref.nii.gz"))
+                    boldrefs = sorted(
+                        d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_boldref.nii.gz")
+                    )
                 func_bg = boldrefs[0] if boldrefs else None
             if func_mask is not None and func_bg is not None:
                 break
@@ -266,6 +278,17 @@ class FmriAnalysisPipeline(PipelineBase):
         self.logger.info("Saved %s", path.name)
         return path
 
+    def _save_required(self, img: Any, path: Path, *, artifact_name: str) -> Path:
+        """Write a required image, preserving the original write error."""
+        if img is None:
+            raise ValueError(f"Cannot write absent required artifact: {artifact_name}.")
+
+        import nibabel as nib
+
+        nib.save(img, str(path))
+        self.logger.info("Saved %s", path.name)
+        return path
+
     def _contrast_detail_maps(
         self, *, glm_result: Any, contrast_def: Any, plotting_cfg: Any
     ) -> tuple[Any, Any]:
@@ -288,7 +311,9 @@ class FmriAnalysisPipeline(PipelineBase):
 
         try:
             argument = _contrast_arg_for_model_runs(flm, contrast_def)
-            effect = flm.compute_contrast(argument, output_type="effect_size") if want_effect else None
+            effect = (
+                flm.compute_contrast(argument, output_type="effect_size") if want_effect else None
+            )
             variance = (
                 flm.compute_contrast(argument, output_type="effect_variance")
                 if want_variance
@@ -304,6 +329,61 @@ class FmriAnalysisPipeline(PipelineBase):
             )
             return None, None
         return effect, variance
+
+    def _run_level_maps(
+        self,
+        *,
+        glm_result: Any,
+        contrast_def: Any,
+        run_meta: Any,
+        out_dir: Path,
+        stem: str,
+        cfg_hash: str,
+    ) -> tuple[Optional[Path], Optional[Path], list[str]]:
+        """Write each run's own estimate of this contrast, from the fitted model.
+
+        A fixed-effects combination across runs is weighted equally per run, so an
+        effect resting on one run and an effect present in all of them produce the same
+        map and the same cluster table. These maps are what let the report tell the two
+        apart.
+
+        No refit: nilearn keeps ``labels_`` and ``results_`` per run and combines them
+        at ``compute_contrast`` time, so the per-run estimates already exist inside the
+        fitted object. Failing here costs one diagnostic panel, never the contrast --
+        which is on disk by the time this runs.
+        """
+        from fmri_pipeline.analysis.run_level import (
+            compute_run_level_contrast,
+            write_run_level_maps,
+        )
+
+        flm = getattr(glm_result, "flm", None)
+        if flm is None:
+            return None, None, []
+
+        # The manifest's own labeller, so the forest plot's rows carry the same run
+        # names as the motion table and the design section.
+        from fmri_pipeline.analysis.report.manifest import run_labels_from_bold_paths
+
+        included = run_meta.get("included_bold_paths") or [] if isinstance(run_meta, dict) else []
+        labels = list(run_labels_from_bold_paths(included))
+
+        try:
+            result = compute_run_level_contrast(flm, contrast_def, run_labels=labels)
+        except Exception as exc:
+            self.logger.warning("Could not compute run-level contrasts (%s)", exc)
+            return None, None, []
+        if result is None:
+            return None, None, []
+
+        effect_path, variance_path = write_run_level_maps(
+            result, out_dir=out_dir, stem=stem, cfg_hash=cfg_hash
+        )
+        if effect_path is not None:
+            self.logger.info(
+                "Saved run-level maps for %d run(s): %s", result.n_runs, effect_path.name
+            )
+        return effect_path, variance_path, list(result.run_labels)
 
     def _discover_tissue_segmentation(self, *, sub_label: str, space: str) -> Optional[Path]:
         """Discrete GM/WM/CSF segmentation used to order carpet-plot rows."""
@@ -368,7 +448,10 @@ class FmriAnalysisPipeline(PipelineBase):
         # (e.g., "beta" is represented by nilearn as "effect_size").
         output_type_req = str(getattr(contrast_cfg, "output_type", "z-score") or "z-score")
         output_type_actual = "z_score"
-        nifti_path = out_dir / f"{sub_label}_task-{task}_contrast-{contrast_name}_stat-{output_type_req}_{cfg_hash}.nii.gz"
+        nifti_path = (
+            out_dir
+            / f"{sub_label}_task-{task}_contrast-{contrast_name}_stat-{output_type_req}_{cfg_hash}.nii.gz"
+        )
         sidecar_path = nifti_path.with_suffix("").with_suffix(".json")
 
         if dry_run:
@@ -379,7 +462,9 @@ class FmriAnalysisPipeline(PipelineBase):
 
         self.logger.info(
             "=== fMRI first-level: %s, task-%s, contrast='%s' ===",
-            sub_label, task, contrast_name,
+            sub_label,
+            task,
+            contrast_name,
         )
         self.logger.info(
             "Output type: %s, space: %s",
@@ -405,7 +490,10 @@ class FmriAnalysisPipeline(PipelineBase):
 
         if isinstance(run_meta, dict) and run_meta.get("output_type"):
             output_type_actual = str(run_meta.get("output_type"))
-            nifti_path = out_dir / f"{sub_label}_task-{task}_contrast-{contrast_name}_stat-{output_type_actual}_{cfg_hash}.nii.gz"
+            nifti_path = (
+                out_dir
+                / f"{sub_label}_task-{task}_contrast-{contrast_name}_stat-{output_type_actual}_{cfg_hash}.nii.gz"
+            )
             sidecar_path = nifti_path.with_suffix("").with_suffix(".json")
 
         n_runs = run_meta.get("n_runs", "?") if isinstance(run_meta, dict) else "?"
@@ -414,10 +502,10 @@ class FmriAnalysisPipeline(PipelineBase):
             shape_repr = "unknown"
         self.logger.info(
             "GLM fit + contrast: %s runs, shape=%s (%.1fs)",
-            n_runs, shape_repr, glm_elapsed,
+            n_runs,
+            shape_repr,
+            glm_elapsed,
         )
-
-        contrast_img_for_plotting = contrast_img
 
         # The effect and the variance behind the same contrast, taken off the model
         # that is already fitted. Two compute_contrast calls, no refit.
@@ -475,29 +563,53 @@ class FmriAnalysisPipeline(PipelineBase):
         # derivatives, which is a single run's brain mask. The two differ, and the
         # difference reached the reader as a coverage panel claiming an intersection
         # it was not showing and colour limits taken over voxels the model never fit.
-        mask_path = self._save_optional(
-            analysis_mask_img, out_dir / f"{stem}_desc-analysis_mask_{cfg_hash}.nii.gz"
+        mask_path = self._save_required(
+            analysis_mask_img,
+            out_dir / f"{stem}_desc-analysis_mask_{cfg_hash}.nii.gz",
+            artifact_name="fitted analysis mask",
+        )
+
+        from fmri_pipeline.analysis.model_fit import (
+            extract_model_fit_images,
+            write_model_fit_images,
+        )
+        from fmri_pipeline.analysis.report.manifest import (
+            run_labels_from_bold_paths,
+        )
+
+        fitted_model = getattr(glm_result, "flm", None)
+        if fitted_model is None:
+            raise ValueError("Cannot write model-fit evidence without the fitted model.")
+        run_labels = run_labels_from_bold_paths(run_meta["included_bold_paths"])
+        model_fit_images = extract_model_fit_images(fitted_model)
+        model_fit_paths = write_model_fit_images(
+            model_fit_images,
+            out_dir=out_dir,
+            stem=stem,
+            cfg_hash=cfg_hash,
+            run_labels=run_labels,
+        )
+        self.logger.info(
+            "Saved residual and predicted model series for %d run(s)",
+            len(model_fit_paths.residuals),
+        )
+
+        run_effect_path, run_variance_path, run_level_labels = self._run_level_maps(
+            glm_result=glm_result,
+            contrast_def=contrast_def,
+            run_meta=run_meta,
+            out_dir=out_dir,
+            stem=stem,
+            cfg_hash=cfg_hash,
         )
 
         # Record what was fit, beside what was fit. This is what lets `fmri-analysis
         # report` render from the derivatives tree without touching the model.
         from fmri_pipeline.analysis.report.manifest import write_report_manifest
 
-        plot_cfg_for_manifest = plotting_cfg.normalized() if hasattr(plotting_cfg, "normalized") else None
-        manifest_space = (
-            "mni"
-            if str(run_meta.get("analysis_space", "") if isinstance(run_meta, dict) else "")
-            .lower()
-            .startswith("mni")
-            else "native"
+        plot_cfg_for_manifest = (
+            plotting_cfg.normalized() if hasattr(plotting_cfg, "normalized") else None
         )
-        if mask_path is None:
-            # Falling back to a discovered mask is better than none, but it is not the
-            # fitted mask and the manifest must not let it pass as one.
-            _bg, mask_path = self._discover_plot_assets(
-                sub_label=sub_label, task=task, space=manifest_space
-            )
-
         contrast_vector, contrast_columns = _contrast_vector_for_design(
             glm_result=glm_result, contrast_def=contrast_def
         )
@@ -508,25 +620,27 @@ class FmriAnalysisPipeline(PipelineBase):
             contrast_name=contrast_name,
             stat_map=nifti_path,
             run_meta=run_meta,
+            residual_paths=model_fit_paths.residuals,
+            predicted_paths=model_fit_paths.predicted,
             effect_map=effect_path,
             variance_map=variance_path,
+            run_effect_map=run_effect_path,
+            run_variance_map=run_variance_path,
             mask=mask_path,
             mask_is_analysis_mask=analysis_mask_img is not None and mask_path is not None,
-            design_matrices=[
-                Path(p) for p in (run_meta.get("design_matrix_tsv_paths") or [])
-            ] if isinstance(run_meta, dict) else [],
+            design_matrices=(
+                [Path(p) for p in (run_meta.get("design_matrix_tsv_paths") or [])]
+                if isinstance(run_meta, dict)
+                else []
+            ),
             contrast_vector=contrast_vector,
             contrast_columns=contrast_columns,
-            smoothing_fwhm=_optional_positive_float(
-                getattr(contrast_cfg, "smoothing_fwhm", None)
-            ),
+            smoothing_fwhm=_optional_positive_float(getattr(contrast_cfg, "smoothing_fwhm", None)),
             # Off the fitted model, not off the config. `contrast_cfg` has no
             # `signal_scaling` field, so reading one recorded "not scaled" for every
             # contrast ever produced -- while the model scales unconditionally -- and
             # the report labelled percent-signal-change maps "arbitrary BOLD units".
-            signal_scaling_mode=fitted_signal_scaling_mode(
-                getattr(glm_result, "flm", None)
-            ),
+            signal_scaling_mode=fitted_signal_scaling_mode(getattr(glm_result, "flm", None)),
             threshold_mode=getattr(plot_cfg_for_manifest, "threshold_mode", "z"),
             z_threshold=getattr(plot_cfg_for_manifest, "z_threshold", 2.3),
             fdr_q=getattr(plot_cfg_for_manifest, "fdr_q", 0.05),
@@ -535,8 +649,7 @@ class FmriAnalysisPipeline(PipelineBase):
             radiological=getattr(plot_cfg_for_manifest, "radiological", False),
             contrast_cfg=contrast_cfg,
         )
-        if manifest_path is not None:
-            self.logger.info("Wrote report manifest: %s", manifest_path.name)
+        self.logger.info("Wrote report manifest: %s", manifest_path.name)
 
         plotting_meta: Optional[dict[str, Any]] = None  # reporting now runs separately
         from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
@@ -556,7 +669,11 @@ class FmriAnalysisPipeline(PipelineBase):
                         **{**asdict(contrast_cfg), "fmriprep_space": "MNI152NLin2009cAsym"}
                     )
                 else:
-                    cfg_mni = replace(contrast_cfg) if is_dataclass(contrast_cfg) else copy.deepcopy(contrast_cfg)
+                    cfg_mni = (
+                        replace(contrast_cfg)
+                        if is_dataclass(contrast_cfg)
+                        else copy.deepcopy(contrast_cfg)
+                    )
                     if hasattr(cfg_mni, "fmriprep_space"):
                         setattr(cfg_mni, "fmriprep_space", "MNI152NLin2009cAsym")
 
@@ -590,18 +707,22 @@ class FmriAnalysisPipeline(PipelineBase):
                     if need_mni_variance:
                         mni_variance = nib.load(str(mni_variance_path))
                 else:
-                    mni_img, _mni_meta, mni_glm, mni_contrast_def, _mni_out_type = build_contrast_from_runs_detailed(
-                        bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
-                        bids_derivatives=deriv_root,
-                        subject=subject,
-                        task=task,
-                        cfg=cfg_mni,
-                        output_dir=out_dir,
+                    mni_img, _mni_meta, mni_glm, mni_contrast_def, _mni_out_type = (
+                        build_contrast_from_runs_detailed(
+                            bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
+                            bids_derivatives=deriv_root,
+                            subject=subject,
+                            task=task,
+                            cfg=cfg_mni,
+                            output_dir=out_dir,
+                        )
                     )
                     nib.save(mni_img, str(mni_nifti_path))
 
                     if need_mni_effect or need_mni_variance:
-                        mni_contrast_arg = _contrast_arg_for_model_runs(mni_glm.flm, mni_contrast_def)
+                        mni_contrast_arg = _contrast_arg_for_model_runs(
+                            mni_glm.flm, mni_contrast_def
+                        )
                         if need_mni_effect:
                             mni_effect = mni_glm.flm.compute_contrast(
                                 mni_contrast_arg,
@@ -615,11 +736,11 @@ class FmriAnalysisPipeline(PipelineBase):
                             )
                             nib.save(mni_variance, str(mni_variance_path))
 
-            native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
-            mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")
-            tissue_seg = self._discover_tissue_segmentation(
-                sub_label=sub_label,
-                space=str(getattr(contrast_cfg, "fmriprep_space", "T1w") or "T1w"),
+            native_bg, native_mask = self._discover_plot_assets(
+                sub_label=sub_label, task=task, space="native"
+            )
+            mni_bg, mni_mask = self._discover_plot_assets(
+                sub_label=sub_label, task=task, space="mni"
             )
             sig_root, sig_specs = self._discover_signature_root_and_specs()
 
@@ -641,9 +762,7 @@ class FmriAnalysisPipeline(PipelineBase):
                         stat_or_effect_img=mni_effect,
                         signature_root=sig_root,
                         signature_specs=sig_specs,
-                        mask_img=(
-                            nib.load(str(mni_mask)) if mni_mask is not None else None
-                        ),
+                        mask_img=(nib.load(str(mni_mask)) if mni_mask is not None else None),
                     )
                     tsv_path = write_signature_expression_tsv(
                         signature_results, out_dir / "signature_expression.tsv"
@@ -665,9 +784,17 @@ class FmriAnalysisPipeline(PipelineBase):
             "output_type_requested": output_type_req,
             "output_type_actual": output_type_actual,
             "run_meta": run_meta,
-            "contrast_cfg": asdict(contrast_cfg) if hasattr(contrast_cfg, "__dataclass_fields__") else repr(contrast_cfg),
+            "contrast_cfg": (
+                asdict(contrast_cfg)
+                if hasattr(contrast_cfg, "__dataclass_fields__")
+                else repr(contrast_cfg)
+            ),
             "plotting": {
-                "cfg": asdict(plotting_cfg) if hasattr(plotting_cfg, "__dataclass_fields__") else repr(plotting_cfg),
+                "cfg": (
+                    asdict(plotting_cfg)
+                    if hasattr(plotting_cfg, "__dataclass_fields__")
+                    else repr(plotting_cfg)
+                ),
                 "outputs": plotting_meta,
             },
         }
@@ -676,7 +803,10 @@ class FmriAnalysisPipeline(PipelineBase):
         total_elapsed = _time.perf_counter() - t_glm
         self.logger.info(
             "fMRI analysis complete for %s: contrast='%s', stat=%s (%.1fs total)",
-            sub_label, contrast_name, output_type_actual, total_elapsed,
+            sub_label,
+            contrast_name,
+            output_type_actual,
+            total_elapsed,
         )
 
         if progress is not None and hasattr(progress, "subject_done"):
