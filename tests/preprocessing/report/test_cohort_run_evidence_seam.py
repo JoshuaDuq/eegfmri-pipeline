@@ -84,7 +84,7 @@ def test_the_measuring_pass_records_volume_timing_per_run(tmp_path) -> None:
     assert timing.repetition_time_s == np.float64(TR)
 
 
-def test_the_measuring_pass_records_a_floor_corrected_locked_amplitude(tmp_path) -> None:
+def test_the_measuring_pass_records_a_resolved_locked_amplitude(tmp_path) -> None:
     """It rides on the average the panel already draws, so it costs no extra pass."""
     _write_run(tmp_path, "sub-0014_task-x_run-1", _raw(with_markers=True))
 
@@ -96,14 +96,14 @@ def test_the_measuring_pass_records_a_floor_corrected_locked_amplitude(tmp_path)
 
     average = evidence.locked_averages[0]
     truth_uv = 4e-6 / np.sqrt(2.0) * 1e6
-    assert average.before_amplitude_uv == pytest.approx(truth_uv, rel=0.3)
+    assert average.before_resolved_amplitude_uv == pytest.approx(truth_uv, rel=0.3)
     assert average.before_noise_floor_uv > 0.0
     # This ICA excludes nothing, so the two stages must agree exactly.
-    assert average.after_amplitude_uv == average.before_amplitude_uv
+    assert average.after_resolved_amplitude_uv == average.before_resolved_amplitude_uv
 
 
-def test_the_corrected_amplitude_sits_below_the_waveform_it_corrects(tmp_path) -> None:
-    """The floor is subtracted, so the corrected figure can only be the smaller one."""
+def test_the_resolved_amplitude_sits_below_the_observed_locked_rms(tmp_path) -> None:
+    """The floor is subtracted in power, so the resolved amplitude can only be smaller."""
     _write_run(tmp_path, "sub-0014_task-x_run-1", _raw(with_markers=True))
 
     evidence = measure_runs(
@@ -114,7 +114,7 @@ def test_the_corrected_amplitude_sits_below_the_waveform_it_corrects(tmp_path) -
 
     average = evidence.locked_averages[0]
     raw_rms_uv = float(np.sqrt(np.mean(np.asarray(average.before_rms_uv) ** 2)))
-    assert average.before_amplitude_uv < raw_rms_uv
+    assert average.before_resolved_amplitude_uv < raw_rms_uv
 
 
 def test_the_measuring_pass_records_where_the_sensors_were(tmp_path) -> None:

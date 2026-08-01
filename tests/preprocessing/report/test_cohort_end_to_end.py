@@ -77,10 +77,12 @@ def _run_evidence(subject: str, run_index: int, *, level: float, flagged_s: floa
         before_rms_uv=np.full(5, 3.0),
         after_rms_uv=np.full(5, 1.0),
         n_volumes=300,
-        before_amplitude_uv=2.8,
-        after_amplitude_uv=level / -20.0,
+        before_locked_rms_uv=2.8,
+        after_locked_rms_uv=1.0,
         before_noise_floor_uv=0.5,
         after_noise_floor_uv=0.4,
+        before_excess_power_uv2=2.8**2 - 0.5**2,
+        after_excess_power_uv2=(level / -20.0) ** 2,
     )
     return spectra, continuity, locked
 
@@ -132,7 +134,7 @@ def test_the_context_derived_at_write_time_survives_the_round_trip(cohort_root) 
     for participant in cohort.participants:
         assert participant.context is AcquisitionContext.IN_SCANNER
         assert participant.has_comb_evidence is False  # no comb resolved in this fixture
-        assert "volume_locked_corrected_uv" in participant.runs.columns
+        assert "volume_locked_excess_power_after_uv2" in participant.runs.columns
 
 
 def test_two_participants_are_below_the_gate_and_get_no_summary(cohort_root) -> None:

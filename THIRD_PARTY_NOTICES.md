@@ -1,9 +1,13 @@
 # Third-Party Notices
 
-## NeuXus EEG-fMRI QRS detector
+## NeuXus EEG-fMRI QRS detector (removed 2026-07-30)
 
-The native EEG-fMRI preprocessing package adapts the R-peak prediction algorithm and trained model
-weights from NeuXus:
+The native EEG-fMRI preprocessing package adapted the R-peak prediction algorithm and trained
+model weights from NeuXus. That package was removed on 2026-07-30 when the native correction
+approach was abandoned, so no NeuXus-derived code or model asset ships in the current tree.
+
+This notice is kept because the adapted source and weights remain in this repository's history,
+where they were distributed under GPL-3.0-only:
 
 - Project: [LaSEEB/NeuXus](https://github.com/LaSEEB/NeuXus)
 - Release: `v0.0.4`
@@ -18,9 +22,7 @@ NeuXus is described in:
 > real-time artifact reduction in simultaneous EEG-fMRI. NeuroImage. 2023;280:120353.
 > doi:10.1016/j.neuroimage.2023.120353.
 
-This project modifies the upstream implementation for deterministic offline processing. It removes
-the streaming graph, loads model parameters from a non-executable NumPy archive, filters the full
-ECG before windowing, consolidates overlapping predictions over the complete recording, and passes
+The project modified the upstream implementation for deterministic offline processing. It removed
+the streaming graph, loaded model parameters from a non-executable NumPy archive, filtered the full
+ECG before windowing, consolidated overlapping predictions over the complete recording, and passed
 the resulting R-peaks to MNE-Python PCA-OBS instead of NeuXus pulse average-artifact subtraction.
-
-The adapted source and model assets are distributed under GPL-3.0-only as part of this project.

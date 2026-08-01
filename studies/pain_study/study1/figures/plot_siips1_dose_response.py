@@ -45,9 +45,7 @@ def write_siips1_dose_response(*, trial_data: ValidityTrialData, config: Any) ->
 
 
 def main(argv: Sequence[str] | None = None) -> Path:
-    parser = argparse.ArgumentParser(
-        description="Write the Study 1 SIIPS1 dose-response SVG."
-    )
+    parser = argparse.ArgumentParser(description="Write the Study 1 SIIPS1 dose-response SVG.")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--study1-config", type=Path)
     parser.add_argument("--task", required=True)

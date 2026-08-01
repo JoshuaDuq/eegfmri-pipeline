@@ -47,7 +47,14 @@ import yaml
 ###################################################################
 
 
-_NON_PATH_KEYS = {"project_root", "task", "random_state", "picks"}
+_NON_PATH_KEYS = {
+    "project_root",
+    "task",
+    "random_state",
+    "picks",
+    "volume_marker_description",
+    "pulse_marker_description",
+}
 _PROJECT_ROOT_PREFIXES = ("data/", "eeg_pipeline/")
 
 

@@ -25,7 +25,13 @@ from eeg_pipeline.utils.config.loader import ConfigError, load_config, set_defau
 from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 from eeg_pipeline.utils.data.subjects import parse_subject_args
 from eeg_pipeline.cli.common import get_deriv_root
-from eeg_pipeline.cli.commands import get_commands, get_command, Command
+from eeg_pipeline.cli.commands import (
+    Command,
+    MissingCommandDependency,
+    get_command,
+    get_command_names,
+    get_commands,
+)
 
 os.environ["NUMPY_SKIP_MACOS_CHECK"] = "1"
 warnings.filterwarnings(
@@ -47,8 +53,18 @@ def setup_logging() -> None:
     )
 
 
-def create_argument_parser() -> argparse.ArgumentParser:
-    """Create and configure the main argument parser with all subcommands."""
+def create_argument_parser(only: str | None = None) -> argparse.ArgumentParser:
+    """Create the main parser, with every subcommand or with just the one being run.
+
+    Registering a subcommand means importing the module that declares its arguments, so
+    building all of them imported all of them — and ``validate --config-only``, which
+    only reads a YAML, paid for MNE, scikit-learn, Nilearn and Seaborn before it started.
+    See issue #14.
+
+    ``only`` names the single subcommand to register. It is passed when the invocation
+    already identifies one, and left None for ``--help`` and for an unrecognized command,
+    where the full list is the answer being asked for.
+    """
     parser = argparse.ArgumentParser(
         description="Unified EEG Pipeline Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -81,10 +97,30 @@ For detailed help on each subcommand:
 
     subparsers = parser.add_subparsers(dest="command", help="Analysis type")
 
-    for command in get_commands():
+    if only is None:
+        for command in get_commands():
+            command.setup(subparsers)
+    else:
+        command = get_command(only)
+        if command is None:
+            raise ValueError(f"Unknown command: {only}")
         command.setup(subparsers)
 
     return parser
+
+
+def find_requested_command(argv: list[str]) -> str | None:
+    """The registered command name in ``argv``, if it names one.
+
+    Read positionally rather than by parsing, because parsing is what this decides the
+    cost of. Only names are compared, and names are available from packaging metadata
+    without importing anything.
+    """
+    names = set(get_command_names())
+    for argument in argv:
+        if argument in names:
+            return argument
+    return None
 
 
 def extract_config_path(argv: list[str]) -> tuple[list[str], str | None]:
@@ -147,6 +183,12 @@ def execute_command(
     try:
         command.run(args, subjects, config)
         return EXIT_SUCCESS
+    except MissingCommandDependency as exc:
+        # Not a failure of the run: the code to do it was never importable here. One
+        # line, no traceback, because the stack is the import machinery rather than
+        # anything the user can act on.
+        logging.error("%s", exc)
+        return EXIT_ERROR
     except Exception as e:
         logging.error("Error running %s: %s", command.name, e, exc_info=True)
         return EXIT_ERROR
@@ -158,7 +200,7 @@ def main() -> int:
 
     argv, config_path = extract_config_path(sys.argv[1:])
 
-    parser = create_argument_parser()
+    parser = create_argument_parser(only=find_requested_command(argv))
     args = parser.parse_args(argv)
 
     if not args.command:

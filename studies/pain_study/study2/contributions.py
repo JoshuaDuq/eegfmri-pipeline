@@ -119,11 +119,7 @@ def compute_held_out_contribution_scores(
     if not np.all(assigned_rows):
         missing_rows = np.flatnonzero(~assigned_rows).tolist()
         raise ValueError(f"Study 2 outer folds do not assign rows: {missing_rows}.")
-    return (
-        pd.concat(fold_scores, ignore_index=True)
-        .sort_values("trial_id")
-        .reset_index(drop=True)
-    )
+    return pd.concat(fold_scores, ignore_index=True).sort_values("trial_id").reset_index(drop=True)
 
 
 def standardize_contribution_scores(

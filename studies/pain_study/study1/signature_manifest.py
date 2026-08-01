@@ -8,7 +8,6 @@ import numpy as np
 
 from studies.pain_study.study1.targets import _sha256, _signature_support_summary
 
-
 MNI152NLIN2009CASYM = "mni152nlin2009casym"
 
 STUDY1_SIGNATURE_SPECS = (
@@ -45,7 +44,9 @@ def build_signature_manifest(
         relative_path = str(spec["path"]).strip()
         image_path = root / relative_path
         if not image_path.exists():
-            raise FileNotFoundError(f"Study 1 signature map does not exist for {name}: {image_path}")
+            raise FileNotFoundError(
+                f"Study 1 signature map does not exist for {name}: {image_path}"
+            )
 
         image = nib.load(str(image_path))
         affine = np.asarray(image.affine, dtype=float)

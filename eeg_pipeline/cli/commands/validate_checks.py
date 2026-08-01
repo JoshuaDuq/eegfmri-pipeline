@@ -6,9 +6,6 @@ import json as json_module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import mne
-import pandas as pd
-
 _MAX_SUBJECTS_TO_VALIDATE = 10
 _MAX_ISSUES_TO_DISPLAY = 10
 _MAX_WARNINGS_TO_DISPLAY = 10
@@ -43,6 +40,8 @@ def _validate_table_schema(
     any_of: Optional[List[str]] = None,
 ) -> Optional[str]:
     """Validate table has required columns (TSV or parquet)."""
+    import pandas as pd
+
     try:
         if path.suffix == ".parquet":
             from eeg_pipeline.infra.tsv import read_parquet
@@ -102,6 +101,8 @@ def _validate_epochs(
     passed: List[str],
 ) -> None:
     """Validate epoch files for subjects."""
+    import mne
+
     subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
 
     for subject in subjects_to_check:
@@ -151,6 +152,8 @@ def _validate_features(
     passed: List[str],
 ) -> None:
     """Validate feature files for subjects."""
+    import pandas as pd
+
     from eeg_pipeline.infra.paths import deriv_features_path
 
     subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
@@ -332,6 +335,91 @@ def _validate_bids(
         passed.append("participants.tsv exists")
     else:
         warnings.append({"type": "bids", "message": "Missing participants.tsv"})
+
+    _validate_ecg_channels(config, issues, warnings, passed)
+
+
+def _validate_ecg_channels(
+    config: Any,
+    issues: List[Dict[str, str]],
+    warnings: List[Dict[str, str]],
+    passed: List[str],
+) -> None:
+    """Confirm the declared ECG channel against BIDS channel typing.
+
+    ``eeg.ecg_channels`` is how a study turns on the cardiac review and the ECG coupling
+    metric, and it is a free-text name that has to match ``channels.tsv``. A typo, or the
+    channel name inherited from another study's montage, otherwise surfaced only when
+    cardiac QC opened the recording — after preprocessing had begun. Issue #14.
+
+    Silent when no channel is declared: not recording ECG is an ordinary configuration.
+    """
+    import pandas as pd
+
+    declared = config.get("eeg.ecg_channels", None) or []
+    if not declared:
+        return
+
+    bids_root = getattr(config, "bids_root", None)
+    if not bids_root:
+        return
+
+    channel_tables = sorted(Path(bids_root).glob("sub-*/**/*_channels.tsv"))
+    if not channel_tables:
+        return
+
+    types_by_name: Dict[str, set] = {}
+    for table in channel_tables:
+        try:
+            frame = pd.read_csv(table, sep="\t")
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
+            continue
+        if "name" not in frame.columns:
+            continue
+        kinds = frame["type"] if "type" in frame.columns else [""] * len(frame)
+        for name, kind in zip(frame["name"], kinds):
+            types_by_name.setdefault(str(name), set()).add(str(kind).upper())
+
+    if not types_by_name:
+        return
+
+    recorded_ecg = sorted(
+        name for name, kinds in types_by_name.items() if "ECG" in kinds or "EKG" in kinds
+    )
+
+    for channel in declared:
+        channel = str(channel)
+        if channel not in types_by_name:
+            alternatives = (
+                f" Channels typed ECG in this dataset: {', '.join(recorded_ecg)}."
+                if recorded_ecg
+                else " No channel in this dataset is typed ECG."
+            )
+            issues.append(
+                {
+                    "type": "bids",
+                    "message": (
+                        f"eeg.ecg_channels names {channel!r}, which no channels.tsv in "
+                        f"this dataset contains.{alternatives}"
+                    ),
+                }
+            )
+            continue
+
+        kinds = types_by_name[channel]
+        if "ECG" in kinds or "EKG" in kinds:
+            passed.append(f"ECG channel {channel!r} is present and typed ECG")
+        else:
+            warnings.append(
+                {
+                    "type": "bids",
+                    "message": (
+                        f"eeg.ecg_channels names {channel!r}, which is present but typed "
+                        f"{'/'.join(sorted(kinds))} rather than ECG. Cardiac stages that "
+                        f"select by type will not find it."
+                    ),
+                }
+            )
 
 
 def _determine_status(issues: List[Any], warnings: List[Any]) -> str:

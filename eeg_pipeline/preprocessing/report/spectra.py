@@ -83,6 +83,7 @@ def summarize_stage(
     frequencies: np.ndarray,
     power_db: np.ndarray,
     *,
+    fit_range_hz: tuple[float, float],
     excluded_windows: Sequence[tuple[float, float]],
 ) -> StageSpectrum:
     """Collapse per-channel decibels and fit the aperiodic background of the median."""
@@ -96,7 +97,7 @@ def summarize_stage(
         aperiodic=fit_aperiodic(
             frequencies,
             median,
-            fit_range_hz=DEFAULT_FIT_RANGE_HZ,
+            fit_range_hz=fit_range_hz,
             excluded_windows=excluded_windows,
         ),
     )
@@ -258,6 +259,7 @@ def compute_run_spectra(
     fmax: float | None = None,
     line_frequency: float | None = None,
     gradient_fundamental_hz: float | None = None,
+    aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ,
 ) -> RunSpectra:
     """Compute the across-channel sensor spectrum before and after ICA.
 
@@ -285,8 +287,18 @@ def compute_run_spectra(
     return RunSpectra(
         recording_id=recording_id,
         frequencies=frequencies,
-        before=summarize_stage(frequencies, before_channels, excluded_windows=excluded),
-        after=summarize_stage(frequencies, after_channels, excluded_windows=excluded),
+        before=summarize_stage(
+            frequencies,
+            before_channels,
+            fit_range_hz=aperiodic_fit_range_hz,
+            excluded_windows=excluded,
+        ),
+        after=summarize_stage(
+            frequencies,
+            after_channels,
+            fit_range_hz=aperiodic_fit_range_hz,
+            excluded_windows=excluded,
+        ),
         n_channels=before_channels.shape[0],
         fmax_reason=reason,
     )
@@ -435,6 +447,16 @@ def _aperiodic_values(fit: AperiodicFit | None) -> list[object]:
     return [f"{fit.exponent:.2f}", f"{fit.offset_db:.1f}"]
 
 
+def _aperiodic_quality_values(fit: AperiodicFit | None) -> list[object]:
+    if fit is None:
+        return [None, None, None]
+    return [
+        f"{fit.r_squared:.3f}",
+        f"{fit.residual_db:.2f}",
+        f"{fit.n_bins_used}/{fit.n_bins_available}",
+    ]
+
+
 def spectra_summary_html(spectra: Sequence[RunSpectra]) -> str:
     """Render the aperiodic fits and the across-channel spread, per run."""
     if not spectra:
@@ -458,10 +480,42 @@ def spectra_summary_html(spectra: Sequence[RunSpectra]) -> str:
         ]
         for run in spectra
     ]
-    fit_low, fit_high = DEFAULT_FIT_RANGE_HZ
+    quality_columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Stage", align=Align.TEXT),
+        Column("R²"),
+        Column("RMS residual (dB)"),
+        Column("Bins retained"),
+    )
+    quality_rows = [
+        [
+            run_label(run.recording_id),
+            stage,
+            *_aperiodic_quality_values(fit),
+        ]
+        for run in spectra
+        for stage, fit in (
+            ("Before ICA", run.before.aperiodic),
+            ("After ICA", run.after.aperiodic),
+        )
+    ]
+    fit_ranges = {
+        fit.fit_range_hz
+        for run in spectra
+        for fit in (run.before.aperiodic, run.after.aperiodic)
+        if fit is not None
+    }
+    if len(fit_ranges) == 1:
+        fit_low, fit_high = next(iter(fit_ranges))
+        fit_range_text = f"over {fit_low:g}-{fit_high:g} Hz"
+    elif fit_ranges:
+        rendered = ", ".join(f"{low:g}-{high:g} Hz" for low, high in sorted(fit_ranges))
+        fit_range_text = f"over the recorded run-specific ranges {rendered}"
+    else:
+        fit_range_text = "over the configured fit range"
     return (
         "<p>The aperiodic background is a robust line through the spectrum in log-log "
-        f"coordinates over {fit_low:g}-{fit_high:g} Hz, after dropping the bins that sit "
+        f"coordinates {fit_range_text}, after dropping the bins that sit "
         "in the upper quartile of the residuals so that oscillatory peaks do not tilt "
         "it. The exponent is the tilt and the offset is the level at 1 Hz.</p>"
         + grid_table(columns, rows)
@@ -470,6 +524,10 @@ def spectra_summary_html(spectra: Sequence[RunSpectra]) -> str:
         "means cleaning altered the background the analysis sits on, not only the "
         "artifact on top of it. The last column is the widest across-channel gap after "
         "cleaning, which locates a focal residual the median trace cannot show.</p>"
+        "<h4>Fit quality</h4><p>R² and the RMS residual describe how closely the retained "
+        "background bins follow the fitted line. Bins retained is reported over all "
+        "available bins so the amount removed as positive spectral peaks is explicit.</p>"
+        + grid_table(quality_columns, quality_rows)
     )
 
 

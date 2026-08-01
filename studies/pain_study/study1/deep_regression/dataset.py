@@ -21,7 +21,9 @@ from studies.pain_study.study1.deep_regression.bands import build_band_tensor
 
 
 def _subject_eeg_channels(epochs: mne.Epochs) -> list[str]:
-    eeg_picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    eeg_picks = mne.pick_types(
+        epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+    )
     return [str(epochs.ch_names[pick]) for pick in eeg_picks]
 
 
@@ -50,9 +52,7 @@ def _raise_on_duplicate_keys(
     duplicates = counts[counts > 1]
     if not duplicates.empty:
         examples = ", ".join(str(key) for key in duplicates.index[:5])
-        raise ValueError(
-            f"Deep regression alignment has duplicate {label} keys: {examples}."
-        )
+        raise ValueError(f"Deep regression alignment has duplicate {label} keys: {examples}.")
 
 
 def _raise_on_missing_or_duplicate_trial_keys(keys: list[str | None], *, label: str) -> None:
@@ -133,7 +133,9 @@ def _alignment_key_data(
         )
     ]
     _raise_on_missing_or_duplicate_trial_keys(event_trial_keys, label="EEG event")
-    trial_matches = sum(1 for key in event_trial_keys if key is not None and key in trial_lookup.index)
+    trial_matches = sum(
+        1 for key in event_trial_keys if key is not None and key in trial_lookup.index
+    )
 
     event_time_keys = [
         _time_key(run_num, onset, duration)
@@ -175,7 +177,11 @@ def _alignment_key_data(
         )
         trial_y = np.asarray(
             [
-                float(trial_lookup[key]) if key is not None and key in trial_lookup.index else np.nan
+                (
+                    float(trial_lookup[key])
+                    if key is not None and key in trial_lookup.index
+                    else np.nan
+                )
                 for key in event_trial_keys
             ],
             dtype=float,
@@ -332,7 +338,9 @@ def load_band_tensor_matrix(
 
         run = find_run_column(aligned_events)
         if run is None:
-            raise ValueError("Clean EEG events must contain a usable 'run' column for deep regression.")
+            raise ValueError(
+                "Clean EEG events must contain a usable 'run' column for deep regression."
+            )
         if "trial_number" in aligned_events.columns:
             trial_index = pd.to_numeric(aligned_events["trial_number"], errors="coerce")
         elif "trial_index" in aligned_events.columns:

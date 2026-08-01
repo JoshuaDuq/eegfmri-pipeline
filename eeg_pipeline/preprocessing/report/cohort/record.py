@@ -9,8 +9,8 @@ and they can disagree the moment this file starts recomputing.
 Two derivations are made here rather than configured, both from the participant's own
 evidence, so that a mixed cohort classifies itself:
 
-* volume timing was measurable in at least one run, so the recording was made in a
-  scanner;
+* volume markers were observed in at least one run, so the recording was made in a
+  scanner, even when too few survived to estimate timing;
 * at least one run carried task events, so the paradigm has trials to retain.
 
 What is deliberately *not* carried is as considered as what is. The volume-locked
@@ -53,15 +53,17 @@ BEFORE = "before"
 AFTER = "after"
 
 
-def acquisition_context_of(timings: Mapping[str, Any]) -> AcquisitionContext:
-    """Classify the acquisition from whether volume timing was measurable.
+def acquisition_context_of(continuity: Sequence[RunContinuity]) -> AcquisitionContext:
+    """Classify the acquisition from whether volume markers were observed.
 
-    Timing comes from the volume-marker train, so a run that has one was made in a
-    scanner and a run that has none was not. This is the axis the cohort report refuses
-    to pool across, and deriving it from the evidence rather than from configuration is
-    what lets a cohort assembled from several studies sort itself out.
+    Timing estimation requires enough markers to characterize the interval distribution.
+    Acquisition classification does not: even one observed volume marker is direct
+    evidence of an in-scanner recording. This is the axis the cohort report refuses to
+    pool across, so failed timing estimation must not silently move a participant into
+    the out-of-scanner stratum.
     """
-    return AcquisitionContext.IN_SCANNER if timings else AcquisitionContext.OUT_OF_SCANNER
+    observed = any(run.has_volume_markers for run in continuity)
+    return AcquisitionContext.IN_SCANNER if observed else AcquisitionContext.OUT_OF_SCANNER
 
 
 def paradigm_of(continuity: Sequence[RunContinuity]) -> Paradigm:
@@ -155,6 +157,17 @@ def run_table(
         )
         row["n_markers"] = _finite(None if agreement is None else agreement.n_markers)
         row["n_detected_beats"] = _finite(None if agreement is None else agreement.n_detected)
+        row["n_matched_beats"] = _finite(None if agreement is None else agreement.n_matched)
+        # The pair that says what a low matched fraction is made of. A train that sits a
+        # fixed distance from the beats the detector found is a delay between two
+        # detectors, and the in-scanner ECG produces one routinely: the magnetohydrodynamic
+        # deflection is larger than the R wave, so the detector locks onto it a few hundred
+        # milliseconds late and reports a marker train that drove a working correction as
+        # complete disagreement. A tight lag says that; a broad one says the markers really
+        # do not describe the heartbeat. The subject report prints both already, and
+        # without them here the cohort table cannot tell the two apart.
+        row["marker_median_lag_s"] = _finite(None if agreement is None else agreement.median_lag_s)
+        row["marker_lag_iqr_s"] = _finite(None if agreement is None else agreement.lag_iqr_s)
 
         if context is AcquisitionContext.IN_SCANNER:
             timing = timings.get(recording_id)
@@ -167,15 +180,20 @@ def run_table(
             # measured excess without the residual itself having changed, so a timing
             # outlier invalidates the gradient section rather than merely annotating it.
             row["volume_jitter_s"] = _finite(None if timing is None else timing.interval_jitter_s)
-            row["volume_locked_corrected_uv"] = _finite(
-                None if locked is None else locked.after_amplitude_uv
-            )
-            row["volume_locked_noise_floor_uv"] = _finite(
-                None if locked is None else locked.after_noise_floor_uv
-            )
-            row["volume_locked_corrected_before_uv"] = _finite(
-                None if locked is None else locked.before_amplitude_uv
-            )
+            for stage in (BEFORE, AFTER):
+                suffix = "before" if stage == BEFORE else "after"
+                row[f"volume_locked_rms_{suffix}_uv"] = _finite(
+                    None if locked is None else getattr(locked, f"{suffix}_locked_rms_uv")
+                )
+                row[f"volume_locked_floor_{suffix}_uv"] = _finite(
+                    None if locked is None else getattr(locked, f"{suffix}_noise_floor_uv")
+                )
+                row[f"volume_locked_excess_power_{suffix}_uv2"] = _finite(
+                    None if locked is None else getattr(locked, f"{suffix}_excess_power_uv2")
+                )
+                row[f"volume_locked_resolved_{suffix}"] = (
+                    None if locked is None else bool(getattr(locked, f"{suffix}_is_resolved"))
+                )
             # What the upstream pulse correction left behind, and whether it had a beat
             # train to work from at all. A run with no markers had no subtraction applied,
             # so this is the column that says which runs need re-exporting from Analyzer.
@@ -440,6 +458,7 @@ def pool_alpha_runs(measured: Sequence[PosteriorAlpha]) -> PosteriorAlpha | None
             np.median([entry.peak_frequency_hz for entry in peak_source])
         ),
         prominence_db=float(np.median([entry.prominence_db for entry in entries])),
+        band_hz=entries[0].band_hz,
         background_residual_db=float(
             np.median([entry.background_residual_db for entry in entries])
         ),
@@ -525,7 +544,7 @@ def build_subject_sidecar(
         raise ValueError(
             f"sub-{subject} has no measured runs, so there is nothing for a cohort to read."
         )
-    context = acquisition_context_of(timings)
+    context = acquisition_context_of(continuity)
     paradigm = paradigm_of(continuity)
     alpha = dict(alpha or {})
     combined: dict[str, Any] = dict(measurements or {})

@@ -122,12 +122,10 @@ def test_disagreeing_rest_flags_are_reported_not_raised_from_inside() -> None:
 
 def test_scanner_keys_left_on_for_an_eeg_only_dataset_are_listed_as_warnings() -> None:
     """None of these stops the run — each is gated at its own call site — but a config
-    still asking for four things it will not get is one nobody has finished adapting."""
+    still asking for things it will not get is one nobody has finished adapting."""
     config = _config(
         preprocessing__eeg_fmri=False,
         preprocessing__brainvision_analyzer__enabled=True,
-        ica__cardiac_review__enabled=True,
-        preprocessing__clean_events_qc__ecg_coupling__enabled=True,
         alignment__trim_to_volume_bounds=True,
     )
 
@@ -136,8 +134,6 @@ def test_scanner_keys_left_on_for_an_eeg_only_dataset_are_listed_as_warnings() -
     assert report.errors == ()
     assert _keys(report.warnings) == {
         "preprocessing.brainvision_analyzer.enabled",
-        "ica.cardiac_review.enabled",
-        "preprocessing.clean_events_qc.ecg_coupling.enabled",
         "alignment.trim_to_volume_bounds",
     }
 
@@ -146,3 +142,58 @@ def test_an_eeg_fmri_dataset_gets_no_scanner_warnings() -> None:
     config = _config(preprocessing__eeg_fmri=True)
 
     assert check_config_coherence(config).warnings == ()
+
+
+###################################################################
+# Being outside a scanner and having an ECG lead are separate facts
+###################################################################
+
+
+def test_out_of_scanner_ecg_stages_are_not_warned_about_when_an_ecg_lead_exists() -> None:
+    """Reported in issue #14. Both stages were listed as scanner-only, on the reasoning
+    that out-of-scanner montages carry no ECG. They often do, and the cardiac review
+    falls back to detecting R peaks from the channel when there are no Analyzer markers,
+    so outside a scanner it reviews ordinary cardiac artifact. Warning here told a user
+    with an ECG lead that a stage they had correctly enabled would be skipped."""
+    config = _config(
+        preprocessing__eeg_fmri=False,
+        preprocessing__brainvision_analyzer__enabled=False,
+        alignment__trim_to_volume_bounds=False,
+        ica__cardiac_review__enabled=True,
+        preprocessing__clean_events_qc__ecg_coupling__enabled=True,
+    )
+    config["eeg.ecg_channels"] = ["ECG"]
+
+    report = check_config_coherence(config)
+
+    assert report.warnings == (), [str(warning) for warning in report.warnings]
+
+
+def test_ecg_stages_without_an_ecg_lead_are_warned_about_naming_the_lead() -> None:
+    """The dependency these actually have. Cardiac QC raises at its call site when
+    eeg.ecg_channels names nothing, so the config can say this in advance."""
+    config = _config(
+        preprocessing__eeg_fmri=False,
+        preprocessing__brainvision_analyzer__enabled=False,
+        alignment__trim_to_volume_bounds=False,
+        ica__cardiac_review__enabled=True,
+        preprocessing__clean_events_qc__ecg_coupling__enabled=True,
+    )
+    config["eeg.ecg_channels"] = []
+
+    report = check_config_coherence(config)
+
+    assert _keys(report.warnings) == {
+        "ica.cardiac_review.enabled",
+        "preprocessing.clean_events_qc.ecg_coupling.enabled",
+    }
+    assert all("eeg.ecg_channels" in str(warning) for warning in report.warnings)
+
+
+def test_a_missing_ecg_lead_is_reported_inside_the_scanner_too() -> None:
+    """The condition is the lead, not the room. An EEG-fMRI config that enables cardiac
+    review without naming an ECG channel is in exactly the same position."""
+    config = _config(preprocessing__eeg_fmri=True, ica__cardiac_review__enabled=True)
+    config["eeg.ecg_channels"] = []
+
+    assert "ica.cardiac_review.enabled" in _keys(check_config_coherence(config).warnings)

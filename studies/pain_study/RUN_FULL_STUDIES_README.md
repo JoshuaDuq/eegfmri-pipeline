@@ -174,7 +174,7 @@ JOB_ID="$(sbatch --parsable \
   --output=/scratch/joshduq/study1_logs/study1_smoke_%j.out \
   --error=/scratch/joshduq/study1_logs/study1_smoke_%j.err \
   --export=ALL,STUDY1_RUN_ID="$STUDY1_RUN_ID",STUDY1_N_PERM="$STUDY1_N_PERM" \
-  --wrap='bash studies/pain_study/scripts/trillium_run_study1_all_in_one.sh')"
+  --wrap='bash studies/pain_study/scripts/study_support/trillium_run_study1_all_in_one.sh')"
 
 echo "$JOB_ID"
 ```
@@ -279,7 +279,7 @@ source local_workflows/alliance_canada/alliance_env.sh
 source "$EEG_PIPELINE_VENV/bin/activate"
 source /scratch/joshduq/study1_common_args.sh
 
-python studies/pain_study/scripts/study1_missing_benchmark_cells.py \
+python studies/pain_study/scripts/study_support/study1_missing_benchmark_cells.py \
   "${COMMON_ARGS[@]}" \
   > /scratch/joshduq/missing_study1_cells.txt
 
@@ -308,7 +308,7 @@ source /scratch/joshduq/study1_common_args.sh
 CELL_LINE="$(sed -n "${SLURM_ARRAY_TASK_ID}p" /scratch/joshduq/missing_study1_cells.txt)"
 read -r PARTITION TARGET SPEC <<< "$CELL_LINE"
 
-python studies/pain_study/scripts/study1_benchmark_cell.py \
+python studies/pain_study/scripts/study_support/study1_benchmark_cell.py \
   --partition "$PARTITION" \
   --target "$TARGET" \
   --spec "$SPEC" \
@@ -448,7 +448,7 @@ source studies/pain_study/study2/alliance/lib/study2_alliance_common.sh
 study2_load_env "$STUDY2_ENV"
 study2_activate_python
 
-python studies/pain_study/scripts/study2_prepare_source_stage_input.py \
+python studies/pain_study/scripts/study_support/study2_prepare_source_stage_input.py \
   --subjects-file "$STUDY2_SUBJECTS_FILE" \
   --task "$STUDY2_TASK" \
   --study2-config "$STUDY2_CONFIG" \
@@ -556,7 +556,7 @@ STUDY2_ROOT="/scratch/joshduq/derivatives/group/multimodal/<STUDY2_RUN_ID>"
 SUBJECTS_DIR="/scratch/joshduq/study2_freesurfer_subjects"
 QC_OUT="$STUDY1_ROOT/reports/subject_qc"
 
-python studies/pain_study/scripts/study_subject_qc_summary.py \
+python studies/pain_study/scripts/study_support/study_subject_qc_summary.py \
   --subjects-file /scratch/joshduq/pain_study_subjects_current.txt \
   --study1-root "$STUDY1_ROOT" \
   --study2-root "$STUDY2_ROOT" \

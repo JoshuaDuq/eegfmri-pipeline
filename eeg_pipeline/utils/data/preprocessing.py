@@ -834,6 +834,52 @@ def _derive_clean_events_path_from_epochs(epochs_path: Path) -> Path:
     return epochs_path.with_suffix(".tsv")
 
 
+def presented_events_for_epochs(
+    *,
+    subject: str,
+    task: str,
+    bids_root: Path,
+    epochs: mne.BaseEpochs,
+    conditions: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Return the BIDS event rows that entered the epoch-rejection denominator.
+
+    This uses the same condition semantics and run ordering as the clean-events writer,
+    but retains dropped rows. It is therefore the denominator required for per-condition
+    and per-run retention rates in the report.
+    """
+    subject_label = subject if subject.startswith("sub-") else f"sub-{subject}"
+    bids_sub_eeg_dir = Path(bids_root) / subject_label / "eeg"
+    if not bids_sub_eeg_dir.exists():
+        raise FileNotFoundError(f"Missing BIDS EEG directory: {bids_sub_eeg_dir}")
+
+    resolved_conditions = conditions
+    if resolved_conditions is None:
+        resolved_conditions = list(getattr(epochs, "event_id", {}).keys())
+    if not resolved_conditions:
+        raise ValueError(
+            f"No epoching conditions provided and epochs.event_id is empty for "
+            f"{subject_label}, task-{task}"
+        )
+
+    events = _load_subject_events_for_epochs(bids_sub_eeg_dir, subject_label, task)
+    mask, condition_column = _build_epoch_event_mask(events, resolved_conditions)
+    presented = events.loc[mask].copy().reset_index(drop=True)
+    if presented.empty:
+        available = sorted(events[condition_column].dropna().astype(str).unique())
+        raise ValueError(
+            f"No events matched conditions={resolved_conditions} in {subject_label}, "
+            f"task-{task}. Available {condition_column} values: {available}"
+        )
+
+    # Validates that the BIDS selection is the same population represented by the MNE
+    # drop log. The mask itself is intentionally not applied: rejected rows are the
+    # denominators this function exists to retain.
+    _kept_event_mask(epochs, len(presented))
+    presented.insert(0, "event_index", range(len(presented)))
+    return presented
+
+
 def write_clean_events_tsv_for_epochs(
     *,
     subject: str,
@@ -882,30 +928,13 @@ def write_clean_events_tsv_for_epochs(
     epochs = mne.read_epochs(epochs_path, preload=False, verbose=False)
     qc_cfg = CleanEventsQCConfig.from_config(config)
 
-    if conditions is None:
-        # Fallback to event_id keys if explicit conditions were not provided.
-        conditions = list(getattr(epochs, "event_id", {}).keys())
-    if not conditions:
-        raise ValueError(
-            f"No epoching conditions provided and epochs.event_id is empty for {subject_label}, task-{task}"
-        )
-
-    events_df = _load_subject_events_for_epochs(bids_sub_eeg_dir, subject_label, task)
-    mask, condition_column = _build_epoch_event_mask(
-        events_df,
-        conditions,
+    target = presented_events_for_epochs(
+        subject=subject,
+        task=task,
+        bids_root=bids_root,
+        epochs=epochs,
+        conditions=conditions,
     )
-    target = events_df.loc[mask].copy().reset_index(drop=True)
-
-    if len(target) == 0:
-        raise ValueError(
-            f"No events matched conditions={conditions} in {subject_label}, task-{task}. "
-            f"Available {condition_column} values: "
-            f"{sorted(set(events_df.get(condition_column, pd.Series(dtype=str)).dropna().astype(str)))}"
-        )
-
-    # Track pre-rejection index within the condition-filtered target set.
-    target.insert(0, "event_index", range(len(target)))
 
     n_epochs = len(epochs)
     if n_epochs == 0:
@@ -960,6 +989,7 @@ def write_clean_events_tsv_for_epochs(
 __all__ = [
     "find_brainvision_vhdrs",
     "parse_subject_id",
+    "presented_events_for_epochs",
     "extract_run_number",
     "get_run_index",
     "normalize_string",

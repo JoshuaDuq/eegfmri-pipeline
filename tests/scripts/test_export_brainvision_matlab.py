@@ -7,13 +7,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from studies.pain_study.scripts import export_brainvision_matlab
+from studies.pain_study.scripts.conversion import export_brainvision_matlab
 
 MODULE_PATH = (
     Path(__file__).parents[2]
     / "studies"
     / "pain_study"
     / "scripts"
+    / "conversion"
     / "export_brainvision_matlab.py"
 )
 
@@ -27,6 +28,35 @@ def test_export_module_exposes_main() -> None:
     specification.loader.exec_module(module)
 
     assert callable(getattr(module, "main", None))
+
+
+def _write_processed_triplet(directory: Path, stem: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    header = directory / f"{stem}.vhdr"
+    header.write_text("Brain Vision Data Exchange Header File Version 2.0\n", encoding="utf-8")
+    header.with_suffix(".vmrk").write_text("marker\n", encoding="utf-8")
+    header.with_suffix(".eeg").write_bytes(b"\x00\x00")
+    return header
+
+
+def test_require_run_header_reads_the_gap_recovery_export_suffix(tmp_path: Path) -> None:
+    """The current export ends at `scanner_artifact_step2`, not `scannerpulse_corrected`."""
+    header = _write_processed_triplet(
+        tmp_path,
+        "ThermalPainEEGFMRI_run4_sub0015_2026-07-13_11h18.48.310_scanner_artifact_step2",
+    )
+
+    assert export_brainvision_matlab._require_run_header(tmp_path, 4) == header
+
+
+def test_require_run_header_rejects_two_export_generations_of_one_run(tmp_path: Path) -> None:
+    """Holding both generations is an ambiguity, not a preference order."""
+    stem = "ThermalPainEEGFMRI_run4_sub0015_2026-07-13_11h18.48.310"
+    _write_processed_triplet(tmp_path, f"{stem}_scannerpulse_corrected")
+    _write_processed_triplet(tmp_path, f"{stem}_scanner_artifact_step2")
+
+    with pytest.raises(FileNotFoundError, match="found 2"):
+        export_brainvision_matlab._require_run_header(tmp_path, 4)
 
 
 def test_select_trials_requires_eleven_ordered_thermal_trials() -> None:

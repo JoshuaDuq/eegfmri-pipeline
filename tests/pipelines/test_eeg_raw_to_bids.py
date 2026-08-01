@@ -6,7 +6,7 @@ import mne
 import numpy as np
 import pandas as pd
 
-from studies.pain_study.scripts.eeg_raw_to_bids import (
+from studies.pain_study.scripts.conversion.eeg_raw_to_bids import (
     _discard_unrecorded_terminal_volumes,
     run_raw_to_bids,
 )

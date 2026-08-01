@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy import ndimage
 
-from studies.pain_study.scripts.t1_anatomical_reference import (
+from studies.pain_study.scripts.t1.t1_anatomical_reference import (
     AnatomicalReferenceParameters,
     estimate_anatomical_reference,
     fit_anatomically_constrained_scalp,

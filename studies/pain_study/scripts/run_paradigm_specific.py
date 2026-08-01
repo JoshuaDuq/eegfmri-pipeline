@@ -4,16 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
-_SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_DIR))
-
-from eeg_raw_to_bids import run_raw_to_bids
-from fmri_raw_to_bids import run_fmri_raw_to_bids
-from merge_psychopy import run_merge_psychopy
+from studies.pain_study.scripts.conversion.eeg_raw_to_bids import run_raw_to_bids
+from studies.pain_study.scripts.conversion.fmri_raw_to_bids import run_fmri_raw_to_bids
+from studies.pain_study.scripts.conversion.merge_psychopy import run_merge_psychopy
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -53,12 +48,18 @@ def _parser() -> argparse.ArgumentParser:
     fmri.add_argument("--overwrite", action="store_true")
     fmri.add_argument("--no-events", action="store_true")
     fmri.add_argument("--event-granularity", choices=["trial", "phases"], default="phases")
-    fmri.add_argument("--onset-reference", choices=["as_is", "first_iti_start", "first_stim_start"], default="first_iti_start")
+    fmri.add_argument(
+        "--onset-reference",
+        choices=["as_is", "first_iti_start", "first_stim_start"],
+        default="first_iti_start",
+    )
     fmri.add_argument("--onset-offset-s", type=float, default=0.0)
     fmri.add_argument("--dcm2niix-path", default=None)
     fmri.add_argument("--dcm2niix-arg", action="append", default=None)
 
-    merge = sub.add_parser("merge-psychopy", help="Merge PsychoPy TrialSummary into BIDS EEG events.tsv")
+    merge = sub.add_parser(
+        "merge-psychopy", help="Merge PsychoPy TrialSummary into BIDS EEG events.tsv"
+    )
     merge.add_argument("--source-root", required=True)
     merge.add_argument("--bids-root", required=True)
     merge.add_argument("--task", required=True)
@@ -73,7 +74,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, args.log_level), format="%(levelname)s %(name)s: %(message)s"
+    )
 
     if args.command == "eeg-raw-to-bids":
         n = run_raw_to_bids(

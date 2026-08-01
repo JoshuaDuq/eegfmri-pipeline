@@ -9,10 +9,7 @@ from tests import REPO_ROOT
 os.environ["MNE_DONTWRITE_HOME"] = "true"
 
 
-PROTECTED_PLOTS = (
-    "eeg_pipeline/preprocessing/eeg_fmri/plotting.py",
-    "eeg_pipeline/plotting/scanner_harmonic_comb.py",
-)
+PROTECTED_PLOTS = ("eeg_pipeline/plotting/scanner_harmonic_comb.py",)
 
 REMOVED_ENTRY_POINTS = (
     "eeg_pipeline/plotting/plot_catalog.json",

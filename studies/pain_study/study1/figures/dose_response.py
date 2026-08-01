@@ -41,8 +41,7 @@ def build_dose_response_figure(
     colors = require_config_value(config, "study1.figures.validity.colors")
     if specification.color_config_key not in colors:
         raise ValueError(
-            "Unknown Study 1 validity color key: "
-            f"{specification.color_config_key!r}."
+            "Unknown Study 1 validity color key: " f"{specification.color_config_key!r}."
         )
     cohort_color = str(colors[specification.color_config_key])
 

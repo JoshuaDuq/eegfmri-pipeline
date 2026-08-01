@@ -200,11 +200,27 @@ Run read-only checks before touching any data:
 
 .. code-block:: bash
 
+   eeg-pipeline preflight             # Inspect the dataset before processing any of it
    eeg-pipeline validate quick        # BIDS structure + config consistency
    eeg-pipeline info subjects         # List discovered subjects and run counts
    eeg-pipeline info subjects --status # Show which subjects already have epochs/features
    eeg-pipeline info config           # Print resolved active configuration
    eeg-pipeline info ml-feature-space # Show feature matrix dimensions (post-extraction)
+
+``preflight`` is the first thing to run against a dataset the pipeline has not
+seen before. It reads BIDS metadata only — the ``_eeg.json`` sidecars,
+``channels.tsv``, ``events.tsv`` — and never opens a recording, so it is fast
+and needs none of the analysis packages. It reports subjects, tasks and run
+counts, whether every recording has an ``events.tsv``, the sampling rate and
+channel layout across runs, whether the ECG/EOG channels your config names are
+actually recorded, whether the line frequency matches ``notch_freq``, and how
+complete the required event columns are.
+
+It does not grade. A sampling rate that differs between runs is reported as the
+two rates, marked ``!``, because whether that is a problem depends on your
+study. Three marks appear: ``✓`` as configured, ``!`` varying across runs,
+``✗`` not found. Nothing is written, including the derivatives directory —
+preflight reports whether it *can* be created.
 
 ``validate quick`` confirms that the BIDS layout is parseable, required files
 exist, and the ``eeg_config.yaml`` values are internally consistent.

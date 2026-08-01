@@ -26,9 +26,9 @@ dependencies = [
     "mne-connectivity>=0.7.0",
     "mne-icalabel>=0.7.0",
     "networkx>=3.5",
+    "neurokit2==0.2.12",
     "nibabel>=3.2.0,<6.0.0",
     "nilearn>=0.11.1",
-    "numba>=0.62,<1.0",
     "numpy>=1.24.0,<2.0.0",
     "pandas>=2.3.0",
     "pyarrow>=17.0.0",
@@ -82,8 +82,6 @@ namespaces = true
 
 [tool.setuptools.package-data]
 eeg_pipeline = [
-    "preprocessing/eeg_fmri/assets/*.npz",
-    "preprocessing/eeg_fmri/assets/*.sha256",
     "utils/config/*.yaml",
     "utils/config/presets/*.yaml",
 ]

@@ -105,10 +105,7 @@ def _predictor_beta(
 def _subject_status_map(analysis_cells: pd.DataFrame) -> Dict[str, str]:
     if analysis_cells.empty:
         return {}
-    return {
-        str(row.analysis_id): str(row.status)
-        for row in analysis_cells.itertuples(index=False)
-    }
+    return {str(row.analysis_id): str(row.status) for row in analysis_cells.itertuples(index=False)}
 
 
 def _subject_count_map(analysis_cells: pd.DataFrame) -> Dict[str, tuple[int, int]]:
@@ -381,23 +378,23 @@ def aggregate_primary_permutation_effects(
                 "message": "",
             }
         )
-    out = pd.DataFrame(rows).sort_values(
-        ["family", "roi", "band", "analysis_id"]
-    ).reset_index(drop=True)
+    out = (
+        pd.DataFrame(rows)
+        .sort_values(["family", "roi", "band", "analysis_id"])
+        .reset_index(drop=True)
+    )
     if out.empty:
         return out
     out["p_holm"] = np.nan
-    valid_mask = (
-        out["interpretable"].astype(bool)
-        & np.isfinite(pd.to_numeric(out["p_value"], errors="coerce").to_numpy(dtype=float))
+    valid_mask = out["interpretable"].astype(bool) & np.isfinite(
+        pd.to_numeric(out["p_value"], errors="coerce").to_numpy(dtype=float)
     )
     if bool(valid_mask.any()):
         out.loc[valid_mask, "p_holm"] = _holm_adjust(
             pd.to_numeric(out.loc[valid_mask, "p_value"], errors="coerce").to_numpy(dtype=float)
         )
-    out["significant_holm"] = (
-        out["interpretable"].astype(bool)
-        & (pd.to_numeric(out["p_holm"], errors="coerce") < float(alpha))
+    out["significant_holm"] = out["interpretable"].astype(bool) & (
+        pd.to_numeric(out["p_holm"], errors="coerce") < float(alpha)
     )
     return out
 

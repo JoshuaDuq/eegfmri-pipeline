@@ -192,9 +192,7 @@ def test_the_eeg_directory_may_be_given_directly(deriv_root, tmp_path) -> None:
     output = tmp_path / "group"
 
     run_cohort_report(
-        _args(
-            deriv_root=str(deriv_root / "preprocessed" / "eeg"), output_dir=str(output)
-        ),
+        _args(deriv_root=str(deriv_root / "preprocessed" / "eeg"), output_dir=str(output)),
         [],
         None,
     )

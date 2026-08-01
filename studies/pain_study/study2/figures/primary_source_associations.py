@@ -427,8 +427,7 @@ def _summary_table(
                 "n_permutations": result.n_permutations,
                 "n_clusters": len(inference.clusters),
                 "n_corrected_clusters": sum(
-                    cluster.p_value <= family_alpha
-                    and result.holm_adjusted_p_value <= family_alpha
+                    cluster.p_value <= family_alpha and result.holm_adjusted_p_value <= family_alpha
                     for cluster in inference.clusters
                 ),
                 "min_cluster_p_value": result.min_cluster_p_value,

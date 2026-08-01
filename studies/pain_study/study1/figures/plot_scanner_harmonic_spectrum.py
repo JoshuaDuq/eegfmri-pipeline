@@ -100,9 +100,7 @@ def _build_summary(
         excluded_subjects=specification.excluded_subjects,
         requested_subjects=subjects,
     )
-    run_spectra = tuple(
-        estimate_run_spectrum(path, specification) for path in run_paths
-    )
+    run_spectra = tuple(estimate_run_spectrum(path, specification) for path in run_paths)
     return build_scanner_harmonic_summary(
         run_spectra,
         specification,

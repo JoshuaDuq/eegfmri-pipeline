@@ -18,7 +18,9 @@ from nilearn.surface import PolyData, PolyMesh, SurfaceImage, vol_to_surf
 from scipy.signal import hilbert
 from scipy.spatial import cKDTree
 
-from eeg_pipeline.analysis.features.source_localization import setup_surface_forward_model_configured
+from eeg_pipeline.analysis.features.source_localization import (
+    setup_surface_forward_model_configured,
+)
 from studies.pain_study.eeg_coupling.analysis.eeg_bold_nuisance import (
     CouplingNuisanceConfig,
     apply_trial_censoring,
@@ -84,7 +86,6 @@ from fmri_pipeline.utils.bold_discovery import (
     validate_design_matrices as _validate_design_matrices,
 )
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
-
 
 LOGGER = logging.getLogger(__name__)
 _EPS = 1.0e-12
@@ -287,9 +288,7 @@ def _selected_history_events(
         )
 
     allowed = {
-        str(value).strip()
-        for value in coupling_cfg.fmri.selection_values
-        if str(value).strip()
+        str(value).strip() for value in coupling_cfg.fmri.selection_values if str(value).strip()
     }
     if not allowed:
         raise ValueError("eeg_bold_coupling.fmri.selection_values must not be empty.")
@@ -307,7 +306,10 @@ def _selected_history_events(
                 f"{coupling_cfg.fmri.selection_column!r}."
             )
         selected = events_df.loc[
-            events_df[coupling_cfg.fmri.selection_column].astype(str).str.strip().isin(sorted(allowed))
+            events_df[coupling_cfg.fmri.selection_column]
+            .astype(str)
+            .str.strip()
+            .isin(sorted(allowed))
         ].copy()
         if selected.empty:
             continue
@@ -440,23 +442,25 @@ class CouplingROIConfig:
         name = str(raw.get("name", "")).strip()
         if not name:
             raise ValueError("eeg_bold_coupling.rois.items[*].name is required.")
-        template_subject = str(
-            raw.get("template_subject", default_template_subject)
-        ).strip()
+        template_subject = str(raw.get("template_subject", default_template_subject)).strip()
         if not template_subject:
             raise ValueError(f"ROI {name!r} is missing template_subject.")
-        annot_labels = tuple(str(v).strip() for v in _require_sequence(raw.get("annot_labels"), path=f"ROI {name} annot_labels") if str(v).strip())
-        label_files = tuple(str(v).strip() for v in _require_sequence(raw.get("label_files"), path=f"ROI {name} label_files") if str(v).strip())
+        annot_labels = tuple(
+            str(v).strip()
+            for v in _require_sequence(raw.get("annot_labels"), path=f"ROI {name} annot_labels")
+            if str(v).strip()
+        )
+        label_files = tuple(
+            str(v).strip()
+            for v in _require_sequence(raw.get("label_files"), path=f"ROI {name} label_files")
+            if str(v).strip()
+        )
         if not annot_labels and not label_files:
-            raise ValueError(
-                f"ROI {name!r} must define annot_labels and/or label_files."
-            )
+            raise ValueError(f"ROI {name!r} must define annot_labels and/or label_files.")
         parcellation_raw = str(raw.get("parcellation", "") or "").strip()
         parcellation = parcellation_raw or None
         if annot_labels and parcellation is None:
-            raise ValueError(
-                f"ROI {name!r} uses annot_labels but has no parcellation."
-            )
+            raise ValueError(f"ROI {name!r} uses annot_labels but has no parcellation.")
         return cls(
             name=name,
             template_subject=template_subject,
@@ -533,9 +537,7 @@ class TrialShuffleNegativeControlConfig:
             {},
         )
         if not isinstance(raw, Mapping):
-            raise ValueError(
-                "eeg_bold_coupling.negative_controls.trial_shuffle must be a mapping."
-            )
+            raise ValueError("eeg_bold_coupling.negative_controls.trial_shuffle must be a mapping.")
         output_name = str(raw.get("output_name", "trial_shuffle")).strip()
         enabled = bool(raw.get("enabled", False))
         if enabled and not output_name:
@@ -619,9 +621,7 @@ class EEGBOLDCouplingConfig:
             depth=float(eeg_cfg.get("depth", 0.8)),
         )
         if eeg.feature_batch_size <= 0:
-            raise ValueError(
-                "eeg_bold_coupling.eeg.feature_batch_size must be positive."
-            )
+            raise ValueError("eeg_bold_coupling.eeg.feature_batch_size must be positive.")
         if eeg.method not in {"lcmv", "eloreta", "dspm", "wmne"}:
             raise ValueError(
                 "eeg_bold_coupling.eeg.method must be one of "
@@ -640,23 +640,17 @@ class EEGBOLDCouplingConfig:
             if str(v).strip()
         )
         if not selection_values:
-            raise ValueError(
-                "eeg_bold_coupling.fmri.selection_values must not be empty."
-            )
+            raise ValueError("eeg_bold_coupling.fmri.selection_values must not be empty.")
         fmri = CouplingFMRIConfig(
             contrast_name=str(fmri_cfg.get("contrast_name", "eeg_bold_coupling")).strip(),
             input_source=str(fmri_cfg.get("input_source", "fmriprep")).strip().lower(),
             fmriprep_space=str(fmri_cfg.get("fmriprep_space", "T1w")).strip(),
             require_fmriprep=bool(fmri_cfg.get("require_fmriprep", True)),
-            extraction_method=str(
-                fmri_cfg.get("extraction_method", "surface_glm")
-            ).strip().lower(),
+            extraction_method=str(fmri_cfg.get("extraction_method", "surface_glm")).strip().lower(),
             selection_column=str(fmri_cfg.get("selection_column", "")).strip(),
             selection_values=selection_values,
             hrf_model=str(fmri_cfg.get("hrf_model", "spm")).strip().lower(),
-            drift_model=(
-                str(fmri_cfg.get("drift_model", "")).strip().lower() or None
-            ),
+            drift_model=(str(fmri_cfg.get("drift_model", "")).strip().lower() or None),
             high_pass_hz=float(fmri_cfg.get("high_pass_hz", 0.008)),
             low_pass_hz=(
                 None
@@ -668,12 +662,8 @@ class EEGBOLDCouplingConfig:
                 if fmri_cfg.get("smoothing_fwhm", None) in {None, "", 0}
                 else float(fmri_cfg.get("smoothing_fwhm"))
             ),
-            confounds_strategy=str(
-                fmri_cfg.get("confounds_strategy", "auto")
-            ).strip(),
-            lss_other_regressors=str(
-                fmri_cfg.get("lss_other_regressors", "all")
-            ).strip().lower(),
+            confounds_strategy=str(fmri_cfg.get("confounds_strategy", "auto")).strip(),
+            lss_other_regressors=str(fmri_cfg.get("lss_other_regressors", "all")).strip().lower(),
         )
         if not fmri.selection_column:
             raise ValueError("eeg_bold_coupling.fmri.selection_column is required.")
@@ -686,9 +676,7 @@ class EEGBOLDCouplingConfig:
                 "eeg_bold_coupling.fmri.fmriprep_space must be 'T1w' to match subject surfaces."
             )
         if fmri.extraction_method != "surface_glm":
-            raise ValueError(
-                "eeg_bold_coupling.fmri.extraction_method must be 'surface_glm'."
-            )
+            raise ValueError("eeg_bold_coupling.fmri.extraction_method must be 'surface_glm'.")
 
         cov_cfg = coupling_cfg.get("covariates", {})
         if not isinstance(cov_cfg, dict):
@@ -703,12 +691,8 @@ class EEGBOLDCouplingConfig:
         )
         covariates = CouplingCovariateConfig(
             model_terms=model_terms,
-            temperature_column=(
-                str(cov_cfg.get("temperature_column", "")).strip() or None
-            ),
-            include_temperature_squared=bool(
-                cov_cfg.get("include_temperature_squared", True)
-            ),
+            temperature_column=(str(cov_cfg.get("temperature_column", "")).strip() or None),
+            include_temperature_squared=bool(cov_cfg.get("include_temperature_squared", True)),
             site_column=str(cov_cfg.get("site_column", "")).strip() or None,
             extra_numeric_columns=tuple(
                 str(v).strip()
@@ -726,14 +710,10 @@ class EEGBOLDCouplingConfig:
         if not isinstance(align_cfg, dict):
             raise ValueError("eeg_bold_coupling.alignment must be a mapping.")
         alignment = CouplingAlignmentConfig(
-            key_mode=str(
-                align_cfg.get("key_mode", "run_trial_number")
-            ).strip().lower(),
+            key_mode=str(align_cfg.get("key_mode", "run_trial_number")).strip().lower(),
         )
         if alignment.key_mode != "run_trial_number":
-            raise ValueError(
-                "eeg_bold_coupling.alignment.key_mode must be 'run_trial_number'."
-            )
+            raise ValueError("eeg_bold_coupling.alignment.key_mode must be 'run_trial_number'.")
         runtime_cfg = coupling_cfg.get("runtime", {})
         if not isinstance(runtime_cfg, dict):
             raise ValueError("eeg_bold_coupling.runtime must be a mapping.")
@@ -811,9 +791,7 @@ def _load_template_labels(
             if not path.is_absolute():
                 path = subjects_dir / spec.template_subject / "label" / label_file
             if not path.exists():
-                raise FileNotFoundError(
-                    f"ROI {spec.name!r} label file not found: {path}"
-                )
+                raise FileNotFoundError(f"ROI {spec.name!r} label file not found: {path}")
             labels.append(mne.read_label(str(path), subject=spec.template_subject))
 
     return labels
@@ -912,11 +890,7 @@ def _resolve_subject_output_dir(
         base = cfg.output_dir / _subject_bids(subject_raw)
     else:
         base = deriv_root / _subject_bids(subject_raw) / "multimodal" / "eeg_bold_coupling"
-    return (
-        base
-        / f"task-{task}"
-        / f"contrast-{_safe_slug(cfg.fmri.contrast_name)}"
-    )
+    return base / f"task-{task}" / f"contrast-{_safe_slug(cfg.fmri.contrast_name)}"
 
 
 def _resolve_group_output_dir(
@@ -929,11 +903,7 @@ def _resolve_group_output_dir(
         base = cfg.output_dir / "group"
     else:
         base = deriv_root / "group" / "multimodal" / "eeg_bold_coupling"
-    return (
-        base
-        / f"task-{task}"
-        / f"contrast-{_safe_slug(cfg.fmri.contrast_name)}"
-    )
+    return base / f"task-{task}" / f"contrast-{_safe_slug(cfg.fmri.contrast_name)}"
 
 
 class SubjectStageProfiler:
@@ -1086,9 +1056,7 @@ def _run_subject_preflight(
         subject_surface_dir / "rh.white",
         subject_bem_dir / f"{_subject_bids(subject)}-trans.fif",
     ]
-    bem_solutions = sorted(
-        subject_bem_dir.glob(f"{_subject_bids(subject)}-*-bem-sol.fif")
-    )
+    bem_solutions = sorted(subject_bem_dir.glob(f"{_subject_bids(subject)}-*-bem-sol.fif"))
     if not bem_solutions:
         raise FileNotFoundError(
             f"Missing BEM solution for {_subject_bids(subject)} in {subject_bem_dir}."
@@ -1103,10 +1071,7 @@ def _run_subject_preflight(
             label_path = Path(label_file)
             if not label_path.is_absolute():
                 label_path = (
-                    coupling_cfg.eeg.subjects_dir
-                    / roi.template_subject
-                    / "label"
-                    / label_file
+                    coupling_cfg.eeg.subjects_dir / roi.template_subject / "label" / label_file
                 )
             template_label_paths.append(label_path)
     if template_label_paths:
@@ -1151,10 +1116,7 @@ def _validate_clean_event_qc_columns(
         if str(column) not in clean_events.columns
     ]
     if missing:
-        raise ValueError(
-            "Clean events are missing required EEG artifact QC columns: "
-            f"{missing}"
-        )
+        raise ValueError("Clean events are missing required EEG artifact QC columns: " f"{missing}")
 
 
 def _run_group_preflight(
@@ -1177,17 +1139,17 @@ def _materialize_runtime_roi_specs(config: Any) -> None:
     built_rois = build_eeg_bold_rois(config=config, logger=LOGGER)
     if not built_rois:
         return
-    config.setdefault("eeg_bold_coupling", {}).setdefault("rois", {})[
-        "items"
-    ] = built_rois_as_runtime_specs(
-        built_rois,
-        template_subject=str(
-            get_config_value(
-                config,
-                "eeg_bold_coupling.roi_builder.template_subject",
-                "fsaverage",
-            )
-        ).strip(),
+    config.setdefault("eeg_bold_coupling", {}).setdefault("rois", {})["items"] = (
+        built_rois_as_runtime_specs(
+            built_rois,
+            template_subject=str(
+                get_config_value(
+                    config,
+                    "eeg_bold_coupling.roi_builder.template_subject",
+                    "fsaverage",
+                )
+            ).strip(),
+        )
     )
 
 
@@ -1206,9 +1168,7 @@ def _resolve_subject_source_model(
     bem_candidates = sorted(bem_dir.glob(f"{subject_bids}-*-bem-sol.fif"))
     bem_path = bem_candidates[0] if bem_candidates else None
     if not trans_path.exists() or bem_path is None or not bem_path.exists():
-        raise ValueError(
-            f"Missing subject-specific trans/BEM for {subject_bids}."
-        )
+        raise ValueError(f"Missing subject-specific trans/BEM for {subject_bids}.")
     return setup_surface_forward_model_configured(
         info=epochs.info,
         subject=subject_bids,
@@ -1300,7 +1260,9 @@ def _map_rois_to_source_rows(
                     surface_points=np.asarray(surface_info.white_points["lh"], dtype=float),
                     vertex_areas=np.asarray(surface_info.vertex_areas["lh"], dtype=float),
                 )
-                matched = [int(np.searchsorted(lh_vertices, vertex)) for vertex in weighted_vertices]
+                matched = [
+                    int(np.searchsorted(lh_vertices, vertex)) for vertex in weighted_vertices
+                ]
                 roi_lh_vertices = [int(v) for v in label_vertex_array.tolist()]
             else:
                 weighted_vertices, weighted_areas = _map_label_vertices_to_source_weights(
@@ -1317,9 +1279,7 @@ def _map_rois_to_source_rows(
             source_rows.extend(int(row) for row in matched)
             source_weights.extend(float(v) for v in weighted_areas.tolist())
         if not source_rows:
-            raise ValueError(
-                f"ROI {name!r} has no vertices in the subject source space."
-            )
+            raise ValueError(f"ROI {name!r} has no vertices in the subject source space.")
         unique_rows = np.asarray(source_rows, dtype=int)
         unique_weights = np.asarray(source_weights, dtype=float)
         order = np.argsort(unique_rows)
@@ -1350,9 +1310,7 @@ def _build_window_mask(
     start, end = window
     mask = (times >= float(start)) & (times <= float(end))
     if not np.any(mask):
-        raise ValueError(
-            f"{label} window {window} does not overlap epoch times."
-        )
+        raise ValueError(f"{label} window {window} does not overlap epoch times.")
     return mask
 
 
@@ -1378,22 +1336,12 @@ def _extract_trialwise_eeg_features(
     for stc in stcs[1:]:
         shape = np.asarray(stc.data).shape
         if shape != (n_sources, n_times):
-            raise ValueError(
-                "All source estimates must share the same (n_sources, n_times) shape."
-            )
+            raise ValueError("All source estimates must share the same (n_sources, n_times) shape.")
     n_epochs = len(stcs)
     rows: Dict[str, np.ndarray] = {}
-    roi_rows = {
-        roi.name: np.asarray(roi.source_rows, dtype=int)
-        for roi in rois
-    }
-    roi_weights = {
-        roi.name: np.asarray(roi.source_weights, dtype=float)
-        for roi in rois
-    }
-    requested_rows = np.unique(
-        np.concatenate([source_rows for source_rows in roi_rows.values()])
-    )
+    roi_rows = {roi.name: np.asarray(roi.source_rows, dtype=int) for roi in rois}
+    roi_weights = {roi.name: np.asarray(roi.source_weights, dtype=float) for roi in rois}
+    requested_rows = np.unique(np.concatenate([source_rows for source_rows in roi_rows.values()]))
     if requested_rows.size == 0:
         raise ValueError("No ROI source vertices were available for EEG extraction.")
     power_floor = float(np.finfo(float).tiny)
@@ -1410,18 +1358,9 @@ def _extract_trialwise_eeg_features(
         if band not in frequency_bands:
             raise ValueError(f"Unknown band {band!r}.")
         fmin, fmax = float(frequency_bands[band][0]), float(frequency_bands[band][1])
-        roi_active_sums = {
-            roi.name: np.zeros(n_epochs, dtype=float)
-            for roi in rois
-        }
-        roi_baseline_sums = {
-            roi.name: np.zeros(n_epochs, dtype=float)
-            for roi in rois
-        }
-        roi_counts = {
-            roi.name: 0.0
-            for roi in rois
-        }
+        roi_active_sums = {roi.name: np.zeros(n_epochs, dtype=float) for roi in rois}
+        roi_baseline_sums = {roi.name: np.zeros(n_epochs, dtype=float) for roi in rois}
+        roi_counts = {roi.name: 0.0 for roi in rois}
         for start in range(0, requested_rows.size, feature_batch_size):
             stop = min(start + feature_batch_size, requested_rows.size)
             batch_source_rows = requested_rows[start:stop]
@@ -1429,16 +1368,12 @@ def _extract_trialwise_eeg_features(
             batch_weights: Dict[str, np.ndarray] = {}
             for roi in rois:
                 positions = roi_positions[roi.name]
-                within_batch = positions[
-                    (positions >= start) & (positions < stop)
-                ] - start
+                within_batch = positions[(positions >= start) & (positions < stop)] - start
                 if within_batch.size == 0:
                     continue
                 batch_positions[roi.name] = within_batch
                 full_weights = roi_weights[roi.name]
-                roi_batch_weights = full_weights[
-                    (positions >= start) & (positions < stop)
-                ]
+                roi_batch_weights = full_weights[(positions >= start) & (positions < stop)]
                 batch_weights[roi.name] = roi_batch_weights
                 roi_counts[roi.name] += float(np.sum(roi_batch_weights))
             for epoch_index in range(n_epochs):
@@ -1472,9 +1407,7 @@ def _extract_trialwise_eeg_features(
         for roi in rois:
             column = f"eeg_{roi.name}_{band}"
             if roi_counts[roi.name] <= 0:
-                raise ValueError(
-                    f"ROI {roi.name!r} does not overlap any source vertices."
-                )
+                raise ValueError(f"ROI {roi.name!r} does not overlap any source vertices.")
             roi_active_mean = roi_active_sums[roi.name] / float(roi_counts[roi.name])
             roi_baseline_mean = roi_baseline_sums[roi.name] / float(roi_counts[roi.name])
             rows[column] = 10.0 * np.log10(
@@ -1503,31 +1436,19 @@ def _extract_trialwise_band_features_from_stc_stream(
         raise ValueError("Source estimates must be scalar surface estimates.")
     n_sources, n_times = first_block.shape
     power_floor = float(np.finfo(float).tiny)
-    roi_rows = {
-        roi.name: np.asarray(roi.source_rows, dtype=int)
-        for roi in rois
-    }
-    roi_weights = {
-        roi.name: np.asarray(roi.source_weights, dtype=float)
-        for roi in rois
-    }
+    roi_rows = {roi.name: np.asarray(roi.source_rows, dtype=int) for roi in rois}
+    roi_weights = {roi.name: np.asarray(roi.source_weights, dtype=float) for roi in rois}
     for roi in rois:
         source_rows = roi_rows[roi.name]
         source_weights = roi_weights[roi.name]
         if source_rows.size == 0:
             raise ValueError(f"ROI {roi.name!r} has no source rows.")
         if source_weights.shape != source_rows.shape:
-            raise ValueError(
-                f"ROI {roi.name!r} source weights do not match source rows."
-            )
+            raise ValueError(f"ROI {roi.name!r} source weights do not match source rows.")
         total_weight = float(np.sum(source_weights))
         if not np.isfinite(total_weight) or total_weight <= 0:
-            raise ValueError(
-                f"ROI {roi.name!r} has non-positive total source weight."
-            )
-    requested_rows = np.unique(
-        np.concatenate([source_rows for source_rows in roi_rows.values()])
-    )
+            raise ValueError(f"ROI {roi.name!r} has non-positive total source weight.")
+    requested_rows = np.unique(np.concatenate([source_rows for source_rows in roi_rows.values()]))
     if requested_rows.size == 0:
         raise ValueError("No ROI source vertices were available for EEG extraction.")
     roi_positions: Dict[str, np.ndarray] = {}
@@ -1546,9 +1467,7 @@ def _extract_trialwise_band_features_from_stc_stream(
     def append_epoch(stc: Any) -> None:
         shape = np.asarray(stc.data).shape
         if shape != (n_sources, n_times):
-            raise ValueError(
-                "All source estimates must share the same (n_sources, n_times) shape."
-            )
+            raise ValueError("All source estimates must share the same (n_sources, n_times) shape.")
         source_data = np.asarray(stc.data[requested_rows, :], dtype=float)
         analytic = hilbert(source_data, axis=-1)
         power = np.abs(analytic) ** 2
@@ -1574,8 +1493,7 @@ def _extract_trialwise_band_features_from_stc_stream(
         roi_active = np.asarray(roi_active_values[roi.name], dtype=float)
         roi_baseline = np.asarray(roi_baseline_values[roi.name], dtype=float)
         rows[f"eeg_{roi.name}_{band}"] = 10.0 * np.log10(
-            np.maximum(roi_active, power_floor)
-            / np.maximum(roi_baseline, power_floor)
+            np.maximum(roi_active, power_floor) / np.maximum(roi_baseline, power_floor)
         )
     return pd.DataFrame(rows)
 
@@ -1651,9 +1569,7 @@ def _prepare_eeg_trial_table(
         raise ValueError("EEG clean events must contain onset and duration.")
     run_series = _resolve_run_series(events_df)
     if run_series is None:
-        raise ValueError(
-            "EEG clean events are missing a usable run/block column."
-        )
+        raise ValueError("EEG clean events are missing a usable run/block column.")
     run_numeric = pd.to_numeric(run_series, errors="coerce")
     if not np.all(np.isfinite(run_numeric.to_numpy(dtype=float))):
         raise ValueError("EEG clean events run column contains non-finite values.")
@@ -1691,13 +1607,9 @@ def _prepare_eeg_trial_table(
     ]
     metadata = events_df.copy()
     metadata = metadata.drop(columns=["trial_id", "onset", "duration"], errors="ignore")
-    metadata = metadata.rename(
-        columns={column: f"events_{column}" for column in metadata.columns}
-    )
+    metadata = metadata.rename(columns={column: f"events_{column}" for column in metadata.columns})
     if len(out) != len(eeg_features):
-        raise ValueError(
-            "EEG features row count does not match EEG clean events row count."
-        )
+        raise ValueError("EEG features row count does not match EEG clean events row count.")
     return pd.concat(
         [
             out.reset_index(drop=True),
@@ -1839,9 +1751,7 @@ def _prepare_trial_table(
         "exp_site",
         *coupling_cfg.covariates.extra_numeric_columns,
     ]
-    available_history_columns = [
-        column for column in history_columns if column in history.columns
-    ]
+    available_history_columns = [column for column in history_columns if column in history.columns]
     out = out.merge(
         history[available_history_columns],
         on="source_event_key",
@@ -1854,7 +1764,9 @@ def _prepare_trial_table(
     if not derived_history_columns:
         raise ValueError("No full-session trial history covariates were derived.")
     if out[derived_history_columns].isna().all(axis=None):
-        raise ValueError("Full-session trial history covariates failed to merge onto selected trials.")
+        raise ValueError(
+            "Full-session trial history covariates failed to merge onto selected trials."
+        )
     return out.sort_values(["run_num", "onset", "duration"]).reset_index(drop=True)
 
 
@@ -1915,9 +1827,7 @@ def _subject_surface_paths(
         pial = surf_dir / f"{hemi}.pial"
         white = surf_dir / f"{hemi}.white"
         if not pial.exists() or not white.exists():
-            raise FileNotFoundError(
-                f"Missing surface files for {subject}: {pial} / {white}"
-            )
+            raise FileNotFoundError(f"Missing surface files for {subject}: {pial} / {white}")
         hemis[hemi] = {"pial": pial, "white": white}
     return hemis
 
@@ -1967,14 +1877,8 @@ def _subject_surface_info(
         subject=subject,
         subjects_dir=subjects_dir,
     )
-    pial_paths = {
-        hemi: hemi_paths["pial"]
-        for hemi, hemi_paths in surface_paths.items()
-    }
-    white_paths = {
-        hemi: hemi_paths["white"]
-        for hemi, hemi_paths in surface_paths.items()
-    }
+    pial_paths = {hemi: hemi_paths["pial"] for hemi, hemi_paths in surface_paths.items()}
+    white_paths = {hemi: hemi_paths["white"] for hemi, hemi_paths in surface_paths.items()}
     vertex_areas = {
         hemi: (
             _read_surface_vertex_areas(pial_paths[hemi])
@@ -1983,10 +1887,7 @@ def _subject_surface_info(
         / 2.0
         for hemi in ("lh", "rh")
     }
-    white_points = {
-        hemi: _read_surface_points(white_paths[hemi])
-        for hemi in ("lh", "rh")
-    }
+    white_points = {hemi: _read_surface_points(white_paths[hemi]) for hemi in ("lh", "rh")}
     return SubjectSurfaceInfo(
         pial_paths=pial_paths,
         white_paths=white_paths,
@@ -2059,9 +1960,7 @@ def _collect_roi_surface_values(
         value_parts.append(np.asarray(rh_values, dtype=float)[rh_vertices])
         area_parts.append(np.asarray(rh_vertex_areas, dtype=float)[rh_vertices])
     if not value_parts or not area_parts:
-        raise ValueError(
-            f"ROI {roi.name!r} has no surface vertices for cortical extraction."
-        )
+        raise ValueError(f"ROI {roi.name!r} has no surface vertices for cortical extraction.")
     values = np.concatenate(value_parts)
     areas = np.concatenate(area_parts)
     finite_mask = np.isfinite(values) & np.isfinite(areas) & (areas > 0)
@@ -2122,9 +2021,7 @@ def _coerce_surface_matrix(
     array = np.asarray(values, dtype=float)
     if array.ndim == 1:
         if array.shape[0] != n_vertices:
-            raise ValueError(
-                f"{label} surface vector does not match vertex count {n_vertices}."
-            )
+            raise ValueError(f"{label} surface vector does not match vertex count {n_vertices}.")
         return array.reshape(n_vertices, 1)
     if array.ndim != 2:
         raise ValueError(f"{label} surface data must be 1D or 2D.")
@@ -2255,11 +2152,7 @@ def _surface_record_for_trial(
                 variances=variance_values,
                 areas=variance_areas,
             )
-    if (
-        signature_weights is not None
-        and expression_cfg is not None
-        and expression_cfg.enabled
-    ):
+    if signature_weights is not None and expression_cfg is not None and expression_cfg.enabled:
         for roi in rois:
             record.update(
                 _extract_local_expression(
@@ -2320,9 +2213,7 @@ def _extract_trialwise_bold_features_surface_glm(
         if progress_callback is not None:
             progress_callback(f"surface_glm {subject_label} run-{run_num:02d}")
         if run_num not in runs_by_number:
-            raise FileNotFoundError(
-                f"Could not resolve fMRI run inputs for run {run_num}."
-            )
+            raise FileNotFoundError(f"Could not resolve fMRI run inputs for run {run_num}.")
         bold_path, events_path, confounds_path = runs_by_number[run_num]
         events_df = pd.read_csv(events_path, sep="\t")
         confounds = None
@@ -2333,9 +2224,7 @@ def _extract_trialwise_bold_features_surface_glm(
                 logger=logger,
             )
             if confounds is None or not confound_columns:
-                raise ValueError(
-                    f"Surface GLM requires confounds for {bold_path.name}."
-                )
+                raise ValueError(f"Surface GLM requires confounds for {bold_path.name}.")
         bold_img = nib.load(str(bold_path))
         surface_run = _build_surface_run_image(
             bold_img=bold_img,
@@ -2383,9 +2272,7 @@ def _extract_trialwise_bold_features_surface_glm(
                 )
             rows.append(
                 _surface_record_for_trial(
-                    trial_key=trial_key_lookup[
-                        (int(trial.run), int(trial.trial_index))
-                    ],
+                    trial_key=trial_key_lookup[(int(trial.run), int(trial.trial_index))],
                     rois=rois,
                     surface_info=surface_info,
                     beta_surface=beta_surface,
@@ -2536,13 +2423,9 @@ def _merge_trialwise_tables(
             atol=0.0,
             equal_nan=True,
         )
-        same_text = left.fillna("__nan__").astype(str).equals(
-            right.fillna("__nan__").astype(str)
-        )
+        same_text = left.fillna("__nan__").astype(str).equals(right.fillna("__nan__").astype(str))
         if not same_numeric and not same_text:
-            raise ValueError(
-                f"Merged trial column {name!r} differs between EEG and fMRI tables."
-            )
+            raise ValueError(f"Merged trial column {name!r} differs between EEG and fMRI tables.")
         table[name] = left
         return table.drop(columns=[left_name, right_name])
 
@@ -2571,9 +2454,13 @@ def _merge_trialwise_tables(
             merged[eeg_column] = pd.to_numeric(merged[left_name], errors="coerce")
             merged[column] = pd.to_numeric(merged[right_name], errors="coerce")
             if not np.all(np.isfinite(merged[eeg_column].to_numpy(dtype=float))):
-                raise ValueError(f"Merged EEG timing column {eeg_column!r} contains non-finite values.")
+                raise ValueError(
+                    f"Merged EEG timing column {eeg_column!r} contains non-finite values."
+                )
             if not np.all(np.isfinite(merged[column].to_numpy(dtype=float))):
-                raise ValueError(f"Merged trial timing column {column!r} contains non-finite values.")
+                raise ValueError(
+                    f"Merged trial timing column {column!r} contains non-finite values."
+                )
             merged = merged.drop(columns=[left_name, right_name])
     overlapping_event_columns = sorted(
         {
@@ -2756,10 +2643,7 @@ def _merge_nested_mapping(
     base: Mapping[str, Any],
     overrides: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {
-        str(key): value
-        for key, value in base.items()
-    }
+    merged: Dict[str, Any] = {str(key): value for key, value in base.items()}
     for key, value in overrides.items():
         key_text = str(key)
         if isinstance(value, Mapping):
@@ -2821,7 +2705,9 @@ def _build_sensitivity_cell_specs(
     nonstandardized_terms_map: Optional[Mapping[str, Sequence[str]]] = None,
 ) -> List[CellSpec]:
     cells: List[CellSpec] = []
-    available = None if available_columns is None else set(str(column) for column in available_columns)
+    available = (
+        None if available_columns is None else set(str(column) for column in available_columns)
+    )
     for cell in base_cells:
         outcome_column = cell.outcome_column
         if outcome_suffix_map is not None and outcome_column in outcome_suffix_map:
@@ -2899,9 +2785,7 @@ def _make_temperature_factor(
     max_levels: Optional[int],
 ) -> pd.DataFrame:
     if temperature_column not in merged_table.columns:
-        raise ValueError(
-            f"Temperature-categorical sensitivity is missing {temperature_column!r}."
-        )
+        raise ValueError(f"Temperature-categorical sensitivity is missing {temperature_column!r}.")
     out = merged_table.copy()
     values = pd.to_numeric(out[temperature_column], errors="coerce")
     if not np.all(np.isfinite(values.to_numpy(dtype=float))):
@@ -2936,7 +2820,9 @@ def _bold_concordance_table(
         mask = np.isfinite(left.to_numpy(dtype=float)) & np.isfinite(right.to_numpy(dtype=float))
         if not np.any(mask):
             continue
-        corr = np.corrcoef(left.to_numpy(dtype=float)[mask], right.to_numpy(dtype=float)[mask])[0, 1]
+        corr = np.corrcoef(left.to_numpy(dtype=float)[mask], right.to_numpy(dtype=float)[mask])[
+            0, 1
+        ]
         rows.append(
             {
                 "outcome_column": column,
@@ -2973,9 +2859,7 @@ def _shuffle_bold_table_within_run(
     )
     if annotated.empty:
         raise ValueError("Negative-control trial shuffling found no matched BOLD trials.")
-    rng = np.random.default_rng(
-        _subject_negative_control_seed(subject=subject, config=config)
-    )
+    rng = np.random.default_rng(_subject_negative_control_seed(subject=subject, config=config))
     shuffled_parts: List[pd.DataFrame] = []
     for run_num, run_table in annotated.groupby("run_num", sort=True):
         out = run_table.copy().reset_index(drop=True)
@@ -3536,7 +3420,9 @@ def _run_subject_sensitivity_analyses(
             config=config,
         )
         if epochs is None or clean_events is None:
-            raise ValueError(f"Could not reload epochs/events for source-method sensitivity: sub-{subject}.")
+            raise ValueError(
+                f"Could not reload epochs/events for source-method sensitivity: sub-{subject}."
+            )
         fwd, _src = _resolve_subject_source_model(
             subject=subject,
             epochs=epochs,
@@ -3932,9 +3818,7 @@ def _cellspec_from_analysis_row(cell_row: Any) -> CellSpec:
 
 def _group_confirmatory_cell_rows(analysis_cells: pd.DataFrame) -> pd.DataFrame:
     return (
-        analysis_cells.loc[
-            analysis_cells["family"].astype(str) == "confirmatory"
-        ]
+        analysis_cells.loc[analysis_cells["family"].astype(str) == "confirmatory"]
         .drop_duplicates(
             subset=[
                 "analysis_id",
@@ -3962,9 +3846,9 @@ def _confirmatory_pooled_subset(
         & (analysis_cells["status"].astype(str) == "ok"),
         "subject",
     ].astype(str)
-    return pooled.loc[
-        pooled["subject"].astype(str).isin(ok_subjects.tolist())
-    ].reset_index(drop=True)
+    return pooled.loc[pooled["subject"].astype(str).isin(ok_subjects.tolist())].reset_index(
+        drop=True
+    )
 
 
 def _leave_one_out_refits(
@@ -3983,8 +3867,7 @@ def _leave_one_out_refits(
             ].reset_index(drop=True)
         elif refit_type == "run":
             refit_table = pooled_subset.loc[
-                pd.to_numeric(pooled_subset["run_num"], errors="coerce")
-                != float(holdout_value)
+                pd.to_numeric(pooled_subset["run_num"], errors="coerce") != float(holdout_value)
             ].reset_index(drop=True)
         else:
             raise ValueError(f"Unsupported refit_type {refit_type!r}.")
@@ -4026,16 +3909,12 @@ def _summarize_leave_one_out_refits(
         interpretable_betas = beta_values[interpretable_mask]
         reference_beta = float(getattr(reference, "beta"))
         if np.isfinite(reference_beta) and reference_beta != 0.0 and interpretable_betas.size > 0:
-            sign_flips = int(
-                np.sum(np.sign(interpretable_betas) != np.sign(reference_beta))
-            )
+            sign_flips = int(np.sum(np.sign(interpretable_betas) != np.sign(reference_beta)))
         else:
             sign_flips = 0
         max_abs_beta_delta = np.nan
         if np.isfinite(reference_beta) and interpretable_betas.size > 0:
-            max_abs_beta_delta = float(
-                np.max(np.abs(interpretable_betas - reference_beta))
-            )
+            max_abs_beta_delta = float(np.max(np.abs(interpretable_betas - reference_beta)))
         rows.append(
             {
                 "analysis_id": str(analysis_id),
@@ -4044,16 +3923,18 @@ def _summarize_leave_one_out_refits(
                 "reference_p_value": float(getattr(reference, "p_value")),
                 "n_refits": int(len(group)),
                 "n_interpretable_refits": int(np.sum(interpretable_mask)),
-                "min_beta": float(np.min(interpretable_betas)) if interpretable_betas.size > 0 else np.nan,
-                "max_beta": float(np.max(interpretable_betas)) if interpretable_betas.size > 0 else np.nan,
+                "min_beta": (
+                    float(np.min(interpretable_betas)) if interpretable_betas.size > 0 else np.nan
+                ),
+                "max_beta": (
+                    float(np.max(interpretable_betas)) if interpretable_betas.size > 0 else np.nan
+                ),
                 "max_abs_beta_delta": max_abs_beta_delta,
                 "n_sign_flips": sign_flips,
                 "sign_stable": bool(sign_flips == 0 and interpretable_betas.size > 0),
             }
         )
-    return pd.DataFrame(rows).sort_values(
-        ["analysis_id", "refit_type"]
-    ).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(["analysis_id", "refit_type"]).reset_index(drop=True)
 
 
 def _write_group_robustness_refits(
@@ -4149,10 +4030,7 @@ def _sign_match(
 def _result_row_by_analysis_id(table: pd.DataFrame) -> Dict[str, Any]:
     if table.empty:
         return {}
-    return {
-        str(row.analysis_id): row
-        for row in table.itertuples(index=False)
-    }
+    return {str(row.analysis_id): row for row in table.itertuples(index=False)}
 
 
 def _negative_control_passes(
@@ -4198,24 +4076,34 @@ def _write_group_adjudication_summary(
         )
         for item in sensitivity_cfg.artifact_models.items
     }
-    within_between_table = _load_optional_group_results(
-        group_dir
-        / "sensitivities"
-        / _safe_slug(sensitivity_cfg.within_between.output_name)
-        / "group_results.tsv"
-    ) if sensitivity_cfg.within_between.enabled else pd.DataFrame()
-    negative_control_table = _load_optional_group_results(
-        group_dir
-        / "negative_controls"
-        / _safe_slug(negative_control_cfg.output_name)
-        / "group_results.tsv"
-    ) if negative_control_cfg.enabled else pd.DataFrame()
+    within_between_table = (
+        _load_optional_group_results(
+            group_dir
+            / "sensitivities"
+            / _safe_slug(sensitivity_cfg.within_between.output_name)
+            / "group_results.tsv"
+        )
+        if sensitivity_cfg.within_between.enabled
+        else pd.DataFrame()
+    )
+    negative_control_table = (
+        _load_optional_group_results(
+            group_dir
+            / "negative_controls"
+            / _safe_slug(negative_control_cfg.output_name)
+            / "group_results.tsv"
+        )
+        if negative_control_cfg.enabled
+        else pd.DataFrame()
+    )
     loo_summary = _load_optional_group_results(
         group_dir / "robustness" / "leave_one_out_summary.tsv"
     )
 
     source_maps = {name: _result_row_by_analysis_id(table) for name, table in source_tables.items()}
-    artifact_maps = {name: _result_row_by_analysis_id(table) for name, table in artifact_tables.items()}
+    artifact_maps = {
+        name: _result_row_by_analysis_id(table) for name, table in artifact_tables.items()
+    }
     within_between_map = _result_row_by_analysis_id(within_between_table)
     negative_control_map = _result_row_by_analysis_id(negative_control_table)
 
@@ -4238,7 +4126,9 @@ def _write_group_adjudication_summary(
             "reference_beta": float(ref_row.beta),
             "reference_p_value": float(ref_row.p_value),
             "reference_p_holm": float(
-                pd.to_numeric(pd.Series([getattr(ref_row, "p_holm", np.nan)]), errors="coerce").iloc[0]
+                pd.to_numeric(
+                    pd.Series([getattr(ref_row, "p_holm", np.nan)]), errors="coerce"
+                ).iloc[0]
             ),
             "confirmatory_interpretable": bool(ref_row.interpretable),
             "confirmatory_significant_holm": bool(getattr(ref_row, "significant_holm", False)),
@@ -4250,7 +4140,9 @@ def _write_group_adjudication_summary(
             passed = (
                 candidate is not None
                 and bool(getattr(candidate, "interpretable", False))
-                and _sign_match(reference_beta=ref_row.beta, candidate_beta=getattr(candidate, "beta", np.nan))
+                and _sign_match(
+                    reference_beta=ref_row.beta, candidate_beta=getattr(candidate, "beta", np.nan)
+                )
             )
             row[f"source_method_{_safe_slug(name)}"] = passed
             source_passes.append(bool(passed))
@@ -4261,7 +4153,9 @@ def _write_group_adjudication_summary(
             passed = (
                 candidate is not None
                 and bool(getattr(candidate, "interpretable", False))
-                and _sign_match(reference_beta=ref_row.beta, candidate_beta=getattr(candidate, "beta", np.nan))
+                and _sign_match(
+                    reference_beta=ref_row.beta, candidate_beta=getattr(candidate, "beta", np.nan)
+                )
             )
             row[f"artifact_model_{_safe_slug(name)}"] = passed
             artifact_passes.append(bool(passed))
@@ -4271,7 +4165,9 @@ def _write_group_adjudication_summary(
             within_between_pass = (
                 candidate is not None
                 and bool(getattr(candidate, "interpretable", False))
-                and _sign_match(reference_beta=ref_row.beta, candidate_beta=getattr(candidate, "beta", np.nan))
+                and _sign_match(
+                    reference_beta=ref_row.beta, candidate_beta=getattr(candidate, "beta", np.nan)
+                )
             )
             row["within_between_pass"] = within_between_pass
         else:
@@ -4279,16 +4175,19 @@ def _write_group_adjudication_summary(
 
         subject_loo = loo_subject_map.get(analysis_id)
         run_loo = loo_run_map.get(analysis_id)
-        subject_loo_pass = bool(getattr(subject_loo, "sign_stable", False)) if subject_loo is not None else False
-        run_loo_pass = bool(getattr(run_loo, "sign_stable", False)) if run_loo is not None else False
+        subject_loo_pass = (
+            bool(getattr(subject_loo, "sign_stable", False)) if subject_loo is not None else False
+        )
+        run_loo_pass = (
+            bool(getattr(run_loo, "sign_stable", False)) if run_loo is not None else False
+        )
         row["leave_one_subject_pass"] = subject_loo_pass
         row["leave_one_run_pass"] = run_loo_pass
 
         if negative_control_cfg.enabled:
             candidate = negative_control_map.get(analysis_id)
-            negative_control_pass = (
-                candidate is not None
-                and _negative_control_passes(row=candidate, alpha=alpha)
+            negative_control_pass = candidate is not None and _negative_control_passes(
+                row=candidate, alpha=alpha
             )
             row["negative_control_pass"] = negative_control_pass
         else:
@@ -4309,9 +4208,9 @@ def _write_group_adjudication_summary(
         )
         rows.append(row)
 
-    adjudication = pd.DataFrame(rows).sort_values(
-        ["roi", "band", "analysis_id"]
-    ).reset_index(drop=True)
+    adjudication = (
+        pd.DataFrame(rows).sort_values(["roi", "band", "analysis_id"]).reset_index(drop=True)
+    )
     adjudication.to_csv(
         group_dir / "robustness" / "adjudication_summary.tsv",
         sep="\t",
@@ -4487,9 +4386,7 @@ def run_subject_eeg_bold_coupling(
                 trial_table["trial_key"].isin(set(eeg_table["trial_key"]))
             ].reset_index(drop=True)
             if matched_trial_table.empty:
-                raise ValueError(
-                    f"No EEG trials matched selected LSS trials for {subject_bids}."
-                )
+                raise ValueError(f"No EEG trials matched selected LSS trials for {subject_bids}.")
             signature_weights = None
             if expression_cfg.enabled:
                 signature_paths = resolve_signature_paths(config)
@@ -4499,17 +4396,14 @@ def run_subject_eeg_bold_coupling(
                     )
                 if expression_cfg.signatures:
                     missing = [
-                        name
-                        for name in expression_cfg.signatures
-                        if name not in signature_paths
+                        name for name in expression_cfg.signatures if name not in signature_paths
                     ]
                     if missing:
                         raise ValueError(
                             f"Missing configured local-expression signatures: {missing}"
                         )
                     signature_paths = {
-                        name: signature_paths[name]
-                        for name in expression_cfg.signatures
+                        name: signature_paths[name] for name in expression_cfg.signatures
                     }
                 signature_weights = sample_signatures_to_subject_surface(
                     signature_paths=signature_paths,

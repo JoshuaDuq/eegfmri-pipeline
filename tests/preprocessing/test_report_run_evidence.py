@@ -21,7 +21,16 @@ TR = 0.9
 DURATION = 90.0
 
 
-def _write_run(tmp_path, name, *, with_markers=True, with_beats=True, n_channels=8):
+def _write_run(
+    tmp_path,
+    name,
+    *,
+    with_markers=True,
+    with_beats=True,
+    n_channels=8,
+    volume_description="Volume/V  1",
+    pulse_description="Pulse Artifact/R",
+):
     rng = np.random.default_rng(0)
     info = mne.create_info([f"C{index}" for index in range(n_channels)], SFREQ, "eeg")
     n_samples = int(DURATION * SFREQ)
@@ -35,13 +44,13 @@ def _write_run(tmp_path, name, *, with_markers=True, with_beats=True, n_channels
     if with_markers:
         onsets = np.arange(0.0, DURATION - TR, TR)
         annotations += mne.Annotations(
-            onset=onsets, duration=0.0, description=["Volume/V  1"] * len(onsets)
+            onset=onsets, duration=0.0, description=[volume_description] * len(onsets)
         )
     if with_beats:
         beats = np.cumsum(rng.normal(0.85, 0.02, 120))
         beats = beats[beats < DURATION]
         annotations += mne.Annotations(
-            onset=beats, duration=0.0, description=["Pulse Artifact/R"] * len(beats)
+            onset=beats, duration=0.0, description=[pulse_description] * len(beats)
         )
     if len(annotations):
         raw.set_annotations(annotations)
@@ -70,6 +79,34 @@ def test_every_per_run_measurement_is_gathered(tmp_path) -> None:
     assert len(evidence.rr_intervals) == 1
     assert evidence.has_scanner_evidence
     assert evidence.spectra[0].recording_id == "sub-0001_task-x_run-1"
+
+
+def test_configured_annotation_descriptions_drive_every_marker_measurement(tmp_path) -> None:
+    path, raw = _write_run(
+        tmp_path,
+        "sub-0001_task-x_run-1_proc-filt_raw.fif",
+        volume_description="Scanner/Volume",
+        pulse_description="Cardiac/R",
+    )
+    settings = ReportSettings(
+        volume_marker_description="Scanner/Volume",
+        pulse_marker_description="Cardiac/R",
+    )
+
+    evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=settings)
+
+    assert evidence.has_scanner_evidence
+    assert len(evidence.rr_intervals) == 1
+    assert evidence.cardiac_residuals[0].marker_count > 0
+
+
+def test_configured_aperiodic_range_reaches_the_spectral_fit(tmp_path) -> None:
+    path, raw = _write_run(tmp_path, "sub-0001_task-x_run-1_proc-filt_raw.fif")
+    settings = ReportSettings(aperiodic_fit_range_hz=(5.0, 35.0))
+
+    evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=settings)
+
+    assert evidence.spectra[0].after.aperiodic.fit_range_hz == (5.0, 35.0)
 
 
 def test_the_ica_is_applied_once_per_run_not_once_per_panel(tmp_path) -> None:
@@ -101,6 +138,7 @@ def test_a_recording_without_scanner_markers_keeps_the_other_sections(tmp_path) 
     assert evidence.combs == []
     assert len(evidence.spectra) == 1
     assert len(evidence.continuity) == 1
+    assert not evidence.continuity[0].has_volume_markers
 
 
 def test_a_recording_without_beats_keeps_the_other_sections(tmp_path) -> None:
@@ -174,3 +212,22 @@ def test_no_runs_is_a_programming_error() -> None:
 
     with pytest.raises(ValueError, match="at least one filtered run"):
         measure_runs(filtered_raw_paths=[], ica=ica, settings=ReportSettings())
+
+
+def test_non_finite_ica_output_is_rejected_before_measurement(tmp_path) -> None:
+    path, _ = _write_run(tmp_path, "sub-0001_task-x_run-1_proc-filt_raw.fif")
+
+    class NonFiniteIca:
+        exclude = []
+
+        @staticmethod
+        def apply(raw, *, exclude, verbose):
+            raw._data[0, 0] = np.nan
+            return raw
+
+    with pytest.raises(ValueError, match="non-finite values in ICA output"):
+        measure_runs(
+            filtered_raw_paths=[path],
+            ica=NonFiniteIca(),
+            settings=ReportSettings(),
+        )

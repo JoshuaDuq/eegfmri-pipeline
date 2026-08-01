@@ -29,7 +29,7 @@ case "${partition}:${target}" in
         ;;
 esac
 
-python studies/pain_study/scripts/study1_benchmark_cell.py \
+python studies/pain_study/scripts/study_support/study1_benchmark_cell.py \
     --partition "${partition}" \
     --target "${target}" \
     --spec "${feature_spec}" \

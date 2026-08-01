@@ -64,8 +64,7 @@ def load_study1_confirmatory_row(
     matches = report.loc[mask]
     if len(matches) != 1:
         raise ValueError(
-            "Study 2 expected exactly one Study 1 confirmatory row, "
-            f"found {len(matches)}."
+            "Study 2 expected exactly one Study 1 confirmatory row, " f"found {len(matches)}."
         )
 
     metrics = matches.iloc[0].to_dict()

@@ -39,9 +39,9 @@ class CardiacAttenuationMetrics:
     before_rms_uv: float
     after_rms_uv: float
     attenuation_percent: float
-    #: Same quantity in decibels, matching how attenuation is reported elsewhere in the
-    #: pipeline (eeg_fmri.qc uses 20*log10 for amplitude ratios). Kept alongside the
-    #: percentage so existing QC tables stay readable.
+    #: Same quantity in decibels, using 20*log10 because the ratio is one of amplitudes
+    #: rather than powers. Kept alongside the percentage so existing QC tables stay
+    #: readable.
     attenuation_db: float
     is_fallback: bool = False
 

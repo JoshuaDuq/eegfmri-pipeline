@@ -44,13 +44,9 @@ def compute_haufe_pattern(
 
 def _validate_inputs(feature_matrix: np.ndarray, weight_vector: np.ndarray) -> None:
     if feature_matrix.ndim != 2:
-        raise ValueError(
-            f"Study 2 Haufe X_train must be 2D, got shape {feature_matrix.shape}."
-        )
+        raise ValueError(f"Study 2 Haufe X_train must be 2D, got shape {feature_matrix.shape}.")
     if weight_vector.ndim != 1:
-        raise ValueError(
-            f"Study 2 Haufe coefficients must be 1D, got shape {weight_vector.shape}."
-        )
+        raise ValueError(f"Study 2 Haufe coefficients must be 1D, got shape {weight_vector.shape}.")
     if feature_matrix.shape[0] < 2:
         raise ValueError("Study 2 Haufe pattern requires at least two training observations.")
     if feature_matrix.shape[1] != weight_vector.shape[0]:

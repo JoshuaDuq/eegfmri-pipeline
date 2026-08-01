@@ -21,7 +21,6 @@ from eeg_pipeline.utils.config.loader import get_config_value
 from fmri_pipeline.analysis.multivariate_signatures import discover_signature_files
 from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 
-
 LOGGER = logging.getLogger(__name__)
 _SURFACE_DEPTH_FRACTIONS = tuple(np.linspace(0.0, 1.0, 7))
 
@@ -71,9 +70,7 @@ class ROIBuilderConfig:
         )
         default_exclude = bool(raw.get("exclude_discordant_vertices", True))
         default_connected_components = bool(raw.get("connected_components", True))
-        default_component_selection = str(
-            raw.get("component_selection", "largest")
-        ).strip().lower()
+        default_component_selection = str(raw.get("component_selection", "largest")).strip().lower()
         if default_component_selection not in {"largest", "all"}:
             raise ValueError(
                 "eeg_bold_coupling.roi_builder.component_selection must be 'largest' or 'all'."
@@ -82,9 +79,7 @@ class ROIBuilderConfig:
         for entry in items_raw:
             if not isinstance(entry, dict):
                 raise ValueError("Each roi_builder item must be a mapping.")
-            definition = str(
-                entry.get("definition", "anatomical")
-            ).strip().lower()
+            definition = str(entry.get("definition", "anatomical")).strip().lower()
             if definition not in {"anatomical", "signature_intersection"}:
                 raise ValueError(
                     "roi_builder definition must be 'anatomical' or 'signature_intersection'."
@@ -102,18 +97,16 @@ class ROIBuilderConfig:
                     signature = str(include.get("signature", "")).strip()
                     sign = str(include.get("sign", "")).strip().lower()
                     if sign not in {"positive", "negative"}:
-                        raise ValueError("roi_builder include sign must be 'positive' or 'negative'.")
+                        raise ValueError(
+                            "roi_builder include sign must be 'positive' or 'negative'."
+                        )
                     if not signature:
                         raise ValueError("roi_builder include signature is required.")
                     include_specs.append(ROIIncludeSpec(signature=signature, sign=sign))
             elif include_raw not in (None, [], ()):
-                raise ValueError(
-                    "anatomical ROI builder items must not define include entries."
-                )
+                raise ValueError("anatomical ROI builder items must not define include entries.")
             atlas_labels = tuple(
-                str(label).strip()
-                for label in entry.get("atlas_labels", [])
-                if str(label).strip()
+                str(label).strip() for label in entry.get("atlas_labels", []) if str(label).strip()
             )
             if not atlas_labels:
                 raise ValueError("Each roi_builder item must define atlas_labels.")
@@ -122,12 +115,10 @@ class ROIBuilderConfig:
             if not name:
                 raise ValueError("Each roi_builder item needs a name.")
             if hemisphere not in {"lh", "rh", "both"}:
-                raise ValueError(
-                    "roi_builder hemisphere must be 'lh', 'rh', or 'both'."
-                )
-            component_selection = str(
-                entry.get("component_selection", default_component_selection)
-            ).strip().lower()
+                raise ValueError("roi_builder hemisphere must be 'lh', 'rh', or 'both'.")
+            component_selection = (
+                str(entry.get("component_selection", default_component_selection)).strip().lower()
+            )
             if component_selection not in {"largest", "all"}:
                 raise ValueError(
                     f"ROI {name!r} has invalid component_selection={component_selection!r}; expected 'largest' or 'all'."
@@ -194,9 +185,7 @@ def _resolve_subjects_dir(config: Any) -> Path:
     if value is None:
         value = get_config_value(config, "paths.freesurfer_dir", None)
     if value is None or not str(value).strip():
-        raise ValueError(
-            "eeg_bold_coupling.eeg.subjects_dir or paths.freesurfer_dir is required."
-        )
+        raise ValueError("eeg_bold_coupling.eeg.subjects_dir or paths.freesurfer_dir is required.")
     return Path(str(value)).expanduser().resolve()
 
 
@@ -281,9 +270,7 @@ def _atlas_label_map(
     )
     label_map = {str(label.name): label for label in labels}
     if not label_map:
-        raise ValueError(
-            f"No labels found for {template_subject}/{parcellation}."
-        )
+        raise ValueError(f"No labels found for {template_subject}/{parcellation}.")
     return label_map
 
 
@@ -307,9 +294,7 @@ def _candidate_vertices_for_hemi(
             )
         vertices.append(np.asarray(label.vertices, dtype=int))
     if not vertices:
-        raise ValueError(
-            f"ROI {item.name!r} has no atlas vertices in hemisphere {hemisphere!r}."
-        )
+        raise ValueError(f"ROI {item.name!r} has no atlas vertices in hemisphere {hemisphere!r}.")
     return np.unique(np.concatenate(vertices))
 
 
@@ -361,7 +346,7 @@ def _component_adjacency(
             continue
         unique_vertices = sorted(set(tri_vertices))
         for idx, left in enumerate(unique_vertices[:-1]):
-            for right in unique_vertices[idx + 1:]:
+            for right in unique_vertices[idx + 1 :]:
                 edges.append((remap[left], remap[right]))
                 edges.append((remap[right], remap[left]))
     if not edges:
@@ -407,8 +392,7 @@ def _prune_connected_components(
         return_labels=True,
     )
     all_component_sizes = tuple(
-        int(np.sum(labels == component_id))
-        for component_id in range(int(n_components))
+        int(np.sum(labels == component_id)) for component_id in range(int(n_components))
     )
     kept_components: List[np.ndarray] = []
     for component_id in range(int(n_components)):
@@ -487,9 +471,7 @@ def _build_single_hemi_roi(
                 detail["n_discordant_vertices"] = int(excluded_vertices.size)
             include_details.append(detail)
         merged_vertices = (
-            np.unique(np.concatenate(included))
-            if included
-            else np.asarray([], dtype=int)
+            np.unique(np.concatenate(included)) if included else np.asarray([], dtype=int)
         )
         if excluded:
             merged_excluded = np.unique(np.concatenate(excluded))
@@ -519,9 +501,7 @@ def _build_single_hemi_roi(
         "hemisphere": hemisphere,
         "definition": item.definition,
         "candidate_vertex_count": int(candidate_vertices.size),
-        "post_sign_vertex_count": int(
-            np.unique(np.concatenate(included)).size if included else 0
-        ),
+        "post_sign_vertex_count": int(np.unique(np.concatenate(included)).size if included else 0),
         "discordant_vertex_count": int(merged_excluded.size),
         "component_sizes": list(component_result.component_sizes),
         "kept_component_sizes": list(component_result.kept_component_sizes),
@@ -572,8 +552,7 @@ def _build_single_roi(
         )
     label = hemi_results["lh"][0] + hemi_results["rh"][0]
     per_hemi_details = {
-        hemisphere: details
-        for hemisphere, (_label, details) in hemi_results.items()
+        hemisphere: details for hemisphere, (_label, details) in hemi_results.items()
     }
     merged_details = {
         "candidate_vertex_count": int(
@@ -587,9 +566,7 @@ def _build_single_roi(
         ),
         "component_sizes": [],
         "kept_component_sizes": [],
-        "final_vertex_count": int(
-            len(label.lh.vertices) + len(label.rh.vertices)
-        ),
+        "final_vertex_count": int(len(label.lh.vertices) + len(label.rh.vertices)),
         "connected_components": bool(item.connected_components),
         "component_selection": item.component_selection,
         "min_component_vertices": int(item.min_component_vertices),
@@ -620,10 +597,7 @@ def build_eeg_bold_rois(
     ensure_dir(output_dir)
     subjects_dir = _resolve_subjects_dir(config)
 
-    requires_signatures = any(
-        item.definition == "signature_intersection"
-        for item in cfg.items
-    )
+    requires_signatures = any(item.definition == "signature_intersection" for item in cfg.items)
     signature_paths: Dict[str, Path] = {}
     surface_values: Dict[str, Dict[str, np.ndarray]] = {}
     if requires_signatures:
@@ -663,10 +637,7 @@ def build_eeg_bold_rois(
 
     built: List[BuiltROI] = []
     manifest_rows: List[Dict[str, Any]] = []
-    signature_path_map = {
-        name: str(path)
-        for name, path in sorted(signature_paths.items())
-    }
+    signature_path_map = {name: str(path) for name, path in sorted(signature_paths.items())}
     for item in cfg.items:
         label, roi_details = _build_single_roi(
             item=item,
@@ -678,8 +649,7 @@ def build_eeg_bold_rois(
         )
         if item.hemisphere == "both":
             label_paths = tuple(
-                label_dir / f"{hemisphere}.{item.name}.label"
-                for hemisphere in ("lh", "rh")
+                label_dir / f"{hemisphere}.{item.name}.label" for hemisphere in ("lh", "rh")
             )
             for hemisphere, label_path in zip(("lh", "rh"), label_paths):
                 hemi_vertices = np.asarray(

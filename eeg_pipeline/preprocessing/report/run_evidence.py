@@ -35,7 +35,6 @@ from eeg_pipeline.preprocessing.report.continuity import (
     compute_run_continuity,
 )
 from eeg_pipeline.preprocessing.report.scanner import (
-    VOLUME_MARKER_DESCRIPTION,
     CombResidual,
     VolumeLockedAverage,
     VolumeTiming,
@@ -60,6 +59,8 @@ from eeg_pipeline.preprocessing.report.spectra import (
 #: lines. The dedicated comb panel measures every harmonic properly; these few are here
 #: only so a reviewer can see where the comb sits relative to everything else.
 MARKED_GRADIENT_HARMONICS = 3
+
+_FINITE_CHECK_SECONDS = 10.0
 
 
 @dataclass
@@ -186,12 +187,21 @@ def _measure_gradient(
         evidence.locked_averages.append(locked)
 
 
+def _validate_finite(raw: mne.io.BaseRaw, *, recording_id: str) -> None:
+    """Reject invalid ICA output without allocating another full recording."""
+    block_samples = max(1, int(round(_FINITE_CHECK_SECONDS * raw.info["sfreq"])))
+    for start in range(0, raw.n_times, block_samples):
+        data = raw.get_data(start=start, stop=min(start + block_samples, raw.n_times))
+        if not np.isfinite(data).all():
+            raise ValueError(f"{recording_id}: non-finite values in ICA output.")
+
+
 def measure_runs(
     *,
     filtered_raw_paths: Sequence[Path],
     ica: mne.preprocessing.ICA,
     settings: ReportSettings,
-    volume_description: str = VOLUME_MARKER_DESCRIPTION,
+    edge_support_seconds: float = 0.0,
 ) -> RunEvidence:
     """Measure every per-run panel, reading and cleaning each run exactly once."""
     if not filtered_raw_paths:
@@ -202,12 +212,16 @@ def measure_runs(
         recording_id = path.name.removesuffix("_proc-filt_raw.fif")
         raw = mne.io.read_raw_fif(path, preload=True, verbose="ERROR")
         cleaned = ica.apply(raw.copy(), exclude=ica.exclude, verbose="ERROR")
+        _validate_finite(cleaned, recording_id=recording_id)
 
         # Measured before the spectra, because the aperiodic fit inside them has to know
         # where the comb is: the harmonics run through the fit range, and a line fitted
         # across them is fitted partly to the scanner. Costs nothing extra -- the timing is
         # measured from the marker train, which the gradient section needs anyway.
-        timing = measure_volume_timing(raw, description=volume_description)
+        timing = measure_volume_timing(
+            raw,
+            description=settings.volume_marker_description,
+        )
 
         evidence.spectra.append(
             compute_run_spectra(
@@ -217,6 +231,7 @@ def measure_runs(
                 fmax=settings.spectra_fmax,
                 line_frequency=settings.spectra_line_frequency,
                 gradient_fundamental_hz=None if timing is None else timing.fundamental_hz,
+                aperiodic_fit_range_hz=settings.aperiodic_fit_range_hz,
             )
         )
         evidence.continuity.append(
@@ -224,16 +239,26 @@ def measure_runs(
                 raw,
                 recording_id=recording_id,
                 window_seconds=settings.continuity_window_seconds,
-                volume_description=volume_description,
+                edge_support_seconds=edge_support_seconds,
+                volume_description=settings.volume_marker_description,
+                pulse_description=settings.pulse_marker_description,
             )
         )
-        intervals = compute_rr_intervals(raw, recording_id=recording_id)
+        intervals = compute_rr_intervals(
+            raw,
+            recording_id=recording_id,
+            description=settings.pulse_marker_description,
+        )
         if intervals is not None:
             evidence.rr_intervals.append(intervals)
         else:
             evidence.rr_missing.append(recording_id)
 
-        agreement = compute_run_marker_agreement(raw, recording_id=recording_id)
+        agreement = compute_run_marker_agreement(
+            raw,
+            recording_id=recording_id,
+            description=settings.pulse_marker_description,
+        )
         if agreement is not None:
             evidence.marker_agreements.append(agreement)
 
@@ -242,7 +267,11 @@ def measure_runs(
         # for whatever MNE's decomposition removed. Costs one epoching pass over a
         # recording already in memory.
         evidence.cardiac_residuals.append(
-            compute_cardiac_residual(raw, recording_id=recording_id)
+            compute_cardiac_residual(
+                raw,
+                recording_id=recording_id,
+                marker_description=settings.pulse_marker_description,
+            )
         )
 
         _measure_gradient(
@@ -250,15 +279,23 @@ def measure_runs(
             cleaned,
             recording_id=recording_id,
             settings=settings,
-            volume_description=volume_description,
+            volume_description=settings.volume_marker_description,
             evidence=evidence,
             timing=timing,
         )
         # Both stages, on the same run, by the same estimator: the only paired measurement
         # of the rhythm the pipeline can make. A stage that measured nothing contributes
         # nothing rather than a zero, and the pair is only used where both sides exist.
-        before_alpha = compute_posterior_alpha(raw, band_hz=settings.alpha_band_hz)
-        after_alpha = compute_posterior_alpha(cleaned, band_hz=settings.alpha_band_hz)
+        before_alpha = compute_posterior_alpha(
+            raw,
+            band_hz=settings.alpha_band_hz,
+            pattern=settings.posterior_channel_pattern,
+        )
+        after_alpha = compute_posterior_alpha(
+            cleaned,
+            band_hz=settings.alpha_band_hz,
+            pattern=settings.posterior_channel_pattern,
+        )
         if before_alpha is not None and after_alpha is not None:
             evidence.posterior_alpha_before.append(before_alpha)
             evidence.posterior_alpha_after.append(after_alpha)
@@ -344,14 +381,14 @@ def add_run_evidence_review(
     filtered_raw_paths: Sequence[Path],
     ica: mne.preprocessing.ICA,
     settings: ReportSettings,
-    volume_description: str = VOLUME_MARKER_DESCRIPTION,
+    edge_support_seconds: float = 0.0,
 ) -> RunEvidence:
     """Measure every run once and append all the per-run sections."""
     evidence = measure_runs(
         filtered_raw_paths=filtered_raw_paths,
         ica=ica,
         settings=settings,
-        volume_description=volume_description,
+        edge_support_seconds=edge_support_seconds,
     )
     add_run_evidence_sections(report=report, evidence=evidence, settings=settings)
     return evidence

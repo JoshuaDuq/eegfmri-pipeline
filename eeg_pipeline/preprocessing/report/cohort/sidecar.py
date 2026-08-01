@@ -33,12 +33,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
 import pandas as pd
 
 #: Layout version of the sidecar. Bumped when a column changes meaning, not when a stage
 #: adds one: a reader that meets an unknown column can ignore it, but one that meets a
 #: familiar column holding something else cannot.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Suffix of the report the sidecar belongs to, mirroring :mod:`build_record`.
 _REPORT_SUFFIX = "_report.h5"
@@ -79,15 +80,34 @@ RUN_COLUMNS = (
 #: the volume-locked amplitude may be absent in value where too few complete epochs
 #: survived, but the column proves the writer attempted it.
 #:
-#: The locked amplitude and the floor it was measured against, and nothing derived from
-#: them. The uncorrected RMS is ``sqrt(corrected^2 + floor^2)`` and detectability is their
-#: ratio, so storing either as well would store one measurement twice and invite the two
-#: copies to disagree.
+#: Observed locked RMS, its estimated floor, and the signed difference in power are all
+#: retained. A negative difference is a censored measurement and cannot be reconstructed
+#: from a zero-clipped amplitude.
 SCANNER_RUN_COLUMNS = (
     "n_volumes",
     "repetition_time_s",
-    "volume_locked_corrected_uv",
-    "volume_locked_noise_floor_uv",
+    "volume_jitter_s",
+    "volume_locked_rms_before_uv",
+    "volume_locked_floor_before_uv",
+    "volume_locked_excess_power_before_uv2",
+    "volume_locked_resolved_before",
+    "volume_locked_rms_after_uv",
+    "volume_locked_floor_after_uv",
+    "volume_locked_excess_power_after_uv2",
+    "volume_locked_resolved_after",
+    "median_bpm",
+    "n_beats",
+    "beat_dropouts",
+    "marker_matched_fraction",
+    "marker_median_lag_s",
+    "marker_lag_iqr_s",
+    "n_markers",
+    "n_detected_beats",
+    "n_matched_beats",
+    "pulse_marker_count",
+    "beat_source",
+    "bcg_residual_uv",
+    "bcg_beat_train_coverage",
 )
 
 #: The across-channel median and the worst channel, per run and stage.
@@ -303,6 +323,48 @@ def _require_columns(
     raise ValueError(f"{source} is missing the columns {', '.join(missing)}.{detail}")
 
 
+def _require_no_infinite_values(frame: pd.DataFrame, *, source: str) -> None:
+    """Reject infinities while retaining NaN as the missing-value marker."""
+    for column in frame.columns:
+        numeric = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
+        if np.isinf(numeric).any():
+            raise ValueError(f"{source} has a non-finite value in {column}.")
+
+
+def _resolved_value(value: Any, *, column: str) -> bool | None:
+    if pd.isna(value):
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "1.0"}:
+        return True
+    if text in {"false", "0", "0.0"}:
+        return False
+    raise ValueError(f"The run table has an invalid boolean in {column}: {value!r}.")
+
+
+def _require_locked_power_consistency(frame: pd.DataFrame) -> None:
+    """Ensure resolution flags preserve the signed-power meaning."""
+    for stage in ("before", "after"):
+        power_column = f"volume_locked_excess_power_{stage}_uv2"
+        resolved_column = f"volume_locked_resolved_{stage}"
+        if power_column not in frame or resolved_column not in frame:
+            continue
+        powers = pd.to_numeric(frame[power_column], errors="coerce")
+        for index, (power, resolved) in enumerate(
+            zip(powers, frame[resolved_column], strict=True)
+        ):
+            flag = _resolved_value(resolved, column=resolved_column)
+            if pd.isna(power) or flag is None:
+                continue
+            if flag is not bool(power > 0.0):
+                raise ValueError(
+                    f"The run table row {index} has {resolved_column}={flag}, but "
+                    f"{power_column}={power:g}. The flag must equal signed power > 0."
+                )
+
+
 def _read_table(
     path: Path,
     columns: tuple[str, ...],
@@ -316,6 +378,7 @@ def _read_table(
         return _empty(columns)
     frame = pd.read_csv(path, sep="\t")
     _require_columns(frame, columns, source=path.name, context=context)
+    _require_no_infinite_values(frame, source=path.name)
     return frame
 
 
@@ -336,8 +399,16 @@ def write_sidecar(report_path: Path | str, sidecar: SubjectSidecar) -> SidecarPa
         source=f"The run table for sub-{sidecar.subject}",
         context=sidecar.context,
     )
-    paths = sidecar_paths(report_path)
-    paths.subject_json.parent.mkdir(parents=True, exist_ok=True)
+    for frame, source in (
+        (sidecar.runs, "The run table"),
+        (sidecar.spectrum_curves, "The spectrum table"),
+        (sidecar.comb_curves, "The comb table"),
+        (sidecar.channels, "The channel table"),
+        (sidecar.conditions, "The condition table"),
+    ):
+        _require_no_infinite_values(frame, source=source)
+    _require_locked_power_consistency(sidecar.runs)
+
     document = {
         "schema_version": int(sidecar.schema_version),
         "subject": str(sidecar.subject),
@@ -351,7 +422,14 @@ def write_sidecar(report_path: Path | str, sidecar: SubjectSidecar) -> SidecarPa
         "settings": dict(sidecar.settings),
         "versions": dict(sidecar.versions),
     }
-    paths.subject_json.write_text(json.dumps(document, indent=1, sort_keys=True), encoding="utf-8")
+    try:
+        serialized = json.dumps(document, indent=1, sort_keys=True, allow_nan=False)
+    except ValueError as error:
+        raise ValueError(f"The QC subject metadata is not valid finite JSON: {error}") from error
+
+    paths = sidecar_paths(report_path)
+    paths.subject_json.parent.mkdir(parents=True, exist_ok=True)
+    paths.subject_json.write_text(serialized, encoding="utf-8")
 
     for frame, path, required in (
         (sidecar.runs, paths.runs, True),
@@ -402,6 +480,8 @@ def read_sidecar(report_path: Path | str) -> SubjectSidecar:
         )
 
     context = AcquisitionContext(document["context"])
+    runs = _read_table(paths.runs, run_columns_for(context), required=True, context=context)
+    _require_locked_power_consistency(runs)
     return SubjectSidecar(
         subject=subject,
         task=str(document.get("task", "")),
@@ -413,9 +493,7 @@ def read_sidecar(report_path: Path | str) -> SubjectSidecar:
         acquisition_date=document.get("acquisition_date"),
         written_at=document.get("written_at"),
         schema_version=version,
-        runs=_read_table(
-            paths.runs, run_columns_for(context), required=True, context=context
-        ),
+        runs=runs,
         spectrum_curves=_read_table(paths.spectrum_curves, SPECTRUM_COLUMNS, required=True),
         comb_curves=_read_table(paths.comb_curves, COMB_COLUMNS, required=False),
         channels=_read_table(paths.channels, CHANNEL_COLUMNS, required=False),

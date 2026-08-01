@@ -195,25 +195,19 @@ def _check_task_settings(config: Any, errors: List[ConfigIssue]) -> None:
 def _check_scanner_settings(config: Any, warnings: List[ConfigIssue]) -> None:
     """Scanner-only stages left switched on for a dataset recorded outside one.
 
-    None of these stops the run — each is gated at its own call site — but a config that
-    still asks for four things it will not get is a config nobody has finished adapting,
-    and the listing is how the reader finds out which four.
+    Neither stops the run — each is gated at its own call site — but a config that still
+    asks for things it will not get is a config nobody has finished adapting, and the
+    listing is how the reader finds out which.
+
+    Only what the *scanner* provides belongs here. The ECG-dependent stages were listed
+    alongside these on the reasoning that an out-of-scanner montage carries no ECG lead,
+    which is not true and is not what they depend on; see :func:`_check_ecg_settings`.
     """
     scanner_only = (
         (
             "preprocessing.brainvision_analyzer.enabled",
             "no Analyzer correction precedes an out-of-scanner recording, so the pulse "
             "marker and cardiac attenuation QC will be skipped.",
-        ),
-        (
-            "ica.cardiac_review.enabled",
-            "there is no ballistocardiogram to measure outside a scanner, so the ICA "
-            "cardiac review will be skipped.",
-        ),
-        (
-            "preprocessing.clean_events_qc.ecg_coupling.enabled",
-            "this correlates EEG against a recorded ECG lead, which out-of-scanner "
-            "montages do not carry, so the metric will be skipped.",
         ),
         (
             "alignment.trim_to_volume_bounds",
@@ -227,6 +221,46 @@ def _check_scanner_settings(config: Any, warnings: List[ConfigIssue]) -> None:
                     key,
                     f"is true, but preprocessing.eeg_fmri is false: {explanation} "
                     "Set it false to say so in the config.",
+                )
+            )
+
+
+def _check_ecg_settings(config: Any, warnings: List[ConfigIssue]) -> None:
+    """Stages that need a recorded ECG lead, checked against whether one is named.
+
+    Being outside a scanner and having an ECG lead are separate facts, and issue #14 was
+    filed by someone who had the second without the first. Both stages below were gated
+    on ``preprocessing.eeg_fmri`` instead, so a montage with an ECG channel was told that
+    correctly-enabled stages would be skipped.
+
+    What they actually need is the channel. The ICA cardiac review prefers Analyzer's R
+    markers where the recording carries them and otherwise detects R peaks from the ECG
+    channel directly, so outside a scanner it reviews ordinary cardiac artifact rather
+    than a ballistocardiogram. The coupling metric correlates EEG against that same lead.
+    Cardiac QC raises at its call site when the channel is not named; this reports it
+    first, and does so inside the scanner as well, where the requirement is identical.
+    """
+    if get_config_value(config, "eeg.ecg_channels", None):
+        return
+
+    ecg_dependent = (
+        (
+            "ica.cardiac_review.enabled",
+            "it detects R peaks in the recorded ECG lead, so the ICA cardiac review "
+            "will be skipped.",
+        ),
+        (
+            "preprocessing.clean_events_qc.ecg_coupling.enabled",
+            "it correlates EEG against the recorded ECG lead, so the metric will be " "skipped.",
+        ),
+    )
+    for key, explanation in ecg_dependent:
+        if bool(get_config_value(config, key, False)):
+            warnings.append(
+                ConfigIssue(
+                    key,
+                    f"is true, but eeg.ecg_channels names no channel: {explanation} "
+                    "Name the recorded ECG channel, or set this false.",
                 )
             )
 
@@ -245,6 +279,9 @@ def check_config_coherence(config: Any) -> CoherenceReport:
 
     if not is_eeg_fmri(config):
         _check_scanner_settings(config, warnings)
+
+    # Unconditional: the ECG stages need a lead whether or not there was a scanner.
+    _check_ecg_settings(config, warnings)
 
     return CoherenceReport(errors=tuple(errors), warnings=tuple(warnings))
 

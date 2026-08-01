@@ -51,6 +51,33 @@ class _ThreeEpochsStub:
 
 
 class TestPreprocessingCleanEvents(unittest.TestCase):
+    def test_presented_events_keep_the_rejection_denominator(self):
+        from eeg_pipeline.utils.data import preprocessing as preproc
+
+        bids_root = Path(tempfile.mkdtemp())
+        (bids_root / "sub-0001" / "eeg").mkdir(parents=True)
+        events = pd.DataFrame(
+            {
+                "trial_type": ["stim", "stim"],
+                "run_id": [1, 2],
+            }
+        )
+
+        with patch.object(
+            preproc,
+            "_load_subject_events_for_epochs",
+            return_value=events,
+        ):
+            presented = preproc.presented_events_for_epochs(
+                subject="0001",
+                task="task",
+                bids_root=bids_root,
+                epochs=_EpochsStub(),
+            )
+
+        self.assertEqual(presented["event_index"].tolist(), [0, 1])
+        self.assertEqual(presented["run_id"].tolist(), [1, 2])
+
     def test_write_clean_events_assigns_one_based_trial_ids(self):
         mne_home = Path(tempfile.mkdtemp())
         with (

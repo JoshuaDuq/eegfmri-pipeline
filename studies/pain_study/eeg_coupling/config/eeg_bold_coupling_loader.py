@@ -11,7 +11,6 @@ import yaml
 
 from eeg_pipeline.utils.config.loader import resolve_config_paths
 
-
 EEG_BOLD_COUPLING_CONFIG_ENV_VAR = "EEG_BOLD_COUPLING_CONFIG"
 
 

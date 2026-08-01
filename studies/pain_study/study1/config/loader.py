@@ -13,7 +13,6 @@ import yaml
 
 from eeg_pipeline.utils.config.loader import resolve_config_paths
 
-
 STUDY1_CONFIG_ENV_VAR = "PAIN_STUDY_STUDY1_CONFIG"
 STUDY1_FIGURE_CONFIG_PATH = Path(__file__).with_name("study1_figure_config.yaml")
 TEMPORAL_NEGATIVE_CONTROL_TRANSFORM = "raw_log_power"
@@ -347,9 +346,7 @@ def _validate_validity_figure_config(config: dict[str, Any]) -> None:
             field_name=f"study1.figures.validity.font.{name}",
         )
         if not 5.0 <= size <= 7.0:
-            raise ValueError(
-                f"study1.figures.validity.font.{name} must be between 5 and 7 pt."
-            )
+            raise ValueError(f"study1.figures.validity.font.{name} must be between 5 and 7 pt.")
 
     style = _required_mapping(validity, "style")
     _validate_hex_color(style.get("participant_color"), "style.participant_color")
@@ -407,9 +404,7 @@ def _validate_validity_figure_config(config: dict[str, Any]) -> None:
         raise ValueError("study1.figures.validity.output_parts must be a non-empty list.")
     for part in output_parts:
         if not isinstance(part, str):
-            raise ValueError(
-                "study1.figures.validity.output_parts entries must be strings."
-            )
+            raise ValueError("study1.figures.validity.output_parts entries must be strings.")
         value = part.strip()
         if not value or value in {".", ".."} or "/" in value or "\\" in value:
             raise ValueError(

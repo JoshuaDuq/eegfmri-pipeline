@@ -291,9 +291,7 @@ def _add_null_row(
     null_limits: tuple[float, float],
 ) -> None:
     null_grid = grid_cell.subgridspec(1, 3, wspace=0.23)
-    for band_index, (band, band_spec) in enumerate(
-        zip(summary.bands, band_specs, strict=True)
-    ):
+    for band_index, (band, band_spec) in enumerate(zip(summary.bands, band_specs, strict=True)):
         axis = figure.add_subplot(null_grid[0, band_index])
         axis.set_gid(f"null-{band}")
         _draw_null_distribution(
@@ -456,9 +454,7 @@ def _masked_nonzero_values(
         raise ValueError(f"Study 2 spatial {label} does not match the source vertex manifest.")
     masked_values = array[mask]
     if not np.isfinite(masked_values).all() or not np.any(masked_values != 0.0):
-        raise ValueError(
-            f"Study 2 spatial masked {label} must contain a finite nonzero effect."
-        )
+        raise ValueError(f"Study 2 spatial masked {label} must contain a finite nonzero effect.")
     return masked_values
 
 

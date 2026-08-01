@@ -358,7 +358,7 @@ nearest-neighbor resampling to the scoring grid. This mask is configured up fron
 required: the scored extent is defined independently of the analyzed sample, so it cannot drift as
 subjects are added and a single truncated field of view cannot shrink the scored extent for the whole
 cohort. Sample-derived scoring masks are not supported. The reference mask is materialized with
-`studies/pain_study/scripts/build_apriori_scoring_mask.py`, which fetches the TemplateFlow brain mask
+`studies/pain_study/scripts/study_support/build_apriori_scoring_mask.py`, which fetches the TemplateFlow brain mask
 and verifies signature coverage (NPS 0.998, SIIPS1 0.957 of nonzero support retained). Voxel count
 and scoring-mask extent are identical across retained subjects, runs, and trials for the same
 signature.

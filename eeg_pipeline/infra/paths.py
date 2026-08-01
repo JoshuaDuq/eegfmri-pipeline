@@ -1,15 +1,25 @@
-"""Path utilities for BIDS and derivative paths."""
+"""Path utilities for BIDS and derivative paths.
+
+``pandas`` and ``mne_bids`` are imported inside the four functions that need them rather
+than at module scope. Most of this module builds and searches paths, which is string and
+filesystem work; but it sits under ``eeg_pipeline.cli.common``, so importing it to ask
+where the derivatives root is pulled MNE, Matplotlib and Numba into every CLI
+invocation — including ``validate --config-only``, which reads a YAML. See issue #14.
+
+Annotations are strings here (``from __future__ import annotations``), so the deferred
+names can still be used in signatures.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
-
-import pandas as pd
-from mne_bids import BIDSPath
+from typing import TYPE_CHECKING, Optional, Dict, Any
 
 from eeg_pipeline.utils.config.loader import ConfigDict
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 EEGConfig = ConfigDict
 
@@ -143,6 +153,8 @@ def _is_visible_file(path: Path) -> bool:
 
 def _search_standard_bids_paths(root: Path, subject_id: str, task: str) -> Optional[Path]:
     """Search standard BIDS paths for clean epochs file."""
+    from mne_bids import BIDSPath
+
     bids_path = BIDSPath(
         subject=subject_id,
         task=task,
@@ -336,6 +348,8 @@ def _resolve_bids_root(
 
 def _find_events_path(bids_root: Path, subject_id: str, task: str) -> Optional[Path]:
     """Find events file path for subject and task."""
+    from mne_bids import BIDSPath
+
     bids_path = BIDSPath(
         subject=subject_id,
         task=task,
@@ -367,6 +381,8 @@ def _load_events_df(
     prefer_clean: bool = True,
 ) -> Optional[pd.DataFrame]:
     """Load events DataFrame (prefer cleaned derivative events when available)."""
+    import pandas as pd
+
     if prefer_clean:
         resolved_deriv_root: Optional[Path]
         try:

@@ -32,13 +32,10 @@ from studies.pain_study.study2.source_maps import (
     compute_cohort_source_association_maps,
 )
 
-
 BANDS = ("alpha", "beta", "gamma")
 DEFAULT_DERIVATIVES_ROOT = Path("/Volumes/KINGSTON/EEG_fMRI_data/derivatives")
 FEATURE_RELATIVE_PATH = Path("eeg/features/power/features_power_plateau.csv")
-PRIMARY_TARGETS_RELATIVE_PATH = Path(
-    "group/multimodal/study1/targets/primary_targets.tsv"
-)
+PRIMARY_TARGETS_RELATIVE_PATH = Path("group/multimodal/study1/targets/primary_targets.tsv")
 STUDY1_REPORT_RELATIVE_PATH = Path("group/multimodal/study1/reports/study1_report.tsv")
 DEFAULT_RANDOM_SEED = 20260601
 
@@ -111,13 +108,10 @@ def run_real_data_smoke(
 
     subject_ids = _common_source_valid_subject_ids(band_results)
     if len(subject_ids) < 2:
-        raise ValueError(
-            "Study 2 real-data smoke requires at least two source-valid subjects."
-        )
+        raise ValueError("Study 2 real-data smoke requires at least two source-valid subjects.")
 
     observed_maps_by_band = {
-        band: result.fisher_z_maps[:, valid_vertices]
-        for band, result in band_results.items()
+        band: result.fisher_z_maps[:, valid_vertices] for band, result in band_results.items()
     }
     null_maps_by_band = _sign_flip_null_maps(
         observed_maps_by_band,
@@ -269,8 +263,7 @@ def _shared_channel_labels(
             ]
             if not labels:
                 raise ValueError(
-                    f"Study 2 real-data smoke found no usable {band} channels "
-                    f"for {subject_id}."
+                    f"Study 2 real-data smoke found no usable {band} channels " f"for {subject_id}."
                 )
             if not first_order:
                 first_order = labels
@@ -278,9 +271,7 @@ def _shared_channel_labels(
 
     retained = tuple(label for label in first_order if shared_labels and label in shared_labels)
     if not retained:
-        raise ValueError(
-            "Study 2 real-data smoke found no shared non-excluded channel labels."
-        )
+        raise ValueError("Study 2 real-data smoke found no shared non-excluded channel labels.")
     return retained
 
 
@@ -306,9 +297,7 @@ def _build_source_stage_frame(
     source_power_by_band: dict[str, dict[str, np.ndarray]] = {band: {} for band in BANDS}
     for subject_id in subject_ids:
         subject_targets = (
-            targets.loc[targets["subject_id"] == subject_id]
-            .copy()
-            .reset_index(drop=True)
+            targets.loc[targets["subject_id"] == subject_id].copy().reset_index(drop=True)
         )
         features = feature_tables[subject_id].reset_index(drop=True)
         _validate_trial_alignment(subject_id, subject_targets, features)
@@ -354,9 +343,7 @@ def _validate_trial_alignment(
     feature_trial_ids = pd.to_numeric(features["trial_id"], errors="coerce").to_numpy()
     target_trial_ids = pd.to_numeric(targets["trial_id"], errors="coerce").to_numpy()
     if not np.array_equal(feature_trial_ids, target_trial_ids):
-        raise ValueError(
-            f"Study 2 real-data smoke trial_id alignment failed for {subject_id}."
-        )
+        raise ValueError(f"Study 2 real-data smoke trial_id alignment failed for {subject_id}.")
 
 
 def _compute_band_source_maps(
@@ -383,9 +370,7 @@ def _common_valid_vertices(
     valid_vertices = np.ones(first_result.fisher_z_maps.shape[1], dtype=bool)
     for band, result in band_results.items():
         if result.fisher_z_maps.shape[1] != len(valid_vertices):
-            raise ValueError(
-                "Study 2 real-data smoke band maps do not share a vertex count."
-            )
+            raise ValueError("Study 2 real-data smoke band maps do not share a vertex count.")
         valid_vertices &= np.all(np.isfinite(result.fisher_z_maps), axis=0)
     return valid_vertices
 
@@ -490,8 +475,7 @@ def _write_summary(
             force_gate_override and not study1_gate_qc.confirmatory_criteria_met
         ),
         "source_localization_input_status": (
-            "no_precomputed_source_maps_found; "
-            "plateau_eeg_feature_columns_used_as_test_vertices"
+            "no_precomputed_source_maps_found; " "plateau_eeg_feature_columns_used_as_test_vertices"
         ),
         "requested_subject_ids": list(requested_subject_ids),
         "source_valid_subject_ids": list(source_valid_subject_ids),

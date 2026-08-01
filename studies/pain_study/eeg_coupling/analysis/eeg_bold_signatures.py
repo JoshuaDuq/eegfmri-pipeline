@@ -26,10 +26,7 @@ def resolve_signature_paths(config: Any) -> Dict[str, Path]:
     if signature_root is None or not signature_specs:
         return {}
     discovered = discover_signature_files(signature_root, signature_specs)
-    return {
-        str(name): Path(path).expanduser().resolve()
-        for name, path in discovered.items()
-    }
+    return {str(name): Path(path).expanduser().resolve() for name, path in discovered.items()}
 
 
 @dataclass(frozen=True)
@@ -59,9 +56,7 @@ class LocalSignatureExpressionConfig:
         return cls(
             enabled=bool(raw.get("enabled", False)),
             signatures=tuple(
-                str(value).strip()
-                for value in raw.get("signatures", [])
-                if str(value).strip()
+                str(value).strip() for value in raw.get("signatures", []) if str(value).strip()
             ),
             abs_weight_threshold=float(raw.get("abs_weight_threshold", 0.0)),
             normalize_weights=normalize,
@@ -101,7 +96,7 @@ def normalize_signature_weights(
     if mode == "l1":
         scale = float(np.sum(np.abs(arr)))
     else:
-        scale = float(np.sqrt(np.sum(arr ** 2)))
+        scale = float(np.sqrt(np.sum(arr**2)))
     if not np.isfinite(scale) or scale <= 0:
         raise ValueError("Signature weights have zero norm after thresholding.")
     return arr / scale

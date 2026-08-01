@@ -10,7 +10,7 @@ from studies.pain_study.study2.config import load_study2_config
 
 
 def test_build_source_stage_frame_writes_standardized_band_scores(monkeypatch) -> None:
-    from studies.pain_study.scripts import study2_prepare_source_stage_input as builder
+    from studies.pain_study.scripts.study_support import study2_prepare_source_stage_input as builder
 
     groups = np.asarray(["sub-0001"] * 3 + ["sub-0002"] * 3, dtype=object)
     context = SimpleNamespace(

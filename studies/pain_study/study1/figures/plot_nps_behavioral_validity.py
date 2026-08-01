@@ -48,9 +48,7 @@ def write_nps_behavioral_validity(
 
 
 def main(argv: Sequence[str] | None = None) -> Path:
-    parser = argparse.ArgumentParser(
-        description="Write the Study 1 NPS behavioral-validity SVG."
-    )
+    parser = argparse.ArgumentParser(description="Write the Study 1 NPS behavioral-validity SVG.")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--study1-config", type=Path)
     parser.add_argument("--task", required=True)

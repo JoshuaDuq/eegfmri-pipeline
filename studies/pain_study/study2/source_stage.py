@@ -207,9 +207,7 @@ def _evaluate_source_stage_cohort(
 
     qc_frame = pd.DataFrame(qc_records)
     n_subjects = int(len(qc_frame))
-    n_source_valid_subjects = (
-        int(qc_frame["source_stage_criteria_met"].sum()) if n_subjects else 0
-    )
+    n_source_valid_subjects = int(qc_frame["source_stage_criteria_met"].sum()) if n_subjects else 0
     min_source_valid_subjects = require_config_int(
         config,
         "study2.source_stage.min_source_valid_subjects",

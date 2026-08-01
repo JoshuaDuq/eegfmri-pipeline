@@ -80,9 +80,7 @@ class FMRIQCConfig:
                 ),
             ),
             roi=FMRIRoiQCConfig(
-                outlier_mad_threshold=float(
-                    roi_raw.get("outlier_mad_threshold", 5.0)
-                ),
+                outlier_mad_threshold=float(roi_raw.get("outlier_mad_threshold", 5.0)),
                 max_outlier_proportion=(
                     None
                     if roi_raw.get("max_outlier_proportion", None) in {None, ""}
@@ -209,7 +207,11 @@ def _design_qc_table(
                 raise ValueError(f"Design matrix contains non-finite values for {events_path}.")
             target = design["target"].to_numpy(dtype=float)
             other_columns = _other_trial_columns(list(design.columns))
-            other_matrix = design[other_columns].to_numpy(dtype=float) if other_columns else np.empty((len(design), 0), dtype=float)
+            other_matrix = (
+                design[other_columns].to_numpy(dtype=float)
+                if other_columns
+                else np.empty((len(design), 0), dtype=float)
+            )
             rank = int(np.linalg.matrix_rank(values))
             residual_dof = int(values.shape[0] - rank)
             rank_deficient = bool(rank < values.shape[1])
@@ -245,11 +247,7 @@ def _roi_outlier_table(
     cfg: FMRIQCConfig,
 ) -> pd.DataFrame:
     rows: List[Dict[str, Any]] = []
-    roi_columns = [
-        str(column)
-        for column in bold_table.columns
-        if str(column).startswith("bold_")
-    ]
+    roi_columns = [str(column) for column in bold_table.columns if str(column).startswith("bold_")]
     for bold_column in roi_columns:
         roi = bold_column.replace("bold_", "", 1)
         values = pd.to_numeric(bold_table[bold_column], errors="coerce").to_numpy(dtype=float)

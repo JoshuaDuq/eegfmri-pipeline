@@ -260,8 +260,7 @@ def _compute_fold_pattern(
         raise ValueError(f"Fold {fold} has undefined held-out R².")
     model_r2 = 1.0 - float(np.sum((evaluation_target - prediction) ** 2)) / total_sum
     nuisance_r2 = (
-        1.0
-        - float(np.sum((evaluation_target - fit.nuisance_prediction) ** 2)) / total_sum
+        1.0 - float(np.sum((evaluation_target - fit.nuisance_prediction) ** 2)) / total_sum
     )
     _require_metric_agreement(saved_metric, model_r2, nuisance_r2, tolerance)
 
@@ -354,9 +353,8 @@ def fit_frozen_study1_fold(
     transformed_training = estimator[:-1].transform(training_matrix)
     transformed_test = estimator[:-1].transform(test_matrix)
     transformed_names = transform_feature_names_through_steps(estimator.steps[:-1], retained_names)
-    if (
-        transformed_training.shape[1] != len(transformed_names)
-        or transformed_test.shape[1] != len(transformed_names)
+    if transformed_training.shape[1] != len(transformed_names) or transformed_test.shape[1] != len(
+        transformed_names
     ):
         raise ValueError("Fitted preprocessing cannot be mapped one-to-one to EEG features.")
     weights = np.asarray(estimator.named_steps["regressor"].coef_, dtype=float)
