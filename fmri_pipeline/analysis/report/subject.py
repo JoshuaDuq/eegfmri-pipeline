@@ -1910,11 +1910,14 @@ def _sign_flip_block(
         caption=(
             "Every threshold in the table above assumes a distribution for the map's "
             "voxels; this one assumes only that the runs are exchangeable in sign. "
-            "Each mark is one relabelling of which runs count positively, recombined "
-            "exactly as the reported map combines all of them, and the value is that "
-            "recombination's largest |z| anywhere in the mask. The observed maximum "
-            "sitting inside the spread means a map like this one is reachable by "
-            "relabelling alone; sitting clear of it means it is not."
+            "Each step is one relabelling of which runs count positively, recombined "
+            "exactly as the reported map combines all of them, and its position on "
+            "the horizontal axis is that recombination's largest |z| anywhere in the "
+            "mask. Read the familywise height where the curve crosses 0.95, and the "
+            "observed value's separation as the flat stretch above the null's last "
+            "step. The unflipped pattern is itself one of the steps, which is why the "
+            "curve reaches 1 at the observed value and why the p cannot fall below "
+            "its floor."
         ),
     )
 

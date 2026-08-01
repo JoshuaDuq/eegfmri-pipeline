@@ -47,39 +47,60 @@ def test_the_observed_value_and_the_height_are_both_marked():
     plt.close(figure)
 
 
-def test_every_pattern_is_drawn_rather_than_binned():
+def test_every_pattern_is_a_step_on_the_curve():
     """32 values binned into a density invents a shape the data does not have."""
     values = [8.87, 5.7, 6.1, 5.2, 6.4, 5.9]
     figure = sign_flip.sign_flip_figure(values, summary=_summary())
-    plotted = [
+    marked = [
         float(x)
-        for collection in figure.axes[0].collections
-        for x, _y in collection.get_offsets()
+        for line in figure.axes[0].lines
+        if line.get_linestyle() == "None"
+        for x, _y in line.get_xydata()
     ]
-    assert sorted(plotted) == pytest.approx(sorted(values))
+    assert sorted(marked) == pytest.approx(sorted(values))
     plt.close(figure)
 
 
-def test_each_pattern_gets_its_own_row():
-    """Ranked rather than piled: no marker hides another and no jitter is invented."""
-    values = [8.87, 5.7, 6.1, 5.2, 6.4, 5.9]
-    figure = sign_flip.sign_flip_figure(values, summary=_summary())
-    rows = [
-        float(y)
-        for collection in figure.axes[0].collections
-        for _x, y in collection.get_offsets()
-    ]
-    assert sorted(rows) == list(range(1, len(values) + 1))
-    plt.close(figure)
-
-
-def test_the_observed_value_is_distinguished_from_the_rest():
+def test_the_vertical_axis_is_a_probability_not_an_index():
+    """Rank carries no information: nothing follows from a pattern being 17th."""
     values = [8.87, 5.7, 6.1, 5.2]
     figure = sign_flip.sign_flip_figure(values, summary=_summary())
-    collections = figure.axes[0].collections
-    highlighted = [c for c in collections if len(c.get_offsets()) == 1]
-    assert highlighted, "the observed maximum is not drawn apart from the null"
-    assert float(highlighted[0].get_offsets()[0][0]) == pytest.approx(8.87)
+    axis = figure.axes[0]
+    heights = sorted(
+        float(y)
+        for line in axis.lines
+        if line.get_linestyle() == "None"
+        for _x, y in line.get_xydata()
+    )
+    assert heights == pytest.approx([0.25, 0.5, 0.75, 1.0])
+    assert axis.get_ylim()[1] <= 1.1
+    assert "proportion" in axis.get_ylabel()
+
+
+def test_the_curve_is_monotone_and_reaches_one():
+    """An ECDF that does not reach 1 is missing patterns from its own null."""
+    values = [8.87, 5.7, 6.1, 5.2, 6.4, 5.9]
+    figure = sign_flip.sign_flip_figure(values, summary=_summary())
+    steps = [
+        line for line in figure.axes[0].lines if line.get_drawstyle() != "default"
+    ]
+    assert steps, "no step curve was drawn"
+    heights = steps[0].get_ydata()
+    assert list(heights) == sorted(heights)
+    assert heights[-1] == pytest.approx(1.0)
+    plt.close(figure)
+
+
+def test_the_familywise_level_is_drawn_so_the_height_can_be_read_off_it():
+    """The height is the 0.95 quantile; without that line it cannot be verified."""
+    figure = sign_flip.sign_flip_figure([8.87, 5.7, 6.1], summary=_summary())
+    axis = figure.axes[0]
+    horizontals = [
+        float(line.get_ydata()[0])
+        for line in axis.lines
+        if len(set(line.get_ydata())) == 1 and len(line.get_ydata()) > 1
+    ]
+    assert any(abs(value - 0.95) < 1e-9 for value in horizontals)
     plt.close(figure)
 
 

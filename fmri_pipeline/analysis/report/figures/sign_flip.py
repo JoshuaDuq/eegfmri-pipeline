@@ -31,72 +31,79 @@ def sign_flip_figure(
     if values.size == 0:
         raise ValueError("The sign-flip panel requires at least one enumerated maximum.")
 
-    # Ranked rather than piled on one row. Every pattern gets its own line, so no
-    # marker hides another and no jitter is invented to separate them; the shape of
-    # the climb is the null's distribution, and the gap at the top is the observed
-    # value's separation from it. Both readings are lost in a rug and faked in a
-    # 32-point histogram.
-    order = np.argsort(values)
-    ranked = values[order]
-    ranks = np.arange(1, ranked.size + 1)
-    observed_rank = int(np.argmin(np.abs(ranked - summary.observed_max))) + 1
+    # The empirical CDF of the permutation distribution. Both quantities a reader
+    # needs are then read off an axis rather than inferred: the familywise height is
+    # where the curve crosses 1 - alpha, and the exceedance probability of the
+    # observed value is one minus its height on the curve.
+    #
+    # An earlier version put rank on the vertical axis. Rank is an index, not a
+    # measurement -- nothing follows from a pattern being 17th rather than 18th -- so
+    # that panel spent its whole vertical dimension on a non-quantity, and was this
+    # same curve unnormalised and mislabelled.
+    ordered = np.sort(values)
+    cumulative = np.arange(1, ordered.size + 1) / ordered.size
+    #: The level the familywise height is the quantile of. Fixed at 0.95 because
+    #: ``SignFlipSummary.height`` is defined as the 95th percentile of this null.
+    alpha = 0.95
 
     with style.plot_context():
-        height_in = max(2.0, 0.085 * ranked.size + 1.0)
-        figure, axis = plt.subplots(figsize=(6.0, height_in), constrained_layout=True)
+        figure, axis = plt.subplots(figsize=(6.2, 3.4), constrained_layout=True)
 
-        axis.axvline(
-            summary.height,
-            color=style.OKABE_ITO["blue"],
+        axis.step(
+            np.concatenate([[ordered[0]], ordered]),
+            np.concatenate([[0.0], cumulative]),
+            where="post",
+            color="0.25",
             linewidth=1.3,
-            zorder=2,
+            zorder=3,
         )
-        # Mid-height, not at the top: the ranked points crowd the top of the line,
-        # which is exactly where a threshold label wants to sit.
+        axis.plot(
+            ordered,
+            cumulative,
+            marker="o",
+            linestyle="none",
+            markersize=3.2,
+            markerfacecolor="white",
+            markeredgecolor="0.25",
+            markeredgewidth=0.8,
+            zorder=4,
+        )
+
+        axis.axhline(alpha, color=style.OKABE_ITO["blue"], linewidth=1.0, linestyle=":")
+        axis.axvline(summary.height, color=style.OKABE_ITO["blue"], linewidth=1.3)
         axis.annotate(
-            f"familywise 5%\n|z| > {summary.height:.2f}",
-            xy=(summary.height, ranked.size * 0.45),
-            xytext=(-6, 0),
+            f"familywise 5%: |z| > {summary.height:.2f}",
+            xy=(summary.height, alpha),
+            xytext=(-11, -10),
             textcoords="offset points",
             ha="right",
-            va="center",
+            va="top",
             fontsize=7,
             color=style.OKABE_ITO["blue"],
         )
 
-        is_observed = ranks == observed_rank
-        axis.scatter(
-            ranked[~is_observed],
-            ranks[~is_observed],
-            s=16,
-            facecolor="white",
-            edgecolor="0.4",
-            linewidth=0.8,
-            zorder=3,
-        )
-        axis.scatter(
-            ranked[is_observed],
-            ranks[is_observed],
-            s=34,
+        axis.axvline(
+            summary.observed_max,
             color=style.OKABE_ITO["vermillion"],
-            zorder=4,
+            linewidth=1.3,
+            zorder=5,
         )
         axis.annotate(
-            f"observed  {summary.observed_max:.2f}",
-            xy=(summary.observed_max, observed_rank),
-            xytext=(-8, 0),
+            f"observed {summary.observed_max:.2f}\np = {summary.global_p:.3f}",
+            xy=(summary.observed_max, 0.06),
+            xytext=(-7, 0),
             textcoords="offset points",
             ha="right",
-            va="center",
+            va="bottom",
             fontsize=7.5,
-            fontweight="bold",
             color=style.OKABE_ITO["vermillion"],
         )
 
         axis.set_xlabel("max |z| over the analysis mask")
-        axis.set_ylabel("sign patterns, ranked")
-        axis.set_ylim(0.3, ranked.size + 1.8)
-        axis.set_yticks([1, ranked.size])
+        axis.set_ylabel("proportion of sign patterns ≤ x")
+        axis.set_ylim(0.0, 1.04)
+        axis.set_yticks([0.0, 0.25, 0.5, 0.75, alpha, 1.0])
+        axis.set_yticklabels(["0", "0.25", "0.50", "0.75", "0.95", "1"])
         axis.set_title(title or "Run sign-flip null", pad=10)
         for side in ("top", "right"):
             axis.spines[side].set_visible(False)
