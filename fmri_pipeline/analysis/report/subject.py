@@ -1677,6 +1677,21 @@ def build_contrast_section(
             )
         )
 
+        # Beneath the calibration panel: that one shows where the thresholds fall on
+        # the map's voxel distribution, this one where the observed maximum falls
+        # among the maxima run relabelling produces. Different distributions, and the
+        # second is the only one whose null is the data's own.
+        if context.sign_flip is not None and manifest.sign_flip_null_tsv:
+            with _panel(f"sign-flip null for {manifest.contrast_name}"):
+                block = _sign_flip_block(
+                    manifest=manifest,
+                    summary=context.sign_flip,
+                    out_dir=out_dir,
+                    cfg=cfg,
+                )
+                if block is not None:
+                    blocks.append(block)
+
         if path:
             blocks.append(
                 html.Figure(
@@ -1849,6 +1864,58 @@ def _threshold_table_caption(context: inference.ThresholdContext) -> str:
     return caption + (
         " No cluster-extent correction is applied; the sign-flip height is "
         "familywise-corrected over voxels, not over extent."
+    )
+
+
+def _sign_flip_block(
+    *,
+    manifest: ContrastManifest,
+    summary: inference.SignFlipSummary,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> Optional[html.Figure]:
+    """Draw the enumerated null the analysis wrote, with the observed value on it."""
+    import pandas as pd
+
+    from fmri_pipeline.analysis.report.figures import sign_flip as sign_flip_figures
+
+    path = Path(manifest.sign_flip_null_tsv or "")
+    if not path.exists():
+        return None
+    try:
+        maxima = pd.read_csv(path, sep="\t")["max_abs_z"].tolist()
+    except Exception as exc:
+        logger.warning("Could not read the sign-flip null %s (%s)", path.name, exc)
+        return None
+    if not maxima:
+        return None
+
+    saved = _save(
+        sign_flip_figures.sign_flip_figure(
+            maxima,
+            summary=summary,
+            title=f"{manifest.contrast_name}: run sign-flip null",
+        ),
+        out_dir=out_dir / "plots" / _slug(manifest),
+        stem="sign_flip_null",
+        dense=False,
+        formats=cfg.formats,
+    )
+    if not saved:
+        return None
+    return html.Figure(
+        title="Run sign-flip null",
+        path=saved,
+        dense=False,
+        caption=(
+            "Every threshold in the table above assumes a distribution for the map's "
+            "voxels; this one assumes only that the runs are exchangeable in sign. "
+            "Each mark is one relabelling of which runs count positively, recombined "
+            "exactly as the reported map combines all of them, and the value is that "
+            "recombination's largest |z| anywhere in the mask. The observed maximum "
+            "sitting inside the spread means a map like this one is reachable by "
+            "relabelling alone; sitting clear of it means it is not."
+        ),
     )
 
 
