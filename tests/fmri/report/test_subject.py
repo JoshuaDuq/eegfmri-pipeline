@@ -1531,3 +1531,105 @@ def test_no_companion_manifest_without_companion_maps(tmp_path):
         )
     )
     assert companion_manifest(manifest) is None
+
+
+def test_survivor_line_states_the_expected_count_beside_the_observed():
+    """The observed count alone reads as a result; the pair is the measurement.
+
+    On sub-0001 the applied height yields 8,463 voxels where the map's own fitted
+    null predicts 8,001 -- a 5.8% excess, which the bare count does not convey.
+    """
+    from fmri_pipeline.analysis.report.subject import survivor_summary
+
+    line = survivor_summary(
+        surviving=8463, n_voxels=50626, expected_under_fitted_null=8001.4
+    )
+    assert "8,463" in line
+    assert "50,626" in line
+    assert "16.72%" in line
+    assert "8,001" in line
+    assert "fitted null" in line
+
+
+def test_survivor_line_without_a_fitted_null_states_only_what_it_has():
+    from fmri_pipeline.analysis.report.subject import survivor_summary
+
+    line = survivor_summary(
+        surviving=8463, n_voxels=50626, expected_under_fitted_null=None
+    )
+    assert "8,463 of 50,626" in line
+    assert "fitted null" not in line
+
+
+def test_survivor_line_survives_an_empty_mask():
+    from fmri_pipeline.analysis.report.subject import survivor_summary
+
+    assert "0" in survivor_summary(
+        surviving=0, n_voxels=0, expected_under_fitted_null=None
+    )
+
+
+def test_familywise_line_carries_the_floor_when_it_binds():
+    from fmri_pipeline.analysis.report import inference
+    from fmri_pipeline.analysis.report.subject import familywise_summary
+
+    line = familywise_summary(
+        inference.SignFlipSummary(
+            height=7.02, survivors=38, global_p=0.0606, p_floor=0.0606,
+            n_runs=6, n_patterns=32, observed_max=8.87,
+        )
+    )
+    assert "7.02" in line and "38" in line
+    assert "0.061" in line
+    assert "floor" in line.lower()
+
+
+def test_familywise_line_omits_the_floor_note_when_it_does_not_bind():
+    from fmri_pipeline.analysis.report import inference
+    from fmri_pipeline.analysis.report.subject import familywise_summary
+
+    line = familywise_summary(
+        inference.SignFlipSummary(
+            height=6.0, survivors=120, global_p=0.008, p_floor=0.0155,
+            n_runs=8, n_patterns=128, observed_max=9.1,
+        )
+    )
+    assert "6.00" in line and "120" in line
+    assert "at its floor" not in line.lower()
+
+
+def test_the_glass_brain_caps_its_peak_markers():
+    """557 numbered markers cover the projection they are drawn on.
+
+    Markers exist so a reader can key the table's strongest rows to the picture.
+    Past a handful they stop doing that and start hiding the map, which the native
+    sections never revealed because a native fit gets no glass brain at all.
+    """
+    from fmri_pipeline.analysis.report.subject import GLASS_BRAIN_MAX_MARKERS, _marker_peaks
+
+    peaks = tuple((str(i), (float(i), 0.0, 0.0)) for i in range(557))
+    shown = _marker_peaks(peaks)
+    assert len(shown) == GLASS_BRAIN_MAX_MARKERS
+    assert shown[0][0] == "0"
+
+
+def test_marker_cap_leaves_a_short_table_alone():
+    from fmri_pipeline.analysis.report.subject import _marker_peaks
+
+    peaks = tuple((str(i), (float(i), 0.0, 0.0)) for i in range(4))
+    assert len(_marker_peaks(peaks)) == 4
+
+
+def test_marker_caption_says_how_many_are_drawn():
+    from fmri_pipeline.analysis.report.subject import _marker_caption
+
+    assert _marker_caption(4, 4) == "Markers number the peaks in the cluster table below."
+    text = _marker_caption(10, 557)
+    assert "10" in text and "557" in text
+    assert "strongest" in text
+
+
+def test_marker_caption_is_empty_without_peaks():
+    from fmri_pipeline.analysis.report.subject import _marker_caption
+
+    assert _marker_caption(0, 0) == ""

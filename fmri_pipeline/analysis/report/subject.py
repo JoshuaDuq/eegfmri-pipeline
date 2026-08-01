@@ -1439,15 +1439,10 @@ def build_contrast_section(
 
     prefix = f"{manifest.contrast_name}: "
     _note(facts, f"{prefix}height threshold", threshold_label or "none")
-    if threshold:
-        compared = np.abs(values) if manifest.two_sided else values
-        surviving = int(np.count_nonzero(compared > float(threshold)))
-        _note(
-            facts,
-            f"{prefix}voxels above the threshold",
-            f"{surviving:,} of {values.size:,}"
-            + (f" ({surviving / values.size:.2%})" if values.size else ""),
-        )
+    # The survivor count is recorded further down, from the calibration panel's own
+    # context, so that it can state the count expected under the fitted null beside
+    # it. Fitting that null here as well would compute it twice per contrast and
+    # leave two copies free to drift apart.
 
     if manifest.effect_map and Path(manifest.effect_map).exists() and threshold:
         with _panel(f"dual-coded panel for {manifest.contrast_name}"):
@@ -1522,6 +1517,7 @@ def build_contrast_section(
 
         if supports_glass_brain(manifest.space):
             with _panel(f"glass brain for {manifest.contrast_name}"):
+                marked = _marker_peaks(peaks)
                 path = _save(
                     stat_map_figures.glass_brain(
                         stat_img,
@@ -1529,8 +1525,8 @@ def build_contrast_section(
                         threshold=float(threshold),
                         two_sided=manifest.two_sided,
                         radiological=manifest.radiological,
-                        peak_coords=[coord for _label, coord in peaks] or None,
-                        peak_labels=[label for label, _coord in peaks] or None,
+                        peak_coords=[coord for _label, coord in marked] or None,
+                        peak_labels=[label for label, _coord in marked] or None,
                         title=f"{manifest.contrast_name}: glass brain",
                     ),
                     out_dir=plots_dir,
@@ -1542,11 +1538,7 @@ def build_contrast_section(
                         html.Figure(
                             title="Glass brain · thresholded",
                             path=path,
-                            caption=(
-                                "Markers number the peaks in the cluster table below."
-                                if peaks
-                                else ""
-                            ),
+                            caption=_marker_caption(len(marked), len(peaks)),
                         )
                     )
         else:
@@ -1628,6 +1620,28 @@ def build_contrast_section(
             two_sided=manifest.two_sided,
             sign_flip=_sign_flip_summary(manifest),
         )
+
+        if context.applied_survivors is not None:
+            _note(
+                facts,
+                f"{prefix}voxels above the threshold",
+                survivor_summary(
+                    surviving=context.applied_survivors,
+                    n_voxels=context.n_voxels,
+                    expected_under_fitted_null=(
+                        None
+                        if context.calibration is None
+                        else context.calibration.expected_survivors
+                    ),
+                ),
+            )
+        if context.sign_flip is not None:
+            _note(
+                facts,
+                f"{prefix}familywise (run sign-flip)",
+                familywise_summary(context.sign_flip),
+            )
+
         path = _save(
             distribution_figures.null_calibration_figure(
                 values,
@@ -1690,6 +1704,78 @@ CALIBRATION_CAPTION = (
     "panel states what the residuals do, and the run-level panels state what each run "
     "contributes. Nothing in a thresholded mosaic reveals any of the three."
 )
+
+
+#: How many numbered peak markers a glass brain carries.
+#:
+#: The markers key the table's strongest rows to the projection. A whole-brain
+#: contrast at an uncorrected height yields hundreds of clusters -- 557 on this
+#: study's standard-space fit -- and drawing a numbered marker for each covers the
+#: map with the labels of clusters nobody reads. Peaks arrive ordered by |z|, so the
+#: cap keeps the ones a reader is looking for.
+GLASS_BRAIN_MAX_MARKERS = 10
+
+
+def _marker_peaks(
+    peaks: Sequence[Tuple[str, Tuple[float, float, float]]],
+) -> Tuple[Tuple[str, Tuple[float, float, float]], ...]:
+    """The peaks a glass brain draws markers for."""
+    return tuple(peaks[:GLASS_BRAIN_MAX_MARKERS])
+
+
+def _marker_caption(shown: int, total: int) -> str:
+    """Say what the markers key to, and what they leave out."""
+    if not total:
+        return ""
+    if shown >= total:
+        return "Markers number the peaks in the cluster table below."
+    return (
+        f"Markers number the {shown} strongest peaks by |z|, of {total:,} in the "
+        f"cluster table below; the map itself is drawn in full."
+    )
+
+
+def survivor_summary(
+    *,
+    surviving: int,
+    n_voxels: int,
+    expected_under_fitted_null: Optional[float],
+) -> str:
+    """State how many voxels cleared the height, against how many were going to.
+
+    The expected count is the point of the line rather than an addition to it. A bare
+    "8,463 of 50,626 (16.72%)" reads as a result; stated beside the 8,001 the map's own
+    fitted null predicts, the same numbers read as a 5.8% excess. The reader cannot
+    recover the second figure from the first, and the summary is where most readers
+    stop.
+
+    N(0, 1) is deliberately not the comparison here. It is in the threshold table,
+    where there is room to say which null each column assumes; a summary line carrying
+    the theoretical expectation alone would overstate the enrichment by roughly
+    eightfold on an over-dispersed map.
+    """
+    line = f"{surviving:,} of {n_voxels:,}"
+    if n_voxels:
+        line += f" ({surviving / n_voxels:.2%})"
+    if expected_under_fitted_null is not None:
+        line += (
+            f" — {expected_under_fitted_null:,.0f} expected under this map's own "
+            f"fitted null"
+        )
+    return line
+
+
+def familywise_summary(summary: inference.SignFlipSummary) -> str:
+    """State the familywise height, its survivors, and what its p is worth."""
+    line = f"|z| > {summary.height:.2f} — {summary.survivors:,} voxels"
+    if summary.floor_limited:
+        line += (
+            f"; global p = {summary.global_p:.3f}, at its floor for "
+            f"{summary.n_runs} runs"
+        )
+    else:
+        line += f"; global p = {summary.global_p:.3f}"
+    return line
 
 
 def _sign_flip_summary(
@@ -2986,12 +3072,18 @@ def build_subject_report(
         companion = companion_manifest(manifest)
         if companion is not None:
             with _panel(f"standard-space section for {manifest.contrast_name}"):
+                # Its own anatomy, discovered against its own space. The subject's
+                # native T1w over a standard-space map would put every cluster
+                # somewhere it is not, and nothing in the panel would show it.
+                companion_background, _source = load_background(
+                    deriv_root=Path(deriv_root), manifest=companion
+                )
                 sections.append(
                     build_contrast_section(
                         manifest=companion,
                         out_dir=out_dir,
                         cfg=cfg,
-                        background=None,
+                        background=companion_background,
                         facts=facts,
                         deriv_root=Path(deriv_root),
                     )
