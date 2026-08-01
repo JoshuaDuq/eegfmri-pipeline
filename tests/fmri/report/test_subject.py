@@ -1633,3 +1633,76 @@ def test_marker_caption_is_empty_without_peaks():
     from fmri_pipeline.analysis.report.subject import _marker_caption
 
     assert _marker_caption(0, 0) == ""
+
+
+def _run_effect_map(tmp_path, name, per_run_means):
+    data = np.stack(
+        [np.full((12, 12, 12), v, dtype=np.float32) for v in per_run_means], axis=-1
+    )
+    path = tmp_path / name
+    nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
+    return path
+
+
+def test_run_contributions_render_as_a_table_not_a_figure(tmp_path: Path) -> None:
+    """Six runs and four numbers each is a table; a chart would lose precision."""
+    manifest = _manifest(
+        tmp_path,
+        run_effect_map=_run_effect_map(tmp_path, "perrun.nii.gz", [-0.08, 0.06]),
+    )
+    block = subject.build_run_contribution_block(manifest=manifest, out_dir=tmp_path)
+    assert isinstance(block, subject.html.Table)
+
+
+def test_run_contributions_state_the_offset_per_run(tmp_path: Path) -> None:
+    manifest = _manifest(
+        tmp_path,
+        run_effect_map=_run_effect_map(tmp_path, "perrun2.nii.gz", [-0.08, 0.06]),
+    )
+    block = subject.build_run_contribution_block(manifest=manifest, out_dir=tmp_path)
+    assert "run-01" in block.html and "run-02" in block.html
+    assert "-0.08" in block.html and "0.06" in block.html
+
+
+def test_run_contributions_merge_the_influence_table(tmp_path: Path) -> None:
+    influence = tmp_path / "influence.tsv"
+    pd.DataFrame(
+        {
+            "dropped_run": ["run-01", "run-02"],
+            "survivors": [7108, 8003],
+            "delta": [-1367, -472],
+            "max_abs_z": [8.18, 7.68],
+            "correlation": [0.941, 0.913],
+        }
+    ).to_csv(influence, sep="\t", index=False)
+
+    manifest = _manifest(
+        tmp_path,
+        run_effect_map=_run_effect_map(tmp_path, "perrun3.nii.gz", [-0.08, 0.06]),
+        run_influence_tsv=influence,
+    )
+    block = subject.build_run_contribution_block(manifest=manifest, out_dir=tmp_path)
+    assert "-1367" in block.html and "0.941" in block.html
+    assert "Mean effect over mask" in block.html
+
+
+def test_run_contributions_absent_without_any_measurement(tmp_path: Path) -> None:
+    assert (
+        subject.build_run_contribution_block(
+            manifest=_manifest(tmp_path), out_dir=tmp_path
+        )
+        is None
+    )
+
+
+def test_run_contributions_score_no_run(tmp_path: Path) -> None:
+    manifest = _manifest(
+        tmp_path,
+        run_effect_map=_run_effect_map(tmp_path, "perrun4.nii.gz", [-0.08, 0.06]),
+    )
+    caption = subject.build_run_contribution_block(
+        manifest=manifest, out_dir=tmp_path
+    ).caption.lower()
+    for word in ("outlier", "exclude", "fail", "reject", "bad run"):
+        assert word not in caption
+    assert "measurement, not a fault" in caption

@@ -997,3 +997,87 @@ def test_no_split_when_the_contrast_weights_every_regressor() -> None:
     figure = design.variance_inflation_across_runs_figure(frames, contrast=contrast)
     assert _vif_axis(figure, "vif-contrast") is None
     plt.close(figure)
+
+
+def test_contrast_confound_detects_time_on_task_correlation() -> None:
+    """A contrast whose positive condition sits early correlates with elapsed time."""
+    import numpy as np
+    import pandas as pd
+
+    n = 100
+    early = np.zeros(n); early[:40] = 1.0
+    late = np.zeros(n); late[60:] = 1.0
+    frame = pd.DataFrame(
+        {"cond_a": early, "cond_b": late, "drift_1": np.linspace(-1, 1, n)}
+    )
+    row = design.contrast_confounding(frame, {"cond_a": 1.0, "cond_b": -1.0})
+    assert row["r_with_time"] < -0.5
+
+
+def test_an_interleaved_design_has_little_time_correlation() -> None:
+    import numpy as np
+    import pandas as pd
+
+    n = 100
+    a = np.zeros(n); a[::10] = 1.0
+    b = np.zeros(n); b[5::10] = 1.0
+    frame = pd.DataFrame(
+        {"cond_a": a, "cond_b": b, "drift_1": np.linspace(-1, 1, n)}
+    )
+    row = design.contrast_confounding(frame, {"cond_a": 1.0, "cond_b": -1.0})
+    assert abs(row["r_with_time"]) < 0.2
+
+
+def test_drift_correlation_is_the_strongest_over_the_basis() -> None:
+    """One drift column absorbing the contrast is what costs it, not the average."""
+    import numpy as np
+    import pandas as pd
+
+    n = 120
+    ramp = np.linspace(-1, 1, n)
+    frame = pd.DataFrame(
+        {
+            "cond_a": ramp,
+            "drift_1": np.cos(np.pi * np.arange(n) / n),
+            "drift_2": ramp,
+        }
+    )
+    row = design.contrast_confounding(frame, {"cond_a": 1.0})
+    assert row["r_with_drift_max"] > 0.99
+
+
+def test_a_constant_contrast_regressor_yields_no_correlation() -> None:
+    """No variance means no correlation; nan is the honest answer, not zero."""
+    import numpy as np
+    import pandas as pd
+
+    frame = pd.DataFrame({"cond_a": np.ones(50), "drift_1": np.linspace(-1, 1, 50)})
+    row = design.contrast_confounding(frame, {"cond_a": 1.0})
+    assert np.isnan(row["r_with_time"])
+
+
+def test_a_design_without_drift_columns_reports_no_drift_correlation() -> None:
+    import numpy as np
+    import pandas as pd
+
+    n = 60
+    a = np.zeros(n); a[::6] = 1.0
+    frame = pd.DataFrame({"cond_a": a})
+    row = design.contrast_confounding(frame, {"cond_a": 1.0})
+    assert np.isnan(row["r_with_drift_max"])
+
+
+def test_the_summary_table_carries_the_confound_columns() -> None:
+    frames = _run_frames(n=2)
+    summaries = [design.summarize_design(f, contrast=None) for f in frames]
+    table, rows = design.design_summary_table(
+        summaries,
+        run_labels=["run-01", "run-02"],
+        confounding=[
+            design.contrast_confounding(f, {"cond_a": 1.0, "cond_b": -1.0})
+            for f in frames
+        ],
+    )
+    assert "r with elapsed time" in table
+    assert "r with drift" in table
+    assert any("r with elapsed time" in row for row in rows)

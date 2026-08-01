@@ -506,12 +506,67 @@ def _summary_number(value: Optional[float]) -> str:
     return f"{value:.3g}"
 
 
+def contrast_confounding(
+    frame: "pd.DataFrame", contrast: Optional[Dict[str, float]]
+) -> Dict[str, float]:
+    """How far this run's contrast regressor is confounded with time and with drift.
+
+    ``X @ c`` is the single time series the comparison actually tests. Correlating it
+    with elapsed time measures time-on-task confounding: conditions that block against
+    one another rather than interleaving make the contrast partly a measure of when in
+    the run the scan happened. Correlating it with each drift column measures how much
+    of the comparison the high-pass basis can absorb, and the strongest such
+    correlation is what costs it -- an average over the basis dilutes exactly the
+    column that does the damage.
+
+    The event raster shows both and quantifies neither, which is why these are numbers
+    rather than another picture.
+
+    Both are measurements. A blocked design is *supposed* to correlate with time, so
+    no cutoff is applied to either.
+    """
+    columns = [name for name in (contrast or {}) if float((contrast or {})[name]) != 0.0]
+    empty = {"r_with_time": float("nan"), "r_with_drift_max": float("nan")}
+    if not columns:
+        return empty
+
+    present = [name for name in columns if name in frame.columns]
+    if not present:
+        return empty
+
+    weights = np.array([float(contrast[name]) for name in present], dtype=float)
+    values = frame.loc[:, present].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        return empty
+    # An elementwise weighted sum rather than a matmul. The result is identical for a
+    # handful of columns, and `@` dispatches to BLAS, which on this platform raises
+    # spurious divide-by-zero and overflow flags on input that is entirely finite.
+    regressor = (values * weights).sum(axis=1)
+
+    def _r(other: np.ndarray) -> float:
+        if regressor.size < 2 or np.std(regressor) == 0 or np.std(other) == 0:
+            return float("nan")
+        return float(np.corrcoef(regressor, other)[0, 1])
+
+    drift_columns = [name for name in frame.columns if str(name).startswith("drift")]
+    drift_correlations = [
+        abs(_r(frame[name].to_numpy(dtype=float))) for name in drift_columns
+    ]
+    finite = [value for value in drift_correlations if np.isfinite(value)]
+
+    return {
+        "r_with_time": _r(np.linspace(-1.0, 1.0, regressor.size)),
+        "r_with_drift_max": max(finite) if finite else float("nan"),
+    }
+
+
 def design_summary_table(
     summaries: Sequence[DesignSummary],
     *,
     run_labels: Sequence[str],
     event_counts: Sequence[Dict[str, int]] = (),
     condition_names: Sequence[str] = (),
+    confounding: Sequence[Dict[str, float]] = (),
 ) -> Tuple[str, List[str]]:
     """Every run's design summary as one table, one row per run.
 
@@ -536,6 +591,8 @@ def design_summary_table(
         "Efficiency",
     ]
     headers.extend(f"Events: {name}" for name in conditions)
+    if confounding:
+        headers.extend(["r with elapsed time", "r with drift (max)"])
 
     rows: List[List[str]] = []
     for index, summary in enumerate(summaries):
@@ -563,6 +620,12 @@ def design_summary_table(
         row.extend(
             str(counts[name]) if name in counts else "n/a" for name in conditions
         )
+        if confounding:
+            measured = confounding[index] if index < len(confounding) else {}
+            row.extend(
+                _summary_number(measured.get(key))
+                for key in ("r_with_time", "r_with_drift_max")
+            )
         rows.append(row)
 
     head = "".join(f"<th>{_escape(header)}</th>" for header in headers)

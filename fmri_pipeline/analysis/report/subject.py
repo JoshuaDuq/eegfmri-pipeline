@@ -1583,6 +1583,13 @@ def build_contrast_section(
         if block is not None:
             blocks.append(block)
 
+    # Directly beneath the forest panel: that one shows the runs at the chosen peaks,
+    # this one shows what they do to the whole map, and the two are read together.
+    with _panel(f"run contributions for {manifest.contrast_name}"):
+        block = build_run_contribution_block(manifest=manifest, out_dir=out_dir)
+        if block is not None:
+            blocks.append(block)
+
     if manifest.effect_map and Path(manifest.effect_map).exists():
         with _panel(f"effect versus evidence for {manifest.contrast_name}"):
             block = _effect_versus_evidence_block(
@@ -1842,6 +1849,87 @@ def _threshold_table_caption(context: inference.ThresholdContext) -> str:
     return caption + (
         " No cluster-extent correction is applied; the sign-flip height is "
         "familywise-corrected over voxels, not over extent."
+    )
+
+
+def build_run_contribution_block(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+) -> Optional[html.Table]:
+    """What each run contributes to the contrast, as one table.
+
+    A table rather than a figure. Six runs and four numbers each is a table already;
+    drawn as a chart it would carry the same values at lower precision, and the
+    reading here -- which run is the odd one, by how much -- is a comparison of
+    numbers rather than of shapes.
+
+    One table rather than two, because both measurements are keyed by run and a reader
+    comparing them across two panels has to hold six rows in mind to do it.
+
+    ``None`` when neither measurement is available, which a single-run contrast and a
+    derivatives tree written before these existed both are.
+    """
+    import pandas as pd
+
+    from fmri_pipeline.analysis.report import contributions
+
+    labels = list(manifest.included_runs)
+    if not labels:
+        return None
+
+    offsets = None
+    if manifest.run_effect_map and Path(manifest.run_effect_map).exists():
+        import nibabel as nib
+
+        offsets = contributions.run_offsets(
+            nib.load(str(manifest.run_effect_map)), _load_mask(manifest)
+        )
+
+    influence = contributions.read_run_influence(manifest.run_influence_tsv)
+    if offsets is None and not influence:
+        return None
+
+    rows = contributions.contribution_rows(
+        run_labels=labels, offsets=offsets, influence=influence
+    )
+    frame = pd.DataFrame(rows)
+    if frame.shape[1] <= 1:
+        return None
+
+    plots_dir = out_dir / "plots" / _slug(manifest)
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    tsv_path = plots_dir / "run_contributions.tsv"
+    frame.to_csv(tsv_path, sep="\t", index=False)
+
+    notes = [
+        "Each run's own estimate of this contrast, and what the combined map loses "
+        "when that run is left out."
+    ]
+    if offsets is not None:
+        notes.append(
+            "The mean effect over the mask is a whole-brain offset: a contrast that "
+            "differences two conditions has no reason to carry one, so a non-zero "
+            "value is signal shared across the mask rather than anatomy. It is also "
+            "the fitted null's centre, and a map centred away from zero produces "
+            "large clusters of the offset's sign and shifts survival toward whichever "
+            "tissue class the offset reaches most."
+        )
+    if influence:
+        notes.append(
+            "Runs are dropped by giving that run a null contrast, so the remaining "
+            "runs are combined exactly as the reported map combines all of them. The "
+            "forest panel answers a related question at the chosen peaks; a run can "
+            "carry the largest peak estimates while a different run moves the map "
+            "more."
+        )
+    notes.append("Runs differing is a measurement, not a fault.")
+
+    return html.Table(
+        title="What each run contributes",
+        html=for_display(frame).to_html(index=False, border=0, classes=""),
+        tsv_path=tsv_path,
+        caption=" ".join(notes),
     )
 
 
@@ -2655,11 +2743,21 @@ def build_design_section(
                 )
 
     if summaries:
+        # Columns on the table that already reports this design per run, rather than a
+        # panel of their own: they are two numbers per run, and the reading is against
+        # the event counts and the efficiency already in the same row.
+        confounding = [
+            design_figures.contrast_confounding(
+                frame, _contrast_for_run(manifest, list(frame.columns))[0]
+            )
+            for frame in frames
+        ]
         table_html, rows = design_figures.design_summary_table(
             summaries,
             run_labels=summary_labels,
             event_counts=event_counts,
             condition_names=weighted,
+            confounding=confounding,
         )
         tsv_path = plots_dir / "design_summary.tsv"
         plots_dir.mkdir(parents=True, exist_ok=True)
@@ -2713,7 +2811,17 @@ def build_design_section(
                     "and meaningless as an absolute number, so no cutoff is applied "
                     "to it or to anything else here. Event counts are the onsets in "
                     "each run's own convolved regressor, so a trial the model's "
-                    "scoping dropped is already absent."
+                    "scoping dropped is already absent — and a run whose two counts "
+                    "are lopsided estimates the comparison from whichever is smaller, "
+                    "while still contributing its own precision to the combination. "
+                    "The last two columns quantify what the raster shows: r with "
+                    "elapsed time is the correlation of this run's contrast regressor "
+                    "with a ramp across the run, so a design whose conditions are "
+                    "ordered rather than interleaved confounds the comparison with "
+                    "time-on-task; r with drift is the strongest correlation that "
+                    "regressor reaches against any single drift column, which is what "
+                    "the high-pass basis can absorb. A blocked design is expected to "
+                    "correlate with time, so both are reported without a cutoff."
                 ),
             ),
         )
