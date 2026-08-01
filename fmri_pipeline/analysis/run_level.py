@@ -165,8 +165,152 @@ def write_run_level_maps(
     return written[0], written[1]
 
 
+@dataclass(frozen=True)
+class SignFlipNull:
+    """A familywise height from sign-flipping run-level contributions.
+
+    Exchangeability is over runs, which is the unit the design actually replicates.
+    The null is exact and enumerated rather than sampled: with ``n`` runs there are
+    ``2**(n-1)`` distinct sign patterns for a two-sided maximum statistic, because a
+    pattern and its global negation give identical ``|z|`` maps.
+
+    Why this exists beside Bonferroni and FDR: both of those assume every voxel is
+    drawn from N(0, 1). A single-subject map combined across runs is routinely
+    over-dispersed relative to that -- on this study's own data the fitted null is
+    N(-0.61, 1.51^2) -- so both corrections are computed against a distribution the
+    map demonstrably does not follow. Sign-flipping runs makes no distributional
+    assumption at all; it asks how large a maximum this same data produces when the
+    only thing changed is which runs are labelled positive.
+    """
+
+    null_max: Tuple[float, ...]
+    observed_max: float
+    fwe_height: float
+    fwe_survivors: int
+    global_p: float
+    p_floor: float
+    n_runs: int
+    n_patterns: int
+    alpha: float
+
+
+def _sign_patterns(n_runs: int) -> np.ndarray:
+    """Return the distinct sign patterns, identity first.
+
+    The first run's sign is pinned to +1: a pattern and its global negation produce
+    the same ``|z|`` map, so enumerating both would double the null with copies and
+    halve the apparent resolution of the p-value for nothing.
+    """
+    import itertools
+
+    patterns = [
+        (1.0,) + rest for rest in itertools.product((1.0, -1.0), repeat=n_runs - 1)
+    ]
+    # Identity first, so callers can read the observed map off row zero.
+    patterns.sort(key=lambda pattern: [sign < 0 for sign in pattern])
+    return np.asarray(patterns, dtype=float)
+
+
+def compute_sign_flip_null(
+    flm: Any, contrast_def: Any, *, alpha: float = 0.05
+) -> Optional[SignFlipNull]:
+    """Enumerate the run sign-flip null for ``contrast_def``.
+
+    Each pattern is evaluated by passing the per-run vectors ``s_i * c_i`` through the
+    same ``compute_contrast`` call the pipeline already uses, so the pooling rule is
+    nilearn's own and the identity pattern reproduces the stored map exactly rather
+    than approximating it.
+
+    ``None`` when the model holds a single run, or when the contrast cannot be
+    expanded. Best-effort throughout: this is a diagnostic, and the contrast it
+    describes is already on disk by the time it runs.
+    """
+    designs = list(getattr(flm, "design_matrices_", []) or [])
+    masker = getattr(flm, "masker_", None)
+    if masker is None or len(designs) < 2:
+        return None
+
+    try:
+        vectors = _contrast_vectors(flm, contrast_def)
+    except Exception as exc:
+        logger.warning("Could not expand the contrast for the sign-flip null (%s)", exc)
+        return None
+
+    patterns = _sign_patterns(len(vectors))
+
+    maxima: List[float] = []
+    observed: Optional[np.ndarray] = None
+    for index, signs in enumerate(patterns):
+        flipped = [sign * vector for sign, vector in zip(signs, vectors)]
+        try:
+            z_img = flm.compute_contrast(flipped, output_type="z_score")
+        except Exception as exc:
+            logger.warning("Sign-flip pattern %d failed (%s)", index, exc)
+            return None
+        z = np.asarray(masker.transform(z_img), dtype=float).ravel()
+        z = z[np.isfinite(z)]
+        if z.size == 0:
+            return None
+        maxima.append(float(np.abs(z).max()))
+        if index == 0:
+            observed = z
+
+    if observed is None:
+        return None
+
+    null_max = np.asarray(maxima, dtype=float)
+    observed_max = float(null_max[0])
+    height = float(np.quantile(null_max, 1.0 - alpha))
+    # The identity is a member of the null set and always ties the observed maximum,
+    # so the +1 in the numerator is not a continuity correction -- it is that tie. It
+    # is also why p can never fall below ``p_floor``; see that field.
+    global_p = float((np.sum(null_max >= observed_max) + 1) / (null_max.size + 1))
+    return SignFlipNull(
+        null_max=tuple(float(value) for value in null_max),
+        observed_max=observed_max,
+        fwe_height=height,
+        fwe_survivors=int(np.sum(np.abs(observed) >= height)),
+        global_p=global_p,
+        p_floor=float(2 / (null_max.size + 1)),
+        n_runs=len(vectors),
+        n_patterns=int(null_max.size),
+        alpha=float(alpha),
+    )
+
+
+def write_sign_flip_null(
+    null: SignFlipNull, *, out_dir: Path, stem: str, cfg_hash: str
+) -> Optional[Path]:
+    """Write the enumerated null, one row per sign pattern."""
+    import pandas as pd
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{stem}_desc-signflipnull_{cfg_hash}.tsv"
+
+    patterns = _sign_patterns(null.n_runs)
+    frame = pd.DataFrame(
+        {
+            "pattern": np.arange(1, null.n_patterns + 1),
+            "signs": [
+                "".join("+" if sign > 0 else "-" for sign in row) for row in patterns
+            ],
+            "max_abs_z": null.null_max,
+        }
+    )
+    try:
+        frame.to_csv(path, sep="\t", index=False)
+    except Exception as exc:
+        logger.warning("Could not write %s (%s)", path.name, exc)
+        return None
+    return path
+
+
 __all__ = [
     "RunLevelContrast",
+    "SignFlipNull",
     "compute_run_level_contrast",
+    "compute_sign_flip_null",
     "write_run_level_maps",
+    "write_sign_flip_null",
 ]
