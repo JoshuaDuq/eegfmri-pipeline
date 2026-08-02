@@ -243,3 +243,17 @@ class TestRunSpectrum:
         raw = mne.io.RawArray(np.zeros((1, 1000)), info)
         with pytest.raises(ValueError, match="shorter than one estimation block"):
             rlc.run_spectrum(raw)
+
+
+def test_removal_settings_reads_the_mains_exclusion_flag():
+    """Whether mains is left to the pipeline's FIR notch is a setting, not a constant."""
+
+    class _Config:
+        def __init__(self, block):
+            self._block = block
+
+        def get(self, key):
+            return self._block if key == "line_comb_removal" else None
+
+    assert rlc.RemovalSettings.from_config(_Config({})).exclude_mains is True
+    assert rlc.RemovalSettings.from_config(_Config({"exclude_mains": False})).exclude_mains is False

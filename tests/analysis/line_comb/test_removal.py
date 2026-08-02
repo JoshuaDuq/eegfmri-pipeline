@@ -166,6 +166,14 @@ class TestRemovalFrequencies:
                 self._estimate(isolated=()), harmonic_range=(24, 30), low_hz=200.0, high_hz=300.0
             )
 
+    def test_keeps_mains_when_the_exclusion_is_turned_off(self):
+        targets = lr.removal_frequencies(
+            self._estimate(isolated=(57.22, 60.0)), harmonic_range=(24, 79), excluded_hz=()
+        )
+        assert any(
+            f == pytest.approx(60.0) for f in targets
+        ), "with the FIR notch disabled the removal must take mains itself"
+
 
 class TestCombineEstimates:
     def _estimate(self, fundamental, isolated=(57.2, 47.0)):

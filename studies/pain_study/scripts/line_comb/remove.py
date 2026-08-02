@@ -90,6 +90,15 @@ class RemovalSettings:
     notch_width_min_hz: float = NOTCH_WIDTH_MIN_HZ
     low_hz: float = 3.0
     high_hz: float = 95.0
+    exclude_mains: bool = True
+    """Leave 59.5-60.5 Hz to the pipeline's own notch.
+
+    False moves mains into this pass, which is the point of doing so: the pipeline's FIR
+    notch measured 0.97 Hz wide on the delivered epochs (59.537-60.463 Hz) against
+    0.133 Hz for spectrum_fit at freq/450. Exactly one of the two may remove mains --
+    ``preprocessing.notch_freq`` has to be null when this is False, and
+    tests/scripts/line_comb/test_config_pairing.py fails if the two ever disagree.
+    """
 
     @classmethod
     def from_config(cls, config) -> "RemovalSettings":
@@ -114,6 +123,7 @@ class RemovalSettings:
             notch_width_min_hz=float(block.get("notch_width_min_hz", defaults.notch_width_min_hz)),
             low_hz=float(block.get("low_hz", defaults.low_hz)),
             high_hz=float(block.get("high_hz", defaults.high_hz)),
+            exclude_mains=bool(block.get("exclude_mains", defaults.exclude_mains)),
         )
 
 
@@ -227,6 +237,7 @@ def estimate_and_targets(
         harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
+        excluded_hz=(lr.MAINS_NOTCH_HZ,) if settings.exclude_mains else (),
     )
     return estimate, targets, prominence
 
