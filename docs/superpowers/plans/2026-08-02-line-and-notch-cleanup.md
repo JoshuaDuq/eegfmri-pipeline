@@ -920,7 +920,15 @@ print(f'bins more than 1 dB low near mains: {width} ({width * (f[1] - f[0]):.3f}
 "
 ```
 
-Expected: 60 Hz within about 1 dB of background, and the low-bin span around 0.13 Hz rather than the 0.97 Hz the FIR notch left. A span still near 0.97 Hz means both notches ran.
+Expected: 60 Hz at or below background, and the low-bin span **near 0.97 Hz**, which is the
+FIR notch doing its job.
+
+This expectation is the reverse of what this plan originally stated, and the reversal is
+the point. Task 4's move to a 0.13 Hz `spectrum_fit` pass was measured on the BIDS copy it
+produced and left 60 Hz at +8.04 dB median over background in 13 of 15 participants, because
+mains here is a cluster of 32-38 peaks across 59-61 Hz rather than a single line. It was
+reverted in `5b7e810b`; `notch_freq` is 60 again and `exclude_mains` is true. A span near
+0.13 Hz now would mean the notch did **not** run and 60 Hz is still in the data.
 
 - [ ] **Step 8: Check the bad-channel set, and Cz in sub-0011 specifically**
 
