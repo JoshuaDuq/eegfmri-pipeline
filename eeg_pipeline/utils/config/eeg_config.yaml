@@ -36,7 +36,12 @@ project:
   subject_list: null  # Optional list of subjects to process (null = all found)
 
 paths:
-  bids_root: "../../../data/bids_output/eeg"  # BIDS-formatted EEG data directory
+  # The line-cleaned copy, because that is what the pipeline is actually run against: every
+  # delivered run passed --bids-root .../eeg_linecleaned on the command line while this said
+  # "eeg", so the data depended on a flag someone had to remember. 81 of 119 recorded
+  # preprocessing runs carried the flag and the rest did not. Producing the cleaned copy is
+  # `eeg-pipeline line-comb apply`, whose own config pins the raw root it reads.
+  bids_root: "../../../data/bids_output/eeg_linecleaned"  # BIDS-formatted EEG data directory
   bids_rest_root: null  # Optional resting-state EEG BIDS directory used when task_is_rest is enabled
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory

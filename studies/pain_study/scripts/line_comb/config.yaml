@@ -13,7 +13,13 @@
 paths:
   # null inherits the core eeg_config.yaml paths.* value. Set one only to point this
   # workflow somewhere the rest of the pipeline does not look.
-  bids_root: null
+  #
+  # bids_root is pinned rather than inherited: the core config points at the *cleaned*
+  # copy, because that is what every downstream stage consumes. This workflow is what
+  # produces that copy, so it has to read the uncleaned root. Left inheriting, it would
+  # read its own output and write bids_output/eeg_linecleaned_linecleaned.
+  # Repo-relative, matching diagnosis_dir and removal_dir below; run from the repo root.
+  bids_root: "data/bids_output/eeg"
   source_data: null
   deriv_root: null
 
