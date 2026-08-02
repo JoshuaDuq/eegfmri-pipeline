@@ -838,13 +838,8 @@ class PreprocessingPipeline(PipelineBase):
             minimum_recording_coverage=float(qc_config["minimum_recording_coverage"]),
         )
         task_entity = f"task-{task}_" if task is not None else ""
-        output_path = (
-            self.deriv_root
-            / "preprocessed"
-            / "eeg"
-            / "qc"
-            / f"{task_entity}desc-pulsemarkers_qc.tsv"
-        )
+        qc_root = self.deriv_root / "preprocessed" / "eeg" / "qc"
+        output_path = qc_root / f"{task_entity}desc-pulsemarkers_qc.tsv"
         strict_validation = self.config.get(
             "preprocessing.brainvision_analyzer.strict_pulse_qc", False
         )
@@ -854,6 +849,10 @@ class PreprocessingPipeline(PipelineBase):
             criteria,
             output_path=output_path,
             strict=strict_validation,
+            # The stage that measures how much of each run the pulse correction covered
+            # also records the intervals it did not, so nothing downstream has to rederive
+            # them from the marker train.
+            annotations_dir=qc_root / f"{task_entity}bcg_uncorrected",
         )
 
     def _get_analyzer_cardiac_qc_config(self) -> Any:

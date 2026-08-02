@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 PULSE_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
+#: Marks a stretch the pulse correction never ran on. ``BAD_`` so that MNE excludes it
+#: from epoching by default.
+UNCORRECTED_PULSE_DESCRIPTION = "BAD_bcg_uncorrected"
+
 #: An inter-marker interval longer than this multiple of the run's own median is counted
 #: as a gap. Relative to the run rather than absolute, so it does not mistake a slow heart
 #: for a dropout. The value matches the pulse-correction recovery investigation, so the
@@ -158,6 +162,114 @@ def measure_pulse_markers(
     )
 
 
+def uncorrected_pulse_intervals(
+    raw: mne.io.BaseRaw,
+    *,
+    recording_id: str,
+    maximum_plausible_interval: float | None = None,
+) -> mne.Annotations:
+    """Mark the stretches of a run where no pulse template was subtracted.
+
+    Analyzer's correction runs at the beats it marked. Where the marker train has a gap,
+    or has not started or has ended, the ballistocardiogram is still in the EEG. Those
+    beats cannot be recovered afterwards: on this cohort a gap-restricted redetection with
+    the flanking markers supplying the rate prior recovers 27-52% of known-deleted beats in
+    exactly the subjects that have gaps, at 25-79 ms timing error, which is coarser than
+    template subtraction can use. So the intervals are labelled rather than repaired.
+
+    A gap contributes the region closer to its missing beats than to the marked beats
+    either side — half a beat period inside each flanking marker. The gap rule is the same
+    :data:`GAP_INTERVAL_MULTIPLE` that produces ``gap_count``, so the annotations and the QC
+    table cannot disagree about what a gap is.
+
+    The beat period is the median interval, which survives corruption in both directions:
+    scattered dropouts do not move it, and neither do the doubled markers some runs carry
+    (sub-0005 marks an extra beat mid-cycle often enough that its 20th-percentile interval
+    is half its true period, which would flag most of a well-marked run).
+
+    The median has one blind spot, and it is the one that matters most: a run missing most
+    of its beats has *every* interval inflated, so judged against itself it looks evenly
+    covered at an impossible rate. sub-0008 run-4 carries 110 markers over 497 s — a median
+    of 4.07 s against the same subject's 1.0 s elsewhere — and scores as nearly fully
+    covered while being the worst uncorrected run in the cohort. ``maximum_plausible_
+    interval`` — the caller's configured minimum heart rate as an interval — caps the
+    estimate so such a run is measured against a rate a heart could actually have. Without
+    it the function stays purely relative to the run.
+
+    A run with fewer than three markers has no interval to measure against and is marked
+    end to end: that it cannot be characterised is not a reason to call it corrected.
+    """
+    if not recording_id.strip():
+        raise ValueError("recording_id must not be empty.")
+    if maximum_plausible_interval is not None and maximum_plausible_interval <= 0:
+        raise ValueError("maximum_plausible_interval must be positive.")
+
+    onsets = _pulse_onsets(raw)
+    duration = raw.n_times / float(raw.info["sfreq"])
+
+    if len(onsets) < 3:
+        return mne.Annotations(
+            onset=[0.0], duration=[duration], description=[UNCORRECTED_PULSE_DESCRIPTION]
+        )
+
+    intervals = np.diff(onsets)
+    if np.any(intervals <= 0):
+        raise ValueError(f"{recording_id}: pulse marker onsets must be strictly increasing.")
+
+    beat_period = float(np.median(intervals))
+    if maximum_plausible_interval is not None:
+        beat_period = min(beat_period, float(maximum_plausible_interval))
+    half = beat_period / 2.0
+    threshold = GAP_INTERVAL_MULTIPLE * beat_period
+
+    spans: list[tuple[float, float]] = []
+    for index in np.where(intervals > threshold)[0]:
+        spans.append((float(onsets[index]) + half, float(onsets[index + 1]) - half))
+    # The same rule applies to the ends: the correction cannot have run before the first
+    # marked beat or after the last, and those stretches are gaps against the run's own
+    # rate exactly as an interior one is.
+    if onsets[0] - 0.0 > threshold:
+        spans.append((0.0, float(onsets[0]) - half))
+    if duration - onsets[-1] > threshold:
+        spans.append((float(onsets[-1]) + half, duration))
+
+    spans = [(max(0.0, lo), min(duration, hi)) for lo, hi in sorted(spans) if hi > lo]
+    return mne.Annotations(
+        onset=[lo for lo, _ in spans],
+        duration=[hi - lo for lo, hi in spans],
+        description=[UNCORRECTED_PULSE_DESCRIPTION] * len(spans),
+    )
+
+
+def _write_uncorrected_intervals(
+    annotations: mne.Annotations,
+    *,
+    recording_id: str,
+    directory: Path,
+) -> Path:
+    """Write one run's intervals, including when there are none.
+
+    An empty file distinguishes "this run was measured and had nothing to mark" from
+    "this run was never measured"; a missing file would conflate them.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{recording_id}_desc-bcguncorrected_annotations.tsv"
+    with path.open("w", encoding="utf-8", newline="") as output_file:
+        writer = csv.DictWriter(
+            output_file, fieldnames=["onset", "duration", "description"], delimiter="\t"
+        )
+        writer.writeheader()
+        for annotation in annotations:
+            writer.writerow(
+                {
+                    "onset": f"{annotation['onset']:.3f}",
+                    "duration": f"{annotation['duration']:.3f}",
+                    "description": annotation["description"],
+                }
+            )
+    return path
+
+
 def pulse_marker_bound_notes(
     metrics: PulseMarkerMetrics,
     criteria: PulseMarkerCriteria,
@@ -200,6 +312,7 @@ def summarize_pulse_marker_recordings(
     *,
     output_path: Path,
     strict: bool = False,
+    annotations_dir: Path | None = None,
 ) -> Path:
     """Write one row of pulse-marker measurements per recording, and the bounds they meet.
 
@@ -207,6 +320,11 @@ def summarize_pulse_marker_recordings(
     bounds. ``outside_configured_bounds`` and ``notes`` describe the relation between the
     measurements and the bounds that were configured; they are not a quality grade, and
     the thresholds are written into the table so the comparison stays re-derivable.
+
+    With ``annotations_dir``, each run's uncorrected-pulse intervals are written beside the
+    table by :func:`uncorrected_pulse_intervals`. They come from the same measurement pass
+    as ``gap_count``, so the stage that reports how much of a run the correction covered
+    also emits the intervals it did not cover.
 
     ``strict`` remains available for a caller that wants a hard gate, and is off by
     default: on this dataset incomplete within-run coverage is a documented, open property
@@ -219,6 +337,16 @@ def summarize_pulse_marker_recordings(
         notes = pulse_marker_bound_notes(metrics, criteria)
         if notes:
             outside.append(f"{recording_id}: " + "; ".join(notes))
+        if annotations_dir is not None:
+            _write_uncorrected_intervals(
+                uncorrected_pulse_intervals(
+                    raw,
+                    recording_id=recording_id,
+                    maximum_plausible_interval=60.0 / criteria.minimum_bpm,
+                ),
+                recording_id=recording_id,
+                directory=annotations_dir,
+            )
         rows.append(
             {
                 "recording_id": metrics.recording_id,
@@ -232,9 +360,7 @@ def summarize_pulse_marker_recordings(
                 "expected_marker_count": metrics.expected_marker_count,
                 "configured_bpm_range": f"{criteria.minimum_bpm:.0f}-{criteria.maximum_bpm:.0f}",
                 "configured_minimum_marker_fraction": f"{criteria.minimum_marker_fraction:.3f}",
-                "configured_minimum_coverage": (
-                    f"{criteria.minimum_recording_coverage:.3f}"
-                ),
+                "configured_minimum_coverage": (f"{criteria.minimum_recording_coverage:.3f}"),
                 "outside_configured_bounds": "yes" if notes else "no",
                 "notes": "; ".join(notes),
             }
@@ -265,9 +391,11 @@ def summarize_pulse_marker_recordings(
 __all__ = [
     "GAP_INTERVAL_MULTIPLE",
     "PULSE_MARKER_DESCRIPTION",
+    "UNCORRECTED_PULSE_DESCRIPTION",
     "PulseMarkerCriteria",
     "PulseMarkerMetrics",
     "measure_pulse_markers",
     "pulse_marker_bound_notes",
     "summarize_pulse_marker_recordings",
+    "uncorrected_pulse_intervals",
 ]
