@@ -281,7 +281,12 @@ preprocessing:
   resample_freq: 500
   l_freq: 0.1
   h_freq: 100
-  notch_freq: 60
+  # Mains is removed by the line-comb spectrum_fit pass before this pipeline reads the
+  # data (studies/pain_study/scripts/line_comb/config.yaml, exclude_mains: false). The FIR
+  # notch here measured 0.97 Hz wide on the delivered epochs, 59.537-60.463 Hz, against
+  # 0.133 Hz for spectrum_fit at freq/450. Setting this back to 60 without also setting
+  # exclude_mains true removes mains twice, and takes a second bite of the spectrum.
+  notch_freq: null
   line_freq: 60
 
   # The scanner room's line comb is removed before this pipeline reads the data, by

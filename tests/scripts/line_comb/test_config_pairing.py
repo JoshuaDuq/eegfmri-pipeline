@@ -98,3 +98,35 @@ def test_the_gradient_harmonics_are_derived_from_a_nine_tenths_second_tr():
             f"gradient harmonic {harmonic} should be seeded at {expected:.4f} Hz "
             f"(TR is exactly 0.9 s by the Volume markers), found {nearest}"
         )
+
+
+def test_exactly_one_stage_removes_mains():
+    core, workflow = _configs()
+
+    fir_notch = core.get("preprocessing.notch_freq")
+    exclude_mains = bool(workflow.get("line_comb_removal.exclude_mains"))
+    search = float(workflow.get("line_comb_removal.isolated_search_hz"))
+    isolated = workflow.get("line_comb_removal.isolated_hz")
+    removal_takes_mains = (not exclude_mains) and any(
+        abs(seed - 60.0) <= search for seed in isolated
+    )
+
+    assert bool(fir_notch) != removal_takes_mains, (
+        f"preprocessing.notch_freq={fir_notch!r} and the line-comb pass "
+        f"{'takes' if removal_takes_mains else 'does not take'} mains. Exactly one must: "
+        "both means a second bite of the spectrum, neither means 60 Hz survives."
+    )
+
+
+def test_the_narrow_mains_notch_is_the_one_in_use():
+    core, workflow = _configs()
+
+    assert core.get("preprocessing.notch_freq") in (None, False), (
+        "the FIR notch occupies 0.97 Hz against 0.133 Hz for spectrum_fit at freq/450; "
+        "leaving it on forfeits 0.84 Hz and keeps 58-62 Hz unusable"
+    )
+    ratio = float(workflow.get("line_comb_removal.notch_width_ratio"))
+    assert 60.0 / ratio < 0.2, (
+        f"mains notch would be {60.0 / ratio:.3f} Hz wide; the point of the move is a "
+        "notch narrower than 0.2 Hz"
+    )

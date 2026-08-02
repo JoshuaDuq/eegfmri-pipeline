@@ -85,7 +85,10 @@ line_comb_removal:
   # 93.76 Hz is deliberately absent: 16.6 dB, but in one participant only, and a cohort
   # notch for one participant is the wrong trade. 59.02 Hz is absent too -- 4 of 14, and
   # inside the 60 Hz notch skirt.
-  isolated_hz: [23.7776, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 61.0353, 81.1111, 82.2228, 94.0748]
+  #
+  # 60.0 is mains itself, taken here rather than by MNE-BIDS-Pipeline; see exclude_mains
+  # below for why.
+  isolated_hz: [23.7776, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 60.0, 61.0353, 81.1111, 82.2228, 94.0748]
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets
@@ -105,3 +108,13 @@ line_comb_removal:
   # 100 Hz lowpass the pipeline applies, and the removal notch there is freq/450 = 0.22 Hz
   # wide, so it stays clear of the cutoff.
   high_hz: 99.8
+
+  # Take mains here instead of in MNE-BIDS-Pipeline. Its notch is FIR and measured 0.97 Hz
+  # wide on the delivered epochs (59.537-60.463 Hz, -54.6 dB at centre); spectrum_fit at
+  # freq/450 takes 0.133 Hz. That recovers about 0.84 Hz and makes 45-95 Hz continuous
+  # rather than 45-58 plus 62-95, which is the largest single piece of spectrum any change
+  # in this file returns.
+  #
+  # preprocessing.notch_freq MUST be null while this is false, or mains is removed twice.
+  # tests/scripts/line_comb/test_config_pairing.py fails if the two ever disagree.
+  exclude_mains: false
