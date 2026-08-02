@@ -117,16 +117,20 @@ line_comb_removal:
   # wide, so it stays clear of the cutoff.
   high_hz: 99.8
 
-  # Take mains here instead of in MNE-BIDS-Pipeline. Its notch is FIR and measured 0.97 Hz
-  # wide on the delivered epochs (59.537-60.463 Hz, -54.6 dB at centre); spectrum_fit at
-  # freq/450 takes 0.133 Hz. That recovers about 0.84 Hz and makes 45-95 Hz continuous
-  # rather than 45-58 plus 62-95, which is the largest single piece of spectrum any change
-  # in this file returns.
+  # Mains is left to MNE-BIDS-Pipeline's FIR notch, not taken here.
   #
-  # Nothing needs adding to isolated_hz for this: because the comb is mains-synchronous,
-  # 60 Hz is comb harmonic 50 and is already a target. All this flag does is stop
-  # removal_frequencies dropping it again on the way out.
+  # Taking it here was tried and measured. The comb is mains-synchronous, so 60 Hz is comb
+  # harmonic 50 and turning this flag off makes it a target -- but the comb fit forces
+  # harmonics onto an exact grid n*f0, and the physical mains line does not sit on it: the
+  # grid put harmonic 50 at 59.9994 Hz while the line stood at 60.0344 Hz, and across the
+  # cohort the peak scattered 59.906-60.083 Hz. The result was a 0.41 Hz hole dug at the
+  # grid position with the line still standing at +15.38 dB beside it.
   #
-  # preprocessing.notch_freq MUST be null while this is false, or mains is removed twice.
+  # Aiming at the observed peak instead does not fix it, because 60 Hz is a cluster rather
+  # than a line: 59-61 Hz carries 32-38 distinct peaks above 3 dB at 0.002 Hz resolution.
+  # spectrum_fit at the grid and at the measured peak both landed on +7.1 dB, the peak
+  # merely moving to a neighbour. Only a notch wide enough to span the cluster clears it.
+  #
+  # preprocessing.notch_freq MUST be 60 while this is true, or 60 Hz survives.
   # tests/scripts/line_comb/test_config_pairing.py fails if the two ever disagree.
-  exclude_mains: false
+  exclude_mains: true

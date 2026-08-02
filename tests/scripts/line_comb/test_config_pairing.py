@@ -126,15 +126,34 @@ def test_exactly_one_stage_removes_mains():
     )
 
 
-def test_the_narrow_mains_notch_is_the_one_in_use():
+def test_the_wide_fir_notch_is_the_one_in_use():
+    """Mains is a cluster, not a line, so only a wide notch clears it.
+
+    The spec proposed trading the 0.97 Hz FIR notch for a 0.133 Hz spectrum_fit pass to
+    recover 0.84 Hz. Measured on the cleaned BIDS, that trade left 60 Hz standing at
+    +8.04 dB median over background, up to +15.38 dB, in 13 of 15 participants, against
+    -42 dB in the generation the FIR notch produced.
+
+    The reason is that 60 Hz here is not one line: 59-61 Hz carries 32-38 distinct peaks
+    above 3 dB at 0.002 Hz resolution (sub-0008/0012/0001). Every narrow method removes
+    the tallest and surfaces the next. Measured against the uncorrected cleaned data on
+    sub-0008, as a change in absolute power over 59.5-60.5 Hz:
+
+        FIR notch, 1.0 Hz wide   -56.66 dB     45-58 Hz: -0.00   62-95 Hz: -0.00
+        spectrum_fit @ 60.034     -2.77 dB     45-58 Hz: -0.00   62-95 Hz: +0.00
+        ZapLine, rank 4           -1.65 dB     45-58 Hz: -0.06   62-95 Hz: -0.21
+
+    So the 0.84 Hz the trade would recover is mains structure rather than usable
+    spectrum, it sits inside the unanalysed 58-62 gap, and the notch's measured cost in
+    the bands that are analysed is 0.00 dB.
+    """
     core, workflow = _configs()
 
-    assert core.get("preprocessing.notch_freq") in (None, False), (
-        "the FIR notch occupies 0.97 Hz against 0.133 Hz for spectrum_fit at freq/450; "
-        "leaving it on forfeits 0.84 Hz and keeps 58-62 Hz unusable"
+    assert float(core.get("preprocessing.notch_freq")) == 60.0, (
+        "60 Hz is a 2 Hz-wide cluster of 32-38 lines; spectrum_fit removed 2.77 dB of it "
+        "and ZapLine 1.65 dB, against 56.66 dB for the FIR notch"
     )
-    ratio = float(workflow.get("line_comb_removal.notch_width_ratio"))
-    assert 60.0 / ratio < 0.2, (
-        f"mains notch would be {60.0 / ratio:.3f} Hz wide; the point of the move is a "
-        "notch narrower than 0.2 Hz"
+    assert bool(workflow.get("line_comb_removal.exclude_mains")), (
+        "with the FIR notch taking mains, the comb must not also remove at grid harmonic "
+        "50: it cannot hit the cluster and only digs a 0.41 Hz hole at 59.999 Hz"
     )

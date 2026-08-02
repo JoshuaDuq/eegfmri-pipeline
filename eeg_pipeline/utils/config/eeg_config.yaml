@@ -281,12 +281,19 @@ preprocessing:
   resample_freq: 500
   l_freq: 0.1
   h_freq: 100
-  # Mains is removed by the line-comb spectrum_fit pass before this pipeline reads the
-  # data (studies/pain_study/scripts/line_comb/config.yaml, exclude_mains: false). The FIR
-  # notch here measured 0.97 Hz wide on the delivered epochs, 59.537-60.463 Hz, against
-  # 0.133 Hz for spectrum_fit at freq/450. Setting this back to 60 without also setting
-  # exclude_mains true removes mains twice, and takes a second bite of the spectrum.
-  notch_freq: null
+  # Mains is taken here, by this FIR notch, and NOT by the line-comb pass
+  # (studies/pain_study/scripts/line_comb/config.yaml, exclude_mains: true). Setting this
+  # to null without also setting exclude_mains false leaves 60 Hz in the data.
+  #
+  # The notch is 0.97 Hz wide (59.537-60.463 Hz) against 0.133 Hz for spectrum_fit, and
+  # the spec proposed trading it for the narrow pass to recover 0.84 Hz. Measured, that
+  # trade left 60 Hz at +8.04 dB median over background across 13 of 15 participants,
+  # because mains here is not one line: 59-61 Hz carries 32-38 distinct peaks above 3 dB
+  # at 0.002 Hz resolution. Removing the tallest surfaces the next. On sub-0008, as a
+  # change in absolute 59.5-60.5 Hz power, spectrum_fit took 2.77 dB and ZapLine 1.65 dB
+  # against 56.66 dB here -- and this notch measured 0.00 dB collateral in both 45-58 and
+  # 62-95 Hz, because its whole footprint lies inside the unanalysed 58-62 gap.
+  notch_freq: 60
   line_freq: 60
 
   # The scanner room's line comb is removed before this pipeline reads the data, by
