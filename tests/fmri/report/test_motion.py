@@ -513,3 +513,22 @@ def test_a_single_run_reports_its_own_correlation(tmp_path):
     reported = float(re.search(r"within-run r = ([+-]?\d+\.\d+)", text).group(1))
     assert reported > 0.9
     plt.close(figure)
+
+
+def test_the_dvars_column_preference_is_standardised_first():
+    """Raw DVARS is in image intensity units and is not comparable across runs.
+
+    Both panels that show DVARS must resolve it the same way; picking raw in one and
+    standardised in the other puts two different quantities under one name in a single
+    report.
+    """
+    import pandas as pd
+
+    both = pd.DataFrame({"dvars": [20.0, 30.0], "std_dvars": [0.9, 1.1]})
+    values, label = motion._dvars_column(both)
+    assert label == "std DVARS"
+    assert values.tolist() == [0.9, 1.1]
+
+    raw_only = pd.DataFrame({"dvars": [20.0, 30.0]})
+    _values, label = motion._dvars_column(raw_only)
+    assert label == "DVARS"

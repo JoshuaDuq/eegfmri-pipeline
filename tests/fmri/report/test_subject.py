@@ -191,7 +191,7 @@ def test_qc_uses_the_exact_retained_frame_indices(tmp_path: Path) -> None:
         captured.setdefault("sample_masks", []).append(sample_mask)
         raise RuntimeError("stop once the call is recorded")
 
-    with patch("fmri_pipeline.analysis.report.figures.carpet.standardise_carpet", _record):
+    with patch("fmri_pipeline.analysis.report.figures.carpet.scale_carpet", _record):
         subject.build_qc_sections(
             manifests=[manifest],
             deriv_root=tmp_path,
@@ -1706,3 +1706,25 @@ def test_run_contributions_score_no_run(tmp_path: Path) -> None:
     for word in ("outlier", "exclude", "fail", "reject", "bad run"):
         assert word not in caption
     assert "measurement, not a fault" in caption
+
+
+def test_the_carpet_and_the_coupling_panel_resolve_dvars_the_same_way(tmp_path: Path):
+    """One name, one quantity. The carpet preferred raw where the coupling panel
+    preferred standardised, so a single report showed both under "DVARS"."""
+    from fmri_pipeline.analysis.report.figures.motion import _dvars_column
+
+    frame = pd.DataFrame({"dvars": [20.0, 30.0], "std_dvars": [0.9, 1.1]})
+    values, label = _dvars_column(frame)
+
+    carpet_values, carpet_label = subject._carpet_dvars_column(frame)
+    assert carpet_label == label
+    assert carpet_values.tolist() == values.tolist()
+
+
+def test_runs_disagreeing_on_their_dvars_column_are_not_concatenated(tmp_path: Path):
+    """Mixing raw and standardised into one trace produces a step no run contains."""
+    frames = [
+        pd.DataFrame({"std_dvars": [0.9, 1.1]}),
+        pd.DataFrame({"dvars": [20.0, 30.0]}),
+    ]
+    assert subject._concatenated_dvars(frames) == (None, "DVARS")

@@ -597,6 +597,7 @@ def _carpet_blocks(
     from fmri_pipeline.analysis.report.assets import discover_plot_assets
 
     standardised: List[np.ndarray] = []
+    retained_masks: List[np.ndarray] = []
     run_breaks = [0]
     voxel_mask = None
     mask_source = "nonzero mean signal"
@@ -626,8 +627,9 @@ def _carpet_blocks(
         mask = sample_masks[index] if sample_masks and index < len(sample_masks) else None
         if mask is not None and mask.size != voxels.shape[1]:
             mask = None
-        standardised.append(
-            carpet_figures.standardise_carpet(voxels, sample_mask=mask)
+        standardised.append(carpet_figures.scale_carpet(voxels, sample_mask=mask))
+        retained_masks.append(
+            mask if mask is not None else np.ones(voxels.shape[1], dtype=bool)
         )
         run_breaks.append(run_breaks[-1] + int(voxels.shape[1]))
 
@@ -635,10 +637,12 @@ def _carpet_blocks(
         return []
 
     carpet = np.concatenate(standardised, axis=1)
+    # The colour limit takes its reference from the same frames the scaling did.
+    # Otherwise a censored frame sets the limit it was meant to fall outside.
+    carpet_retained = np.concatenate(retained_masks) if retained_masks else None
 
     fd_parts: List[np.ndarray] = []
-    dvars_parts: List[np.ndarray] = []
-    dvars_label = "DVARS"
+    dvars_frames: List[Any] = []
     for path in manifest.confounds_paths:
         try:
             frame = pd.read_csv(str(path), sep="\t")
@@ -652,14 +656,10 @@ def _carpet_blocks(
             if "framewise_displacement" in frame.columns
             else np.full(len(frame), np.nan)
         )
-        if "dvars" in frame.columns:
-            dvars_parts.append(frame["dvars"].to_numpy(dtype=float))
-        elif "std_dvars" in frame.columns:
-            dvars_parts.append(frame["std_dvars"].to_numpy(dtype=float))
-            dvars_label = "std DVARS"
+        dvars_frames.append(frame)
 
     fd = np.concatenate(fd_parts) if fd_parts else None
-    dvars = np.concatenate(dvars_parts) if dvars_parts else None
+    dvars, dvars_label = _concatenated_dvars(dvars_frames)
     if fd is not None and fd.size != carpet.shape[1]:
         fd = None
     if dvars is not None and dvars.size != carpet.shape[1]:
@@ -701,6 +701,9 @@ def _carpet_blocks(
         dvars_label=dvars_label,
         censored=censored,
         voxel_source=mask_source,
+        colour_limit=carpet_figures.carpet_colour_limit(
+            carpet, sample_mask=carpet_retained
+        ),
         title="Carpet (as modelled)",
     )
     path = _save(figure, out_dir=qc_dir, stem="carpet", formats=cfg.formats)
@@ -770,6 +773,41 @@ def resolve_threshold(
             return None, f"FDR q = {manifest.fdr_q:g}: no voxel survives correction"
         return threshold, f"FDR q = {manifest.fdr_q:g} (|z| > {threshold:.2f})"
     return None, "none"
+
+
+def _carpet_dvars_column(frame: Any) -> Tuple[Optional[np.ndarray], str]:
+    """Resolve a run's DVARS trace exactly as the coupling panel resolves it.
+
+    Delegated rather than reimplemented. The carpet used to prefer the raw column
+    where the coupling panel preferred the standardised one, so a single report drew
+    two different quantities -- one in image intensity units near 27, one near 1 --
+    both labelled DVARS.
+    """
+    from fmri_pipeline.analysis.report.figures.motion import _dvars_column
+
+    return _dvars_column(frame)
+
+
+def _concatenated_dvars(frames: Sequence[Any]) -> Tuple[Optional[np.ndarray], str]:
+    """One DVARS trace across runs, or nothing if the runs disagree on its units.
+
+    Resolving per run and concatenating produced a trace whose scale changed at a run
+    boundary whenever one run carried the standardised column and another only the
+    raw one -- a step no run contains and no reader could attribute.
+    """
+    resolved = [_carpet_dvars_column(frame) for frame in frames]
+    usable = [(values, label) for values, label in resolved if values is not None]
+    if not usable:
+        return None, "DVARS"
+
+    labels = {label for _values, label in usable}
+    if len(labels) > 1 or len(usable) != len(frames):
+        logger.info(
+            "Runs disagree on their DVARS column (%s); the carpet omits the trace.",
+            ", ".join(sorted(labels)),
+        )
+        return None, "DVARS"
+    return np.concatenate([values for values, _label in usable]), usable[0][1]
 
 
 def _load_mask(manifest: ContrastManifest) -> Any:
@@ -2493,6 +2531,12 @@ def build_residual_carpet_block(
             not_retained=residual_carpet.not_retained,
             voxel_source="fitted analysis mask",
             voxel_count_total=residual_carpet.total_voxels,
+            # Residuals are mean-zero by construction, so percent of their own mean is
+            # undefined; each voxel's residual standard deviation is the natural unit,
+            # and the amplitude differences that normalisation removes are carried by
+            # the pooled residual-SD map beside this panel.
+            colour_limit=carpet_figures.RESIDUAL_Z_CLIP,
+            value_label="z (per voxel)",
             title=f"{manifest.contrast_name}: model-response residuals",
         ),
         out_dir=out_dir / "plots" / _slug(manifest),
