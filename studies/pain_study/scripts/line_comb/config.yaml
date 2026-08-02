@@ -73,7 +73,19 @@ line_comb_removal:
   # scanner clock and has the tightest scatter of any line measured (0.12 Hz). Re-derive it
   # if the sequence TR ever changes -- it is the one entry here that is not a property of
   # the room.
-  isolated_hz: [47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 82.2228, 94.0748]
+  #
+  # Added 2026-08-02 from an audit of the delivered epochs (14 participants, sub-0008
+  # excluded). 23.7776 and 29.6854 are narrow, on neither comb, and present in 7 and 9 of
+  # 14; 29.6854 matters because it sits 0.41 Hz below the 30.1 Hz gamma_low edge, close
+  # enough that any spectral smoothing pulls it in. 61.0353 is the mains +1.02 Hz sideband,
+  # 11 of 14. 81.1111 is the imaging gradient's 73rd harmonic at TR = 0.9 s -- the partner
+  # of 82.2228 above, with the same nulled centre and elevated shoulders, and like it must
+  # be re-derived if the sequence TR ever changes.
+  #
+  # 93.76 Hz is deliberately absent: 16.6 dB, but in one participant only, and a cohort
+  # notch for one participant is the wrong trade. 59.02 Hz is absent too -- 4 of 14, and
+  # inside the 60 Hz notch skirt.
+  isolated_hz: [23.7776, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 61.0353, 81.1111, 82.2228, 94.0748]
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets
