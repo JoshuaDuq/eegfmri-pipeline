@@ -8,7 +8,7 @@ import numpy as np
 import pybv
 import pytest
 
-from studies.pain_study.scripts.sanitize_brainvision_vas_markers import (
+from studies.pain_study.scripts.conversion.sanitize_brainvision_vas_markers import (
     _remove_appledouble_files,
     discover_cohort_recordings,
     run_sanitization,
@@ -39,7 +39,9 @@ def _write_raw_brainvision_recording(
     return raw_dir / f"{basename}.vhdr"
 
 
-def test_discover_cohort_recordings_uses_all_original_untrimmed_5khz_recordings(tmp_path: Path) -> None:
+def test_discover_cohort_recordings_uses_all_original_untrimmed_5khz_recordings(
+    tmp_path: Path,
+) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     kingston_root = tmp_path / "KINGSTON"
     source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"

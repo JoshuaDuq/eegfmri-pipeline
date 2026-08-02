@@ -84,15 +84,12 @@ study1:
         processed:
           label: "BrainVision processed"
           sampling_frequency_hz: 1000.0
-          source_corrections:
-            - header_filename: "ThermalPainEEGFMRI_run3 (1)_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.vhdr"
-              subject_id: "sub-0003"
-              run_id: "3"
-              data_filename: "ThermalPainEEGFMRI_run3 (1)_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.eeg"
-              marker_filename: "ThermalPainEEGFMRI_run3 (1)_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.vmrk"
-              expected_data_reference: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.eeg"
-              expected_marker_reference: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.vmrk"
-              reason: "Run 3 reused the run-1 temperature sequence; tracked Study 1 acquisition issue."
+          # No source_corrections here any more. sub-0003's 11h30.23.962 recording used to
+          # arrive labelled "run3 (1)" with .vhdr self-references pointing at run-1 names;
+          # the export now names it run3 and references itself correctly, so a correction
+          # for it would never be observed and discovery raises on corrections it cannot
+          # find. The raw stage above keeps its entry: the acquisition folders deliberately
+          # still carry the run1 name.
         mne:
           label: "Final MNE processed"
           sampling_frequency_hz: 500.0

@@ -1,0 +1,41 @@
+# Filling BrainVision Analyzer's pulse-marker gaps.
+#
+# Analyzer's own correction is kept wherever it marked a beat, because it measurably beats
+# ours there. What it never marked is untouched artifact -- thousands of seconds across the
+# cohort, up to 77% of a single run -- and that is all this workflow changes. The rationale
+# and the cohort numbers are in docs/pulse_artifact_correction_recovery.md.
+
+paths:
+  # null inherits the core eeg_config.yaml paths.* value.
+  source_data: null
+  deriv_root: null
+
+  # The two Analyzer exports that get paired: same runs, one with pulse markers and no BCG
+  # correction, one with Analyzer's correction applied.
+  #
+  # `corrected_root` must stay the *pre-recovery* correction. This workflow measures what
+  # Analyzer achieves where it marked a beat, so pointing it at step 3 -- the correction
+  # that already includes the beats this workflow recovered -- would compare the output
+  # against itself.
+  uncorrected_root: "<source_data>/step1_scanner_artifact_pulse_marked"
+  corrected_root: "<source_data>/reference_bcg_pre_recovery"
+
+  # Corrected recordings and the report tables. Repo-relative, as they have always been.
+  output_root: "outputs/cardiac_gap_fill/corrected"
+  report_dir: "outputs/cardiac_gap_fill"
+
+cardiac_gaps:
+  # Correction confined to the gaps. OBS with 4 components was chosen on the benchmark's
+  # two arms together -- artifact removed AND signal preserved -- not on removal alone,
+  # which improves monotonically with rank while the signal is destroyed.
+  method: "obs"
+  n_components: 4
+
+  # Occipital channels carry the posterior rhythm used as the preservation measure.
+  picks: ["O1", "O2", "Oz", "PO3", "PO4", "POz"]
+
+  band: [1.0, 20.0]                # band the artifact measure is taken in
+  alpha_band: [8.0, 13.0]          # preservation measure
+  window: [-0.3, 0.7]              # epoch around each beat
+  n_surrogate: 20                  # circular-shift null: raw event-locked p-p is averaging noise
+  seed: 0

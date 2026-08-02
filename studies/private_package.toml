@@ -6,6 +6,8 @@ dependencies = ["eeg-pipeline"]
 
 [project.entry-points."eeg_pipeline.cli_commands"]
 coupling = "studies.pain_study.cli.command_registry:coupling_command"
+line-comb = "studies.pain_study.cli.command_registry:line_comb_command"
+cardiac-gaps = "studies.pain_study.cli.command_registry:cardiac_gaps_command"
 signature-prediction = "studies.pain_study.cli.command_registry:signature_prediction_command"
 source-interpretation = "studies.pain_study.cli.command_registry:source_interpretation_command"
 
@@ -16,6 +18,15 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "studies.pain_study" = ["scripts/config/*.yaml"]
+"studies.pain_study.scripts" = ["README.md"]
+"studies.pain_study.scripts.line_comb" = ["config.yaml", "README.md"]
+"studies.pain_study.scripts.cardiac_gaps" = ["config.yaml", "README.md"]
+"studies.pain_study.scripts.conversion" = ["README.md"]
+"studies.pain_study.scripts.t1" = ["README.md"]
+"studies.pain_study.scripts.study_support" = ["README.md", "*.sh"]
+"studies.pain_study.analysis" = ["README.md"]
+"studies.pain_study.analysis.line_comb" = ["README.md"]
+"studies.pain_study.analysis.bcg" = ["README.md"]
 "studies.pain_study.study1" = ["config/*.yaml", "README.md"]
 "studies.pain_study.study2" = ["config/*.yaml", "README.md"]
 "studies.pain_study.eeg_coupling" = [

@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Any, List
 
-from eeg_pipeline.cli.common import create_progress_reporter, resolve_task
+from eeg_pipeline.cli.common import create_progress_reporter, report_dry_run, resolve_task
 from eeg_pipeline.cli.commands.features_helpers import _apply_feature_config_overrides
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
@@ -50,6 +50,17 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                     "tmax": float(tmax) if tmax.lower() != "none" and tmax != "" else None,
                 }
             )
+
+    if report_dry_run(
+        args,
+        command="features",
+        subjects=subjects,
+        config=config,
+        mode=args.mode,
+        task=task,
+        categories=", ".join(categories) if categories else "(all)",
+    ):
+        return
 
     pipeline = FeaturePipeline(config=config)
     ledger = pipeline.run_batch(

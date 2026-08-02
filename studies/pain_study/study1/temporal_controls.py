@@ -50,9 +50,7 @@ def resolve_temporal_control_windows(config: Any) -> tuple[TemporalControlWindow
         "feature_baseline_window" not in temporal_config
         or temporal_config.get("feature_baseline_window") is not None
     ):
-        raise ValueError(
-            "study1.temporal_negative_controls.feature_baseline_window must be null."
-        )
+        raise ValueError("study1.temporal_negative_controls.feature_baseline_window must be null.")
 
     plateau_start, plateau_end = _active_plateau_window(config)
     windows: list[TemporalControlWindow] = []

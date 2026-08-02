@@ -180,3 +180,36 @@ def test_a_report_whose_settings_are_all_absent_says_so() -> None:
 
     assert "<table" not in document
     assert "no recorded settings" in document.lower()
+
+
+def test_measurement_defining_report_settings_are_provenance() -> None:
+    from eeg_pipeline.preprocessing.report.provenance import provenance_html
+
+    document = provenance_html(
+        _Config(
+            {
+                "report.analysis.aperiodic_fit_range_hz": [2.0, 45.0],
+                "report.analysis.response_window_s": [0.0, 1.0],
+                "report.analysis.alpha_band_hz": [7.0, 14.0],
+                "report.acquisition.volume_marker_description": "Scanner/Volume",
+                "report.acquisition.pulse_marker_description": "Cardiac/R",
+                "report.acquisition.posterior_channel_pattern": "^O",
+                "report.thresholds.comb_frequency_range_hz": [15.0, 90.0],
+                "report.thresholds.comb_welch_seconds": 8.0,
+                "report.display.continuity_window_seconds": 1.0,
+            }
+        )
+    )
+
+    for label in (
+        "Aperiodic fit range",
+        "Split-half response window",
+        "Posterior rhythm band",
+        "Volume marker annotation",
+        "Pulse marker annotation",
+        "Posterior channel pattern",
+        "Gradient comb range",
+        "Gradient comb Welch window",
+        "Continuity window",
+    ):
+        assert label in document

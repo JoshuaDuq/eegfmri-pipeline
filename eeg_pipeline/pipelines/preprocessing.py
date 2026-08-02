@@ -1680,6 +1680,7 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.preprocessing.report.build_record import save_subject_report
         from eeg_pipeline.preprocessing.report.organize import open_subject_report
         from eeg_pipeline.preprocessing.report.rejection import add_rejection_review
+        from eeg_pipeline.utils.data.preprocessing import presented_events_for_epochs
 
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             epochs_path = find_clean_epochs_path(
@@ -1705,11 +1706,19 @@ class PreprocessingPipeline(PipelineBase):
 
             events_path = epochs_path.with_name(epochs_path.name.replace("_epo.fif", "_events.tsv"))
             clean_events = pd.read_csv(events_path, sep="\t") if events_path.is_file() else None
+            clean_epochs = mne.read_epochs(epochs_path, preload=False, verbose="ERROR")
+            presented_events = presented_events_for_epochs(
+                subject=subject,
+                task=task,
+                bids_root=self.bids_root,
+                epochs=clean_epochs,
+            )
             report = open_subject_report(report_path)
             summary = add_rejection_review(
                 report=report,
-                clean_epochs=mne.read_epochs(epochs_path, preload=False, verbose="ERROR"),
+                clean_epochs=clean_epochs,
                 clean_events=clean_events,
+                presented_events=presented_events,
                 config=self.config,
             )
             preservation = self._append_signal_preservation(
@@ -1755,14 +1764,23 @@ class PreprocessingPipeline(PipelineBase):
         )
         from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
-        if not ReportSettings.from_config(self.config).enabled:
+        report_settings = ReportSettings.from_config(self.config)
+        if not report_settings.enabled:
             return {}
         epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
         if bool(self.config.get("preprocessing.task_is_rest", False)):
             reliability = None
-            alpha = add_rest_preservation_review(report=report, epochs=epochs)
+            alpha = add_rest_preservation_review(
+                report=report,
+                epochs=epochs,
+                settings=report_settings,
+            )
         else:
-            reliability, alpha = add_task_preservation_review(report=report, epochs=epochs)
+            reliability, alpha = add_task_preservation_review(
+                report=report,
+                epochs=epochs,
+                settings=report_settings,
+            )
         self.logger.info(
             "sub-%s preservation: split-half r=%s posterior alpha=%s",
             subject,
@@ -1778,6 +1796,7 @@ class PreprocessingPipeline(PipelineBase):
         report_path: Path,
         task: str,
         subject: str,
+        settings,
     ):
         """Add preservation evidence before the exclusions are approved.
 
@@ -1816,11 +1835,13 @@ class PreprocessingPipeline(PipelineBase):
                 report=report,
                 epochs=epochs,
                 analysis_status=status,
+                settings=settings,
             )
         _, alpha = add_task_preservation_review(
             report=report,
             epochs=epochs,
             analysis_status=status,
+            settings=settings,
         )
         # Returned rather than discarded: this is the one place the posterior rhythm is
         # measured on the cleaned data, and the cohort sidecar needs the measurement
@@ -1874,6 +1895,7 @@ class PreprocessingPipeline(PipelineBase):
             for report_path in reports:
                 report = open_subject_report(report_path)
                 add_provenance_review(report=report, config=self.config)
+                filter_edge_support_s = 0.0
                 # Skipped without a filtered run to read the sampling rate from, which is
                 # the case for a dataset filtered upstream: there is no pipeline filter to
                 # describe, and inventing a rate would describe one that was never applied.
@@ -1883,6 +1905,7 @@ class PreprocessingPipeline(PipelineBase):
                         sfreq=self._filtered_sampling_rate(filtered_paths[0]),
                     )
                     if description is not None:
+                        filter_edge_support_s = description.edge_support_s
                         add_filter_review(
                             report=report,
                             description=description,
@@ -1906,12 +1929,14 @@ class PreprocessingPipeline(PipelineBase):
                     report_path=report_path,
                     filtered_paths=filtered_paths,
                     settings=report_settings,
+                    edge_support_seconds=filter_edge_support_s,
                 )
                 self._append_provisional_signal_preservation(
                     report=report,
                     report_path=report_path,
                     task=task,
                     subject=subject,
+                    settings=report_settings,
                 )
                 record = save_subject_report(
                     report,
@@ -1965,10 +1990,9 @@ class PreprocessingPipeline(PipelineBase):
         beneath it are provably the same measurement rather than two computations that have
         to be kept agreeing.
 
-        Failure here is logged and swallowed. The subject report is already written and is
-        the deliverable; losing a participant from a future cohort run is a smaller harm
-        than failing the stage that produced the document, and the cohort command lists a
-        participant with no sidecar rather than silently dropping it.
+        A write or validation failure surfaces here. The sidecar is part of the report's
+        scientific record: silently losing it would make a successful-looking participant
+        disappear from every future cohort denominator.
         """
         from dataclasses import asdict
 
@@ -1985,40 +2009,36 @@ class PreprocessingPipeline(PipelineBase):
             self.logger.info("No per-run evidence for sub-%s; no QC sidecar written", subject)
             return
 
-        try:
-            presented, retained = self._condition_counts(report_path=report_path, task=task)
-            sidecar = build_subject_sidecar(
-                subject=subject,
-                task=task,
-                spectra=evidence.spectra,
-                continuity=evidence.continuity,
-                timings=evidence.timings,
-                locked_averages=evidence.locked_averages,
-                combs=evidence.combs,
-                rr_intervals=evidence.rr_intervals,
-                marker_agreements=evidence.marker_agreements,
-                cardiac_residuals=evidence.cardiac_residuals,
-                # Both sides come from the measuring pass, which is the only place the
-                # same data exists before and after the exclusions. The epochs-based
-                # measurement in ``alpha`` stays on the subject panel under its own
-                # unsuffixed key: it is a better measurement of the final rhythm, but it
-                # has no "before" to be paired against, and pairing two estimators would
-                # measure the difference between them rather than the effect of cleaning.
-                alpha=self._paired_alpha(evidence, pool=pool_alpha_runs, stages=(BEFORE, AFTER)),
-                components=self._ica_component_table(report_path),
-                channel_positions=evidence.channel_positions,
-                bad_channels_by_run=evidence.bad_channels_by_run,
-                trials_by_condition=presented,
-                retained_by_condition=retained,
-                measurements=latest_measurements(record),
-                settings=asdict(settings),
-                versions=_recorded_versions(record),
-                acquisition_date=evidence.acquisition_date,
-            )
-            paths = write_sidecar(report_path, sidecar)
-        except (ValueError, OSError, KeyError) as error:
-            self.logger.warning("Could not write the QC sidecar for sub-%s: %s", subject, error)
-            return
+        presented, retained = self._condition_counts(report_path=report_path, task=task)
+        sidecar = build_subject_sidecar(
+            subject=subject,
+            task=task,
+            spectra=evidence.spectra,
+            continuity=evidence.continuity,
+            timings=evidence.timings,
+            locked_averages=evidence.locked_averages,
+            combs=evidence.combs,
+            rr_intervals=evidence.rr_intervals,
+            marker_agreements=evidence.marker_agreements,
+            cardiac_residuals=evidence.cardiac_residuals,
+            # Both sides come from the measuring pass, which is the only place the same
+            # data exists before and after the exclusions. The epochs-based measurement
+            # in ``alpha`` stays on the subject panel under its own unsuffixed key: it is
+            # a better measurement of the final rhythm, but it has no "before" to be
+            # paired against, and pairing two estimators would measure the difference
+            # between them rather than the effect of cleaning.
+            alpha=self._paired_alpha(evidence, pool=pool_alpha_runs, stages=(BEFORE, AFTER)),
+            components=self._ica_component_table(report_path),
+            channel_positions=evidence.channel_positions,
+            bad_channels_by_run=evidence.bad_channels_by_run,
+            trials_by_condition=presented,
+            retained_by_condition=retained,
+            measurements=latest_measurements(record),
+            settings=asdict(settings),
+            versions=_recorded_versions(record),
+            acquisition_date=evidence.acquisition_date,
+        )
+        paths = write_sidecar(report_path, sidecar)
         self.logger.info(
             "sub-%s QC sidecar: %d run(s), %d condition(s) -> %s",
             subject,
@@ -2121,6 +2141,7 @@ class PreprocessingPipeline(PipelineBase):
         report_path: Path,
         filtered_paths: List[Path],
         settings,
+        edge_support_seconds: float,
     ):
         """Add every per-run section for the runs belonging to one report.
 
@@ -2147,6 +2168,7 @@ class PreprocessingPipeline(PipelineBase):
             # itself and render that as a reassuringly small correction.
             ica=read_ica_with_reviewed_exclusions(ica_path),
             settings=settings,
+            edge_support_seconds=edge_support_seconds,
         )
 
     def _find_subject_report_path(self, epochs_path: Path) -> Optional[Path]:

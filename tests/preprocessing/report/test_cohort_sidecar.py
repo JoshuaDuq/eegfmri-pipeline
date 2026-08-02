@@ -43,8 +43,28 @@ def _runs(n_runs: int = 2, *, in_scanner: bool = True) -> pd.DataFrame:
     if in_scanner:
         frame["n_volumes"] = [360] * n_runs
         frame["repetition_time_s"] = [2.0] * n_runs
-        frame["volume_locked_corrected_uv"] = [1.2] * n_runs
-        frame["volume_locked_noise_floor_uv"] = [0.4] * n_runs
+        frame["volume_jitter_s"] = [0.003] * n_runs
+        frame["volume_locked_rms_before_uv"] = [2.0] * n_runs
+        frame["volume_locked_floor_before_uv"] = [0.5] * n_runs
+        frame["volume_locked_excess_power_before_uv2"] = [3.75] * n_runs
+        frame["volume_locked_resolved_before"] = [True] * n_runs
+        frame["volume_locked_rms_after_uv"] = [0.35] * n_runs
+        frame["volume_locked_floor_after_uv"] = [0.4] * n_runs
+        frame["volume_locked_excess_power_after_uv2"] = [-0.0375] * n_runs
+        frame["volume_locked_resolved_after"] = [False] * n_runs
+        frame["median_bpm"] = [62.0] * n_runs
+        frame["n_beats"] = [700.0] * n_runs
+        frame["beat_dropouts"] = [2.0] * n_runs
+        frame["marker_matched_fraction"] = [0.96] * n_runs
+        frame["marker_median_lag_s"] = [0.004] * n_runs
+        frame["marker_lag_iqr_s"] = [0.010] * n_runs
+        frame["n_markers"] = [704.0] * n_runs
+        frame["n_detected_beats"] = [700.0] * n_runs
+        frame["n_matched_beats"] = [672.0] * n_runs
+        frame["pulse_marker_count"] = [704.0] * n_runs
+        frame["beat_source"] = ["ECG"] * n_runs
+        frame["bcg_residual_uv"] = [0.8] * n_runs
+        frame["bcg_beat_train_coverage"] = [0.98] * n_runs
     return frame
 
 
@@ -232,7 +252,7 @@ def test_required_columns_are_the_documented_ones() -> None:
     assert RUN_COLUMNS[:3] == ("run", "n_channels", "duration_s")
     assert "flagged_fraction" in RUN_COLUMNS
     assert SPECTRUM_COLUMNS[:3] == ("run", "stage", "freq_hz")
-    assert "volume_locked_corrected_uv" in SCANNER_RUN_COLUMNS
+    assert "volume_locked_excess_power_after_uv2" in SCANNER_RUN_COLUMNS
 
 
 def test_an_in_scanner_sidecar_must_carry_the_gradient_columns(tmp_path) -> None:
@@ -244,21 +264,64 @@ def test_an_in_scanner_sidecar_must_carry_the_gradient_columns(tmp_path) -> None
     """
     report = _report(tmp_path)
     paths = write_sidecar(report, _sidecar())
-    _runs().drop(columns=["volume_locked_corrected_uv"]).to_csv(paths.runs, sep="\t", index=False)
+    _runs().drop(columns=["volume_locked_excess_power_after_uv2"]).to_csv(
+        paths.runs, sep="\t", index=False
+    )
 
-    with pytest.raises(ValueError, match="volume_locked_corrected_uv"):
+    with pytest.raises(ValueError, match="volume_locked_excess_power_after_uv2"):
         read_sidecar(report)
+
+
+@pytest.mark.parametrize("column", ["volume_jitter_s", "n_matched_beats"])
+def test_scanner_denominator_columns_are_required(tmp_path, column) -> None:
+    report = _report(tmp_path)
+    runs = _runs().drop(columns=[column])
+
+    with pytest.raises(ValueError, match=column):
+        write_sidecar(report, _sidecar(runs=runs))
 
 
 def test_the_gradient_columns_may_hold_missing_values(tmp_path) -> None:
     """A measurement that was attempted and did not resolve is an ordinary outcome."""
     report = _report(tmp_path)
     runs = _runs()
-    runs["volume_locked_corrected_uv"] = float("nan")
+    runs["volume_locked_excess_power_after_uv2"] = float("nan")
 
     write_sidecar(report, _sidecar(runs=runs))
 
-    assert read_sidecar(report).runs["volume_locked_corrected_uv"].isna().all()
+    assert read_sidecar(report).runs["volume_locked_excess_power_after_uv2"].isna().all()
+
+
+def test_an_infinite_table_value_is_rejected_before_writing(tmp_path) -> None:
+    report = _report(tmp_path)
+    runs = _runs()
+    runs.loc[0, "continuity_max_db"] = float("inf")
+
+    with pytest.raises(ValueError, match="non-finite.*continuity_max_db"):
+        write_sidecar(report, _sidecar(runs=runs))
+
+    assert not sidecar_paths(report).subject_json.exists()
+
+
+def test_nonstandard_json_numbers_are_rejected_before_writing(tmp_path) -> None:
+    report = _report(tmp_path)
+
+    with pytest.raises(ValueError, match="JSON"):
+        write_sidecar(
+            report,
+            _sidecar(measurements={"variance_removed": float("inf")}),
+        )
+
+    assert not sidecar_paths(report).subject_json.exists()
+
+
+def test_locked_resolved_flag_must_match_the_signed_power(tmp_path) -> None:
+    report = _report(tmp_path)
+    runs = _runs()
+    runs.loc[0, "volume_locked_resolved_after"] = True
+
+    with pytest.raises(ValueError, match="volume_locked_resolved_after"):
+        write_sidecar(report, _sidecar(runs=runs))
 
 
 def test_an_eeg_only_sidecar_is_not_asked_for_gradient_columns(tmp_path) -> None:

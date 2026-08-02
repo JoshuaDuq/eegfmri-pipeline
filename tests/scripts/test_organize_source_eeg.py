@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from studies.pain_study.scripts.organize_source_eeg import (
+from studies.pain_study.scripts.conversion.organize_source_eeg import (
     discover_unorganized_subjects,
     organize_cohort,
     organize_subject_eeg,

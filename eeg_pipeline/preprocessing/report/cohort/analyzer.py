@@ -88,26 +88,35 @@ def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
 def _participant_row(subject: str, runs: pd.DataFrame) -> dict[str, object]:
     """Reduce one participant's runs to the row the cohort panels read.
 
-    Agreement is pooled as a rate over the whole session -- matched markers over markers
-    presented -- because it is a fraction defined over the session rather than an average
-    of per-run opinions. The worst run is carried alongside it, because a session that
-    agrees at 96% overall while one run agrees at 40% has a broken run, and the pooled
-    figure is precisely what hides that.
+    Sensitivity and precision are pooled from their primitive counts. They answer different
+    questions and therefore have different denominators: detected ECG beats for sensitivity,
+    and Analyzer markers for precision.
     """
-    matched = _numeric(runs, "marker_matched_fraction")
+    matched = _numeric(runs, "n_matched_beats")
+    detected = _numeric(runs, "n_detected_beats")
     markers = _numeric(runs, "n_markers")
-    usable = np.isfinite(matched) & np.isfinite(markers) & (markers > 0)
+    sensitivity_runs = np.isfinite(matched) & np.isfinite(detected) & (detected > 0)
+    precision_runs = np.isfinite(matched) & np.isfinite(markers) & (markers > 0)
 
     row: dict[str, object] = {"subject": subject, "n_runs": int(len(runs))}
-    if usable.any():
+    if sensitivity_runs.any():
         row["marker_agreement"] = pool_runs_rate(
-            (matched[usable] * markers[usable]).tolist(), markers[usable].tolist()
+            matched[sensitivity_runs].tolist(), detected[sensitivity_runs].tolist()
         )
-        row["worst_run_agreement"] = float(matched[usable].min())
-        row["n_markers"] = float(markers[usable].sum())
+        run_sensitivity = matched[sensitivity_runs] / detected[sensitivity_runs]
+        row["worst_run_agreement"] = float(run_sensitivity.min())
+        row["n_detected_beats"] = float(detected[sensitivity_runs].sum())
     else:
         row["marker_agreement"] = float("nan")
         row["worst_run_agreement"] = float("nan")
+        row["n_detected_beats"] = float("nan")
+    if precision_runs.any():
+        row["marker_precision"] = pool_runs_rate(
+            matched[precision_runs].tolist(), markers[precision_runs].tolist()
+        )
+        row["n_markers"] = float(markers[precision_runs].sum())
+    else:
+        row["marker_precision"] = float("nan")
         row["n_markers"] = float("nan")
 
     rate = _numeric(runs, "median_bpm")
@@ -152,7 +161,9 @@ def analyzer_cohort(cohort: Cohort) -> AnalyzerCohort | None:
     if not rows:
         return None
     frame = pd.DataFrame(rows).sort_values("subject").reset_index(drop=True)
-    if not np.isfinite(frame[["marker_agreement", "median_bpm", "dropout_fraction"]]).any().any():
+    if not np.isfinite(
+        frame[["marker_agreement", "marker_precision", "median_bpm", "dropout_fraction"]]
+    ).any().any():
         return None
     return AnalyzerCohort(frame=frame)
 
@@ -182,6 +193,7 @@ def analyzer_table(analyzer: AnalyzerCohort) -> str:
             str(row["subject"]),
             int(row["n_runs"]),
             _percentage(row["marker_agreement"]),
+            _percentage(row["marker_precision"]),
             _percentage(row["worst_run_agreement"]),
             _decimal(row["median_bpm"]),
             _percentage(row["dropout_fraction"]),
@@ -191,8 +203,9 @@ def analyzer_table(analyzer: AnalyzerCohort) -> str:
     columns = (
         Column("Participant", align=Align.TEXT, code=True),
         Column("Runs"),
-        Column("Marker agreement"),
-        Column("Worst run"),
+        Column("Beat sensitivity"),
+        Column("Marker precision"),
+        Column("Worst-run sensitivity"),
         Column("Median bpm"),
         Column("Interval dropouts"),
     )

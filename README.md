@@ -86,8 +86,6 @@ and interpretation guidance.
 
 ## Study-Specific Guides
 
-- [Native EEG-fMRI artifact correction](docs/native_eeg_fmri_artifact_correction.md) for the fixed
-  synchronized AAS, NeuXus QRS, MNE PCA-OBS, and qualification boundary
 - [Study 1 run guide](studies/pain_study/study1/RUN_GUIDE.md) for rerunning the
   trial-wise EEG-to-fMRI pain-signature workflow and locating article-ready outputs
 - [Study 1 protocol README](studies/pain_study/study1/README.md) for the scientific
@@ -142,5 +140,4 @@ in the [contributing guide](https://joshuaduq.github.io/eegfmri-pipeline/contrib
 
 GPL-3.0-only. See [LICENSE](LICENSE).
 
-The native EEG-fMRI cardiac detector adapts GPL-licensed NeuXus code and model weights.
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for provenance and modification details.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party provenance.

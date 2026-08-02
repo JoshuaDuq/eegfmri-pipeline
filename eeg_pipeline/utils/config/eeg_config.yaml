@@ -278,6 +278,11 @@ preprocessing:
   h_freq: 100
   notch_freq: 60
   line_freq: 60
+
+  # The scanner room's line comb is removed before this pipeline reads the data, by
+  # `eeg-pipeline line-comb apply`. Its settings describe one room and are therefore
+  # paradigm-specific: they live with the code that applies them, in
+  # studies/pain_study/scripts/line_comb/config.yaml.
   # Worker count for PyPREP's loop over recordings and for MNE-BIDS-Pipeline's loop over
   # subjects and runs, including the autoreject threshold search that ica.reject and
   # epochs.reject both request. It selects how the work is executed, not what is
@@ -380,10 +385,26 @@ pyprep:
   detection_low_pass: null
   ransac: true
   repeats: 3
-  bad_channel_sync_policy: "per_run"  # "per_run" or "subject_union"
+  # "subject_union": a channel bad in any run of a participant is excluded from all of them,
+  # so every run of a participant carries the same montage. "per_run" keeps run-specific
+  # bads. The default matches how the cohort was actually processed -- leaving it at
+  # "per_run" while every run passed --bad-channel-sync-policy subject_union made the
+  # delivered data depend on a flag someone had to remember.
+  bad_channel_sync_policy: "subject_union"  # "per_run" or "subject_union"
   average_reref: false
   file_extension: ".vhdr"
-  consider_previous_bads: true
+  # false: bad channels are PyPREP's verdict on this recording, every run, and nothing else.
+  #
+  # When true, a channel marked bad from outside the pipeline -- hand-edited into
+  # channels.tsv, or inherited from an upstream conversion -- is carried forward untouched.
+  # That state lives only in a regenerated file: a BIDS re-conversion on 2026-08-01 reset all
+  # 64 channels to "good" across the cohort and silently dropped sixteen such marks, and
+  # nothing failed. PyPREP's own marks are unaffected either way; they are re-measured on
+  # every run rather than assumed, which is what stops a once-flagged channel ratcheting.
+  #
+  # Measured before making the switch: on sub-0000, PyPREP independently flags AF4, F3 and
+  # FC6 -- every channel a human had marked -- and adds T8 that nobody had.
+  consider_previous_bads: false
   overwrite_chans_tsv: true
   delete_breaks: false
   breaks_min_length: 20
@@ -634,6 +655,20 @@ report:
     # time" section, in seconds. Short enough to localise a movement to a few seconds,
     # long enough that a single window's RMS is a stable estimate.
     continuity_window_seconds: 1.0
+  analysis:
+    # Frequency interval used for the robust log-log aperiodic fit. Keep its upper edge
+    # below line noise so the notch and its skirts cannot determine the slope.
+    aperiodic_fit_range_hz: [2.0, 45.0]
+    # Post-stimulus interval used for split-half evoked reliability.
+    response_window_s: [0.0, 1.0]
+    # Posterior rhythm band used as signal-preservation evidence.
+    alpha_band_hz: [7.0, 14.0]
+  acquisition:
+    # Exact annotation descriptions written by the scanner and Analyzer acquisition.
+    volume_marker_description: "Volume/V  1"
+    pulse_marker_description: "Pulse Artifact/R"
+    # Electrode names eligible for the posterior-rhythm measurement.
+    posterior_channel_pattern: '^(P[0-9z]|PO[0-9z]|O[0-9z]|Oz|POz|Pz)'
 
 # 4.2a ICA Component Time-Frequency Analysis
 component_time_frequency:

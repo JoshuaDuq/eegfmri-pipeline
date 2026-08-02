@@ -21,9 +21,18 @@ from studies.pain_study.study1.figures.continuous_spectrum import (
 )
 
 RAW_RUN_PATTERN = re.compile(r"^ThermalPainEEGFMRI_run(?P<run>\d+)_sub(?P<subject>\d{4})_.+\.vhdr$")
+PROCESSED_EXPORT_SUFFIXES = ("scannerpulse_corrected", "scanner_artifact_step2")
+"""Analyzer's names for the final node of a processed export, oldest first.
+
+The export that recovers Analyzer's missed beats ends at a node named
+`scanner_artifact_step2`; the export before it ended at `scannerpulse_corrected`. Both are
+admitted so this discovery reads either generation. It stays strict about what it accepts,
+so a directory holding both generations of one run is an ambiguity that raises rather than
+a coin toss.
+"""
 PROCESSED_RUN_PATTERN = re.compile(
     r"^ThermalPainEEGFMRI_run(?P<run>\d+)_sub(?P<subject>\d{4})_"
-    r".+_scannerpulse_corrected\.vhdr$"
+    rf".+_(?:{'|'.join(PROCESSED_EXPORT_SUFFIXES)})\.vhdr$"
 )
 HEADER_VALUE_PATTERN = re.compile(
     r"^(?P<key>[^\r\n=]+)=(?P<value>[^\r\n]+)$",

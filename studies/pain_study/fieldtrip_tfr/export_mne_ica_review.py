@@ -95,9 +95,7 @@ class ReviewConfig:
             event_name=_text(study, "event_name"),
             tmin_s=float(_mapping(raw, "epochs")["tmin_s"]),
             tmax_s=float(_mapping(raw, "epochs")["tmax_s"]),
-            onset_tolerance_s=float(
-                _mapping(raw, "epochs")["event_onset_tolerance_s"]
-            ),
+            onset_tolerance_s=float(_mapping(raw, "epochs")["event_onset_tolerance_s"]),
             resample_hz=float(_mapping(raw, "epochs")["component_resample_hz"]),
             overwrite_exports=bool(execution["overwrite_exports"]),
         )
@@ -125,9 +123,7 @@ class ReviewConfig:
         if self.onset_tolerance_s <= 0:
             raise ValueError("epochs.event_onset_tolerance_s must be positive.")
         if self.resample_hz <= 2 * float(_mapping(self.raw, "tfr")["frequency_max_hz"]):
-            raise ValueError(
-                "epochs.component_resample_hz must exceed twice tfr.frequency_max_hz."
-            )
+            raise ValueError("epochs.component_resample_hz must exceed twice tfr.frequency_max_hz.")
 
 
 def discover_subject_directories(config: ReviewConfig) -> dict[str, Path]:
@@ -146,9 +142,7 @@ def discover_subject_directories(config: ReviewConfig) -> dict[str, Path]:
             discovered[subject] = eeg_directory
 
     requested = sorted(discovered) if config.participants is None else list(config.participants)
-    requested = [
-        subject for subject in requested if subject not in config.excluded_participants
-    ]
+    requested = [subject for subject in requested if subject not in config.excluded_participants]
     if not requested:
         raise ValueError("No participants remain after applying the configuration.")
     missing = sorted(set(requested) - set(discovered))
@@ -199,9 +193,7 @@ def export_subject(config: ReviewConfig, subject: str, eeg_directory: Path) -> P
     }
 
     output_directory = config.output_root / "exports" / subject
-    output_path = output_directory / (
-        f"{subject}_task-{config.task}_desc-mneica_components.mat"
-    )
+    output_path = output_directory / (f"{subject}_task-{config.task}_desc-mneica_components.mat")
     output_directory.mkdir(parents=True, exist_ok=True)
     if output_path.exists() and not config.overwrite_exports:
         LOGGER.info("Keeping existing export for %s: %s", subject, output_path)
@@ -229,9 +221,7 @@ def write_runtime_config(config: ReviewConfig) -> Path:
     return runtime_path
 
 
-def _subject_paths(
-    config: ReviewConfig, subject: str, eeg_directory: Path
-) -> dict[str, Path]:
+def _subject_paths(config: ReviewConfig, subject: str, eeg_directory: Path) -> dict[str, Path]:
     paths = {
         "ica": eeg_directory / f"{subject}_proc-ica_ica.fif",
         "components": eeg_directory / f"{subject}_proc-ica_components.tsv",
@@ -265,9 +255,7 @@ def _load_component_proposals(
     proposed_bad = components[statuses.eq("bad")]
     excluded = np.asarray(sorted(int(index) for index in ica_exclude), dtype=int)
     if not np.array_equal(proposed_bad, excluded):
-        raise ValueError(
-            f"{path} automatic bad proposals do not match the saved ICA exclusions."
-        )
+        raise ValueError(f"{path} automatic bad proposals do not match the saved ICA exclusions.")
     return proposals
 
 
@@ -413,9 +401,7 @@ def _component_structure(
     component_labels = np.asarray(
         [f"ic{index + 1:03d}" for index in range(ica.n_components_)], dtype=object
     )
-    proposed_bad_indices = np.asarray(
-        sorted(int(index) + 1 for index in ica.exclude), dtype=int
-    )
+    proposed_bad_indices = np.asarray(sorted(int(index) + 1 for index in ica.exclude), dtype=int)
     proposed_bad_mask = np.zeros(ica.n_components_, dtype=bool)
     proposed_bad_mask[proposed_bad_indices - 1] = True
     sample_count = len(sources.times)

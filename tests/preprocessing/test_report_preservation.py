@@ -15,12 +15,14 @@ from eeg_pipeline.preprocessing.report.preservation import (  # noqa: E402
     MINIMUM_TRIALS_FOR_SPLIT_HALF,
     add_rest_preservation_review,
     add_task_preservation_review,
+    _stratified_half_indices,
     compute_posterior_alpha,
     compute_split_half_reliability,
     plot_preservation,
     preservation_html,
     resolvable_prominence_threshold,
 )
+from eeg_pipeline.preprocessing.report.settings import ReportSettings  # noqa: E402
 
 SFREQ = 250.0
 POSTERIOR = ["Pz", "POz", "Oz", "O1", "O2", "PO3", "PO4"]
@@ -164,6 +166,18 @@ def test_trials_are_split_by_alternation_not_by_half() -> None:
     assert alternating > midpoint
 
 
+def test_split_halves_are_balanced_within_each_event_code() -> None:
+    """Blocked conditions must not become a systematic difference between halves."""
+    event_codes = np.asarray([1] * 21 + [2] * 21 + [3] * 20)
+
+    even, odd = _stratified_half_indices(event_codes)
+
+    assert len(even) == len(odd) == 30
+    for code in (1, 2, 3):
+        assert np.sum(event_codes[even] == code) == 10
+        assert np.sum(event_codes[odd] == code) == 10
+
+
 def test_posterior_alpha_is_found_where_it_was_injected() -> None:
     alpha = compute_posterior_alpha(_continuous(alpha_amplitude=8e-6))
 
@@ -297,6 +311,34 @@ def test_the_section_reports_both_measurements_for_a_task() -> None:
     assert plot_preservation(reliability=reliability, alpha=alpha).axes
 
 
+def test_preservation_review_uses_the_configured_window_band_and_channels() -> None:
+    epochs = _evoked_epochs(response_amplitude=6e-6)
+    epochs.set_montage("standard_1020", verbose="ERROR")
+    report = mne.Report(title="task", verbose="ERROR")
+    settings = ReportSettings(
+        response_window_s=(0.1, 0.2),
+        alpha_band_hz=(9.0, 11.0),
+        posterior_channel_pattern="^O",
+    )
+
+    reliability, alpha = add_task_preservation_review(
+        report=report,
+        epochs=epochs,
+        settings=settings,
+    )
+
+    assert reliability.response_window_s == pytest.approx((0.1, 0.2))
+    assert alpha is not None
+    assert all(name.startswith("O") for name in alpha.channel_names)
+    assert 9.0 <= alpha.peak_frequency_hz <= 11.0
+    assert alpha.band_hz == (9.0, 11.0)
+
+    figure = plot_preservation(alpha=alpha)
+    band = figure.axes[0].patches[0]
+    assert band.get_x() == pytest.approx(9.0)
+    assert band.get_x() + band.get_width() == pytest.approx(11.0)
+
+
 def test_an_empty_preservation_panel_is_an_error() -> None:
     with pytest.raises(ValueError, match="at least one measurement"):
         preservation_html()
@@ -406,6 +448,35 @@ def test_the_plotted_traces_follow_the_response() -> None:
         peaks.append(float(reliability.odd_gfp_uv.max()))
 
     assert peaks[1] > 2.0 * peaks[0]
+
+
+def test_spatial_agreement_is_resolved_at_each_latency() -> None:
+    """The pooled reliability must be accompanied by evidence from the same halves."""
+    epochs = _posterior_evoked_epochs(response_amplitude=20e-6)
+    epochs.set_eeg_reference("average", projection=False, verbose="ERROR")
+
+    reliability = compute_split_half_reliability(epochs)
+
+    assert reliability is not None
+    assert reliability.spatial_correlation.shape == reliability.times_s.shape
+    assert np.all(np.isfinite(reliability.spatial_correlation))
+    assert np.all(np.abs(reliability.spatial_correlation) <= 1.0)
+
+
+def test_spatial_agreement_panel_has_a_fixed_correlation_scale() -> None:
+    epochs = _posterior_evoked_epochs(response_amplitude=20e-6)
+    epochs.set_eeg_reference("average", projection=False, verbose="ERROR")
+    reliability = compute_split_half_reliability(epochs)
+
+    figure = plot_preservation(reliability=reliability)
+    spatial_axis = figure.axes[1]
+
+    assert spatial_axis.get_ylabel() == "Pearson r across channels"
+    assert spatial_axis.get_ylim() == pytest.approx((-1.0, 1.0))
+    np.testing.assert_allclose(
+        spatial_axis.lines[0].get_ydata(),
+        reliability.spatial_correlation,
+    )
 
 
 # --------------------------------------------------------------------------------------

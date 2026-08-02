@@ -22,7 +22,6 @@ from eeg_pipeline.utils.config.loader import get_config_value
 from fmri_pipeline.analysis.contrast_builder import discover_confounds
 from fmri_pipeline.utils.bold_discovery import discover_fmriprep_preproc_bold, get_tr_from_bold
 
-
 _EPS = 1.0e-12
 _SUPPORTED_HRF_MODELS = {"spm", "glover"}
 
@@ -179,9 +178,7 @@ class CouplingNuisanceConfig:
         fd_raw = _require_mapping(raw.get("fd", {}), path="eeg_bold_coupling.nuisance.fd")
         hrf_model = str(fd_raw.get("hrf_model", default_hrf_model)).strip().lower()
         if fd_raw.get("enabled", True) and hrf_model not in _SUPPORTED_HRF_MODELS:
-            raise ValueError(
-                "eeg_bold_coupling.nuisance.fd.hrf_model must be 'spm' or 'glover'."
-            )
+            raise ValueError("eeg_bold_coupling.nuisance.fd.hrf_model must be 'spm' or 'glover'.")
         fd = FDNuisanceConfig(
             enabled=bool(fd_raw.get("enabled", True)),
             output_column=str(fd_raw.get("output_column", "fd")).strip(),
@@ -202,9 +199,7 @@ class CouplingNuisanceConfig:
             raw.get("dvars", {}),
             path="eeg_bold_coupling.nuisance.dvars",
         )
-        dvars_hrf_model = str(
-            dvars_raw.get("hrf_model", default_hrf_model)
-        ).strip().lower()
+        dvars_hrf_model = str(dvars_raw.get("hrf_model", default_hrf_model)).strip().lower()
         if dvars_raw.get("enabled", False) and dvars_hrf_model not in _SUPPORTED_HRF_MODELS:
             raise ValueError(
                 "eeg_bold_coupling.nuisance.dvars.hrf_model must be 'spm' or 'glover'."
@@ -475,10 +470,14 @@ def _motion_nuisance_table(
             raise ValueError(
                 f"Confounds file {confounds_path} is missing {source_column!r} required for {label}."
             )
-        confound_values = pd.to_numeric(
-            confounds[source_column],
-            errors="coerce",
-        ).fillna(0.0).to_numpy(dtype=float)
+        confound_values = (
+            pd.to_numeric(
+                confounds[source_column],
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
         if not np.all(np.isfinite(confound_values)):
             raise ValueError(f"{label} confounds contain non-finite values for {confounds_path}.")
 
@@ -661,9 +660,7 @@ def compute_eeg_artifact_table(
         components[f"event_{_sanitize_name(column)}"] = values
 
     if not components:
-        raise ValueError(
-            "EEG artifact computation was enabled but no components were resolved."
-        )
+        raise ValueError("EEG artifact computation was enabled but no components were resolved.")
     resolved_components = tuple(sorted(components))
     required_components = tuple(sorted(nuisance_cfg.eeg_artifact.required_components))
     if resolved_components != required_components:
@@ -708,18 +705,19 @@ def _exclude_reason_columns(
     out["exclude_non_finite_model_term"] = False
 
     if nuisance_cfg.fd.enabled and nuisance_cfg.fd.censor_above is not None:
-        out["exclude_fd_threshold"] = (
-            pd.to_numeric(out[nuisance_cfg.fd.output_column], errors="coerce")
-            > float(nuisance_cfg.fd.censor_above)
-        )
+        out["exclude_fd_threshold"] = pd.to_numeric(
+            out[nuisance_cfg.fd.output_column], errors="coerce"
+        ) > float(nuisance_cfg.fd.censor_above)
 
     if nuisance_cfg.dvars.enabled and nuisance_cfg.dvars.censor_above is not None:
-        out["exclude_dvars_threshold"] = (
-            pd.to_numeric(out[nuisance_cfg.dvars.output_column], errors="coerce")
-            > float(nuisance_cfg.dvars.censor_above)
-        )
+        out["exclude_dvars_threshold"] = pd.to_numeric(
+            out[nuisance_cfg.dvars.output_column], errors="coerce"
+        ) > float(nuisance_cfg.dvars.censor_above)
 
-    if nuisance_cfg.eeg_artifact.enabled and nuisance_cfg.eeg_artifact.component_z_threshold is not None:
+    if (
+        nuisance_cfg.eeg_artifact.enabled
+        and nuisance_cfg.eeg_artifact.component_z_threshold is not None
+    ):
         z_columns = [
             column
             for column in out.columns
@@ -733,17 +731,21 @@ def _exclude_reason_columns(
             out[z_columns].to_numpy(dtype=float).max(axis=1) > threshold
         )
 
-    if nuisance_cfg.eeg_artifact.enabled and nuisance_cfg.eeg_artifact.composite_threshold is not None:
-        out["exclude_eeg_artifact_composite"] = (
-            pd.to_numeric(out[nuisance_cfg.eeg_artifact.output_column], errors="coerce")
-            > float(nuisance_cfg.eeg_artifact.composite_threshold)
-        )
+    if (
+        nuisance_cfg.eeg_artifact.enabled
+        and nuisance_cfg.eeg_artifact.composite_threshold is not None
+    ):
+        out["exclude_eeg_artifact_composite"] = pd.to_numeric(
+            out[nuisance_cfg.eeg_artifact.output_column], errors="coerce"
+        ) > float(nuisance_cfg.eeg_artifact.composite_threshold)
 
     if nuisance_cfg.censoring.require_all_model_terms_finite and model_terms:
         finite_mask = np.ones(len(out), dtype=bool)
         for term in model_terms:
             if term not in out.columns:
-                raise ValueError(f"Configured model term {term!r} is missing from merged trial table.")
+                raise ValueError(
+                    f"Configured model term {term!r} is missing from merged trial table."
+                )
             values = pd.to_numeric(out[term], errors="coerce").to_numpy(dtype=float)
             finite_mask &= np.isfinite(values)
         out["exclude_non_finite_model_term"] = ~finite_mask
@@ -759,9 +761,7 @@ def _exclude_reason_columns(
     reasons: List[str] = []
     for row in out[exclusion_columns].itertuples(index=False):
         active = [
-            name.replace("exclude_", "")
-            for name, flag in zip(exclusion_columns, row)
-            if bool(flag)
+            name.replace("exclude_", "") for name, flag in zip(exclusion_columns, row) if bool(flag)
         ]
         reasons.append(",".join(active))
     out["exclude_reason"] = reasons
@@ -786,15 +786,9 @@ def apply_trial_censoring(
         "n_trials_excluded": int((~qc_table["keep_trial"]).sum()),
         "n_excluded_fd_threshold": int(qc_table["exclude_fd_threshold"].sum()),
         "n_excluded_dvars_threshold": int(qc_table["exclude_dvars_threshold"].sum()),
-        "n_excluded_eeg_artifact_component": int(
-            qc_table["exclude_eeg_artifact_component"].sum()
-        ),
-        "n_excluded_eeg_artifact_composite": int(
-            qc_table["exclude_eeg_artifact_composite"].sum()
-        ),
-        "n_excluded_non_finite_model_term": int(
-            qc_table["exclude_non_finite_model_term"].sum()
-        ),
+        "n_excluded_eeg_artifact_component": int(qc_table["exclude_eeg_artifact_component"].sum()),
+        "n_excluded_eeg_artifact_composite": int(qc_table["exclude_eeg_artifact_composite"].sum()),
+        "n_excluded_non_finite_model_term": int(qc_table["exclude_non_finite_model_term"].sum()),
         "model_terms": list(model_terms),
         "nuisance_config": asdict(nuisance_cfg),
     }

@@ -701,9 +701,7 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
                 "band": qc.band,
                 "artifact_control_criteria_met": qc.artifact_control_criteria_met,
                 "unmet_criteria": ";".join(qc.unmet_criteria),
-                "expression_adjusted_p_values": format_mapping(
-                    qc.expression_adjusted_p_values
-                ),
+                "expression_adjusted_p_values": format_mapping(qc.expression_adjusted_p_values),
                 "missing_controls": ";".join(qc.missing_controls),
             }
         )
@@ -896,9 +894,7 @@ def run_spatial_correspondence(context: "Study2StageContext") -> None:
     """Compute EEG/fMRI spatial-correspondence summaries from prepared maps."""
     config = context.config
     mask = np.load(paths.spatial_mask_path(config))
-    metadata = json.loads(
-        paths.spatial_surrogate_metadata_path(config).read_text(encoding="utf-8")
-    )
+    metadata = json.loads(paths.spatial_surrogate_metadata_path(config).read_text(encoding="utf-8"))
     expected_surrogates = require_config_int(
         config,
         "study2.spatial_comparison.brainsmash_surrogates",
@@ -926,9 +922,7 @@ def run_spatial_correspondence(context: "Study2StageContext") -> None:
                 "meaningful": result.meaningful,
             }
         )
-    adjusted_p_values = holm_adjusted_p_values(
-        {row["band"]: row["p_value"] for row in records}
-    )
+    adjusted_p_values = holm_adjusted_p_values({row["band"]: row["p_value"] for row in records})
     family_alpha = require_config_float(
         config,
         "study2.spatial_comparison.holm_alpha",

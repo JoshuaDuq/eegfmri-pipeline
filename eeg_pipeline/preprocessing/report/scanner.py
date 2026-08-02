@@ -47,9 +47,9 @@ from eeg_pipeline.preprocessing.report.style import (
 )
 from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 
-#: Annotation written by BrainVision at each scanner volume. Matches the description
-#: :mod:`eeg_pipeline.preprocessing.residual_gradient` requires, so both read the same
-#: marker rather than two spellings of it.
+#: Annotation written by BrainVision at each scanner volume. Spelled exactly as the
+#: recording carries it, so a run whose markers were never sanitized is not silently
+#: read as having no volumes.
 VOLUME_MARKER_DESCRIPTION = "Volume/V  1"
 
 #: Welch window for the comb. Longer than the sensor-spectra window because the comb
@@ -183,7 +183,7 @@ class CombResidual:
 
     @property
     def before_worst_db(self) -> np.ndarray:
-        """Excess at each harmonic in the channel that carries the most of it."""
+        """Channelwise maximum excess at each harmonic."""
         return np.max(self.before_excess_db, axis=0)
 
     @property
@@ -200,6 +200,11 @@ class CombResidual:
 
     @property
     def worst_channel(self) -> str:
+        """Channel carrying :attr:`worst_excess_db`."""
+        return self.channel_names[self._worst_index[0]]
+
+    @property
+    def persistent_worst_channel(self) -> str:
         """Channel with the largest median surviving comb across scored harmonics."""
         scored = self.after_excess_db[:, self.scored]
         return self.channel_names[int(np.argmax(np.median(scored, axis=1)))]
@@ -370,18 +375,34 @@ class VolumeLockedAverage:
     before_rms_uv: np.ndarray
     after_rms_uv: np.ndarray
     n_volumes: int
-    #: Locked amplitude with the averaging noise floor removed, in microvolts.
-    #:
-    #: The waveform above carries a floor of sigma / sqrt(n_volumes), so its amplitude
-    #: falls as a session lengthens whether or not the correction improved. These are the
-    #: same measurement with that floor subtracted, which makes them comparable between
-    #: runs of different lengths and between participants. See
-    #: :mod:`eeg_pipeline.preprocessing.report.cohort.noise_floor`.
-    before_amplitude_uv: float | None = None
-    after_amplitude_uv: float | None = None
-    #: The floor itself, so the panel can say how much of the waveform above is it.
+    #: Across-channel, across-latency RMS and the floor it was measured against.
+    before_locked_rms_uv: float | None = None
+    after_locked_rms_uv: float | None = None
     before_noise_floor_uv: float | None = None
     after_noise_floor_uv: float | None = None
+    #: Signed floor-adjusted power. Negative means unresolved, not zero artifact.
+    before_excess_power_uv2: float | None = None
+    after_excess_power_uv2: float | None = None
+
+    @property
+    def before_is_resolved(self) -> bool:
+        return self.before_excess_power_uv2 is not None and self.before_excess_power_uv2 > 0.0
+
+    @property
+    def after_is_resolved(self) -> bool:
+        return self.after_excess_power_uv2 is not None and self.after_excess_power_uv2 > 0.0
+
+    @property
+    def before_resolved_amplitude_uv(self) -> float | None:
+        if not self.before_is_resolved:
+            return None
+        return float(np.sqrt(self.before_excess_power_uv2))
+
+    @property
+    def after_resolved_amplitude_uv(self) -> float | None:
+        if not self.after_is_resolved:
+            return None
+        return float(np.sqrt(self.after_excess_power_uv2))
 
     @property
     def before_peak_to_peak_uv(self) -> float:
@@ -466,10 +487,12 @@ def compute_volume_locked_average(
         before_rms_uv=before,
         after_rms_uv=after,
         n_volumes=int(onsets.size),
-        before_amplitude_uv=before_measured.corrected_amplitude_uv,
-        after_amplitude_uv=after_measured.corrected_amplitude_uv,
+        before_locked_rms_uv=before_measured.locked_rms_uv,
+        after_locked_rms_uv=after_measured.locked_rms_uv,
         before_noise_floor_uv=before_measured.noise_floor_uv,
         after_noise_floor_uv=after_measured.noise_floor_uv,
+        before_excess_power_uv2=before_measured.excess_power_uv2,
+        after_excess_power_uv2=after_measured.excess_power_uv2,
     )
 
 
@@ -484,8 +507,9 @@ _COMB_INTRO = (
 
 _COMB_NOTE = (
     "<p>Excess is the power at a comb line minus the background beside it, measured "
-    "within each channel separately: 0 dB means the line is indistinguishable from the "
-    "surrounding spectrum. The median and the largest surviving line are reported "
+    "within each channel separately: 0 dB means the peak-window maximum equals the "
+    "background-window median. It is not a calibrated statistical null. The median and "
+    "the largest surviving line are reported "
     "together because gradient residual is focal — it concentrates in the sensors with "
     "the largest lead loops — so a median across the montage can sit near zero while "
     "individual channels are unusable. Marker jitter smears the comb across neighbouring "
@@ -505,15 +529,17 @@ VOLUME_LOCKED_TITLE = "Volume-locked residual envelope"
 def volume_locked_note_html() -> str:
     """Explain what the volume-locked figures measure, and what they do not."""
     return (
-        "<p>The locked residual is the peak-to-peak range of the across-channel "
-        "<abbr title='root mean square'>RMS</abbr> of the volume-locked average. "
-        "Averaging on the volume marker keeps whatever repeats at the volume rate and "
-        "averages away what does not, so this is the residual artifact at the amplitude "
-        "it reaches in the data rather than a spectral summary of it.</p>"
+        "<p>Observed locked RMS is the root mean square over channels and latencies of "
+        "the volume-locked average. It still contains finite-average noise. The "
+        "odd–even split estimates that noise floor, and signed excess power is observed "
+        "RMS squared minus floor squared. Only a positive excess supports a resolved "
+        "floor-adjusted amplitude; a negative value is reported as unresolved rather "
+        "than clipped to zero.</p>"
         "<p>It is an envelope, not the artifact waveform: the RMS across channels is "
         "non-negative, so the trace carries magnitude over time and not polarity. A "
         "channel whose residual is large but opposite in sign to its neighbours' raises "
-        "this trace exactly as one that agrees with them.</p>"
+        "this trace exactly as one that agrees with them. Its peak-to-peak range describes "
+        "the envelope's variation; it is not the floor-adjusted residual amplitude.</p>"
         "<p>Each volume epoch has its own mean removed before averaging. Gradient "
         "switching never stops, so there is no artifact-free interval inside a volume "
         "period to baseline against; what is removed is the level each channel sits at, "
@@ -521,11 +547,9 @@ def volume_locked_note_html() -> str:
         "taken on a non-negative trace.</p>"
         "<p>The after figure is not guaranteed to be the smaller of the two, and on some "
         "recordings it is not. ICA is fitted to maximise independence over the whole "
-        "recording, not to minimise what repeats at the volume rate, so a decomposition "
-        "can remove a great deal of sensor variance and leave more volume-locked residual "
-        "than it started with. A run whose locked residual rises across ICA is reporting "
-        "that, not a fault in the measurement, and is worth reading beside the comb table "
-        "above rather than on its own.</p>"
+        "recording, not to minimise what repeats at the volume rate, so the resolved "
+        "amplitude can rise across ICA. That result is worth reading beside the comb "
+        "table above rather than on its own.</p>"
     )
 
 
@@ -560,22 +584,63 @@ def _comb_table(combs: Sequence[CombResidual]) -> str:
     return grid_table(columns, rows)
 
 
+def _locked_stage_measurements(
+    locked: VolumeLockedAverage,
+) -> tuple[tuple[float, float, float, float | None], ...]:
+    """Return complete before/after locked estimates or fail on an incomplete record."""
+    values = (
+        (
+            locked.before_locked_rms_uv,
+            locked.before_noise_floor_uv,
+            locked.before_excess_power_uv2,
+            locked.before_resolved_amplitude_uv,
+        ),
+        (
+            locked.after_locked_rms_uv,
+            locked.after_noise_floor_uv,
+            locked.after_excess_power_uv2,
+            locked.after_resolved_amplitude_uv,
+        ),
+    )
+    if any(value is None for stage in values for value in stage[:3]):
+        raise ValueError(
+            f"{locked.recording_id} has an incomplete volume-locked noise-floor estimate."
+        )
+    return tuple(
+        (float(observed), float(floor), float(excess), resolved)
+        for observed, floor, excess, resolved in values
+    )
+
+
 def _locked_table(averages: Sequence[VolumeLockedAverage]) -> str:
     columns = (
         Column("Run", align=Align.TEXT),
+        Column("Stage", align=Align.TEXT),
         Column("Volumes"),
-        Column("Locked residual before ICA (µV p-p)"),
-        Column("Locked residual after ICA (µV p-p)"),
+        Column("Observed locked RMS (µV)"),
+        Column("Noise floor (µV)"),
+        Column("Signed excess power (µV²)"),
+        Column("Floor-adjusted amplitude (µV)", align=Align.TEXT),
     )
-    rows = [
-        [
-            run_label(locked.recording_id),
-            locked.n_volumes,
-            f"{locked.before_peak_to_peak_uv:.2f}",
-            f"{locked.after_peak_to_peak_uv:.2f}",
-        ]
-        for locked in averages
-    ]
+    rows = []
+    for locked in averages:
+        before, after = _locked_stage_measurements(locked)
+        for stage, observed_rms, noise_floor, excess_power, resolved_amplitude in (
+            ("Before ICA", *before),
+            ("After ICA", *after),
+        ):
+            amplitude = "unresolved" if resolved_amplitude is None else f"{resolved_amplitude:.2f}"
+            rows.append(
+                [
+                    run_label(locked.recording_id),
+                    stage,
+                    locked.n_volumes,
+                    f"{observed_rms:.2f}",
+                    f"{noise_floor:.2f}",
+                    f"{excess_power:+.3f}",
+                    amplitude,
+                ]
+            )
     return grid_table(columns, rows)
 
 
@@ -652,15 +717,16 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
                     markeredgecolor=color,
                     markeredgewidth=0.6,
                 )
-            # A residual confined to a few peripheral sensors leaves the median flat, so
-            # the worst channel is the trace that actually carries the failure.
+            # A residual confined to a few peripheral sensors leaves the median flat. This
+            # is an envelope whose contributing channel may change between harmonics, not
+            # the trace of one sensor.
             axis.plot(
                 comb.harmonic_frequencies_hz,
                 worst,
                 color=color,
                 linewidth=0.8,
                 linestyle=":",
-                label=f"{label}, worst channel",
+                label=f"{label}, channelwise maximum envelope",
             )
         # The zero line is explained in the legend rather than by a caption pinned to
         # the line itself, which landed on top of the traces in every panel.
@@ -669,7 +735,7 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
             color=GUIDE_COLOR,
             linestyle="--",
             linewidth=1.0,
-            label="0 dB: indistinguishable from background",
+            label="0 dB: peak and background statistics are equal",
         )
         axis.set_title(
             f"{_comb_run_label(comb.recording_id)} · median "
@@ -789,39 +855,35 @@ def plot_volume_locked_average(averages: Sequence[VolumeLockedAverage]) -> plt.F
     )
     flat = axes.ravel()
     for axis, locked in zip(flat, averages, strict=False):
-        axis.plot(
-            locked.times_s,
-            locked.before_rms_uv,
-            color=BEFORE_COLOR,
-            linewidth=1.0,
-            label="Before ICA",
-        )
-        axis.plot(
-            locked.times_s,
-            locked.after_rms_uv,
-            color=AFTER_COLOR,
-            linewidth=1.0,
-            label="After ICA",
-        )
-        # The floor this trace has to clear to be artifact rather than averaging noise.
-        # Averaging n_volumes epochs suppresses everything not locked to the marker by
-        # sqrt(n) and no further, so the residual sits on a floor of sigma / sqrt(n) that
-        # the odd-even split measures exactly. Without it drawn, a reported 0.17 µV and a
-        # floor of 0.15 µV are the same picture.
-        if locked.after_noise_floor_uv is not None:
-            axis.axhline(
-                locked.after_noise_floor_uv,
-                color=GUIDE_COLOR,
-                linestyle="--",
+        before, after = _locked_stage_measurements(locked)
+        for values, floor, color, label in (
+            (locked.before_rms_uv, before[1], BEFORE_COLOR, "Before ICA"),
+            (locked.after_rms_uv, after[1], AFTER_COLOR, "After ICA"),
+        ):
+            axis.plot(
+                locked.times_s,
+                values,
+                color=color,
                 linewidth=1.0,
-                label="Averaging noise floor (odd–even split)",
+                label=label,
             )
+            # Each trace has its own floor. ICA changes the non-locked variance as well as
+            # the average, so applying the after-ICA floor to the before trace can turn an
+            # unresolved estimate into an apparently resolved one.
+            axis.axhline(
+                floor,
+                color=color,
+                linestyle="--",
+                linewidth=0.9,
+                alpha=0.75,
+                label=f"{label} noise floor",
+            )
+        before_summary = "unresolved" if before[3] is None else f"{before[3]:.2f} µV resolved"
+        after_summary = "unresolved" if after[3] is None else f"{after[3]:.2f} µV resolved"
         title = (
             f"{_comb_run_label(locked.recording_id)} · {locked.n_volumes} volumes · "
-            f"{locked.before_peak_to_peak_uv:.2f} → {locked.after_peak_to_peak_uv:.2f} µV p-p"
+            f"before {before_summary} → after {after_summary}"
         )
-        if locked.after_noise_floor_uv is not None:
-            title += f" · floor {locked.after_noise_floor_uv:.2f} µV"
         axis.set_title(title, fontsize=8)
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
@@ -844,13 +906,13 @@ def plot_volume_locked_average(averages: Sequence[VolumeLockedAverage]) -> plt.F
         handles,
         labels,
         loc="outside lower center",
-        ncol=min(len(labels), 3),
+        ncol=min(len(labels), 4),
         frameon=False,
         fontsize=7,
     )
     figure.suptitle(
-        "Residual gradient envelope: everything not locked to the volume marker averages "
-        "down by √n, so what clears the dashed floor is locked to the marker",
+        "Residual gradient envelope: each trace has its own odd–even noise floor; only "
+        "positive signed excess power supports a resolved amplitude",
         fontsize=9,
     )
     plt.close(figure)

@@ -10,22 +10,22 @@ import pytest
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-import studies.pain_study.scripts.t1_electrode_localization as localization_module
-import studies.pain_study.scripts.run_t1_electrode_localization as localization_runner
-from studies.pain_study.scripts.t1_anatomical_reference import (
+import studies.pain_study.scripts.t1.t1_electrode_localization as localization_module
+import studies.pain_study.scripts.t1.run_t1_electrode_localization as localization_runner
+from studies.pain_study.scripts.t1.t1_anatomical_reference import (
     AnatomicalReferenceParameters,
 )
-from studies.pain_study.scripts.run_t1_template_montage import (
+from studies.pain_study.scripts.t1.run_t1_template_montage import (
     load_template_projection_configuration,
     run_template_participant,
 )
-from studies.pain_study.scripts.t1_electrode_localization import (
+from studies.pain_study.scripts.t1.t1_electrode_localization import (
     ElectrodeLocalization,
     LocalizationParameters,
     assess_electrodes_from_array,
     localize_electrodes_from_array,
 )
-from studies.pain_study.scripts.t1_electrode_localization_inputs import (
+from studies.pain_study.scripts.t1.t1_electrode_localization_inputs import (
     RunConfiguration,
     SubjectLocalizationInput,
     discover_eeg_channel_names,
@@ -33,17 +33,17 @@ from studies.pain_study.scripts.t1_electrode_localization_inputs import (
     load_run_configuration,
     make_template_positions,
 )
-from studies.pain_study.scripts.t1_electrode_localization_outputs import (
+from studies.pain_study.scripts.t1.t1_electrode_localization_outputs import (
     write_coordinate_files,
     write_mne_head_montage,
     write_qc_render,
 )
-from studies.pain_study.scripts.t1_template_montage import (
+from studies.pain_study.scripts.t1.t1_template_montage import (
     TemplateProjectionParameters,
     infer_template_montage_from_array,
     write_template_montage_outputs,
 )
-from studies.pain_study.scripts.run_t1_electrode_localization import (
+from studies.pain_study.scripts.t1.run_t1_electrode_localization import (
     ParticipantBatchError,
     run_configuration,
     run_participant,

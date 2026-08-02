@@ -43,6 +43,15 @@ PROVENANCE_KEYS = (
     ("time_windows.baseline_tfr_morlet", "TFR baseline, Morlet (s)"),
     ("time_windows.baseline_tfr_multitaper", "TFR baseline, multitaper (s)"),
     ("preprocessing.brainvision_analyzer.enabled", "Analyzer correction upstream"),
+    ("report.analysis.aperiodic_fit_range_hz", "Aperiodic fit range (Hz)"),
+    ("report.analysis.response_window_s", "Split-half response window (s)"),
+    ("report.analysis.alpha_band_hz", "Posterior rhythm band (Hz)"),
+    ("report.acquisition.volume_marker_description", "Volume marker annotation"),
+    ("report.acquisition.pulse_marker_description", "Pulse marker annotation"),
+    ("report.acquisition.posterior_channel_pattern", "Posterior channel pattern"),
+    ("report.thresholds.comb_frequency_range_hz", "Gradient comb range (Hz)"),
+    ("report.thresholds.comb_welch_seconds", "Gradient comb Welch window (s)"),
+    ("report.display.continuity_window_seconds", "Continuity window (s)"),
 )
 
 

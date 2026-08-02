@@ -153,9 +153,9 @@ def _symmetric_half_range(summary: BehavioralValiditySummary) -> float:
     cohort = summary.cohort_estimates
     values = np.concatenate(
         (
-            participants[
-                ["painful_report_beta", "within_scale_intensity_beta"]
-            ].to_numpy(dtype=float).ravel(),
+            participants[["painful_report_beta", "within_scale_intensity_beta"]]
+            .to_numpy(dtype=float)
+            .ravel(),
             cohort[["ci_low", "ci_high"]].to_numpy(dtype=float).ravel(),
         )
     )

@@ -94,6 +94,17 @@ def test_one_marker_cannot_account_for_several_detected_beats() -> None:
     assert agreement.matched_fraction == pytest.approx(1.0 / 3.0)
 
 
+def test_sensitivity_and_precision_keep_their_distinct_denominators() -> None:
+    agreement = _agreement([10.0, 20.0, 20.02], [10.0, 20.0], tolerance_s=0.05)
+
+    assert agreement.matched_fraction == 1.0
+    assert agreement.marker_precision == pytest.approx(2.0 / 3.0)
+
+    document = marker_agreement_html([agreement])
+    assert "Beat sensitivity" in document
+    assert "Marker precision" in document
+
+
 def _healthy_and_collapsed():
     """One run where both detectors agree, and one where the marker train collapsed."""
     beats = np.arange(0.0, 60.0, 0.85)
@@ -188,7 +199,9 @@ def test_an_undefined_fraction_is_not_drawn_as_zero_agreement() -> None:
 
     document = marker_agreement_html([nothing_detected])
 
-    assert "0.0%" not in document
+    # Sensitivity is undefined without detected beats; precision is zero because none of
+    # the recorded Analyzer markers can be supported by a detected beat.
+    assert document.count("0.0%") == 1
     assert "&mdash;" in document
 
 

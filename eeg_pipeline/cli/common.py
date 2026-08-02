@@ -27,6 +27,7 @@ __all__ = [
     "add_path_args",
     "add_output_format_args",
     "resolve_task",
+    "report_dry_run",
     "validate_subjects_not_empty",
     "validate_min_subjects",
     "get_deriv_root",
@@ -125,6 +126,40 @@ def resolve_task(task: Optional[str], config: Any) -> str:
     if task_label is None:
         raise ValueError(f"Missing required config value: {DEFAULT_TASK_KEY}")
     return task_label
+
+
+def report_dry_run(
+    args: argparse.Namespace,
+    *,
+    command: str,
+    subjects: Sequence[str],
+    config: Any = None,
+    **details: Any,
+) -> bool:
+    """Print the resolved plan when ``--dry-run`` was passed, and report whether to stop.
+
+    Returns ``True`` when the caller must return without executing. Call this after the
+    configuration overrides are resolved, so the plan shows the roots and task that would
+    really have been used, but before any pipeline is constructed -- ``--dry-run`` says
+    "without executing", and a command that writes derivatives anyway is worse than one
+    that never offered the flag.
+    """
+    if not getattr(args, "dry_run", False):
+        return False
+
+    paths = (config or {}).get("paths", {}) if hasattr(config, "get") else {}
+    reported = {
+        **details,
+        "bids_root": paths.get("bids_root"),
+        "deriv_root": paths.get("deriv_root"),
+    }
+
+    print(f"[DRY RUN] {command} would run the following, and write nothing:")
+    print(f"  subjects:   {', '.join(str(subject) for subject in subjects) or '(none)'}")
+    for name, value in reported.items():
+        if value is not None:
+            print(f"  {name + ':':11s} {value}")
+    return True
 
 
 def validate_subjects_not_empty(subjects: List[str], operation: str) -> None:

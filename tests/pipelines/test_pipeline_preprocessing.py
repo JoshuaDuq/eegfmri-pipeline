@@ -1485,6 +1485,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         task_epochs_path.write_text("epochs", encoding="utf-8")
         report_path = eeg_dir / "sub-0001_report.h5"
         epochs = object()
+        settings = object()
         read_epochs = Mock(return_value=epochs)
         add_task = Mock(return_value=(None, None))
         preservation_module = _make_module(
@@ -1505,11 +1506,13 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 report_path=report_path,
                 task="pain",
                 subject="0001",
+                settings=settings,
             )
 
         assert read_epochs.call_args.args[0] == task_epochs_path
         kwargs = add_task.call_args.kwargs
         assert kwargs["epochs"] is epochs
+        assert kwargs["settings"] is settings
         assert "Provisional" in kwargs["analysis_status"]
 
     def test_provisional_preservation_is_skipped_without_pre_rejection_epochs(self):
@@ -1522,6 +1525,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         p.config = DotConfig({"preprocessing": {"task_is_rest": False}})
         eeg_dir = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "eeg"
         eeg_dir.mkdir(parents=True)
+        settings = object()
         add_task = Mock(return_value=(None, None))
         preservation_module = _make_module(
             "eeg_pipeline.preprocessing.report.preservation",
@@ -1538,6 +1542,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 report_path=eeg_dir / "sub-0001_report.h5",
                 task="pain",
                 subject="0001",
+                settings=settings,
             )
 
         add_task.assert_not_called()

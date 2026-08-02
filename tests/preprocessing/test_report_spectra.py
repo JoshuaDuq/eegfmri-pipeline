@@ -114,6 +114,22 @@ def test_the_aperiodic_fit_recovers_the_generated_slope() -> None:
     assert spectra.exponent_change == pytest.approx(0.0, abs=0.01)
 
 
+def test_the_summary_names_the_fit_range_that_was_actually_used() -> None:
+    raw = _raw(exponent=1.6)
+    spectra = compute_run_spectra(
+        raw,
+        raw.copy(),
+        recording_id="run-1",
+        fmax=100.0,
+        aperiodic_fit_range_hz=(5.0, 35.0),
+    )
+
+    document = spectra_summary_html([spectra])
+
+    assert "5-35 Hz" in document
+    assert "2-45 Hz" not in document
+
+
 def test_cleaning_that_flattens_the_background_shows_as_an_exponent_change() -> None:
     before = _raw(exponent=1.6)
     after = _raw(exponent=0.8)
@@ -141,6 +157,19 @@ def test_the_summary_states_the_exponents_and_the_worst_channel_gap() -> None:
     assert "exponent" in document
     assert "Worst channel above median" in document
     assert plot_run_spectra(spectra, line_frequency=60.0).axes
+
+
+def test_the_summary_exposes_aperiodic_fit_quality() -> None:
+    spectra = compute_run_spectra(_raw(), _raw(), recording_id="run-1", fmax=100.0)
+    fit = spectra.before.aperiodic
+
+    document = spectra_summary_html([spectra])
+
+    assert fit is not None
+    assert "Fit quality" in document
+    assert "R²" in document
+    assert "RMS residual" in document
+    assert f"{fit.n_bins_used}/{fit.n_bins_available}" in document
 
 
 def test_the_power_axis_names_its_reference() -> None:

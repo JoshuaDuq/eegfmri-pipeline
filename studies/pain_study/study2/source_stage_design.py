@@ -11,7 +11,6 @@ import pandas as pd
 from studies.pain_study.study1.targets import _categorical_level_column
 from studies.pain_study.study2.validation import require_config_string, require_config_value
 
-
 RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "framewise_displacement": "hrf_weighted_framewise_displacement",
     "std_dvars": "hrf_weighted_std_dvars",

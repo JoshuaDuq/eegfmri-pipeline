@@ -54,11 +54,7 @@ def evaluate_artifact_controls(
     source_values = _finite_mapping(source_artifact_map_abs_r, name="source artifact maps")
     expression_adjusted_p_values = holm_adjusted_p_values(expression_p_values)
     required_metrics = _required_metric_names(config)
-    available_metrics = (
-        set(sensor_values)
-        | set(source_values)
-        | set(expression_adjusted_p_values)
-    )
+    available_metrics = set(sensor_values) | set(source_values) | set(expression_adjusted_p_values)
     missing_controls = tuple(name for name in required_metrics if name not in available_metrics)
 
     unmet_criteria: list[str] = []
@@ -105,7 +101,9 @@ def evaluate_robustness_summary(
 
     min_spatial_r = require_config_float(config, "study2.robustness.min_unthresholded_spatial_r")
     min_dice = require_config_float(config, "study2.robustness.min_cluster_dice")
-    max_displacement = require_config_float(config, "study2.robustness.max_centroid_displacement_mm")
+    max_displacement = require_config_float(
+        config, "study2.robustness.max_centroid_displacement_mm"
+    )
     spatial_r = _finite_float(unthresholded_spatial_r, "unthresholded_spatial_r")
     dice = _finite_float(cluster_dice, "cluster_dice")
     displacement = _finite_float(centroid_displacement_mm, "centroid_displacement_mm")

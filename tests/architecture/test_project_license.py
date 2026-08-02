@@ -25,15 +25,19 @@ def test_project_is_consistently_licensed_under_gpl_v3() -> None:
     assert "GPL-3.0-only. See [LICENSE](LICENSE)." in readme
 
 
-def test_neuxus_attribution_and_runtime_requirements_are_declared() -> None:
+def test_neuxus_attribution_survives_the_code_it_described() -> None:
+    """The adapted GPL source is gone from the tree but not from the history.
+
+    The native EEG-fMRI correction package that vendored NeuXus was removed on 2026-07-30.
+    Nothing may re-declare its model assets as shipped package data, and the notice must
+    still carry the upstream provenance, because published history distributes that code.
+    """
     metadata = _project_metadata()
-    dependencies = metadata["project"]["dependencies"]
     package_data = metadata["tool"]["setuptools"]["package-data"]["eeg_pipeline"]
     notices = (REPO_ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
 
-    assert "numba>=0.62,<1.0" in dependencies
-    assert "preprocessing/eeg_fmri/assets/*.npz" in package_data
-    assert "preprocessing/eeg_fmri/assets/*.sha256" in package_data
+    assert not (REPO_ROOT / "eeg_pipeline" / "preprocessing" / "eeg_fmri").exists()
+    assert all("eeg_fmri" not in entry for entry in package_data)
     assert "NeuXus" in notices
     assert "v0.0.4" in notices
     assert "10.1016/j.neuroimage.2023.120353" in notices

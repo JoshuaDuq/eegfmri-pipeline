@@ -18,6 +18,7 @@ those would invite tuning an estimator per subject.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
@@ -29,6 +30,93 @@ from eeg_pipeline.preprocessing.report.preservation import (
 )
 from eeg_pipeline.preprocessing.report.scanner import VOLUME_MARKER_DESCRIPTION
 from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
+
+_REPORT_KEYS = frozenset({"enabled", "thresholds", "display", "analysis", "acquisition"})
+_THRESHOLD_KEYS = frozenset(
+    {
+        "min_r_markers_per_volume",
+        "min_roi_channels",
+        "min_samples_per_squared_component",
+        "low_variance_exclusion_floor",
+        "max_group_levels",
+        "min_runs_for_quantile_band",
+        "comb_frequency_range_hz",
+        "comb_welch_seconds",
+    }
+)
+_DISPLAY_KEYS = frozenset(
+    {
+        "spectra_line_frequency",
+        "spectra_marked_frequencies",
+        "color_limit_percentile",
+        "component_overview_columns",
+        "spectra_fmax",
+        "continuity_window_seconds",
+    }
+)
+_ANALYSIS_KEYS = frozenset(
+    {"aperiodic_fit_range_hz", "response_window_s", "alpha_band_hz"}
+)
+_ACQUISITION_KEYS = frozenset(
+    {
+        "volume_marker_description",
+        "pulse_marker_description",
+        "posterior_channel_pattern",
+    }
+)
+
+
+def _reject_unknown_keys(
+    values: Mapping[str, Any],
+    allowed: frozenset[str],
+    setting: str,
+) -> None:
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        names = ", ".join(unknown)
+        raise ValueError(f"unknown {setting} configuration key(s): {names}.")
+
+
+def _mapping_block(values: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    if key not in values:
+        return {}
+    block = values[key]
+    if not isinstance(block, Mapping):
+        raise TypeError(f"report.{key} must be a mapping.")
+    return block
+
+
+def _string(block: Mapping[str, Any], key: str, default: str) -> str:
+    if key not in block:
+        return default
+    value = block[key]
+    if not isinstance(value, str):
+        raise TypeError(f"report.acquisition.{key} must be a string.")
+    return value
+
+
+def _boolean(values: Mapping[str, Any], key: str, default: bool) -> bool:
+    if key not in values:
+        return default
+    value = values[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"report.{key} must be a boolean.")
+    return value
+
+
+def _pair(
+    block: Mapping[str, Any],
+    key: str,
+    *,
+    default: tuple[float, float],
+    setting: str,
+) -> tuple[float, float]:
+    if key not in block:
+        return default
+    value = block[key]
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise TypeError(f"{setting} must contain exactly two values.")
+    return (float(value[0]), float(value[1]))
 
 
 def _optional_float(block: Mapping[str, Any], key: str) -> float | None:
@@ -100,17 +188,22 @@ class ReportSettings:
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any] | None) -> ReportSettings:
         """Build settings from the ``report`` config block, validating every value."""
-        values = values or {}
+        if values is None:
+            values = {}
         if not isinstance(values, Mapping):
             raise TypeError("report configuration must be a mapping.")
-        thresholds = values.get("thresholds", {}) or {}
-        display = values.get("display", {}) or {}
-        for name, block in (("thresholds", thresholds), ("display", display)):
-            if not isinstance(block, Mapping):
-                raise TypeError(f"report.{name} must be a mapping.")
+        _reject_unknown_keys(values, _REPORT_KEYS, "report")
+        thresholds = _mapping_block(values, "thresholds")
+        display = _mapping_block(values, "display")
+        analysis = _mapping_block(values, "analysis")
+        acquisition = _mapping_block(values, "acquisition")
+        _reject_unknown_keys(thresholds, _THRESHOLD_KEYS, "report.thresholds")
+        _reject_unknown_keys(display, _DISPLAY_KEYS, "report.display")
+        _reject_unknown_keys(analysis, _ANALYSIS_KEYS, "report.analysis")
+        _reject_unknown_keys(acquisition, _ACQUISITION_KEYS, "report.acquisition")
 
         settings = cls(
-            enabled=bool(values.get("enabled", cls.enabled)),
+            enabled=_boolean(values, "enabled", cls.enabled),
             min_r_markers_per_volume=float(
                 thresholds.get("min_r_markers_per_volume", cls.min_r_markers_per_volume)
             ),
@@ -139,31 +232,52 @@ class ReportSettings:
                 display.get("component_overview_columns", cls.component_overview_columns)
             ),
             spectra_fmax=_optional_float(display, "spectra_fmax"),
-            comb_frequency_range_hz=cls._frequency_range(
-                thresholds.get("comb_frequency_range_hz"),
+            comb_frequency_range_hz=_pair(
+                thresholds,
+                "comb_frequency_range_hz",
                 default=cls.comb_frequency_range_hz,
+                setting="report.thresholds.comb_frequency_range_hz",
             ),
             comb_welch_seconds=float(thresholds.get("comb_welch_seconds", cls.comb_welch_seconds)),
             continuity_window_seconds=float(
                 display.get("continuity_window_seconds", cls.continuity_window_seconds)
             ),
+            aperiodic_fit_range_hz=_pair(
+                analysis,
+                "aperiodic_fit_range_hz",
+                default=cls.aperiodic_fit_range_hz,
+                setting="report.analysis.aperiodic_fit_range_hz",
+            ),
+            response_window_s=_pair(
+                analysis,
+                "response_window_s",
+                default=cls.response_window_s,
+                setting="report.analysis.response_window_s",
+            ),
+            alpha_band_hz=_pair(
+                analysis,
+                "alpha_band_hz",
+                default=cls.alpha_band_hz,
+                setting="report.analysis.alpha_band_hz",
+            ),
+            volume_marker_description=_string(
+                acquisition,
+                "volume_marker_description",
+                cls.volume_marker_description,
+            ),
+            pulse_marker_description=_string(
+                acquisition,
+                "pulse_marker_description",
+                cls.pulse_marker_description,
+            ),
+            posterior_channel_pattern=_string(
+                acquisition,
+                "posterior_channel_pattern",
+                cls.posterior_channel_pattern,
+            ),
         )
         settings.validate()
         return settings
-
-    @staticmethod
-    def _frequency_range(
-        value: Any,
-        *,
-        default: tuple[float, float],
-    ) -> tuple[float, float]:
-        if value is None:
-            return default
-        if not isinstance(value, (list, tuple)) or len(value) != 2:
-            raise TypeError(
-                "report.thresholds.comb_frequency_range_hz must contain exactly two values."
-            )
-        return (float(value[0]), float(value[1]))
 
     def validate(self) -> None:
         """Reject values that would make a threshold meaningless rather than strict."""
@@ -206,6 +320,33 @@ class ReportSettings:
             raise ValueError("report.thresholds.comb_welch_seconds must be positive.")
         if self.continuity_window_seconds <= 0:
             raise ValueError("report.display.continuity_window_seconds must be positive.")
+        aperiodic_low, aperiodic_high = self.aperiodic_fit_range_hz
+        if not 0 < aperiodic_low < aperiodic_high:
+            raise ValueError(
+                "report.analysis.aperiodic_fit_range_hz must satisfy 0 < low < high."
+            )
+        response_start, response_stop = self.response_window_s
+        if response_stop <= response_start:
+            raise ValueError(
+                "report.analysis.response_window_s must have a stop after its start."
+            )
+        alpha_low, alpha_high = self.alpha_band_hz
+        if not 0 < alpha_low < alpha_high:
+            raise ValueError("report.analysis.alpha_band_hz must satisfy 0 < low < high.")
+        for key, value in (
+            ("volume_marker_description", self.volume_marker_description),
+            ("pulse_marker_description", self.pulse_marker_description),
+            ("posterior_channel_pattern", self.posterior_channel_pattern),
+        ):
+            if not value.strip():
+                raise ValueError(f"report.acquisition.{key} must not be empty.")
+        try:
+            re.compile(self.posterior_channel_pattern)
+        except re.error as error:
+            raise ValueError(
+                "report.acquisition.posterior_channel_pattern is not a valid regular "
+                f"expression: {error}"
+            ) from error
 
     @classmethod
     def from_config(cls, config: Any | None) -> ReportSettings:

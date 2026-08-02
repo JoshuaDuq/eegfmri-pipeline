@@ -100,9 +100,7 @@ def _pearson_r(left: np.ndarray, right: np.ndarray) -> float:
         raise ValueError("Correlation expects matching 1D vectors.")
     left_centered = np.asarray(left, dtype=float) - float(np.mean(left))
     right_centered = np.asarray(right, dtype=float) - float(np.mean(right))
-    denom = float(
-        np.sqrt(np.sum(np.square(left_centered)) * np.sum(np.square(right_centered)))
-    )
+    denom = float(np.sqrt(np.sum(np.square(left_centered)) * np.sum(np.square(right_centered))))
     if not np.isfinite(denom) or denom <= 0:
         raise ValueError("Residual vectors have zero variance.")
     return float(np.sum(left_centered * right_centered) / denom)
@@ -111,10 +109,7 @@ def _pearson_r(left: np.ndarray, right: np.ndarray) -> float:
 def _subject_status_map(analysis_cells: pd.DataFrame) -> Dict[str, str]:
     if analysis_cells.empty:
         return {}
-    return {
-        str(row.analysis_id): str(row.status)
-        for row in analysis_cells.itertuples(index=False)
-    }
+    return {str(row.analysis_id): str(row.status) for row in analysis_cells.itertuples(index=False)}
 
 
 def _subject_count_map(analysis_cells: pd.DataFrame) -> Dict[str, Tuple[int, int]]:
@@ -288,10 +283,7 @@ def _permutation_p_value(
         )
     permuted = sign_matrix * fisher_z.reshape(1, -1)
     statistics = np.asarray(
-        [
-            _weighted_mean(row, weights)
-            for row in permuted
-        ],
+        [_weighted_mean(row, weights) for row in permuted],
         dtype=float,
     )
     extreme = float(np.sum(np.abs(statistics) >= abs(observed)))
@@ -434,23 +426,23 @@ def aggregate_residualized_correlations(
                 status="ok",
             )
         )
-    out = pd.DataFrame(rows).sort_values(
-        ["family", "roi", "band", "analysis_id"]
-    ).reset_index(drop=True)
+    out = (
+        pd.DataFrame(rows)
+        .sort_values(["family", "roi", "band", "analysis_id"])
+        .reset_index(drop=True)
+    )
     if out.empty:
         return out
     out["p_holm"] = np.nan
-    valid_mask = (
-        out["interpretable"].astype(bool)
-        & np.isfinite(pd.to_numeric(out["p_value"], errors="coerce").to_numpy(dtype=float))
+    valid_mask = out["interpretable"].astype(bool) & np.isfinite(
+        pd.to_numeric(out["p_value"], errors="coerce").to_numpy(dtype=float)
     )
     if bool(valid_mask.any()):
         out.loc[valid_mask, "p_holm"] = _holm_adjust(
             pd.to_numeric(out.loc[valid_mask, "p_value"], errors="coerce").to_numpy(dtype=float)
         )
-    out["significant_holm"] = (
-        out["interpretable"].astype(bool)
-        & (pd.to_numeric(out["p_holm"], errors="coerce") < float(alpha))
+    out["significant_holm"] = out["interpretable"].astype(bool) & (
+        pd.to_numeric(out["p_holm"], errors="coerce") < float(alpha)
     )
     return out
 

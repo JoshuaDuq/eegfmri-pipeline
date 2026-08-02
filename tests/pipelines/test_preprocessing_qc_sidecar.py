@@ -6,9 +6,8 @@ not written at the moment they are in memory, a cohort document can only be buil
 that cost again per participant from a gigabyte of filtered raw each.
 
 So this file pins that the review stage writes the sidecar, that it writes it from the
-evidence rather than recomputing anything, and that a failure to write one does not take
-the subject report down with it -- the report is the deliverable, and a cohort run lists a
-participant with no sidecar rather than dropping it silently.
+evidence rather than recomputing anything, and that a failure to write one fails the stage.
+Otherwise a successful-looking subject report silently becomes unusable by the cohort.
 """
 
 from __future__ import annotations
@@ -272,30 +271,23 @@ def test_a_stage_with_no_run_evidence_writes_no_sidecar(pipeline, report_path) -
 
 
 @pytest.mark.parametrize("failure", [OSError("disk full"), ValueError("missing column")])
-def test_a_sidecar_failure_does_not_take_the_subject_report_down(
+def test_a_sidecar_failure_surfaces_at_the_stage_that_created_it(
     pipeline, report_path, failure
 ) -> None:
-    """The report is already written and is the deliverable; losing a cohort row is smaller.
-
-    A cohort run lists a participant with no sidecar rather than dropping it, so the cost of
-    swallowing this is a named absence in one document rather than a failed stage. Only the
-    data-driven failures are absorbed: an ``AttributeError`` here would be a bug in the
-    writer, and hiding it would turn every future participant into a silent absence.
-    """
     with patch(
         "eeg_pipeline.preprocessing.report.cohort.sidecar.write_sidecar", side_effect=failure
     ):
-        pipeline._write_qc_sidecar(
-            report_path=report_path,
-            record=_record(),
-            subject="0014",
-            task="thermalactive",
-            evidence=_evidence(),
-            settings=ReportSettings(),
-        )
+        with pytest.raises(type(failure), match=str(failure)):
+            pipeline._write_qc_sidecar(
+                report_path=report_path,
+                record=_record(),
+                subject="0014",
+                task="thermalactive",
+                evidence=_evidence(),
+                settings=ReportSettings(),
+            )
 
     assert not has_sidecar(report_path)
-    assert pipeline.logger.warning.called
 
 
 def test_the_condition_counts_come_from_the_two_files_that_define_them(

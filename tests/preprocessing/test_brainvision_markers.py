@@ -1,8 +1,34 @@
 from __future__ import annotations
 
+import mne
+import numpy as np
 import pytest
 
-from eeg_pipeline.preprocessing.brainvision_markers import sanitize_vas_marker_text
+from eeg_pipeline.preprocessing.brainvision_markers import (
+    sanitize_vas_marker_text,
+    validate_unambiguous_vas_markers,
+)
+
+
+def _raw_with_annotations(descriptions: list[str]) -> mne.io.RawArray:
+    info = mne.create_info(["Cz", "ECG"], 1_000.0, ["eeg", "eeg"])
+    raw = mne.io.RawArray(np.zeros((2, 1_000)), info, verbose=False)
+    onsets = 0.1 + np.arange(len(descriptions)) * 0.1
+    raw.set_annotations(mne.Annotations(onsets, 0.0, descriptions))
+    return raw
+
+
+def test_validate_unambiguous_vas_markers_rejects_ambiguous_vas_description() -> None:
+    raw = _raw_with_annotations(["Volume/V  1", "Vas_on/V  1"])
+
+    with pytest.raises(ValueError, match="Vas_on/V  1"):
+        validate_unambiguous_vas_markers(raw)
+
+
+def test_validate_unambiguous_vas_markers_accepts_sanitized_markers() -> None:
+    raw = _raw_with_annotations(["Volume/V  1", "VAS_ON"])
+
+    validate_unambiguous_vas_markers(raw)
 
 
 def test_sanitize_vas_marker_text_changes_only_vas_descriptions() -> None:

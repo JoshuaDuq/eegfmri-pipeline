@@ -12,6 +12,30 @@ def coupling_command():
     )
 
 
+def line_comb_command():
+    from eeg_pipeline.cli.commands import Command
+    from studies.pain_study.cli.line_comb import run_line_comb, setup_line_comb
+
+    return Command(
+        name="line-comb",
+        setup=setup_line_comb,
+        run=run_line_comb,
+        requires_subjects=False,
+    )
+
+
+def cardiac_gaps_command():
+    from eeg_pipeline.cli.commands import Command
+    from studies.pain_study.cli.cardiac_gaps import run_cardiac_gaps, setup_cardiac_gaps
+
+    return Command(
+        name="cardiac-gaps",
+        setup=setup_cardiac_gaps,
+        run=run_cardiac_gaps,
+        requires_subjects=False,
+    )
+
+
 def signature_prediction_command():
     from eeg_pipeline.cli.commands import Command
     from studies.pain_study.cli.signature_prediction import (

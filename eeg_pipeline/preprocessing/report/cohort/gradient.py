@@ -295,18 +295,23 @@ def plot_cohort_comb(comb: CohortComb) -> plt.Figure:
 
 
 def _measured(runs: pd.DataFrame, column: str) -> pd.Series:
-    """The finite values of one run column, or nothing where the column is absent.
-
-    Only the required columns are guaranteed to be on a sidecar; the rest are absent on a
-    sidecar written before they existed, which is an ordinary thing to read rather than a
-    fault. ``DataFrame.get`` returns ``None`` for a missing column and
-    ``pd.to_numeric(None)`` returns a bare float with no ``dropna``, so reading an optional
-    column that way fails on exactly the sidecars that predate it.
-    """
+    """The finite values of one run column, or nothing where it is inapplicable."""
     if column not in runs.columns:
         return pd.Series(dtype=float)
     values = pd.to_numeric(runs[column], errors="coerce")
     return values[np.isfinite(values)]
+
+
+def _locked_amplitude(runs: pd.DataFrame, stage: str) -> tuple[str | None, float | None]:
+    """Participant-median locked amplitude, preserving an unresolved estimate."""
+    excess = _measured(runs, f"volume_locked_excess_power_{stage}_uv2")
+    if excess.empty:
+        return None, None
+    power = float(excess.median())
+    if power <= 0.0:
+        return "unresolved", None
+    amplitude = float(np.sqrt(power))
+    return f"{amplitude:.2f}", amplitude
 
 
 def _timing_rows(cohort: Cohort) -> list[Sequence[object]]:
@@ -318,15 +323,16 @@ def _timing_rows(cohort: Cohort) -> list[Sequence[object]]:
         rate = _measured(runs, "repetition_time_s")
         jitter = _measured(runs, "volume_jitter_s")
         volumes = _measured(runs, "n_volumes")
-        before = _measured(runs, "volume_locked_corrected_before_uv")
-        corrected = _measured(runs, "volume_locked_corrected_uv")
-        floor = _measured(runs, "volume_locked_noise_floor_uv")
+        before_text, before_amplitude = _locked_amplitude(runs, "before")
+        after_text, after_amplitude = _locked_amplitude(runs, "after")
+        observed_after = _measured(runs, "volume_locked_rms_after_uv")
+        floor_after = _measured(runs, "volume_locked_floor_after_uv")
         # Paired within the participant: the removed column is one recording measured twice,
         # not a difference between two cohort summaries. Withheld unless both sides are
         # present, because a difference against a missing side is not a difference.
         removed = (
-            f"{float(before.median()) - float(corrected.median()):.2f}"
-            if not before.empty and not corrected.empty
+            f"{before_amplitude - after_amplitude:.2f}"
+            if before_amplitude is not None and after_amplitude is not None
             else None
         )
         rows.append(
@@ -335,10 +341,11 @@ def _timing_rows(cohort: Cohort) -> list[Sequence[object]]:
                 None if rate.empty else f"{rate.median():.3f}",
                 None if jitter.empty else f"{jitter.max() * 1e3:.1f}",
                 None if volumes.empty else int(volumes.sum()),
-                None if before.empty else f"{before.median():.2f}",
-                None if corrected.empty else f"{corrected.median():.2f}",
+                before_text,
+                after_text,
                 removed,
-                None if floor.empty else f"{floor.median():.2f}",
+                None if observed_after.empty else f"{observed_after.median():.2f}",
+                None if floor_after.empty else f"{floor_after.median():.2f}",
             ]
         )
     return rows
@@ -357,15 +364,17 @@ def timing_table(cohort: Cohort) -> str:
         Column("Before ICA", group="Volume-locked residual (µV)"),
         Column("After ICA", group="Volume-locked residual (µV)"),
         Column("Removed", group="Volume-locked residual (µV)"),
-        Column("Noise floor (µV)"),
+        Column("Observed after (µV RMS)"),
+        Column("Noise floor after (µV RMS)"),
     )
     return (
         grid_table(columns, rows)
-        + "<p>The residual is the volume-locked amplitude with the averaging noise floor "
-        "removed, so it does not fall merely because a participant was scanned for longer. "
-        "The floor beside it is what that subtraction removed: where the two are close, "
-        "the recording holds little volume-locked residual, whatever the uncorrected "
-        "waveform amplitude suggests.</p>"
+        + "<p>The residual is derived from the signed difference between observed locked "
+        "power and its odd-even averaging-floor estimate. A non-positive difference is "
+        "reported as <em>unresolved</em>, not zero. Observed RMS and the estimated floor "
+        "remain beside it so the censored measurement is auditable. The odd-even floor "
+        "uses the same number of epochs as the observed average, so their comparison "
+        "does not fall merely because a participant was scanned for longer.</p>"
         "<p>Reported either side of the exclusions, and paired within the participant. The "
         "after column alone cannot separate a recording whose correction removed a locked "
         "residual from one that never had a measurable residual to remove, and those are "

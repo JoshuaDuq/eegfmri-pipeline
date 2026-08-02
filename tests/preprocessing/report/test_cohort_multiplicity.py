@@ -9,6 +9,7 @@ a measurement that separated nobody.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from eeg_pipeline.preprocessing.report.cohort.aggregate import BandGates
@@ -50,8 +51,15 @@ def _participant(
     if in_scanner:
         runs["n_volumes"] = [300]
         runs["repetition_time_s"] = [2.0]
-        runs["volume_locked_corrected_uv"] = [locked if locked is not None else 0.7]
-        runs["volume_locked_noise_floor_uv"] = [0.3]
+        after_amplitude = locked if locked is not None else 0.7
+        runs["volume_locked_rms_before_uv"] = [1.2]
+        runs["volume_locked_floor_before_uv"] = [0.4]
+        runs["volume_locked_excess_power_before_uv2"] = [1.28]
+        runs["volume_locked_resolved_before"] = [True]
+        runs["volume_locked_rms_after_uv"] = [(after_amplitude**2 + 0.09) ** 0.5]
+        runs["volume_locked_floor_after_uv"] = [0.3]
+        runs["volume_locked_excess_power_after_uv2"] = [after_amplitude**2]
+        runs["volume_locked_resolved_after"] = [True]
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
@@ -204,3 +212,44 @@ def test_a_tied_group_too_large_for_the_budget_is_excluded_entirely() -> None:
 def test_the_repetition_time_is_not_a_quality_metric() -> None:
     """A participant scanned under another protocol is a design fact, not an extreme."""
     assert all(source.key != "repetition_time_s" for source in METRIC_SOURCES)
+
+
+def test_marker_agreement_pools_primitive_counts_across_runs() -> None:
+    source = next(source for source in METRIC_SOURCES if source.key == "marker_matched_fraction")
+    participant = SubjectSidecar(
+        subject="0001",
+        task="x",
+        context=AcquisitionContext.IN_SCANNER,
+        paradigm=Paradigm.TASK,
+        runs=pd.DataFrame(
+            {
+                "marker_matched_fraction": [1.0, 0.5],
+                "n_matched_beats": [1, 50],
+                "n_detected_beats": [1, 100],
+            }
+        ),
+    )
+
+    assert source.read(participant) == 51 / 101
+
+
+def test_unresolved_locked_power_is_not_ranked_as_a_quantitative_extreme() -> None:
+    source = next(
+        source
+        for source in METRIC_SOURCES
+        if source.key == "volume_locked_excess_power_after_uv2"
+    )
+    participant = SubjectSidecar(
+        subject="0001",
+        task="x",
+        context=AcquisitionContext.IN_SCANNER,
+        paradigm=Paradigm.TASK,
+        runs=pd.DataFrame(
+            {
+                "volume_locked_excess_power_after_uv2": [-0.1, -0.4],
+                "volume_locked_resolved_after": [False, False],
+            }
+        ),
+    )
+
+    assert np.isnan(source.read(participant))

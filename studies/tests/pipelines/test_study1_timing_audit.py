@@ -109,7 +109,7 @@ def _temporal_features() -> pd.DataFrame:
 
 
 def test_build_timing_audit_maps_targets_to_clean_events_and_features() -> None:
-    from studies.pain_study.scripts.study1_timing_audit import build_timing_audit
+    from studies.pain_study.scripts.study_support.study1_timing_audit import build_timing_audit
 
     summary, trials = build_timing_audit(
         targets=_targets(),
@@ -139,7 +139,7 @@ def test_build_timing_audit_maps_targets_to_clean_events_and_features() -> None:
 
 
 def test_build_timing_audit_fails_when_target_event_has_no_temporal_feature_row() -> None:
-    from studies.pain_study.scripts.study1_timing_audit import build_timing_audit
+    from studies.pain_study.scripts.study_support.study1_timing_audit import build_timing_audit
 
     bad_features = _temporal_features().copy()
     bad_features = bad_features.loc[bad_features["trial_id"] != 102].copy()

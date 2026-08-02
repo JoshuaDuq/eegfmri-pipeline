@@ -80,6 +80,51 @@ def _run_median(column: str) -> Callable[[SubjectSidecar], float]:
     return read
 
 
+def _run_median_where(
+    column: str,
+    inclusion_column: str,
+) -> Callable[[SubjectSidecar], float]:
+    """Reduce only runs on which the quantitative measurement resolved."""
+
+    def read(participant: SubjectSidecar) -> float:
+        table = participant.runs
+        required = {column, inclusion_column}
+        if table.empty or not required.issubset(table.columns):
+            return float("nan")
+        included = table[inclusion_column].eq(True)  # noqa: E712
+        values = pd.to_numeric(table.loc[included, column], errors="coerce")
+        values = values[np.isfinite(values)]
+        return float(values.median()) if not values.empty else float("nan")
+
+    return read
+
+
+def _pooled_ratio(
+    numerator_column: str,
+    denominator_column: str,
+) -> Callable[[SubjectSidecar], float]:
+    """Pool primitive counts before dividing, preserving their natural denominator."""
+
+    def read(participant: SubjectSidecar) -> float:
+        table = participant.runs
+        required = {numerator_column, denominator_column}
+        if table.empty or not required.issubset(table.columns):
+            return float("nan")
+        numerators = pd.to_numeric(table[numerator_column], errors="coerce")
+        denominators = pd.to_numeric(table[denominator_column], errors="coerce")
+        valid = (
+            np.isfinite(numerators)
+            & np.isfinite(denominators)
+            & (numerators >= 0)
+            & (denominators > 0)
+        )
+        if not valid.any():
+            return float("nan")
+        return float(numerators[valid].sum() / denominators[valid].sum())
+
+    return read
+
+
 def _bad_channel_count(participant: SubjectSidecar) -> float:
     table = participant.channels
     if table.empty:
@@ -109,9 +154,12 @@ METRIC_SOURCES: tuple[MetricSource, ...] = (
     MetricSource("variance_removed", ICA_FAMILY, _measurement("variance_removed")),
     MetricSource("retained_dimensions", ICA_FAMILY, _measurement("retained_dimensions")),
     MetricSource(
-        "volume_locked_corrected_uv",
+        "volume_locked_excess_power_after_uv2",
         SCANNER_FAMILY,
-        _run_median("volume_locked_corrected_uv"),
+        _run_median_where(
+            "volume_locked_excess_power_after_uv2",
+            "volume_locked_resolved_after",
+        ),
     ),
     MetricSource("volume_jitter_s", SCANNER_FAMILY, _run_median("volume_jitter_s")),
     # Deliberately not the repetition time. It is a property of the sequence somebody
@@ -121,7 +169,9 @@ METRIC_SOURCES: tuple[MetricSource, ...] = (
     # section reports repetition-time consistency directly, which is where that belongs.
     MetricSource("median_bpm", PHYSIOLOGY_FAMILY, _run_median("median_bpm")),
     MetricSource(
-        "marker_matched_fraction", PHYSIOLOGY_FAMILY, _run_median("marker_matched_fraction")
+        "marker_matched_fraction",
+        PHYSIOLOGY_FAMILY,
+        _pooled_ratio("n_matched_beats", "n_detected_beats"),
     ),
     MetricSource("beat_dropouts", PHYSIOLOGY_FAMILY, _run_median("beat_dropouts")),
 )

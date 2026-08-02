@@ -1,11 +1,61 @@
-# Paradigm-Specific Scripts (CLI Only)
+# Paradigm-Specific Scripts
 
-Scripts specific to the simultaneous EEG–fMRI pain paradigm. These raw-conversion and event-merging utilities are **not integrated into the TUI or `eeg-pipeline` CLI** and must be run manually before downstream analysis.
+Everything specific to the simultaneous EEG–fMRI pain paradigm. Each folder is one job, and
+each has a README explaining what it is for and why it works the way it does.
 
-Organize newly acquired EEG source recordings with:
+| Folder | What it is for | How it runs |
+|---|---|---|
+| [`conversion/`](conversion/) | Source recordings → BIDS. Runs before anything else. | `run_paradigm_specific.py <command>` |
+| [`line_comb/`](line_comb/) | Diagnose and remove the scanner room's narrowband line comb. | `eeg-pipeline line-comb <mode>` |
+| [`cardiac_gaps/`](cardiac_gaps/) | Recover the heartbeats Analyzer never marked, and correct only there. | `eeg-pipeline cardiac-gaps <mode>` |
+| [`t1/`](t1/) | Electrode localization in a participant's own T1, and the template fallback. | `python -m …scripts.t1.run_t1_*` |
+| [`study_support/`](study_support/) | Batch machinery for running study1 and study2 at cohort scale. | see its README |
+| [`config/`](config/) | Paradigm override templates and per-script configs. | — |
+
+The measurement and algorithm halves of the two artifact workflows live in
+[`../analysis/`](../analysis/); these folders decide which files to read and where results
+go. The EEG coupling workflow lives under [`../eeg_coupling/`](../eeg_coupling/) and runs as
+`eeg-pipeline coupling compute`.
+
+## Order of operations
+
+```
+1. conversion/          → BIDS EEG, BIDS fMRI, behaviour merged into events.tsv
+2. cardiac_gaps/        → recover unmarked beats, correct the gaps       (optional)
+3. line_comb/           → diagnose, benchmark, apply, verify             (optional)
+4. eeg-pipeline ...     → preprocessing, features, behavior, ml, fmri, fmri-analysis
+```
+
+Step 1 must complete before any `eeg-pipeline` command. Steps 2 and 3 are artifact
+remediation: each writes its own output tree rather than editing data in place, so the
+pipeline reads them only once you point `paths.bids_root` at what they wrote.
+
+## Configuration
+
+Paths — `bids_root`, `deriv_root`, `source_data` — are answered once, by the core
+`eeg_pipeline/utils/config/eeg_config.yaml`. Workflow folders inherit them and override only
+when they genuinely need something else. Settings that belong to a single workflow live in
+that folder's own `config.yaml`, next to the code that reads them. See
+[`workflow_config.py`](workflow_config.py) for the resolution order.
+
+## FreeSurfer License (fMRIPrep/BEM)
+
+Default license location is `~/license.txt`. Place your FreeSurfer `license.txt` there, or override with `paths.freesurfer_license`, `EEG_PIPELINE_FREESURFER_LICENSE`, or `--fs-license-file`.
+
+---
+
+## Conversion commands
+
+Staging, conversion and event merging are dispatched through a single entrypoint:
 
 ```bash
-python -m studies.pain_study.scripts.organize_source_eeg \
+python studies/pain_study/scripts/run_paradigm_specific.py <command> [options]
+```
+
+Newly acquired EEG source recordings are staged first, outside that entrypoint:
+
+```bash
+python -m studies.pain_study.scripts.conversion.organize_source_eeg \
   --kingston-root /Volumes/KINGSTON \
   --source-data-root /Volumes/KINGSTON/EEG_fMRI_data/source_data
 ```
@@ -16,35 +66,6 @@ BrainVision-processed 1 kHz files are present, it also moves them into
 the organizer discovers every unorganized `sub-*` EEG directory. Repeat `--subject <ID>` to
 restrict a run.
 
-These scripts cover raw conversion and event merging only. The EEG coupling workflow lives under
-`studies/pain_study/eeg_coupling/` and is integrated in the main CLI as
-`eeg-pipeline coupling compute`.
-
-## Required Workflow Order
-
-```
-1. eeg-raw-to-bids     → Convert BrainVision EEG source files → BIDS EEG
-2. fmri-raw-to-bids    → Convert fMRI DICOMs → BIDS fMRI
-3. merge-psychopy      → Merge PsychoPy TrialSummary.csv → BIDS events.tsv
-4. eeg-pipeline ...    → Run preprocessing, features, behavior, ml, fmri, fmri-analysis
-```
-
-Steps 1–3 must complete successfully before running any `eeg-pipeline` command.
-
-## FreeSurfer License (fMRIPrep/BEM)
-
-Default license location is `~/license.txt`. Place your FreeSurfer `license.txt` there, or override with `paths.freesurfer_license`, `EEG_PIPELINE_FREESURFER_LICENSE`, or `--fs-license-file`.
-
----
-
-## Entrypoint
-
-All commands are dispatched through a single entrypoint:
-
-```bash
-python studies/pain_study/scripts/run_paradigm_specific.py <command> [options]
-```
-
 ---
 
 ## Commands
@@ -52,88 +73,6 @@ python studies/pain_study/scripts/run_paradigm_specific.py <command> [options]
 ### `eeg-raw-to-bids`
 
 Converts BrainVision (`.vhdr`) source files to BIDS EEG format using `mne-bids`.
-
-### Native EEG-fMRI artifact correction
-
-`run_native_eeg_fmri_artifact_correction.py` is the native candidate replacement for the BrainVision
-Analyzer scanner-gradient and pulse-artifact stages. It reads the original 5 kHz recordings from the
-versioned marker-sanitized derivative, applies synchronized phase-aligned AAS, automatic NeuXus LSTM
-R-peak detection, and MNE PCA-OBS, then writes a separate 1 kHz derivative with per-run spectral,
-QRS, and cardiac-locked QC. The source inventory is discovered directly from every matching
-`sub-*/eeg/original_untrimmed_5khz/*.vhdr`; no BrainVision-processed file or fixed subject/run count defines
-the cohort. Each run has separate physiological and scanner-spectrum figures; the
-latter combines the full 15–90 Hz comb with four stage-resolved local PSD windows. The qualification
-boundary is every recording in the verified discovery manifest. After every run succeeds, the
-pipeline automatically writes `cohort_scanner_spectrum_qc.png` with the same five-panel spectral
-layout and `cohort_scanner_spectrum_qc.tsv` with every plotted value. Cohort spectra are
-participant-first:
-runs are aggregated within participant before the equally weighted cohort median and deterministic
-95% participant-bootstrap interval are calculated.
-
-Exceptional acquisition filenames are resolved in
-`config/native_eeg_fmri_recording_overrides.tsv`. This file is used only for explicit exclusions or
-logical run-number corrections; all ordinary recordings and newly added participants are discovered
-without an inventory update.
-
-The output root is
-`/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz`, with participant files
-under `sub-*/eeg/` and cohort manifests/QC at the dataset root.
-
-```bash
-python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction
-```
-
-See [`docs/native_eeg_fmri_artifact_correction.md`](../../../docs/native_eeg_fmri_artifact_correction.md)
-for the fixed method, literature basis, and qualification criteria.
-
-**Source layout expected:**
-```
-<source-root>/
-  sub-<ID>/
-    eeg/
-      brainvision_processed_1khz/
-        sub-<ID>_task-<task>_run-<N>.vhdr
-        sub-<ID>_task-<task>_run-<N>.vmrk
-        sub-<ID>_task-<task>_run-<N>.eeg
-```
-
-**Usage:**
-```bash
-python studies/pain_study/scripts/run_paradigm_specific.py eeg-raw-to-bids \
-  --source-root data/source_data \
-  --bids-root data/bids_output/eeg \
-  --task task \
-  --subject 0001 \
-  --subject 0002
-```
-
-**All options:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--source-root` | *(required)* | Root containing `sub-*/eeg/brainvision_processed_1khz/*.vhdr` |
-| `--bids-root` | *(required)* | Output BIDS root for EEG data |
-| `--task` | *(required)* | BIDS task label (e.g. `task`) |
-| `--subject` | all found | Subject ID(s) to process (repeat flag for multiple) |
-| `--montage` | `easycap-M1` | MNE montage name for electrode positions |
-| `--line-freq` | `60.0` | Power line frequency in Hz (60 for North America, 50 for Europe) |
-| `--overwrite` | `False` | Overwrite existing BIDS files |
-| `--trim-to-first-volume` | `False` | Trim EEG recording to start at first fMRI volume trigger (recommended for EEG-fMRI alignment) |
-| `--event-prefix` | `Trig_therm/T  1` | Keep only annotations matching this prefix (repeat for multiple). Defaults to the thermode trigger prefix. |
-| `--keep-all-annotations` | `False` | Keep all annotations regardless of prefix filtering |
-
-**Example — all subjects, trim to fMRI volume, custom event prefix:**
-```bash
-python studies/pain_study/scripts/run_paradigm_specific.py eeg-raw-to-bids \
-  --source-root data/source_data \
-  --bids-root data/bids_output/eeg \
-  --task task \
-  --montage easycap-M1 \
-  --line-freq 60 \
-  --trim-to-first-volume \
-  --event-prefix "Trig_therm/T  1" \
-  --overwrite
-```
 
 ---
 
@@ -284,7 +223,14 @@ python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
   --bids-root data/bids_output/eeg \
   --task task
 
-# 4. Fit ICA, review component exclusions, then create epochs
+# 4. Artifact remediation (optional; each writes its own output tree)
+eeg-pipeline cardiac-gaps report      # measure Analyzer's pulse-marker gaps
+eeg-pipeline line-comb diagnose       # measure the room's line comb
+eeg-pipeline line-comb benchmark      # check preservation before removing anything
+eeg-pipeline line-comb apply          # write the cleaned BIDS copy
+# Then point paths.bids_root at what you want the pipeline to read.
+
+# 5. Fit ICA, review component exclusions, then create epochs
 eeg-pipeline preprocessing ica --subject 0001 --subject 0002 --task task
 # Review the generated MNE-BIDS component tables before continuing.
 eeg-pipeline preprocessing epochs --subject 0001 --subject 0002 --task task \
@@ -295,7 +241,7 @@ eeg-pipeline fmri preprocess --subject 0001 --subject 0002 --task task
 eeg-pipeline fmri-analysis first-level --subject 0001 --subject 0002 --task task \
   --cond-a-value stimulation --cond-b-value fixation_rest
 
-# 5. Run EEG–BOLD coupling (integrated CLI)
+# 6. Run EEG–BOLD coupling (integrated CLI)
 eeg-pipeline coupling compute --subject 0001 --subject 0002 --task task
 ```
 
@@ -309,11 +255,11 @@ These scripts encode conventions specific to this pain paradigm:
 - **fMRI**: DICOM input via `dcm2niix`, phase-level event granularity, rest + fieldmap runs.
 - **Behavior**: PsychoPy `TrialSummary.csv` with `run_id`, `stim_start_time`, `stimulus_temp`, `condition` columns.
 
+The artifact workflows encode more than conventions — they encode findings. `line_comb/`
+holds the measured frequencies of one scanner room and means nothing at another site;
+`cardiac_gaps/` exists to repair one vendor's failure mode on one set of exports.
+
 To adapt for a different paradigm, modify the scripts in this folder. **Do not modify** `eeg_pipeline/` or `fmri_pipeline/` core code.
 
-Paradigm-specific configuration templates are also isolated here:
-
-- `studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml`
-- `studies/pain_study/scripts/config/thermal_pain_fmri_overrides.yaml`
-
-Use these as optional overrides when running the thermal pain paradigm, while keeping core pipeline defaults paradigm-agnostic.
+Paradigm-specific configuration is isolated here too — see [`config/README.md`](config/README.md)
+for which files are loaded automatically and which are templates you apply yourself.

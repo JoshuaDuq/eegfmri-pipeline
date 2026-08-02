@@ -34,7 +34,9 @@ def _preset_mapping(config: Any) -> dict[str, list[str]]:
             raise ValueError(
                 f"study1.deep_regression.presets.{preset_name} must be a non-empty list of bands."
             )
-        presets[str(preset_name).strip()] = [str(band).strip() for band in bands if str(band).strip()]
+        presets[str(preset_name).strip()] = [
+            str(band).strip() for band in bands if str(band).strip()
+        ]
     return presets
 
 

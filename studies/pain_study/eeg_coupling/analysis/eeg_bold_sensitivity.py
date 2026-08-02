@@ -195,38 +195,31 @@ class CouplingSensitivityConfig:
                 if painful_raw.get("min_rating", None) in {None, ""}
                 else float(painful_raw.get("min_rating"))
             ),
-            output_name=str(
-                painful_raw.get("output_name", "painful_only")
-            ).strip(),
+            output_name=str(painful_raw.get("output_name", "painful_only")).strip(),
         )
         if painful_only.enabled:
-            has_binary = painful_only.binary_column is not None and bool(painful_only.painful_values)
-            has_rating = painful_only.rating_column is not None and painful_only.min_rating is not None
+            has_binary = painful_only.binary_column is not None and bool(
+                painful_only.painful_values
+            )
+            has_rating = (
+                painful_only.rating_column is not None and painful_only.min_rating is not None
+            )
             if not (has_binary or has_rating):
                 raise ValueError(
                     "Painful-only sensitivity requires either binary_column + painful_values or rating_column + min_rating."
                 )
             if not painful_only.output_name:
-                raise ValueError(
-                    "Painful-only sensitivity output_name must not be blank."
-                )
+                raise ValueError("Painful-only sensitivity output_name must not be blank.")
 
         alternative_fmri = AlternativeFMRISensitivityConfig(
             enabled=bool(alternative_raw.get("enabled", False)),
             name=str(alternative_raw.get("name", "alternative_fmri")).strip(),
-            beta_dir_template=str(
-                alternative_raw.get("beta_dir_template", "")
-            ).strip()
-            or None,
+            beta_dir_template=str(alternative_raw.get("beta_dir_template", "")).strip() or None,
         )
         if alternative_fmri.enabled and not alternative_fmri.beta_dir_template:
-            raise ValueError(
-                "Alternative fMRI sensitivity requires a beta_dir_template."
-            )
+            raise ValueError("Alternative fMRI sensitivity requires a beta_dir_template.")
         if alternative_fmri.enabled and not alternative_fmri.name:
-            raise ValueError(
-                "Alternative fMRI sensitivity name must not be blank."
-            )
+            raise ValueError("Alternative fMRI sensitivity name must not be blank.")
         delta_temperature = DeltaTemperatureSensitivityConfig(
             enabled=bool(delta_raw.get("enabled", False)),
             output_name=str(delta_raw.get("output_name", "delta_temperature")).strip(),
@@ -244,14 +237,18 @@ class CouplingSensitivityConfig:
             if not delta_temperature.output_name:
                 raise ValueError("Delta-temperature sensitivity output_name must not be blank.")
             if not delta_temperature.temperature_column:
-                raise ValueError("Delta-temperature sensitivity temperature_column must not be blank.")
+                raise ValueError(
+                    "Delta-temperature sensitivity temperature_column must not be blank."
+                )
             if not delta_temperature.model_terms:
                 raise ValueError("Delta-temperature sensitivity model_terms must not be empty.")
 
         temperature_categorical = TemperatureCategoricalSensitivityConfig(
             enabled=bool(categorical_raw.get("enabled", False)),
             output_name=str(categorical_raw.get("output_name", "temperature_categorical")).strip(),
-            temperature_column=str(categorical_raw.get("temperature_column", "temperature")).strip(),
+            temperature_column=str(
+                categorical_raw.get("temperature_column", "temperature")
+            ).strip(),
             factor_column=str(categorical_raw.get("factor_column", "temperature_factor")).strip(),
             model_terms=tuple(
                 str(value).strip()
@@ -292,12 +289,8 @@ class CouplingSensitivityConfig:
                     "residualized_correlation",
                 )
             ).strip(),
-            bootstrap_iterations=int(
-                residualized_raw.get("bootstrap_iterations", 5000)
-            ),
-            permutation_iterations=int(
-                residualized_raw.get("permutation_iterations", 5000)
-            ),
+            bootstrap_iterations=int(residualized_raw.get("bootstrap_iterations", 5000)),
+            permutation_iterations=int(residualized_raw.get("permutation_iterations", 5000)),
         )
         if residualized_correlation.enabled:
             if not residualized_correlation.output_name:
@@ -320,18 +313,12 @@ class CouplingSensitivityConfig:
                     "primary_permutation",
                 )
             ).strip(),
-            bootstrap_iterations=int(
-                primary_permutation_raw.get("bootstrap_iterations", 5000)
-            ),
-            permutation_iterations=int(
-                primary_permutation_raw.get("permutation_iterations", 5000)
-            ),
+            bootstrap_iterations=int(primary_permutation_raw.get("bootstrap_iterations", 5000)),
+            permutation_iterations=int(primary_permutation_raw.get("permutation_iterations", 5000)),
         )
         if primary_permutation.enabled:
             if not primary_permutation.output_name:
-                raise ValueError(
-                    "Primary-permutation sensitivity output_name must not be blank."
-                )
+                raise ValueError("Primary-permutation sensitivity output_name must not be blank.")
             if primary_permutation.bootstrap_iterations <= 0:
                 raise ValueError(
                     "Primary-permutation sensitivity bootstrap_iterations must be positive."
@@ -376,9 +363,7 @@ class CouplingSensitivityConfig:
             items=tuple(items),
         )
         if source_methods.enabled and not source_methods.items:
-            raise ValueError(
-                "Source-method sensitivity requires at least one item."
-            )
+            raise ValueError("Source-method sensitivity requires at least one item.")
         anatomical_items: list[AnatomicalSpecificityItemConfig] = []
         anatomical_items_raw = _require_sequence(
             anatomical_raw.get("items"),
@@ -391,14 +376,10 @@ class CouplingSensitivityConfig:
             )
             name = str(mapping.get("name", "")).strip()
             if not name:
-                raise ValueError(
-                    "Each anatomical-specificity item requires a non-blank name."
-                )
+                raise ValueError("Each anatomical-specificity item requires a non-blank name.")
             roi_items_raw = _require_sequence(
                 mapping.get("rois"),
-                path=(
-                    "eeg_bold_coupling.sensitivities.anatomical_specificity.items[*].rois"
-                ),
+                path=("eeg_bold_coupling.sensitivities.anatomical_specificity.items[*].rois"),
             )
             if not roi_items_raw:
                 raise ValueError(
@@ -424,19 +405,13 @@ class CouplingSensitivityConfig:
             items=tuple(anatomical_items),
         )
         if anatomical_specificity.enabled and not anatomical_specificity.items:
-            raise ValueError(
-                "Anatomical-specificity sensitivity requires at least one item."
-            )
+            raise ValueError("Anatomical-specificity sensitivity requires at least one item.")
         within_between = WithinBetweenSensitivityConfig(
             enabled=bool(within_between_raw.get("enabled", False)),
-            output_name=str(
-                within_between_raw.get("output_name", "within_between")
-            ).strip(),
+            output_name=str(within_between_raw.get("output_name", "within_between")).strip(),
         )
         if within_between.enabled and not within_between.output_name:
-            raise ValueError(
-                "Within-between sensitivity output_name must not be blank."
-            )
+            raise ValueError("Within-between sensitivity output_name must not be blank.")
         artifact_items: list[ArtifactModelItemConfig] = []
         artifact_items_raw = _require_sequence(
             artifact_raw.get("items"),
@@ -449,14 +424,11 @@ class CouplingSensitivityConfig:
             )
             name = str(mapping.get("name", "")).strip()
             if not name:
-                raise ValueError(
-                    "Each artifact-model sensitivity item requires a non-blank name."
-                )
+                raise ValueError("Each artifact-model sensitivity item requires a non-blank name.")
             nuisance_overrides = _require_mapping(
                 mapping.get("nuisance_overrides", {}),
                 path=(
-                    "eeg_bold_coupling.sensitivities.artifact_models.items[*]."
-                    "nuisance_overrides"
+                    "eeg_bold_coupling.sensitivities.artifact_models.items[*]." "nuisance_overrides"
                 ),
             )
             if not nuisance_overrides:
@@ -474,9 +446,7 @@ class CouplingSensitivityConfig:
             items=tuple(artifact_items),
         )
         if artifact_models.enabled and not artifact_models.items:
-            raise ValueError(
-                "Artifact-model sensitivity requires at least one item."
-            )
+            raise ValueError("Artifact-model sensitivity requires at least one item.")
         return cls(
             painful_only=painful_only,
             alternative_fmri=alternative_fmri,
@@ -509,9 +479,7 @@ def resolve_sensitivity_beta_dir(
     )
     path = Path(rendered).expanduser().resolve()
     if not path.exists():
-        raise FileNotFoundError(
-            f"Sensitivity beta directory does not exist: {path}"
-        )
+        raise FileNotFoundError(f"Sensitivity beta directory does not exist: {path}")
     return path
 
 

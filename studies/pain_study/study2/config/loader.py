@@ -11,7 +11,6 @@ import yaml
 
 from eeg_pipeline.utils.config.loader import resolve_config_paths
 
-
 STUDY2_CONFIG_ENV_VAR = "PAIN_STUDY_STUDY2_CONFIG"
 
 
@@ -67,4 +66,3 @@ __all__ = [
     "apply_study2_config_defaults",
     "load_study2_config",
 ]
-
