@@ -412,7 +412,7 @@ Source data now reads as one chain under
 |---|---|
 | raw 5 kHz, per participant | `sub-*/eeg/original_untrimmed_5khz/`, `original_trimmed_5khz/` |
 | 1 — scanner artifact corrected, R peaks marked only | `step1_scanner_artifact_pulse_marked/` |
-| 2 — missing beats recovered by this workflow | `step2_pulse_markers_recovered/` |
+| 2 — missing beats recovered by this workflow | `step2_pulse_markers_recovered_v2/` |
 | 3 — Analyzer re-run, BCG corrected from those markers | `step3_bcg_corrected/` |
 | 4 — room line comb removed | `data/bids_output/eeg_linecleaned/` (BIDS, not a batch) |
 

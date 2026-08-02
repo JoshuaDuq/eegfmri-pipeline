@@ -62,3 +62,15 @@ def source_interpretation_command():
         setup=setup_source_interpretation,
         run=run_source_interpretation,
     )
+
+
+def data_chain_command():
+    from eeg_pipeline.cli.commands import Command
+    from studies.pain_study.cli.data_chain import run_data_chain, setup_data_chain
+
+    return Command(
+        name="data-chain",
+        setup=setup_data_chain,
+        run=run_data_chain,
+        requires_subjects=False,
+    )

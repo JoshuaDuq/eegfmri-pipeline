@@ -8,6 +8,7 @@ dependencies = ["eeg-pipeline"]
 coupling = "studies.pain_study.cli.command_registry:coupling_command"
 line-comb = "studies.pain_study.cli.command_registry:line_comb_command"
 cardiac-gaps = "studies.pain_study.cli.command_registry:cardiac_gaps_command"
+data-chain = "studies.pain_study.cli.command_registry:data_chain_command"
 signature-prediction = "studies.pain_study.cli.command_registry:signature_prediction_command"
 source-interpretation = "studies.pain_study.cli.command_registry:source_interpretation_command"
 
