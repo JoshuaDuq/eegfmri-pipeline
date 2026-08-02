@@ -118,6 +118,15 @@ MINIMUM_SCORABLE_BEATS = 8
 # its 5th percentile 46.8. Outside this the marker set cannot be the whole beat train.
 PLAUSIBLE_BPM = (40.0, 110.0)
 
+# The absolute range above only catches a train missing most of its beats. A run missing a
+# third of them lands at an unremarkable rate -- sub-0001 run 1 recovered to 47.0 bpm where
+# that subject's other runs sit at 71.1 -- and is passed on as corrected. A rate is only
+# plausible against the heart it came from, so each run is also compared with its own
+# subject. On this cohort the under-marked runs sit at 0.66-0.79 of their subject's rate and
+# the genuinely slower ones at 0.90 or above; this bound is the gap between those two groups
+# and is reported alongside the ratio so it can be re-derived elsewhere.
+SUBJECT_RATE_RATIO = 0.85
+
 
 def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
     """Why a run is or is not correctable, as a status rather than a bare count.
@@ -141,6 +150,57 @@ def recovery_status(recovery, minimum: int = MINIMUM_SCORABLE_BEATS) -> str:
     if bpm == bpm and not PLAUSIBLE_BPM[0] <= bpm <= PLAUSIBLE_BPM[1]:
         return f"implausible_rate ({bpm:.1f} bpm)"
     return "ok"
+
+
+def flag_rates_against_subject(
+    rows: list[dict], *, minimum_ratio: float = SUBJECT_RATE_RATIO
+) -> list[dict]:
+    """Compare each run's recovered rate with its own subject's, and say when it falls short.
+
+    :func:`recovery_status` judges a run alone, so it can only reject a rate that is
+    impossible for anybody. That leaves the common failure untouched: Analyzer marks two
+    thirds of a train, the gap rule finds nothing to search because it is relative to the
+    run's own median RR, and the run reports a perfectly ordinary rate that happens to be a
+    third below the rate the same heart shows in every other run of the session.
+
+    The reference is the median of the subject's *other* runs, restricted to ones whose rate
+    is possible at all, so one bad run cannot define the standard it is judged against. A
+    subject with fewer than two usable runs is left alone rather than guessed at.
+
+    ``subject_reference_bpm`` and ``implied_bpm_ratio`` are written for every row whether or
+    not the status changes, so the comparison stays visible and re-derivable at another
+    bound. A run already flagged for its own reason keeps that reason.
+    """
+    import math
+
+    by_subject: dict[str, list[dict]] = {}
+    for row in rows:
+        by_subject.setdefault(str(row.get("subject")), []).append(row)
+
+    for runs in by_subject.values():
+        for row in runs:
+            row["subject_reference_bpm"] = float("nan")
+            row["implied_bpm_ratio"] = float("nan")
+            bpm = row.get("implied_bpm")
+            if bpm is None or not isinstance(bpm, (int, float)) or math.isnan(bpm):
+                continue
+            others = [
+                float(other["implied_bpm"])
+                for other in runs
+                if other is not row
+                and isinstance(other.get("implied_bpm"), (int, float))
+                and not math.isnan(float(other.get("implied_bpm", float("nan"))))
+                and PLAUSIBLE_BPM[0] <= float(other["implied_bpm"]) <= PLAUSIBLE_BPM[1]
+            ]
+            if len(others) < 2:
+                continue
+            reference = float(np.median(others))
+            row["subject_reference_bpm"] = reference
+            ratio = float(bpm) / reference if reference else float("nan")
+            row["implied_bpm_ratio"] = ratio
+            if row.get("status") == "ok" and ratio < minimum_ratio:
+                row["status"] = f"rate_below_subject ({float(bpm):.1f} vs {reference:.1f} bpm)"
+    return rows
 
 
 def quality_row(recovery, crosscheck: dict | None) -> dict:
@@ -644,6 +704,14 @@ def run(args: argparse.Namespace) -> None:
                 }
             )
         print(json.dumps(rows[-1]), flush=True)
+    # Only now is there a second run of the same subject to compare a rate against, so the
+    # per-subject check cannot live in the per-run status. The streamed lines above are
+    # per-run and predate it; the written table carries the revised status.
+    if args.command in {"report", "markers", "apply"}:
+        flag_rates_against_subject(rows)
+        revised = [r for r in rows if str(r.get("status", "")).startswith("rate_below_subject")]
+        for row in revised:
+            print(f"revised {row['subject']} run-{row['run']}: {row['status']}", flush=True)
     _write_tsv(rows, destination)
     print(f"wrote {len(rows)} rows to {destination}")
 

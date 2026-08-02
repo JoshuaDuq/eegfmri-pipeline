@@ -238,3 +238,79 @@ def test_apply_only_changes_gap_stretches(tmp_path):
     assert np.array_equal(out[:, :lo], analyzer_corrected[:, :lo])
     assert np.array_equal(out[:, hi:], analyzer_corrected[:, hi:])
     assert not np.array_equal(out[:, lo:hi], analyzer_corrected[:, lo:hi])
+
+
+def test_a_rate_plausible_in_the_abstract_is_flagged_against_its_own_subject():
+    """The absolute range cannot catch a run under-marked by a third.
+
+    sub-0001 run 1 recovers to 47.0 bpm where that subject's other five runs sit at 71.1,
+    and 47 bpm is a perfectly ordinary heart rate -- so the absolute check passes it and
+    Analyzer is handed a train missing ~196 beats. sub-0012 run 1 (54.0 against 69.0) and
+    sub-0011 run 2 (48.5 against 61.9) failed the same way on this cohort.
+    """
+    rows = [
+        {"subject": "sub0001", "run": "1", "status": "ok", "implied_bpm": 47.0},
+        {"subject": "sub0001", "run": "2", "status": "ok", "implied_bpm": 71.5},
+        {"subject": "sub0001", "run": "3", "status": "ok", "implied_bpm": 70.8},
+        {"subject": "sub0001", "run": "4", "status": "ok", "implied_bpm": 71.1},
+        {"subject": "sub0001", "run": "5", "status": "ok", "implied_bpm": 72.0},
+    ]
+
+    flagged = correct_cardiac_gaps.flag_rates_against_subject(rows)
+
+    assert flagged[0]["status"].startswith("rate_below_subject")
+    assert "47.0" in flagged[0]["status"] and "71" in flagged[0]["status"]
+    assert [r["status"] for r in flagged[1:]] == ["ok"] * 4
+    assert flagged[0]["subject_reference_bpm"] == pytest.approx(71.1, abs=0.5)
+
+
+def test_a_genuinely_slower_run_is_left_alone():
+    """sub-0009 runs 1 and 3 sit at 65.7 against that subject's 73.3 and are real.
+
+    Their interval distribution is 90% unimodal -- no population at twice the base --
+    so the beats are not missing, the heart was slower. Flagging them would send a sound
+    run back to Analyzer.
+    """
+    rows = [
+        {"subject": "sub0009", "run": "1", "status": "ok", "implied_bpm": 65.7},
+        {"subject": "sub0009", "run": "2", "status": "ok", "implied_bpm": 73.3},
+        {"subject": "sub0009", "run": "3", "status": "ok", "implied_bpm": 65.7},
+        {"subject": "sub0009", "run": "4", "status": "ok", "implied_bpm": 73.0},
+        {"subject": "sub0009", "run": "5", "status": "ok", "implied_bpm": 74.1},
+    ]
+
+    assert [r["status"] for r in correct_cardiac_gaps.flag_rates_against_subject(rows)] == [
+        "ok"
+    ] * 5
+
+
+def test_a_subject_with_too_few_usable_runs_is_not_judged():
+    """One run cannot be a reference for itself."""
+    rows = [
+        {"subject": "sub0099", "run": "1", "status": "ok", "implied_bpm": 44.0},
+        {"subject": "sub0099", "run": "2", "status": "missing_ecg"},
+    ]
+
+    flagged = correct_cardiac_gaps.flag_rates_against_subject(rows)
+
+    assert flagged[0]["status"] == "ok"
+    assert flagged[0]["subject_reference_bpm"] != flagged[0]["subject_reference_bpm"]  # nan
+
+
+def test_an_already_flagged_run_keeps_the_reason_it_was_flagged_for():
+    rows = [
+        {
+            "subject": "sub0008",
+            "run": "4",
+            "status": "implausible_rate (13.3 bpm)",
+            "implied_bpm": 13.3,
+        },
+        {"subject": "sub0008", "run": "1", "status": "ok", "implied_bpm": 60.1},
+        {"subject": "sub0008", "run": "2", "status": "ok", "implied_bpm": 59.4},
+        {"subject": "sub0008", "run": "3", "status": "ok", "implied_bpm": 60.3},
+    ]
+
+    flagged = correct_cardiac_gaps.flag_rates_against_subject(rows)
+
+    assert flagged[0]["status"] == "implausible_rate (13.3 bpm)"
+    assert flagged[0]["implied_bpm_ratio"] < 0.3
