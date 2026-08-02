@@ -53,10 +53,12 @@ def test_the_workflow_reads_the_uncleaned_root_not_its_own_output() -> None:
 
 #: Measured on the delivered epochs, 14 participants, sub-0008 excluded. Each entry is the
 #: frequency, how many participants carry it, and what it is.
+#: 61.0353 Hz is absent on purpose: it falls 0.128 Hz from comb harmonic 51, inside
+#: isolated_search_hz, so estimate_comb rejects it as a seed that would find the comb. It
+#: sits in the unanalysed 58-62 gap and the comb already covers that position.
 AUDITED_RESIDUALS = {
     23.7776: "narrow, off both combs, 7/14, beta",
     29.6854: "narrow, off both combs, 9/14, 0.41 Hz below the gamma_low edge",
-    61.0353: "mains +1.02 Hz sideband, 11/14",
     81.1111: "gradient harmonic 73 at TR = 0.9 s, 3/14, inside 62-95 Hz",
 }
 
@@ -105,11 +107,17 @@ def test_exactly_one_stage_removes_mains():
 
     fir_notch = core.get("preprocessing.notch_freq")
     exclude_mains = bool(workflow.get("line_comb_removal.exclude_mains"))
-    search = float(workflow.get("line_comb_removal.isolated_search_hz"))
-    isolated = workflow.get("line_comb_removal.isolated_hz")
-    removal_takes_mains = (not exclude_mains) and any(
-        abs(seed - 60.0) <= search for seed in isolated
+
+    # Mains reaches the removal as a comb harmonic, not as an isolated line: the comb is
+    # mains-synchronous, so its fundamental is mains/50 and 60 Hz is harmonic 50. All
+    # exclude_mains controls is whether removal_frequencies drops it again on the way out.
+    low, high = workflow.get("line_comb_removal.removal_harmonic_range")
+    mains_harmonic = round(60.0 / float(workflow.get("line_comb_removal.nominal_fundamental_hz")))
+    assert low <= mains_harmonic <= high, (
+        f"60 Hz is comb harmonic {mains_harmonic}, outside removal_harmonic_range "
+        f"[{low}, {high}]; turning exclude_mains off would then remove nothing at mains"
     )
+    removal_takes_mains = not exclude_mains
 
     assert bool(fir_notch) != removal_takes_mains, (
         f"preprocessing.notch_freq={fir_notch!r} and the line-comb pass "

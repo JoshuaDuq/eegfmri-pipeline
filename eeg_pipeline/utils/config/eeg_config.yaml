@@ -725,6 +725,14 @@ feature_engineering:
     itpc: "csd"              # Phase coherence also benefits from CSD
     pac: "csd"               # PAC phase component benefits from CSD
     power: "none"            # Amplitude features - CSD changes interpretation
+    # Kept "none" deliberately, and CSD is NOT added here as a sibling key: this map is
+    # consulted by family name from feature_categories above, so an invented key such as
+    # "power_csd" would be read by nothing. Scalp muscle spreads far from its generators
+    # and a pain-minus-warm gamma change tracks each channel's muscle index across
+    # channels in 12 of 14 participants (median r = +0.34 / +0.28 / +0.19 for
+    # 30.1-45 / 45-58 / 62-95 Hz), which is what CSD would be for. Whether it helps here
+    # is measured by studies/pain_study/scripts/csd_muscle_check.py. Wiring CSD in as a
+    # first-class feature family is deferred until that measurement says it is worth it.
     aperiodic: "none"        # Slope/offset - CSD changes spectral shape
     bursts: "none"           # Envelope-based - CSD changes amplitude
     erds: "none"             # Baseline-normalized power - CSD changes baseline
