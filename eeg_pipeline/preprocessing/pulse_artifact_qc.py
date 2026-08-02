@@ -171,11 +171,17 @@ def uncorrected_pulse_intervals(
     """Mark the stretches of a run where no pulse template was subtracted.
 
     Analyzer's correction runs at the beats it marked. Where the marker train has a gap,
-    or has not started or has ended, the ballistocardiogram is still in the EEG. Those
-    beats cannot be recovered afterwards: on this cohort a gap-restricted redetection with
-    the flanking markers supplying the rate prior recovers 27-52% of known-deleted beats in
-    exactly the subjects that have gaps, at 25-79 ms timing error, which is coarser than
-    template subtraction can use. So the intervals are labelled rather than repaired.
+    or has not started or has ended, the ballistocardiogram is still in the EEG.
+
+    This records what the delivered data has uncorrected; it does not claim the beats are
+    unrecoverable. Some are: sub-0008 run-4 carries 110 markers where an independent
+    detector finds 508 at 61 bpm, reproducing all 110 of Analyzer's own at 9.5 ms, and the
+    merged train is regular (IQR 0.09 s). Recovering them is `eeg-pipeline cardiac-gaps`,
+    which corrects only the gap stretches and keeps Analyzer's correction elsewhere.
+    Whether a given gap is recoverable has to be established per run against that run's own
+    markers, because a generic QRS detector is not a trustworthy arbiter on this in-scanner
+    ECG — it reproduces Analyzer's markers on 17 of 90 runs and over-detects the T wave on
+    the rest.
 
     A gap contributes the region closer to its missing beats than to the marked beats
     either side — half a beat period inside each flanking marker. The gap rule is the same
