@@ -46,7 +46,14 @@ line_comb_removal:
   # 98.4 Hz, inside the 100 Hz lowpass and so in the delivered data; 97.2 Hz is present in
   # 15 of 15 participants with no measurable frequency scatter. They are outside the bands
   # this study analyses, so this end of the range is hygiene rather than a result.
-  removal_harmonic_range: [22, 82]
+  #
+  # Extended to 83 (99.6 Hz) on 2026-08-02: an audit of the delivered epochs found 99.6 Hz
+  # standing 3.8 dB over background in 12 of 15 participants on ~39 channels, the most
+  # consistent residual line in the cohort. It is a comb member -- 1.2 x 83 to within the
+  # 0.08 Hz of frequency scatter it shows across subjects -- that simply sat past the old
+  # ceiling. Checked against a background extrapolated from below the 100 Hz low-pass knee
+  # (+3.9 to +13.2 dB per subject) so it is a line rather than a filter-edge artifact.
+  removal_harmonic_range: [22, 83]
 
   # Not on the comb, and they drift. 57.3485 and 58.3442 were added on 2026-07-31 after
   # sub-0012's cleaned data showed them standing 9.8 and 10.0 dB above background, the two
@@ -59,7 +66,14 @@ line_comb_removal:
   # to both. Narrowing the window cannot fix it: 57.2247 wanders up to 147 mHz across the
   # cohort and needs a wide one to be followed. estimate_comb instead resolves these
   # strongest first and lets each line be claimed once.
-  isolated_hz: [47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 94.0748]
+  # 82.2228 is NOT a room-comb member and does not drift with mains: it is the imaging
+  # gradient's 74th harmonic, 74/TR at TR = 0.899994 s, and it is here because the audit
+  # found it 3.0 dB over background in 9 of 15 participants inside the 62-95 Hz gamma
+  # window. Everything else in this list wanders with the room; this one is locked to the
+  # scanner clock and has the tightest scatter of any line measured (0.12 Hz). Re-derive it
+  # if the sequence TR ever changes -- it is the one entry here that is not a property of
+  # the room.
+  isolated_hz: [47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 82.2228, 94.0748]
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets
@@ -75,4 +89,7 @@ line_comb_removal:
   notch_width_ratio: 450
   notch_width_min_hz: 0.05         # one bin at the 20 s working resolution
   low_hz: 3.0
-  high_hz: 99.0                    # below the 100 Hz lowpass, so harmonics 80-82 are reachable
+  # Raised from 99.0 on 2026-08-02 so harmonic 83 (99.6 Hz) is reachable. Still under the
+  # 100 Hz lowpass the pipeline applies, and the removal notch there is freq/450 = 0.22 Hz
+  # wide, so it stays clear of the cutoff.
+  high_hz: 99.8
