@@ -110,7 +110,11 @@ class TestTuiConfigGapAudit(unittest.TestCase):
             self.assertIn(key, psd_config)
 
         pyprep_config = eeg_config["pyprep"]
-        self.assertEqual("per_run", pyprep_config["bad_channel_sync_policy"])
+        # subject_union, not per_run: every run was already being invoked with
+        # --bad-channel-sync-policy subject_union on the command line while the config
+        # still said per_run, so the delivered data depended on a flag someone had to
+        # remember. The config now states what is actually run.
+        self.assertEqual("subject_union", pyprep_config["bad_channel_sync_policy"])
 
         self.assertEqual(["brain", "other"], eeg_config["ica"]["labels_to_keep"])
 
