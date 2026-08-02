@@ -314,3 +314,43 @@ def test_an_already_flagged_run_keeps_the_reason_it_was_flagged_for():
 
     assert flagged[0]["status"] == "implausible_rate (13.3 bpm)"
     assert flagged[0]["implied_bpm_ratio"] < 0.3
+
+
+def test_a_globally_under_marked_run_still_has_searchable_gaps():
+    """The relative gap test scales with the corruption it is meant to survive.
+
+    sub-0008 run 4 carries 44 markers across 497 s, so its intervals sit near 4 s where the
+    heart's own is 1.0 s. Both the 25th-percentile baseline and the median follow the
+    marker train up, so the threshold lands above the very intervals hiding the missing
+    beats and nothing is searched. Capping the baseline at a rate a heart could actually
+    have restores them.
+    """
+    detect = pytest.importorskip("studies.pain_study.analysis.bcg.detect")
+
+    # one beat in four marked: intervals of ~4 s where the true period is 1 s
+    beats = np.arange(2.0, 400.0, 4.0)
+
+    uncapped = detect.find_gaps(beats, maximum_baseline_s=float("inf"))
+    capped = detect.find_gaps(beats)
+
+    assert uncapped == [], "this is the blind spot: a 4 s interval is not long *for this run*"
+    assert len(capped) > 50, "against a plausible beat period every one of them is a gap"
+
+
+def test_capping_the_baseline_leaves_an_ordinary_run_alone():
+    """A complete train at a normal rate must not suddenly be all gaps."""
+    detect = pytest.importorskip("studies.pain_study.analysis.bcg.detect")
+
+    beats = np.arange(2.0, 400.0, 1.0)
+
+    assert detect.find_gaps(beats) == []
+
+
+def test_a_genuinely_slow_but_complete_train_is_not_shredded():
+    """45 bpm is inside the rate the workflow calls plausible, so its intervals are beats,
+    not gaps."""
+    detect = pytest.importorskip("studies.pain_study.analysis.bcg.detect")
+
+    beats = np.arange(2.0, 400.0, 60.0 / 45.0)
+
+    assert detect.find_gaps(beats) == []

@@ -45,12 +45,20 @@ def read_analyzer_beats(vhdr_path: Path | str) -> np.ndarray:
     return np.asarray(sorted(onsets), dtype=float)
 
 
+#: The longest interval a beating heart is taken to produce, 40 bpm -- the same rate the
+#: cardiac-gaps workflow already treats as the floor of plausibility. Used to cap estimates
+#: of the beat period that are read off a marker train, since a train missing most of its
+#: beats reports a period several times too long.
+MAXIMUM_BEAT_PERIOD_S = 60.0 / 40.0
+
+
 def find_gaps(
     beat_seconds: np.ndarray,
     *,
     minimum_seconds: float = 1.2,
     factor: float = 1.5,
     baseline_percentile: float = 25.0,
+    maximum_baseline_s: float = MAXIMUM_BEAT_PERIOD_S,
 ) -> list[Gap]:
     """Intervals that are both absolutely long and long for this run.
 
@@ -76,7 +84,14 @@ def find_gaps(
     if beats.size < 3:
         return []
     intervals = np.diff(beats)
-    baseline = float(np.percentile(intervals, baseline_percentile))
+    # Capped as well as taken low in the distribution. The percentile survives a train
+    # missing *some* of its beats; it cannot survive one missing most of them, where every
+    # interval is inflated and no percentile of them is a beat period. sub-0008 run 4 marks
+    # one beat in four, so its 25th percentile reads 2.9 s against a true 1.0 s and the
+    # threshold lands above the 4 s intervals the missing beats are hiding in -- 27 gaps
+    # found where the run is 92% gap. A heart does not beat slower than the workflow's own
+    # floor of plausibility, so neither does the baseline.
+    baseline = min(float(np.percentile(intervals, baseline_percentile)), maximum_baseline_s)
     threshold = max(minimum_seconds, factor * baseline)
     return [
         Gap(
@@ -284,7 +299,12 @@ def recover_beats(
             ),
         )
 
-    median_rr = float(np.median(np.diff(analyzer)))
+    # Capped for the same reason the gap baseline is: on an under-marked run the median
+    # interval is not a beat period. Uncapped, sub-0008 run 4 sets a 2.0 s refractory --
+    # so even inside a gap the matcher cannot accept beats 1 s apart -- and trims 2.0 s
+    # off each end of every gap it searches. Capping it recovers 407 beats there against
+    # 66, at a QRS lock ratio of 4.33 where Analyzer's own 44 beats score 3.96.
+    median_rr = min(float(np.median(np.diff(analyzer))), MAXIMUM_BEAT_PERIOD_S)
     refractory = max(int(round(settings.refractory_fraction * median_rr * sfreq)), 1)
     offset = int(round(window[0] * sfreq))
 
