@@ -866,20 +866,40 @@ In `eeg_pipeline/utils/config/eeg_config.yaml`, set:
 - [ ] **Step 3: Detect bad channels first**
 
 ```bash
-.venv/bin/eeg-pipeline bad-channels
+.venv/bin/eeg-pipeline preprocessing bad-channels
 ```
 
 Expected: a pyprep log per participant. Detection is pyprep-only and `preprocessing ica` never runs it, so skipping this leaves the run on a stale bad-channel set from the previous generation.
 
-- [ ] **Step 4: Run preprocessing**
+- [ ] **Step 4: Fit ICA**
 
 ```bash
-.venv/bin/eeg-pipeline preprocessing
+.venv/bin/eeg-pipeline preprocessing ica
+```
+
+`preprocessing` takes a required positional mode — one of `bad-channels`, `ica`, `epochs`.
+There is no combined invocation, so this is two commands and not one, and the epoch half
+cannot run yet: with `ica.require_manual_review: true` and `manual_review_complete: false`,
+`_get_steps_for_mode` raises for `epochs` (`preprocessing.py:442-449`). Epochs are
+therefore produced in Step 6, after the review in Step 5 — the review is a precondition of
+epoching, not a follow-up to it. Steps 7 and 8 read `*_epo.fif` and so follow Step 6 too.
+
+- [ ] **Step 5: Review ICA components for all 15 participants**
+
+Open each `*_proc-ica_components.tsv` and confirm the cardiac and ocular exclusions. The CTPS cardiac review runs against the recorded ECG and provides the automated baseline; the manual pass adjusts it. Set `manual_review_complete: true` only once all 15 are done.
+
+This step gates the next one and cannot be automated: ICA is refit from scratch on the
+newly cleaned data, so component indices from the previous generation do not carry over.
+
+- [ ] **Step 6: Create epochs**
+
+```bash
+.venv/bin/eeg-pipeline preprocessing epochs
 ```
 
 Expected: 15 participants, 6 runs each, 66 epochs per participant.
 
-- [ ] **Step 5: Confirm mains was removed exactly once**
+- [ ] **Step 7: Confirm mains was removed exactly once**
 
 ```bash
 .venv/bin/python -c "
@@ -902,7 +922,7 @@ print(f'bins more than 1 dB low near mains: {width} ({width * (f[1] - f[0]):.3f}
 
 Expected: 60 Hz within about 1 dB of background, and the low-bin span around 0.13 Hz rather than the 0.97 Hz the FIR notch left. A span still near 0.97 Hz means both notches ran.
 
-- [ ] **Step 6: Check the bad-channel set, and Cz in sub-0011 specifically**
+- [ ] **Step 8: Check the bad-channel set, and Cz in sub-0011 specifically**
 
 ```bash
 .venv/bin/python -c "
@@ -931,11 +951,7 @@ it is partly set by the interpolation. If Cz is still bad in sub-0011, record it
 commit message: it is the one channel whose loss constrains midline analyses, and the
 decision to leave it uninterpolated should be visible rather than implicit.
 
-- [ ] **Step 7: Review ICA components for all 15 participants**
-
-Open each `*_proc-ica_components.tsv` and confirm the cardiac and ocular exclusions. The CTPS cardiac review runs against the recorded ECG and provides the automated baseline; the manual pass adjusts it. Set `manual_review_complete: true` only once all 15 are done.
-
-- [ ] **Step 8: Commit the config change**
+- [ ] **Step 9: Commit the config change**
 
 ```bash
 git add eeg_pipeline/utils/config/eeg_config.yaml
