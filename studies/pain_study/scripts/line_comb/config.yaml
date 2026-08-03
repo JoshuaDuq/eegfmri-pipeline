@@ -148,6 +148,14 @@ line_comb_removal:
   detection_low_hz: 20.0           # below this the spec finds no removable lines at all
   detection_high_hz: 100.0
   max_isolated_lines: 16           # cohort needs at most 12; this bounds a pathological run
+  # A line must appear in at least this many runs of a session before it is removed from
+  # any of them. The runs are replication already in hand -- one machine, minutes apart --
+  # and they separate a line from a fluctuation cleanly: on sub-0000 fifteen of twenty
+  # candidates appeared in exactly one of six runs, while the five that recurred are the
+  # known lines (28.278, 57.296, 58.185, 82.204, 93.944 Hz). sub-0008 is the clean case,
+  # all seven of its lines in all six runs. Without this the budget was being spent
+  # arbitrating between one-off noise peaks.
+  min_runs_per_line: 2
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets

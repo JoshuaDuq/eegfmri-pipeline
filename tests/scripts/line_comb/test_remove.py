@@ -300,12 +300,15 @@ def test_a_session_agrees_on_one_nominal_list_across_its_runs():
     floor in different runs. The session list is therefore resolved once, from every run.
     """
     settings = rlc.RemovalSettings(detect_isolated=True)
+    # The line recurs in two of the three runs, so it clears the recurrence rule, and the
+    # third run is the one that has to be given the nominal anyway for pooling to line up.
     strong = _synthetic_spectrum(peaks=[(47.04, 24.0), (94.34, 26.0)])
-    weaker = _synthetic_spectrum(peaks=[(47.04, 24.0)])
+    also = _synthetic_spectrum(peaks=[(47.04, 24.0), (94.34, 22.0)])
+    without = _synthetic_spectrum(peaks=[(47.04, 24.0)])
 
-    nominals = rlc.session_nominals([strong, weaker], settings)
+    nominals = rlc.session_nominals([strong, also, without], settings)
     assert any(abs(f - 94.34) < 0.02 for f in nominals), (
-        "a line seen in one run of a session must be carried for the whole session"
+        "a line the session carries must be offered to every run in it"
     )
 
     estimates = [
@@ -318,7 +321,7 @@ def test_a_session_agrees_on_one_nominal_list_across_its_runs():
             isolated_search_hz=settings.isolated_search_hz,
             min_prominence_db=settings.min_prominence_db,
         )
-        for freqs, spec, prom in (strong, weaker)
+        for freqs, spec, prom in (strong, also, without)
     ]
     lr.combine_estimates(estimates)  # must not raise
 
@@ -327,3 +330,70 @@ def test_the_session_list_respects_the_budget():
     settings = rlc.RemovalSettings(detect_isolated=True, max_isolated_lines=2)
     spectra = [_synthetic_spectrum(peaks=[(47.04, 24.0), (94.34, 26.0), (30.5, 20.0)])]
     assert len(rlc.session_nominals(spectra, settings)) <= 2
+
+
+def test_the_session_budget_is_spent_on_the_strongest_lines_not_the_lowest():
+    """A cap that truncates by frequency throws away exactly what matters.
+
+    Measured on sub-0000, whose six runs union to twenty candidate lines against a cap of
+    sixteen: sorting by frequency and truncating dropped 93.944 Hz -- the 94 Hz line this
+    detection exists to catch -- while keeping weak lines at 20.037 and 21.093 Hz for no
+    reason but that they sit lower in the spectrum.
+    """
+    settings = rlc.RemovalSettings(detect_isolated=True, max_isolated_lines=2)
+    # All four recur, so recurrence is not what decides this -- the budget is, and it has
+    # to spend itself on the two strongest rather than the two lowest.
+    peaks = [(21.093, 11.0), (20.037, 10.5), (47.043, 23.0), (94.344, 27.0)]
+    spectra = [_synthetic_spectrum(peaks=peaks), _synthetic_spectrum(peaks=peaks)]
+    kept = rlc.session_nominals(spectra, settings)
+
+    assert len(kept) == 2
+    assert any(abs(f - 94.344) < 0.02 for f in kept), (
+        f"the strongest line was dropped by the cap: {kept}"
+    )
+    assert any(abs(f - 47.043) < 0.02 for f in kept), kept
+    assert not any(f < 25.0 for f in kept), (
+        f"weak low-frequency lines were kept ahead of strong ones: {kept}"
+    )
+
+
+def test_the_session_list_is_returned_in_frequency_order():
+    """Ranking happens on strength; the result is still ordered for the manifest."""
+    settings = rlc.RemovalSettings(detect_isolated=True)
+    spectra = [_synthetic_spectrum(peaks=[(94.344, 27.0), (47.043, 23.0), (28.1, 19.0)])]
+    kept = rlc.session_nominals(spectra, settings)
+    assert list(kept) == sorted(kept)
+
+
+def test_a_line_seen_in_only_one_run_of_a_session_is_not_taken():
+    """The runs of a session are the replication that separates a line from a fluctuation.
+
+    Measured on sub-0000: of twenty candidates unioned across its six runs, fifteen appeared
+    in exactly one run and five appeared in five or six. The recurring five are the known
+    lines -- 28.278, 57.296, 58.185, 82.204 and 93.944 Hz. sub-0008 is the clean case, where
+    all seven of its lines appear in all six runs. A line on one machine minutes apart does
+    not come and go; a noise peak clearing the floor once does.
+    """
+    settings = rlc.RemovalSettings(detect_isolated=True)
+    # 63.0 Hz is 0.6 Hz from the nearest comb position and 2.35 Hz from the nearest probe
+    # tone, so if it is rejected it is the recurrence rule doing it and nothing else.
+    real = (47.043, 23.0)
+    once = (63.0, 18.0)
+    spectra = [
+        _synthetic_spectrum(peaks=[real, once]),
+        _synthetic_spectrum(peaks=[real]),
+        _synthetic_spectrum(peaks=[real]),
+    ]
+    kept = rlc.session_nominals(spectra, settings)
+
+    assert any(abs(f - real[0]) < 0.02 for f in kept), kept
+    assert not any(abs(f - once[0]) < 0.02 for f in kept), (
+        f"a peak present in one run of three was taken for the session: {kept}"
+    )
+
+
+def test_a_single_run_session_can_still_contribute_lines():
+    """The recurrence rule must not empty a session that has only one run to offer."""
+    settings = rlc.RemovalSettings(detect_isolated=True)
+    kept = rlc.session_nominals([_synthetic_spectrum(peaks=[(47.043, 23.0)])], settings)
+    assert any(abs(f - 47.043) < 0.02 for f in kept), kept

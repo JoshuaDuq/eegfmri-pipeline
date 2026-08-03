@@ -107,6 +107,15 @@ class RemovalSettings:
     detection_low_hz: float = 20.0
     detection_high_hz: float = 100.0
     max_isolated_lines: int = lr.MAX_ISOLATED_LINES
+    min_runs_per_line: int = 2
+    """Runs of a session a line must appear in before it is removed from any of them.
+
+    The runs are replication already in hand -- one machine, minutes apart -- and they
+    separate a line from a fluctuation cleanly. On sub-0000, fifteen of twenty candidates
+    appeared in exactly one of six runs while the five that recurred are the known lines;
+    on sub-0008 all seven appeared in all six. Clamped to the number of runs available, so
+    a single-run session can still contribute.
+    """
     exclude_mains: bool = True
     """Leave 59.5-60.5 Hz to the pipeline's own notch.
 
@@ -148,6 +157,9 @@ class RemovalSettings:
             detection_high_hz=float(block.get("detection_high_hz", defaults.detection_high_hz)),
             max_isolated_lines=int(
                 block.get("max_isolated_lines", defaults.max_isolated_lines)
+            ),
+            min_runs_per_line=int(
+                block.get("min_runs_per_line", defaults.min_runs_per_line)
             ),
             exclude_mains=bool(block.get("exclude_mains", defaults.exclude_mains)),
         )
@@ -282,16 +294,25 @@ def isolated_nominals(
 
 
 def estimate_and_targets(
-    raw, settings: RemovalSettings
+    raw, settings: RemovalSettings, nominals: tuple[float, ...] | None = None
 ) -> tuple[lr.CombEstimate, tuple[float, ...], np.ndarray]:
+    """Estimate and targets for one run, optionally with the session's nominal list.
+
+    ``nominals`` exists so the benchmark can gate what the apply will actually do. Resolved
+    per run instead, detection has no recurrence to lean on and offers every one-off peak
+    that clears the floor: on sub-0000 that is sixteen candidates against the five its
+    session keeps. Benchmarking the sixteen would measure a configuration that never ships.
+    """
     freqs, spectrum_db, prominence = run_spectrum(raw)
+    if nominals is None:
+        nominals = isolated_nominals(freqs, spectrum_db, prominence, settings)
     estimate = lr.estimate_comb(
         freqs,
         spectrum_db,
         prominence,
         nominal_hz=settings.nominal_fundamental_hz,
         harmonic_range=settings.harmonic_range,
-        isolated_nominal_hz=isolated_nominals(freqs, spectrum_db, prominence, settings),
+        isolated_nominal_hz=nominals,
         search_hz=settings.search_hz,
         isolated_search_hz=settings.isolated_search_hz,
         min_prominence_db=settings.min_prominence_db,
@@ -306,13 +327,15 @@ def estimate_and_targets(
     return estimate, targets, prominence
 
 
-def benchmark_run(vhdr: Path, settings: RemovalSettings) -> dict:
+def benchmark_run(
+    vhdr: Path, settings: RemovalSettings, nominals: tuple[float, ...] | None = None
+) -> dict:
     """Inject probes, remove the lines, and measure what came back."""
     import mne
 
     mne.set_log_level("ERROR")
     raw = mne.io.read_raw_brainvision(vhdr, preload=True)
-    estimate, targets, prominence_before = estimate_and_targets(raw, settings)
+    estimate, targets, prominence_before = estimate_and_targets(raw, settings, nominals)
     probe = lr.Probe()
     lr.check_probe_clearance(probe, targets)
 
@@ -400,12 +423,37 @@ def session_nominals(spectra, settings: RemovalSettings) -> tuple[float, ...]:
     if not settings.detect_isolated:
         return settings.isolated_hz
 
-    found: list[float] = []
+    found: list[dict] = []
     for freqs, spectrum_db, prominence in spectra:
+        frequency_array = np.asarray(freqs, dtype=float)
+        prominence_array = np.asarray(prominence, dtype=float)
         for position in isolated_nominals(freqs, spectrum_db, prominence, settings):
-            if not any(abs(position - taken) <= lr._LINE_CLAIM_HZ for taken in found):
-                found.append(float(position))
-    return tuple(sorted(found)[: settings.max_isolated_lines])
+            strength = float(prominence_array[int(np.argmin(np.abs(frequency_array - position)))])
+            for entry in found:
+                if abs(position - entry["hz"]) <= lr._LINE_CLAIM_HZ:
+                    entry["runs"] += 1
+                    # Keep the run that saw it most clearly, so the ranking below compares
+                    # each line at its best rather than at whichever run came first.
+                    if strength > entry["db"]:
+                        entry["hz"], entry["db"] = float(position), strength
+                    break
+            else:
+                found.append({"hz": float(position), "db": strength, "runs": 1})
+
+    # A line has to show up in more than one run of the session. The runs are the
+    # replication already in hand: one machine, minutes apart, so a real line does not come
+    # and go. Measured on sub-0000, fifteen of its twenty candidates appeared in exactly one
+    # of six runs while the five that recurred are the known lines -- 28.278, 57.296,
+    # 58.185, 82.204 and 93.944 Hz. sub-0008 is the clean case, all seven of its lines in
+    # all six runs. Without this the cap was arbitrating between noise entries.
+    required = min(settings.min_runs_per_line, len(spectra))
+    recurring = [entry for entry in found if entry["runs"] >= required]
+
+    # Rank on strength before applying the budget. Truncating the frequency-ordered list
+    # instead spends the budget on whatever sits lowest in the spectrum: on sub-0000 that
+    # dropped 93.944 Hz -- the line this detection exists to catch -- to keep 20.037 Hz.
+    strongest = sorted(recurring, key=lambda e: (-e["db"], e["hz"]))[: settings.max_isolated_lines]
+    return tuple(sorted(entry["hz"] for entry in strongest))
 
 
 def estimate_session(vhdrs, settings: RemovalSettings):
@@ -624,10 +672,37 @@ def run(args: argparse.Namespace) -> None:
     if args.stage == "benchmark":
         # One run per participant unless told otherwise, so the sample spans the cohort.
         sample = runs if args.limit is None else runs[:: max(len(runs) // args.limit, 1)]
+
+        # Resolve each sampled run's session list first, so the gates are measured on the
+        # targets the apply will use. Detection resolved per run has no recurrence to lean
+        # on and offers every one-off peak clearing the floor -- sixteen candidates on
+        # sub-0000 against the five its session keeps -- so benchmarking without this would
+        # gate a configuration that never ships.
+        session_lists: dict[str, tuple[float, ...]] = {}
+        if settings.detect_isolated:
+            import mne
+
+            mne.set_log_level("ERROR")
+            for vhdr in sample:
+                subject = vhdr.stem.split("_")[0]
+                if subject in session_lists:
+                    continue
+                siblings = sorted(vhdr.parent.glob(f"{subject}_task-*_run-*_eeg.vhdr"))
+                spectra = [
+                    run_spectrum(mne.io.read_raw_brainvision(s, preload=True))
+                    for s in siblings
+                ]
+                session_lists[subject] = session_nominals(spectra, settings)
+                print(
+                    f"  {subject}: {len(siblings)} runs -> "
+                    f"{len(session_lists[subject])} isolated lines",
+                    flush=True,
+                )
+
         rows = []
         for index, vhdr in enumerate(sample, start=1):
             started = time.time()
-            row = benchmark_run(vhdr, settings)
+            row = benchmark_run(vhdr, settings, session_lists.get(vhdr.stem.split("_")[0]))
             rows.append(row)
             print(
                 f"[{index}/{len(sample)}] {vhdr.stem[:44]:44s} "
