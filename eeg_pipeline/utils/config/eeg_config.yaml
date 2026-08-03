@@ -462,7 +462,15 @@ ica:
   use_ecg_detection: true
   use_eog_detection: true
   require_manual_review: true
-  manual_review_complete: false  # Set true only after reviewing *_proc-ica_components.tsv.
+  # True on the operator's instruction for the 2026-08-03 re-run, without a component-by-
+  # component pass. Recorded rather than left implicit, because the comment above says why
+  # it matters: ICLabel was not trained on ballistocardiogram components and under-calls
+  # them into its "other" catch-all, which this config retains, so the CTPS scoring against
+  # the recorded ECG is carrying the cardiac exclusions alone here rather than as a
+  # baseline the manual pass adjusts.
+  #
+  # Set back to false to reopen the review; epochs are then blocked until it is set again.
+  manual_review_complete: true
   process_raw_clean: true
   probability_threshold: 0.8
   labels_to_keep: ["brain", "other"]
