@@ -121,6 +121,33 @@ line_comb_removal:
   # participants carrying it 0.18-0.28 Hz high: it is gradient harmonic 74 at TR = 0.9 s
   # (74/0.9 = 82.2222), a physically pinned position, and the misses are 6.5-8.3 dB.
   isolated_hz: [23.7500, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 81.1111, 82.2228, 93.8000, 94.0748, 94.3000]
+  # Find each session's isolated lines in its own spectra rather than using the list above.
+  #
+  # The list is kept as the record of what was curated, and as the fallback when this is
+  # false, but it cannot be right for everyone: measured on the uncleaned root these lines
+  # scatter up to 0.595 Hz between participants while one seed covers 2 * 0.15 = 0.30 Hz.
+  # The 94 Hz line was reached in 11 of 15 participants and left standing at +20 to +28 dB
+  # in the other four -- and in sub-0008 the delivered data came out worse than it went in,
+  # +28.0 dB before cleaning against +31.2 dB after, because the neighbours around it were
+  # removed and it was not. Detection reaches it in 14 of 15, including three of those four.
+  #
+  # Calibrated on the fifteen uncleaned run-1 recordings. Of 889 peaks clearing 6 dB three
+  # quarters sat at or below 8.3 dB, and dropping the floor from 10 dB to 6 dB took the
+  # count from 7.2 to 59.3 peaks per participant while adding no frequency that recurs
+  # across the cohort. At 10 dB what survives lands on the known lines and nothing else:
+  # 23.776 Hz in 10 participants, 29.684 in 8, 47.046 in 13, 57.234 in 15, 58.193 in 14,
+  # 94.091 in 14. It also finds ~28 Hz at +19 to +22 dB, which the curated list never
+  # carried and which cleaning therefore never touched.
+  #
+  # What keeps it from removing signal: peaks within 0.20 Hz of any comb position are left
+  # to the comb pass, peaks within 0.35 Hz of a benchmark probe tone are left alone, and
+  # peaks wider than 0.25 Hz measured 3 dB down are left alone because a scanner line is a
+  # sinusoid while alpha and beta rhythms are whole hertz wide.
+  detect_isolated: true
+  detection_min_prominence_db: 10.0
+  detection_low_hz: 20.0           # below this the spec finds no removable lines at all
+  detection_high_hz: 100.0
+  max_isolated_lines: 16           # cohort needs at most 12; this bounds a pathological run
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets

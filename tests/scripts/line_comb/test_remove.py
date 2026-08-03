@@ -257,3 +257,73 @@ def test_removal_settings_reads_the_mains_exclusion_flag():
 
     assert rlc.RemovalSettings.from_config(_Config({})).exclude_mains is True
     assert rlc.RemovalSettings.from_config(_Config({"exclude_mains": False})).exclude_mains is False
+
+
+def _synthetic_spectrum(peaks=(), *, f0=1.2, harmonics=(24, 79), df=0.002):
+    """A spectrum carrying a full comb plus the given isolated peaks."""
+    freqs = np.arange(1.0, 100.0, df)
+    spectrum = np.zeros_like(freqs)
+    sigma = 0.109 / 2.355
+
+    def add(centre, height):
+        spectrum[:] = np.maximum(
+            spectrum, height * np.exp(-0.5 * ((freqs - centre) / sigma) ** 2)
+        )
+
+    for k in range(harmonics[0], harmonics[1] + 1):
+        add(k * f0, 14.0)
+    for centre, height in peaks:
+        add(centre, height)
+    return freqs, spectrum, spectrum.copy()
+
+
+def test_the_configured_list_is_used_when_detection_is_off():
+    """Detection is opt-in; with it off nothing about the existing behaviour changes."""
+    settings = rlc.RemovalSettings(detect_isolated=False, isolated_hz=(47.0362, 94.0748))
+    freqs, spec, prom = _synthetic_spectrum(peaks=[(94.3453, 26.0)])
+    assert rlc.isolated_nominals(freqs, spec, prom, settings) == (47.0362, 94.0748)
+
+
+def test_detection_finds_the_line_the_configured_list_would_have_missed():
+    """94.3453 Hz is 0.27 Hz from the curated seed, outside its 0.15 Hz window."""
+    settings = rlc.RemovalSettings(detect_isolated=True, isolated_hz=(94.0748,))
+    freqs, spec, prom = _synthetic_spectrum(peaks=[(94.3453, 26.0)])
+    found = rlc.isolated_nominals(freqs, spec, prom, settings)
+    assert any(abs(f - 94.3453) < 0.02 for f in found), found
+
+
+def test_a_session_agrees_on_one_nominal_list_across_its_runs():
+    """Pooling lines estimates up position by position and refuses runs that disagree.
+
+    ``combine_estimates`` raises when two runs carry a different number of isolated lines,
+    which per-run detection produces the moment a line sits either side of the prominence
+    floor in different runs. The session list is therefore resolved once, from every run.
+    """
+    settings = rlc.RemovalSettings(detect_isolated=True)
+    strong = _synthetic_spectrum(peaks=[(47.04, 24.0), (94.34, 26.0)])
+    weaker = _synthetic_spectrum(peaks=[(47.04, 24.0)])
+
+    nominals = rlc.session_nominals([strong, weaker], settings)
+    assert any(abs(f - 94.34) < 0.02 for f in nominals), (
+        "a line seen in one run of a session must be carried for the whole session"
+    )
+
+    estimates = [
+        lr.estimate_comb(
+            freqs, spec, prom,
+            nominal_hz=settings.nominal_fundamental_hz,
+            harmonic_range=settings.harmonic_range,
+            isolated_nominal_hz=nominals,
+            search_hz=settings.search_hz,
+            isolated_search_hz=settings.isolated_search_hz,
+            min_prominence_db=settings.min_prominence_db,
+        )
+        for freqs, spec, prom in (strong, weaker)
+    ]
+    lr.combine_estimates(estimates)  # must not raise
+
+
+def test_the_session_list_respects_the_budget():
+    settings = rlc.RemovalSettings(detect_isolated=True, max_isolated_lines=2)
+    spectra = [_synthetic_spectrum(peaks=[(47.04, 24.0), (94.34, 26.0), (30.5, 20.0)])]
+    assert len(rlc.session_nominals(spectra, settings)) <= 2

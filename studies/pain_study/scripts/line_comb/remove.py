@@ -90,6 +90,23 @@ class RemovalSettings:
     notch_width_min_hz: float = NOTCH_WIDTH_MIN_HZ
     low_hz: float = 3.0
     high_hz: float = 95.0
+    detect_isolated: bool = False
+    """Find each run's isolated lines in its own spectrum instead of using ``isolated_hz``.
+
+    A cohort-wide list is wrong for somebody by construction. Measured on the uncleaned
+    root these lines scatter up to 0.595 Hz between participants while one seed window
+    reaches 0.30 Hz, so the 94 Hz line was caught in 11 of 15 and left standing at +20 to
+    +28 dB in the rest -- and in sub-0008 the delivered data ended up worse than before
+    cleaning, because its neighbours were removed and it was not. Detection reaches it in
+    14 of 15, including three of the four the list missed.
+
+    ``isolated_hz`` stays meaningful when this is False, and stays in the config either
+    way as the record of what the curated list contained.
+    """
+    detection_min_prominence_db: float = lr.LINE_PROMINENCE_FLOOR_DB
+    detection_low_hz: float = 20.0
+    detection_high_hz: float = 100.0
+    max_isolated_lines: int = lr.MAX_ISOLATED_LINES
     exclude_mains: bool = True
     """Leave 59.5-60.5 Hz to the pipeline's own notch.
 
@@ -123,6 +140,15 @@ class RemovalSettings:
             notch_width_min_hz=float(block.get("notch_width_min_hz", defaults.notch_width_min_hz)),
             low_hz=float(block.get("low_hz", defaults.low_hz)),
             high_hz=float(block.get("high_hz", defaults.high_hz)),
+            detect_isolated=bool(block.get("detect_isolated", defaults.detect_isolated)),
+            detection_min_prominence_db=float(
+                block.get("detection_min_prominence_db", defaults.detection_min_prominence_db)
+            ),
+            detection_low_hz=float(block.get("detection_low_hz", defaults.detection_low_hz)),
+            detection_high_hz=float(block.get("detection_high_hz", defaults.detection_high_hz)),
+            max_isolated_lines=int(
+                block.get("max_isolated_lines", defaults.max_isolated_lines)
+            ),
             exclude_mains=bool(block.get("exclude_mains", defaults.exclude_mains)),
         )
 
@@ -217,6 +243,44 @@ def clean_raw(raw, targets, *, filter_length: str, mt_bandwidth: float, notch_wi
         )
 
 
+def isolated_nominals(
+    freqs, spectrum_db, prominence, settings: RemovalSettings
+) -> tuple[float, ...]:
+    """The isolated lines to target: detected from this spectrum, or the configured list.
+
+    Detection needs a fundamental to measure clearance against, and the fundamental comes
+    from the comb fit, so this fits once with no isolated lines purely to obtain it. The
+    detected positions then go back through ``estimate_comb`` like any nominal would, so
+    the claim logic and the comb-collision guard apply to them unchanged rather than
+    detection acquiring a second, softer path into the target list.
+    """
+    if not settings.detect_isolated:
+        return settings.isolated_hz
+
+    scaffold = lr.estimate_comb(
+        freqs,
+        spectrum_db,
+        prominence,
+        nominal_hz=settings.nominal_fundamental_hz,
+        harmonic_range=settings.harmonic_range,
+        isolated_nominal_hz=(),
+        search_hz=settings.search_hz,
+        isolated_search_hz=settings.isolated_search_hz,
+        min_prominence_db=settings.min_prominence_db,
+    )
+    return lr.detect_isolated_lines(
+        freqs,
+        spectrum_db,
+        prominence,
+        fundamental_hz=scaffold.fundamental_hz,
+        harmonic_range=settings.removal_harmonic_range,
+        min_prominence_db=settings.detection_min_prominence_db,
+        low_hz=settings.detection_low_hz,
+        high_hz=settings.detection_high_hz,
+        max_lines=settings.max_isolated_lines,
+    )
+
+
 def estimate_and_targets(
     raw, settings: RemovalSettings
 ) -> tuple[lr.CombEstimate, tuple[float, ...], np.ndarray]:
@@ -227,7 +291,7 @@ def estimate_and_targets(
         prominence,
         nominal_hz=settings.nominal_fundamental_hz,
         harmonic_range=settings.harmonic_range,
-        isolated_nominal_hz=settings.isolated_hz,
+        isolated_nominal_hz=isolated_nominals(freqs, spectrum_db, prominence, settings),
         search_hz=settings.search_hz,
         isolated_search_hz=settings.isolated_search_hz,
         min_prominence_db=settings.min_prominence_db,
@@ -320,28 +384,55 @@ def _psd(raw, picks):
     return freqs, psd.mean(axis=1)
 
 
+def session_nominals(spectra, settings: RemovalSettings) -> tuple[float, ...]:
+    """One nominal list for the whole session, detected from every run in it.
+
+    Detection has to be resolved per session rather than per run, because the pooling in
+    ``combine_estimates`` lines estimates up position by position and refuses a session
+    whose runs disagree on how many isolated lines they carry. Detecting separately in each
+    run would produce exactly that disagreement whenever a line sits just either side of
+    the prominence floor in different runs.
+
+    A line found in any run is taken for the session: the runs are minutes apart on one
+    machine, so a line present in one and marginal in another is the same line, and a
+    nominal that resolves to nothing in a given run contributes nothing to it.
+    """
+    if not settings.detect_isolated:
+        return settings.isolated_hz
+
+    found: list[float] = []
+    for freqs, spectrum_db, prominence in spectra:
+        for position in isolated_nominals(freqs, spectrum_db, prominence, settings):
+            if not any(abs(position - taken) <= lr._LINE_CLAIM_HZ for taken in found):
+                found.append(float(position))
+    return tuple(sorted(found)[: settings.max_isolated_lines])
+
+
 def estimate_session(vhdrs, settings: RemovalSettings):
     """Per-run estimates for one session, and the pooled estimate used to clean it."""
     import mne
 
     mne.set_log_level("ERROR")
-    per_run = []
+    spectra = []
     for vhdr in vhdrs:
         raw = mne.io.read_raw_brainvision(vhdr, preload=True)
-        freqs, spectrum_db, prominence = run_spectrum(raw)
-        per_run.append(
-            lr.estimate_comb(
-                freqs,
-                spectrum_db,
-                prominence,
-                nominal_hz=settings.nominal_fundamental_hz,
-                harmonic_range=settings.harmonic_range,
-                isolated_nominal_hz=settings.isolated_hz,
-                search_hz=settings.search_hz,
-                isolated_search_hz=settings.isolated_search_hz,
-                min_prominence_db=settings.min_prominence_db,
-            )
+        spectra.append(run_spectrum(raw))
+
+    nominals = session_nominals(spectra, settings)
+    per_run = [
+        lr.estimate_comb(
+            freqs,
+            spectrum_db,
+            prominence,
+            nominal_hz=settings.nominal_fundamental_hz,
+            harmonic_range=settings.harmonic_range,
+            isolated_nominal_hz=nominals,
+            search_hz=settings.search_hz,
+            isolated_search_hz=settings.isolated_search_hz,
+            min_prominence_db=settings.min_prominence_db,
         )
+        for freqs, spectrum_db, prominence in spectra
+    ]
     return per_run, lr.combine_estimates(per_run)
 
 

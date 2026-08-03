@@ -357,6 +357,186 @@ def combine_estimates(estimates: Sequence[CombEstimate]) -> CombEstimate:
     )
 
 
+#: Widest a peak may be, measured 3 dB down from its own summit, to count as a line.
+#: The diagnosis measured real lines at a 0.109 Hz half-power width; alpha and beta rhythms
+#: are whole hertz wide. At equal height the two differ by a factor of about eighteen here,
+#: so this threshold does not need to be delicate -- it needs to exist.
+LINE_WIDTH_CEILING_HZ = 0.25
+
+#: How much clear space a detected line needs from the comb positions the comb pass already
+#: removes. Inside this distance a peak cannot be told apart from a harmonic's sideband, and
+#: targeting it would take the same spectrum twice.
+COMB_CLEARANCE_HZ = 0.20
+
+#: Clear space required from the benchmark's probe tones. The probes exist to demonstrate
+#: that signal survives the removal; detecting and removing them would manufacture that
+#: demonstration.
+PROBE_CLEARANCE_HZ = 0.35
+
+#: Most lines one run may contribute. A cap bounds how much spectrum removal can claim
+#: however noisy a recording is; the cohort has needed at most twelve.
+MAX_ISOLATED_LINES = 16
+
+#: Prominence a peak needs to be treated as a line, calibrated on the fifteen uncleaned
+#: run-1 recordings rather than chosen.
+#:
+#: Detections below this are a noise population, not lines: of 889 peaks clearing 6 dB,
+#: three quarters sat at or below 8.3 dB and the median was 7.4 dB, and lowering the
+#: threshold to 6 dB raised the count from 7.2 to 59.3 peaks per participant without
+#: adding a single frequency that recurs across the cohort. At 10 dB what survives
+#: clusters on the known lines and nothing else: 23.776 Hz in 10 participants with 0.022 Hz
+#: of scatter, 29.684 in 8, 47.046 in 13, 57.234 in 15, 58.193 in 14, 94.091 in 14. Noise
+#: does not land on the same frequency in fourteen people.
+LINE_PROMINENCE_FLOOR_DB = 10.0
+
+
+def detect_isolated_lines(
+    freqs: Sequence[float],
+    spectrum_db: Sequence[float],
+    prominence: Sequence[float],
+    *,
+    fundamental_hz: float,
+    harmonic_range: tuple[int, int],
+    min_prominence_db: float = LINE_PROMINENCE_FLOOR_DB,
+    low_hz: float = 20.0,
+    high_hz: float = 100.0,
+    comb_clearance_hz: float = COMB_CLEARANCE_HZ,
+    probe_clearance_hz: float = PROBE_CLEARANCE_HZ,
+    probe_hz: Sequence[float] | None = None,
+    max_line_width_hz: float = LINE_WIDTH_CEILING_HZ,
+    claim_hz: float = _LINE_CLAIM_HZ,
+    max_lines: int = MAX_ISOLATED_LINES,
+) -> tuple[float, ...]:
+    """Find this run's isolated lines in its own spectrum, without a cohort list.
+
+    A listed nominal is wrong for somebody by construction. Measured across the cohort
+    these lines scatter 0.19 Hz to 0.595 Hz while one seed window reaches 0.30 Hz, so the
+    94 Hz line was caught in 11 of 15 participants and left standing at +20 to +28 dB in
+    the rest. Reading each run's own spectrum removes the class of error rather than adding
+    seeds until it is covered.
+
+    The detector is deliberately conservative, because its failure mode is removing signal:
+
+    * peaks within ``comb_clearance_hz`` of a removed comb harmonic are left alone, since
+      inside that distance a line and a harmonic's sideband are indistinguishable and the
+      comb pass takes that spectrum anyway;
+    * peaks within ``probe_clearance_hz`` of a benchmark probe tone are left alone;
+    * peaks broader than ``max_line_width_hz``, measured 3 dB down, are left alone, which
+      is what keeps a tall alpha or beta rhythm from being removed as an artifact;
+    * ``max_lines`` bounds the total, spent strongest-first.
+
+    Returns the accepted positions in ascending order.
+    """
+    frequency_array = np.asarray(freqs, dtype=float)
+    spectrum = np.asarray(spectrum_db, dtype=float)
+    prominence_array = np.asarray(prominence, dtype=float)
+    if not frequency_array.shape == spectrum.shape == prominence_array.shape:
+        raise ValueError("freqs, spectrum_db and prominence must have the same shape.")
+    if not np.isfinite(fundamental_hz) or fundamental_hz <= 0:
+        raise ValueError("fundamental_hz must be a finite positive number.")
+    if low_hz >= high_hz:
+        raise ValueError("low_hz must be below high_hz.")
+    if max_lines < 0:
+        raise ValueError("max_lines must not be negative.")
+    for name, value in (
+        ("comb_clearance_hz", comb_clearance_hz),
+        ("probe_clearance_hz", probe_clearance_hz),
+        ("max_line_width_hz", max_line_width_hz),
+        ("claim_hz", claim_hz),
+    ):
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be a finite positive number.")
+
+    if probe_hz is None:
+        probe = Probe()
+        probe_hz = probe.sinusoid_hz + (probe.burst_hz,)
+    protected = np.asarray(list(probe_hz), dtype=float)
+
+    # Clearance is owed to every comb position in the scanned range, not only to the
+    # harmonics the comb pass removes. A peak 1 mHz from harmonic 17 is the comb whether or
+    # not the removal range reaches harmonic 17; if it ought to be removed, that range is
+    # what should say so. Harmonic 11 at 13.23 Hz is excluded from removal deliberately,
+    # for landing where real rhythms live, and offering it here as an "isolated" line would
+    # route around that decision instead of revisiting it.
+    low_harmonic, high_harmonic = harmonic_range
+    first = max(1, int(np.floor((low_hz - comb_clearance_hz) / fundamental_hz)))
+    last = int(np.ceil((high_hz + comb_clearance_hz) / fundamental_hz))
+    comb_positions = (
+        np.arange(min(first, low_harmonic), max(last, high_harmonic) + 1, dtype=float)
+        * fundamental_hz
+    )
+
+    # Only a summit can be a line. Testing every bin instead lets a rejected peak reappear
+    # at the edge of its own exclusion: the skirt of a strong comb-adjacent peak still
+    # clears the threshold a clearance-width away, and would be taken as a separate line
+    # sitting exactly where the clearance ends.
+    summit = np.zeros(prominence_array.shape, dtype=bool)
+    summit[1:-1] = (prominence_array[1:-1] > prominence_array[:-2]) & (
+        prominence_array[1:-1] >= prominence_array[2:]
+    )
+
+    inside = (frequency_array >= low_hz) & (frequency_array <= high_hz)
+    candidate = (
+        summit & inside & np.isfinite(prominence_array) & (prominence_array >= min_prominence_db)
+    )
+    if comb_positions.size:
+        near_comb = (
+            np.abs(frequency_array[:, None] - comb_positions[None, :]).min(axis=1)
+            <= comb_clearance_hz
+        )
+        candidate &= ~near_comb
+    if protected.size:
+        near_probe = (
+            np.abs(frequency_array[:, None] - protected[None, :]).min(axis=1)
+            <= probe_clearance_hz
+        )
+        candidate &= ~near_probe
+
+    indices = np.flatnonzero(candidate)
+    if indices.size == 0:
+        return ()
+
+    # Strongest first, frequency breaking ties, so the result does not depend on how the
+    # spectrum happened to be ordered.
+    order = sorted(indices, key=lambda i: (-prominence_array[i], frequency_array[i]))
+
+    accepted: list[float] = []
+    for index in order:
+        position = float(frequency_array[index])
+        if any(abs(position - taken) <= claim_hz for taken in accepted):
+            continue
+        if _peak_width_hz(frequency_array, prominence_array, index) > max_line_width_hz:
+            continue
+        accepted.append(position)
+        if len(accepted) >= max_lines:
+            break
+
+    return tuple(sorted(accepted))
+
+
+def _peak_width_hz(
+    frequency_array: np.ndarray,
+    prominence_array: np.ndarray,
+    index: int,
+    drop_db: float = 3.0,
+) -> float:
+    """Width of the peak at ``index``, measured ``drop_db`` below its own summit.
+
+    A sinusoid is as narrow as the spectral resolution allows; a rhythm is not. Walking
+    outward from the summit rather than fitting a shape keeps this honest on the asymmetric
+    peaks that sit on a rhythm's shoulder.
+    """
+    floor = prominence_array[index] - drop_db
+    left = index
+    while left > 0 and prominence_array[left - 1] >= floor:
+        left -= 1
+    right = index
+    last = prominence_array.size - 1
+    while right < last and prominence_array[right + 1] >= floor:
+        right += 1
+    return float(frequency_array[right] - frequency_array[left])
+
+
 def removal_frequencies(
     estimate: CombEstimate,
     *,
