@@ -56,3 +56,46 @@ def test_apply_accepts_a_matching_passing_benchmark(tmp_path):
     settings = rlc.RemovalSettings()
     path = _benchmark(tmp_path / "benchmark.tsv", rlc.settings_fingerprint(settings))
     rlc.require_passing_benchmark(path, settings)  # must not raise
+
+
+def test_the_benchmark_certifies_the_pooled_estimate_the_apply_uses():
+    """Benchmarking a per-run fit does not certify a session-pooled removal.
+
+    The two differ measurably here: sub-0000 run-1 reported a 3.47 dB worst residual under
+    its own fundamental and 13.90 dB under its session's, on the same recording. Whichever
+    is right, the gate has to score the one that ships.
+    """
+    import inspect
+
+    for function in (rlc.benchmark_run, rlc.estimate_and_targets):
+        assert "session_estimate" in inspect.signature(function).parameters, (
+            f"{function.__name__} cannot be told which fundamental the apply will use"
+        )
+
+    source = inspect.getsource(rlc.estimate_and_targets)
+    assert "session_estimate if session_estimate is not None" in source, (
+        "the session estimate is accepted but not the one the targets are built from"
+    )
+
+
+def test_the_fingerprint_covers_the_fundamental_scope_and_the_code():
+    """Two applies that differ in scope or in code are not the same transformation."""
+    settings = rlc.RemovalSettings()
+    a = rlc.settings_fingerprint(settings, fundamental_scope="session")
+    b = rlc.settings_fingerprint(settings, fundamental_scope="run")
+    assert a != b, "the fingerprint ignores which fundamental the apply will use"
+
+
+def test_a_benchmark_missing_a_subject_does_not_authorise_it(tmp_path):
+    """One passing row could authorise all ninety runs."""
+    settings = rlc.RemovalSettings()
+    path = tmp_path / "benchmark.tsv"
+    pd.DataFrame(
+        [{
+            "recording": "sub-0000_task-thermalactive_run-1_eeg",
+            "settings_fingerprint": rlc.settings_fingerprint(settings),
+            "gate_passed": True,
+        }]
+    ).to_csv(path, sep="\t", index=False)
+    with pytest.raises(RuntimeError, match="did not cover"):
+        rlc.require_passing_benchmark(path, settings, subjects={"sub-0000", "sub-0001"})

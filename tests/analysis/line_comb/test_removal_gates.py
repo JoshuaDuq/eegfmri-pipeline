@@ -10,6 +10,7 @@ quantities that are identical for a linear operator, which spectrum_fit is, so t
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from studies.pain_study.analysis.line_comb import removal as lr
 
@@ -60,3 +61,35 @@ def test_the_transient_gate_reads_the_measurement_that_can_fail():
         "a transient reduced to 40% of its injected energy passed the transient gate"
     )
     assert gate.evaluate(_metrics(intrinsic_energy_ratio=0.95))["transient_preserved"]
+
+
+def test_a_residual_displaced_by_a_bin_is_not_missed():
+    """Suppression was read at the nearest bin only, so a line that moved slipped through.
+
+    Reproduced: a target at 50 Hz whose centre falls to -10 dB while a residual at
+    50.05 Hz still stands at +15 dB was reported as a maximum residual of -10 dB. That is
+    the exact shape of the failure this work has been chasing -- removing a line exposes or
+    displaces its neighbour -- so measuring only the centre cannot see it.
+    """
+    freqs = np.arange(45.0, 55.0, 0.01)
+    before = np.full_like(freqs, -20.0)
+    after = np.full_like(freqs, -20.0)
+    before[np.argmin(np.abs(freqs - 50.0))] = 25.0
+    after[np.argmin(np.abs(freqs - 50.0))] = -10.0
+    after[np.argmin(np.abs(freqs - 50.05))] = 15.0
+
+    result = lr.line_suppression(freqs, before, after, [50.0], widths=[0.2])
+    assert result["max_residual_prominence_db"] >= 15.0 - 1e-6, (
+        f"the displaced residual was invisible: {result['max_residual_prominence_db']}"
+    )
+
+
+def test_suppression_still_reads_the_centre_when_nothing_moved():
+    freqs = np.arange(45.0, 55.0, 0.01)
+    before = np.full_like(freqs, -20.0)
+    after = np.full_like(freqs, -20.0)
+    before[np.argmin(np.abs(freqs - 50.0))] = 25.0
+    after[np.argmin(np.abs(freqs - 50.0))] = -12.0
+
+    result = lr.line_suppression(freqs, before, after, [50.0], widths=[0.2])
+    assert result["max_residual_prominence_db"] == pytest.approx(-12.0)

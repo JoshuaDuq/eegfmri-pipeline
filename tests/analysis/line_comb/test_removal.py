@@ -494,7 +494,11 @@ class TestEndToEndOnSyntheticData:
 
         fundamental = 1.19994
         signal = rng.normal(scale=5e-6, size=(4, n_times))
-        for harmonic in range(24, 40):
+        # 24-79, as the cohort fit uses. At 24-39 this fixture carried sixteen
+        # harmonics -- below the floor that now refuses to build a removal grid on
+        # evidence that thin, which is the fixture being unrepresentative, not the
+        # floor being wrong.
+        for harmonic in range(24, 80):
             signal += 1e-6 * np.sin(2 * np.pi * fundamental * harmonic * times + harmonic)
         probe = lr.Probe(burst_centre_s=100.0)
         signal += probe.waveform(times)[None, :]
@@ -511,11 +515,11 @@ class TestEndToEndOnSyntheticData:
         prom = hd.prominence_db(db, half_width_bins=int(round(4.63 / (freqs[1] - freqs[0]))))
 
         estimate = lr.estimate_comb(
-            freqs, db, prom, harmonic_range=(24, 39), isolated_nominal_hz=()
+            freqs, db, prom, harmonic_range=(24, 79), isolated_nominal_hz=()
         )
         assert estimate.fundamental_hz == pytest.approx(fundamental, abs=5e-4)
 
-        targets = lr.removal_frequencies(estimate, harmonic_range=(24, 39), low_hz=3.0)
+        targets = lr.removal_frequencies(estimate, harmonic_range=(24, 79), low_hz=3.0)
         lr.check_probe_clearance(probe, targets)
         widths = lr.notch_widths_for(targets, ratio=450.0, minimum_hz=0.05)
 

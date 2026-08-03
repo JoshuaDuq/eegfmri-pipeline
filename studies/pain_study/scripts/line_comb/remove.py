@@ -205,14 +205,83 @@ def parse_channel_scaling(vhdr_path: Path) -> tuple[list[str], np.ndarray]:
 
 def write_eeg_binary(vhdr_path: Path, destination: Path, data_volts: np.ndarray) -> None:
     """Write one ``.eeg`` binary in the layout its existing header already describes."""
-    names, resolutions = parse_channel_scaling(vhdr_path)
+
     array = np.asarray(data_volts, dtype=float)
+    if not np.all(np.isfinite(array)):
+        bad = int(np.count_nonzero(~np.isfinite(array)))
+        raise ValueError(
+            f"Refusing to write {destination}: {bad} non-finite sample(s). The round-trip "
+            "check cannot catch this -- a NaN makes the deviation NaN, and NaN > tolerance "
+            "is False -- so it is caught here instead."
+        )
+
+    names, resolutions = parse_channel_scaling(vhdr_path)
     if array.shape[0] != len(names):
         raise ValueError(
             f"{vhdr_path.name}: header describes {len(names)} channels, got {array.shape[0]}."
         )
     scaled = (array * 1e6) / resolutions[:, None]
     scaled.T.astype("<f4").tofile(destination)
+
+
+def write_derivative_description(
+    output_root: Path,
+    source_root: Path,
+    settings: RemovalSettings,
+    *,
+    fundamental_scope: str = "session",
+) -> Path:
+    """Declare the cleaned root a derivative and record what produced it.
+
+    ``mirror_sidecars`` copies every sidecar byte-for-byte, so without this the cleaned
+    dataset carried the raw one's description: DatasetType "raw", credit to MNE-BIDS alone,
+    and nothing tying it to the removal, its settings or the code revision. BIDS asks
+    derivatives to carry ``GeneratedBy`` for that reason -- otherwise the delivered data
+    cannot be traced to the transformation that made it, which is the whole question an
+    audit asks first.
+    """
+    import json
+    from dataclasses import asdict
+
+    path = Path(output_root) / "dataset_description.json"
+    described: dict = {}
+    if path.exists():
+        try:
+            described = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            described = {}
+
+    described["DatasetType"] = "derivative"
+    described.setdefault("Name", "line-comb cleaned EEG")
+    described.setdefault("BIDSVersion", "1.8.0")
+    generated = [
+        entry
+        for entry in described.get("GeneratedBy", [])
+        if "line-comb" not in str(entry.get("Name", ""))
+    ]
+    generated.append(
+        {
+            "Name": "line-comb",
+            "Version": _code_revision(),
+            "Description": (
+                "Projection onto sinusoids at the measured comb and isolated-line "
+                "frequencies, estimated per session. Sidecars are byte-identical to the "
+                "source; only the .eeg binaries differ."
+            ),
+            "Parameters": {
+                "settings_fingerprint": settings_fingerprint(
+                    settings, fundamental_scope=fundamental_scope
+                ),
+                "fundamental_scope": fundamental_scope,
+                **{k: (list(v) if isinstance(v, tuple) else v) for k, v in asdict(settings).items()},
+            },
+        }
+    )
+    described["GeneratedBy"] = generated
+    described["SourceDatasets"] = [{"URI": f"file://{Path(source_root).resolve()}"}]
+
+    path.write_text(json.dumps(described, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def mirror_sidecars(source_root: Path, output_root: Path) -> int:
@@ -271,7 +340,27 @@ def clean_raw(raw, targets, *, filter_length: str, mt_bandwidth: float, notch_wi
         )
 
 
-def settings_fingerprint(settings: RemovalSettings) -> str:
+def _code_revision() -> str:
+    """Short git revision of the tree, so a benchmark cannot outlive the code it measured."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        return out.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
+    except Exception:
+        return "unknown"
+
+
+def settings_fingerprint(
+    settings: RemovalSettings, *, fundamental_scope: str = "session"
+) -> str:
     """A short stable hash of every setting that changes what the removal does.
 
     Binds a benchmark to the configuration it measured, so a stale or mismatched
@@ -280,11 +369,15 @@ def settings_fingerprint(settings: RemovalSettings) -> str:
     import hashlib
     from dataclasses import asdict
 
-    payload = repr(sorted(asdict(settings).items())).encode("utf-8")
+    payload = repr(
+        (sorted(asdict(settings).items()), fundamental_scope, _code_revision())
+    ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
-def require_passing_benchmark(path, settings: RemovalSettings) -> None:
+def require_passing_benchmark(
+    path, settings: RemovalSettings, *, fundamental_scope: str = "session", subjects=None
+) -> None:
     """Refuse to write derived data without a passing benchmark of these settings.
 
     Each clause here is a way this went wrong in practice rather than a hypothetical. A
@@ -300,7 +393,7 @@ def require_passing_benchmark(path, settings: RemovalSettings) -> None:
             "the criteria are stated before the measurement for a reason."
         )
     frame = pd.read_csv(path, sep="	")
-    expected = settings_fingerprint(settings)
+    expected = settings_fingerprint(settings, fundamental_scope=fundamental_scope)
     recorded = set(frame.get("settings_fingerprint", pd.Series(dtype=str)).dropna().unique())
     if recorded != {expected}:
         raise RuntimeError(
@@ -313,6 +406,14 @@ def require_passing_benchmark(path, settings: RemovalSettings) -> None:
             f"Refusing to apply: {failed} of {len(frame)} benchmarked runs did not pass. "
             "A failure means the settings are wrong, not that the criteria should move."
         )
+    if subjects:
+        covered = {str(r).split("_")[0] for r in frame.get("recording", [])}
+        missing = set(subjects) - covered
+        if missing:
+            raise RuntimeError(
+                f"Refusing to apply: the benchmark did not cover {sorted(missing)}. "
+                "One passing row must not authorise a cohort it never measured."
+            )
 
 
 def search_for(settings: RemovalSettings) -> float:
@@ -364,7 +465,10 @@ def isolated_nominals(
 
 
 def estimate_and_targets(
-    raw, settings: RemovalSettings, nominals: tuple[float, ...] | None = None
+    raw,
+    settings: RemovalSettings,
+    nominals: tuple[float, ...] | None = None,
+    session_estimate: lr.CombEstimate | None = None,
 ) -> tuple[lr.CombEstimate, tuple[float, ...], np.ndarray]:
     """Estimate and targets for one run, optionally with the session's nominal list.
 
@@ -387,25 +491,34 @@ def estimate_and_targets(
         isolated_search_hz=search_for(settings),
         min_prominence_db=settings.min_prominence_db,
     )
+    # The apply removes at the session's pooled fundamental, so that is what the gate
+    # has to score. Scored at each run's own fundamental instead, sub-0000 run-1 reported
+    # a 3.47 dB worst residual against the 13.90 dB the apply actually produced.
+    scoring = session_estimate if session_estimate is not None else estimate
     targets = lr.removal_frequencies(
-        estimate,
+        scoring,
         harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
         excluded_hz=(lr.MAINS_NOTCH_HZ,) if settings.exclude_mains else (),
     )
-    return estimate, targets, prominence
+    return scoring, targets, prominence
 
 
 def benchmark_run(
-    vhdr: Path, settings: RemovalSettings, nominals: tuple[float, ...] | None = None
+    vhdr: Path,
+    settings: RemovalSettings,
+    nominals: tuple[float, ...] | None = None,
+    session_estimate: lr.CombEstimate | None = None,
 ) -> dict:
     """Inject probes, remove the lines, and measure what came back."""
     import mne
 
     mne.set_log_level("ERROR")
     raw = mne.io.read_raw_brainvision(vhdr, preload=True)
-    estimate, targets, prominence_before = estimate_and_targets(raw, settings, nominals)
+    estimate, targets, prominence_before = estimate_and_targets(
+        raw, settings, nominals, session_estimate
+    )
     probe = lr.Probe()
     lr.check_probe_clearance(probe, targets)
 
@@ -418,12 +531,13 @@ def benchmark_run(
     probe_only = raw.copy()
     probe_only._data[picks] = np.tile(waveform, (len(picks), 1))
 
+    widths = lr.notch_widths_for(
+        targets, ratio=settings.notch_width_ratio, minimum_hz=settings.notch_width_min_hz
+    )
     passes = {
         "filter_length": settings.filter_length,
         "mt_bandwidth": settings.mt_bandwidth,
-        "notch_widths": lr.notch_widths_for(
-            targets, ratio=settings.notch_width_ratio, minimum_hz=settings.notch_width_min_hz
-        ),
+        "notch_widths": widths,
     }
     cleaned_with = clean_raw(with_probe, targets, **passes)
     cleaned_bare = clean_raw(raw.copy(), targets, **passes)
@@ -437,7 +551,7 @@ def benchmark_run(
         cleaned_with.get_data(picks=picks), cleaned_bare.get_data(picks=picks)
     )
     metrics = {
-        **lr.line_suppression(freqs, prominence_before, prominence_after, targets),
+        **lr.line_suppression(freqs, prominence_before, prominence_after, targets, widths),
         **lr.probe_preservation(freqs, psd_before, psd_after, probe),
         "max_nonline_change_db": float(
             np.max(
@@ -573,6 +687,10 @@ def apply_run(
         harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
+        # Was defaulted, so the setting was silently ignored here while the benchmark
+        # honoured it: with exclude_mains false the two paths removed different targets
+        # and the benchmark certified a transformation the apply did not perform.
+        excluded_hz=(lr.MAINS_NOTCH_HZ,) if settings.exclude_mains else (),
     )
     widths = lr.notch_widths_for(
         targets, ratio=settings.notch_width_ratio, minimum_hz=settings.notch_width_min_hz
@@ -603,7 +721,9 @@ def apply_run(
         )
 
     freqs, _, prominence_after = run_spectrum(cleaned)
-    suppression = lr.line_suppression(freqs, prominence_before, prominence_after, targets)
+    suppression = lr.line_suppression(
+        freqs, prominence_before, prominence_after, targets, widths
+    )
     return {
         "removed_band_fraction": lr.removed_band_fraction(freqs, targets, widths),
         "recording": vhdr.stem,
@@ -751,30 +871,48 @@ def run(args: argparse.Namespace) -> None:
         # sub-0000 against the five its session keeps -- so benchmarking without this would
         # gate a configuration that never ships.
         session_lists: dict[str, tuple[float, ...]] = {}
-        if settings.detect_isolated:
-            import mne
+        session_estimates: dict[str, lr.CombEstimate] = {}
+        import mne
 
-            mne.set_log_level("ERROR")
-            for vhdr in sample:
-                subject = vhdr.stem.split("_")[0]
-                if subject in session_lists:
-                    continue
-                siblings = sorted(vhdr.parent.glob(f"{subject}_task-*_run-*_eeg.vhdr"))
-                spectra = [
-                    run_spectrum(mne.io.read_raw_brainvision(s, preload=True))
-                    for s in siblings
-                ]
+        mne.set_log_level("ERROR")
+        for vhdr in sample:
+            subject = vhdr.stem.split("_")[0]
+            if subject in session_estimates:
+                continue
+            siblings = sorted(vhdr.parent.glob(f"{subject}_task-*_run-*_eeg.vhdr"))
+            spectra = [
+                run_spectrum(mne.io.read_raw_brainvision(sib, preload=True)) for sib in siblings
+            ]
+            if settings.detect_isolated:
                 session_lists[subject] = session_nominals(spectra, settings)
-                print(
-                    f"  {subject}: {len(siblings)} runs -> "
-                    f"{len(session_lists[subject])} isolated lines",
-                    flush=True,
+            nominals = session_lists.get(subject, settings.isolated_hz)
+            per_run = [
+                lr.estimate_comb(
+                    freqs, spectrum_db, prominence,
+                    nominal_hz=settings.nominal_fundamental_hz,
+                    harmonic_range=settings.harmonic_range,
+                    isolated_nominal_hz=nominals,
+                    search_hz=settings.search_hz,
+                    isolated_search_hz=search_for(settings),
+                    min_prominence_db=settings.min_prominence_db,
                 )
+                for freqs, spectrum_db, prominence in spectra
+            ]
+            # The apply removes at the pooled fundamental; the gate has to score that one.
+            session_estimates[subject] = lr.combine_estimates(per_run)
+            print(
+                f"  {subject}: {len(siblings)} runs -> {len(nominals)} isolated lines, "
+                f"pooled f0 {session_estimates[subject].fundamental_hz:.7f} Hz",
+                flush=True,
+            )
 
         rows = []
         for index, vhdr in enumerate(sample, start=1):
             started = time.time()
-            row = benchmark_run(vhdr, settings, session_lists.get(vhdr.stem.split("_")[0]))
+            subject = vhdr.stem.split("_")[0]
+            row = benchmark_run(
+                vhdr, settings, session_lists.get(subject), session_estimates.get(subject)
+            )
             rows.append(row)
             print(
                 f"[{index}/{len(sample)}] {vhdr.stem[:44]:44s} "
@@ -783,7 +921,9 @@ def run(args: argparse.Namespace) -> None:
                 f"{'PASS' if row['gate_passed'] else 'FAIL'} ({time.time()-started:.0f}s)"
             )
         frame = pd.DataFrame(rows)
-        frame["settings_fingerprint"] = settings_fingerprint(settings)
+        frame["settings_fingerprint"] = settings_fingerprint(
+            settings, fundamental_scope=args.fundamental_scope
+        )
         frame.to_csv(args.report_dir / "benchmark.tsv", sep="\t", index=False, float_format="%.6g")
         gate_columns = [c for c in frame.columns if c.startswith("gate_") and c != "gate_passed"]
         print(f"\npassed {int(frame.gate_passed.sum())}/{len(frame)} runs")
@@ -795,11 +935,23 @@ def run(args: argparse.Namespace) -> None:
     # Nothing is written before this passes. The benchmark's criteria are stated ahead of
     # the measurement precisely so that they can refuse; letting apply run regardless made
     # them advisory.
-    require_passing_benchmark(args.report_dir / "benchmark.tsv", settings)
-    print(f"Benchmark {settings_fingerprint(settings)} passed; applying.")
+    require_passing_benchmark(
+        args.report_dir / "benchmark.tsv",
+        settings,
+        fundamental_scope=args.fundamental_scope,
+        subjects={vhdr.parent.parent.name for vhdr in runs},
+    )
+    print(
+        f"Benchmark {settings_fingerprint(settings, fundamental_scope=args.fundamental_scope)}"
+        f" passed on every subject; applying."
+    )
 
     print(f"Mirroring sidecars into {args.output_root}")
     print(f"  copied {mirror_sidecars(args.bids_root, args.output_root)} files")
+    described = write_derivative_description(
+        args.output_root, args.bids_root, settings, fundamental_scope=args.fundamental_scope
+    )
+    print(f"  declared {described.name} a derivative of {args.bids_root}")
 
     by_subject: dict[str, list[Path]] = {}
     for vhdr in runs:

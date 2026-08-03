@@ -70,6 +70,23 @@ MAINS_NOTCH_HZ = (59.5, 60.5)
 #: nominals in use, so a line that is really there can still be found beside a claimed one.
 _LINE_CLAIM_HZ = 0.109
 
+#: Fewest harmonics that may carry a fundamental which then authorises the removal grid.
+#:
+#: Three was the old floor, and the fit it produces licenses removing every harmonic from
+#: 22 to 83 -- sixty-one targets from three peaks. Across ninety real runs the fit uses
+#: 52-56 harmonics, so this floor is far below anything genuine and only rules out a fit
+#: with no evidence behind it.
+MIN_HARMONICS_FOR_FIT = 20
+
+#: Most the fitted harmonics may scatter about their arithmetic grid, in Hz RMS.
+#:
+#: A comb is an arithmetic series; peaks that do not lie on one are not a comb, however
+#: many there are. Across ninety real runs the scatter is 0.030-0.156 Hz with a 99th
+#: percentile of 0.111; three mutually inconsistent peaks produced 0.228 Hz and still
+#: generated the full grid. The bound sits at 0.20 Hz -- a sixth of the 1.2 Hz spacing,
+#: above every real run and below the constructed failure.
+MAX_FIT_RESIDUAL_RMS_HZ = 0.20
+
 
 @dataclass(frozen=True)
 class CombEstimate:
@@ -214,6 +231,8 @@ def estimate_comb(
     search_hz: float = 0.25,
     isolated_search_hz: float = 0.15,
     min_prominence_db: float = 1.0,
+    min_harmonics: int = MIN_HARMONICS_FOR_FIT,
+    max_residual_rms_hz: float = MAX_FIT_RESIDUAL_RMS_HZ,
 ) -> CombEstimate:
     """Measure the comb fundamental and the isolated lines in one run's spectrum.
 
@@ -246,10 +265,11 @@ def estimate_comb(
             harmonics.append(harmonic)
             positions.append(position)
             weights.append(strength)
-    if len(harmonics) < 3:
+    if len(harmonics) < min_harmonics:
         raise ValueError(
-            f"Only {len(harmonics)} comb harmonics exceeded {min_prominence_db} dB; "
-            "refusing to fit a fundamental."
+            f"Only {len(harmonics)} comb harmonics exceeded {min_prominence_db} dB, below "
+            f"the {min_harmonics} required; refusing to fit a fundamental that would then "
+            "authorise removing the whole grid."
         )
 
     index = np.asarray(harmonics, dtype=float)
@@ -259,6 +279,13 @@ def estimate_comb(
         np.sum(weight_array * index * position_array) / np.sum(weight_array * index**2)
     )
     residual = position_array - index * fundamental
+    residual_rms = float(np.sqrt(np.mean(residual**2)))
+    if residual_rms > max_residual_rms_hz:
+        raise ValueError(
+            f"Fitted harmonics scatter {residual_rms:.3f} Hz RMS about their grid, above "
+            f"the {max_residual_rms_hz} Hz bound; these peaks do not describe one comb and "
+            "the fit must not authorise a removal grid."
+        )
 
     # The isolated lines get a narrower window than the comb. 47.036 Hz sits only 0.24 Hz
     # from comb harmonic 39 at 46.8 Hz, so a window wide enough for the comb would reach
@@ -722,16 +749,42 @@ def line_suppression(
     prominence_before: Sequence[float],
     prominence_after: Sequence[float],
     targets: Sequence[float],
+    widths: Sequence[float] | None = None,
 ) -> dict[str, float]:
-    """How far the targeted lines fell, in local prominence."""
+    """How far the targeted lines fell, in local prominence.
+
+    The residual is the worst bin left anywhere in the window the removal claimed, not the
+    value at the target's centre. Reading the centre alone misses a line that moved: a
+    target at 50 Hz whose centre falls to -10 dB while a residual at 50.05 Hz still stands
+    at +15 dB was reported as -10 dB. That is precisely the failure this removal keeps
+    producing -- taking a line out exposes or displaces its neighbour -- so the centre is
+    the one place the evidence will not be.
+
+    ``widths`` are the per-target notch widths; without them the search falls back to the
+    centre bin and the old blind spot returns, so callers that have widths should pass them.
+    """
     frequency_array = np.asarray(freqs, dtype=float)
     before = np.asarray(prominence_before, dtype=float)
     after = np.asarray(prominence_after, dtype=float)
+    target_array = np.asarray(list(targets), dtype=float)
+    width_array = (
+        np.asarray(list(widths), dtype=float)
+        if widths is not None
+        else np.zeros(target_array.size)
+    )
+    if width_array.size != target_array.size:
+        raise ValueError("targets and widths must have the same length.")
+
     rows = []
-    for frequency in targets:
-        index = int(np.argmin(np.abs(frequency_array - frequency)))
-        if np.isfinite(before[index]) and np.isfinite(after[index]):
-            rows.append((before[index], after[index]))
+    for frequency, width in zip(target_array, width_array):
+        centre = int(np.argmin(np.abs(frequency_array - frequency)))
+        if not (np.isfinite(before[centre]) and np.isfinite(after[centre])):
+            continue
+        inside = np.abs(frequency_array - frequency) <= max(width, 0.0) / 2.0
+        inside[centre] = True
+        window_after = after[inside]
+        finite = window_after[np.isfinite(window_after)]
+        rows.append((before[centre], float(np.max(finite)) if finite.size else after[centre]))
     if not rows:
         raise ValueError("No target frequency had a usable prominence estimate.")
     values = np.asarray(rows)
