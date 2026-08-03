@@ -82,11 +82,24 @@ def subject_spectrum(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return freqs[band], np.median(psd.mean(axis=0)[:, band], axis=0)
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Declare the report's arguments, kept separate so the defaults can be tested.
+
+    ``--exclude`` defaults to nothing. It used to default to ``sub-0008``, which is
+    excluded elsewhere because its BCG detection is unreliable -- it sits at 60.0 bpm, at
+    the edge of the detector's rate window. That is a cardiac problem and says nothing
+    about narrowband lines, so a spectral audit has no business inheriting it. It also hid
+    the audit's own second-worst case: sub-0008 carries 10.1% of its 62-95 Hz power in the
+    94 Hz line. A caller who needs an exclusion still passes one.
+    """
     parser.add_argument("--deriv-root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--exclude", nargs="*", default=["sub-0008"])
+    parser.add_argument("--exclude", nargs="*", default=[])
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    _add_arguments(parser)
     args = parser.parse_args(argv)
 
     mne.set_log_level("ERROR")

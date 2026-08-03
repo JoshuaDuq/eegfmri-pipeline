@@ -55,3 +55,26 @@ def test_the_gradient_comb_stays_derived_from_tr_not_listed():
     assert all(s == pytest.approx(1 / 0.9) for s in spacing), (
         "the gradient comb must stay an arithmetic series in k/TR"
     )
+
+
+def test_the_audit_does_not_inherit_a_cardiac_participant_exclusion():
+    """sub-0008 is excluded for a cardiac reason, which a spectral audit does not share.
+
+    Its BCG detection is unreliable because it sits at 60.0 bpm, at the edge of the
+    detector's rate window. That says nothing about narrowband line contamination -- and
+    sub-0008 carries the second-worst case of it, 10.1% of its 62-95 Hz power in the 94 Hz
+    line. Defaulting it out hid the audit's own worst example from the audit.
+
+    The flag stays, so a caller who needs an exclusion can pass one. What is wrong is
+    carrying one participant's cardiac problem as a default of a spectral measurement.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    bar._add_arguments(parser)
+    args = parser.parse_args(["--deriv-root", "/tmp/x", "--out", "/tmp/y.csv"])
+
+    assert list(args.exclude) == [], (
+        "no participant should be excluded by default; the cardiac exclusion belongs to "
+        "the analyses that depend on cardiac correction, not to a spectral audit"
+    )
