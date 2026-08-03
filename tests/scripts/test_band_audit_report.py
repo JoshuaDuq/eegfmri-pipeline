@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from studies.pain_study.analysis.line_comb import removal as lr
 from studies.pain_study.scripts import band_audit_report as bar
 from studies.pain_study.scripts.workflow_config import load_workflow_config
 
@@ -18,27 +19,41 @@ def _configured_lines() -> list[float]:
     return [float(f) for f in workflow.get("line_comb_removal.isolated_hz")]
 
 
-def test_the_independent_lines_come_from_the_removal_config():
-    """A hardcoded copy drifts, and this one had.
+STALE_HARDCODED = (23.7776, 29.6854, 46.5839, 57.1925, 59.0168, 61.0353, 61.4039, 99.5982)
 
-    It carried 61.0353 Hz, dropped from the removal for sitting 0.128 Hz from comb
-    harmonic 51, and four other frequencies the removal does not target -- while carrying
-    nothing near 94 Hz, where the strongest residual in the cohort sits.
+
+def test_the_independent_lines_are_not_a_hardcoded_copy():
+    """The copy this replaced carried five frequencies nothing removes and missed 94 Hz.
+
+    Among them 61.0353 Hz, dropped from the removal for sitting 0.128 Hz from comb
+    harmonic 51. Since this report is what judges whether the line work helped, a drifted
+    list charges excess where nothing was removed and leaves what was removed unscored.
     """
-    assert sorted(bar.INDEPENDENT_HZ) == sorted(_configured_lines()), (
-        "INDEPENDENT_HZ must be read from line_comb_removal.isolated_hz; a copy drifts "
-        "and the audit then scores lines nobody removed"
+    assert tuple(bar.INDEPENDENT_HZ) != STALE_HARDCODED
+    assert not any(abs(f - 61.0353) <= 0.05 for f in bar.INDEPENDENT_HZ), (
+        "61.0353 Hz is not a removal target; masking it discards untouched spectrum"
     )
 
 
-def test_the_audit_covers_the_lines_that_wander_between_participants():
-    """The 94 Hz line spans 93.750-94.345 Hz across the cohort and must be scored."""
-    lines = list(bar.INDEPENDENT_HZ)
-    for position in (93.7503, 94.3453):
-        nearest = min(lines, key=lambda f: abs(f - position))
-        assert abs(nearest - position) <= 0.30, (
-            f"no audited line within 0.30 Hz of {position} Hz; nearest is {nearest}"
-        )
+def test_the_independent_lines_track_what_the_removal_recorded():
+    """The manifest is the source, with the configured list as the fallback.
+
+    Reading the config was the first fix, and it is no longer sufficient: lines are
+    detected per session now, so ``isolated_hz`` names the fallback rather than what was
+    removed. Only the manifest knows the latter, and it changes with each apply -- which is
+    the point, since the audit scores the derivatives that apply produced.
+    """
+    assert tuple(bar.INDEPENDENT_HZ) == lr.removed_isolated_lines(
+        bar.MANIFEST, fallback=_configured_lines()
+    )
+
+
+def test_the_audit_falls_back_to_the_configured_list_without_a_manifest(tmp_path):
+    """Before any apply has run there is nothing recorded, and the audit still has to work."""
+    configured = _configured_lines()
+    assert lr.removed_isolated_lines(tmp_path / "absent.tsv", fallback=configured) == tuple(
+        configured
+    )
 
 
 def test_the_gradient_comb_stays_derived_from_tr_not_listed():

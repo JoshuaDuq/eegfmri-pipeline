@@ -27,6 +27,7 @@ result.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -388,6 +389,60 @@ MAX_ISOLATED_LINES = 16
 #: of scatter, 29.684 in 8, 47.046 in 13, 57.234 in 15, 58.193 in 14, 94.091 in 14. Noise
 #: does not land on the same frequency in fourteen people.
 LINE_PROMINENCE_FLOOR_DB = 10.0
+
+
+def removed_isolated_lines(
+    manifest_path,
+    *,
+    fallback: Sequence[float] = (),
+    merge_hz: float = 0.30,
+) -> tuple[float, ...]:
+    """The isolated lines the removal actually acted on, read from its manifest.
+
+    An audit that keeps its own copy of the line list drifts from the removal, and two of
+    them had: one still masked 61.0353 Hz, dropped for sitting 0.128 Hz from comb harmonic
+    51, while masking nothing near 94 Hz. With detection the copy cannot be kept correct at
+    all, because the lines are resolved per session and no static list names them.
+
+    Positions of one line across recordings are collapsed, since the manifest records each
+    session's own refined position and those differ by design -- the 94 Hz line spans
+    0.595 Hz across this cohort. ``merge_hz`` is therefore wider than the per-run claim
+    width: the question here is which line a position belongs to, not whether two nearby
+    lines are distinct.
+
+    ``fallback`` is returned when there is no manifest to read, so an audit still works
+    before any apply has run.
+    """
+    import pandas as pd
+
+    path = Path(manifest_path)
+    if not path.exists():
+        return tuple(float(f) for f in fallback)
+    frame = pd.read_csv(path, sep="\t")
+    if "isolated_hz" not in frame.columns:
+        return tuple(float(f) for f in fallback)
+
+    positions: list[float] = []
+    for cell in frame["isolated_hz"]:
+        if cell is None or (isinstance(cell, float) and np.isnan(cell)):
+            continue
+        for piece in str(cell).split(";"):
+            piece = piece.strip()
+            if not piece:
+                continue
+            try:
+                value = float(piece)
+            except ValueError:
+                continue
+            if np.isfinite(value):
+                positions.append(value)
+
+    merged: list[float] = []
+    for value in sorted(positions):
+        if merged and value - merged[-1] <= merge_hz:
+            continue
+        merged.append(value)
+    return tuple(merged)
 
 
 def detect_isolated_lines(

@@ -24,11 +24,16 @@ import pandas as pd
 from scipy.stats import pearsonr
 
 from studies.pain_study.analysis.line_comb import diagnosis as hd
+from studies.pain_study.analysis.line_comb import removal as hd_removal
 from studies.pain_study.scripts.workflow_config import load_workflow_config
 
 
+#: Where the removal records what it actually took, per recording.
+MANIFEST = Path("outputs/line_comb_mains/removal_manifest.tsv")
+
+
 def _removal_targets() -> tuple[float, ...]:
-    """The isolated lines ``line-comb`` targets, read from its config rather than copied.
+    """The isolated lines the removal acted on: the manifest first, the config as fallback.
 
     This was a hardcoded tuple and it drifted from the removal it was meant to track. It
     masked 61.0353 Hz, which was dropped for sitting 0.128 Hz from comb harmonic 51, and
@@ -37,13 +42,18 @@ def _removal_targets() -> tuple[float, ...]:
     below is a 62-95 Hz ratio, that line sat in the numerator of the measurement the mask
     exists to protect.
 
+    Reading the config fixed the drift but is no longer sufficient on its own: the lines
+    are detected per session now, so ``isolated_hz`` names the fallback list rather than
+    what was removed. The manifest is the only record of the latter.
+
     Only the isolated lines are masked, not the comb harmonics. The harmonics are removed
     and so read as holes rather than excess: they lower the index by a near-constant
     fraction in every participant, which the across-channel correlation is insensitive to,
     whereas a surviving line raises it in some participants only.
     """
     workflow = load_workflow_config("line_comb")
-    return tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
+    configured = tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
+    return hd_removal.removed_isolated_lines(MANIFEST, fallback=configured)
 
 
 LINES = _removal_targets()

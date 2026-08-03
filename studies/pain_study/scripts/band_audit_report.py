@@ -19,14 +19,19 @@ import pandas as pd
 
 from studies.pain_study.analysis import band_audit as ba
 from studies.pain_study.analysis.line_comb import diagnosis as hd
+from studies.pain_study.analysis.line_comb import removal as lr
 from studies.pain_study.scripts.workflow_config import load_workflow_config
 
 TR = 0.9
 KEEP_HIGH_HZ = 125.0
 
 
+#: Where the removal records what it actually took, per recording.
+MANIFEST = Path("outputs/line_comb_mains/removal_manifest.tsv")
+
+
 def _audited_lines() -> tuple[float, ...]:
-    """The isolated lines the removal targets, read from its config rather than copied.
+    """The isolated lines the removal acted on: the manifest first, the config as fallback.
 
     Not a stylistic preference: a copy drifts, and this one had. It carried 61.0353 Hz,
     dropped from the removal for sitting 0.128 Hz from comb harmonic 51, plus four more
@@ -35,16 +40,21 @@ def _audited_lines() -> tuple[float, ...]:
     helped, a drifted list charges excess where nothing was removed and leaves what was
     removed unscored.
 
+    Reading the config fixed that drift but is no longer sufficient on its own: the lines
+    are detected per session now, so ``isolated_hz`` names the fallback list rather than
+    what was removed. The manifest is the only record of the latter.
+
     TR above is deliberately still a literal. The distinction is whether a constant varies
     between participants: the isolated lines scatter 0.19-0.595 Hz across the cohort and so
     must be read, while TR is 0.9 s by the Volume markers for everyone, and k/TR is the
     honest way to name the gradient comb.
     """
     workflow = load_workflow_config("line_comb")
-    return tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
+    configured = tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
+    return lr.removed_isolated_lines(MANIFEST, fallback=configured)
 
 
-#: Narrowband features belonging to neither comb, as configured for the removal.
+#: Narrowband features belonging to neither comb, as the removal recorded them.
 INDEPENDENT_HZ = _audited_lines()
 #: Gradient volume comb. The centres are nulled by the volume-average subtraction; what is
 #: measured here is the sideband energy beside them.
