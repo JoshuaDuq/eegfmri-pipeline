@@ -99,16 +99,6 @@ def test_a_peak_just_off_the_comb_is_judged_by_strength_not_distance():
     assert any(abs(f - near) < 0.05 for f in _detect(*above))
 
 
-def test_a_benchmark_probe_tone_is_never_taken():
-    """The probes prove signal survives; removing them would fake that proof."""
-    probe = lr.Probe()
-    for tone in probe.sinusoid_hz + (probe.burst_hz,):
-        if not 20.0 < tone < 100.0:
-            continue
-        freqs, spec, prom = _spectrum(peaks=[(tone, 30.0)])
-        assert _detect(freqs, spec, prom) == (), tone
-
-
 def test_a_neural_rhythm_is_not_taken_as_a_line():
     """A 2 Hz-wide beta rhythm is signal, however tall its peak.
 
@@ -244,3 +234,31 @@ def test_a_peak_within_one_line_width_of_a_harmonic_is_always_declined():
     assert not any(abs(f - near) < 0.05 for f in found), (
         f"a peak 0.064 Hz from harmonic 39 was taken as its own line: {found}"
     )
+
+
+def test_production_detection_is_not_blind_at_the_probe_frequencies():
+    """Probes are injected after targets are chosen, so excluding them blinds production.
+
+    benchmark_run computes targets from the raw recording and only then adds the probe
+    waveform, so the probe tones are not in the spectrum detection sees and there is
+    nothing there to protect. The exclusion bought nothing for the benchmark and cost five
+    permanent 0.7 Hz blind spots in delivered data: five 30 dB lines placed on 35.55, 40,
+    44.05, 65.35 and 78.45 Hz were all rejected under the production default.
+
+    check_probe_clearance remains the guard that matters, and it is the right one -- if a
+    real line ever does sit on a probe tone it raises, which says move the probe rather
+    than stop looking.
+    """
+    probe = lr.Probe()
+    tones = probe.sinusoid_hz + (probe.burst_hz,)
+    freqs = np.arange(1.0, 100.0, 0.002)
+    spectrum = np.zeros_like(freqs)
+    sigma = 0.109 / 2.355
+    for tone in tones:
+        spectrum[:] = np.maximum(spectrum, 30.0 * np.exp(-0.5 * ((freqs - tone) / sigma) ** 2))
+
+    found = _detect(freqs, spectrum, spectrum)
+    for tone in tones:
+        assert any(abs(f - tone) < 0.05 for f in found), (
+            f"a 30 dB line at {tone} Hz was invisible to production detection: {found}"
+        )

@@ -312,6 +312,17 @@ def build_grid(freqs: np.ndarray, subject_psd: np.ndarray) -> Grid:
     return Grid(freqs, subject_psd, prominence, half_width_bins(freqs))
 
 
+class NoLinesDetected(RuntimeError):
+    """No line survived FDR control, which is a measurement rather than a fault.
+
+    Separated from the other RuntimeErrors this module raises so a caller can report a
+    genuinely clean cohort without also swallowing "no usable gradient-free window" and
+    "no usable background estimate", which mean the analysis could not run. Recorded
+    identically, those read as successful cleaning -- the most dangerous direction for a
+    verification step to fail in.
+    """
+
+
 def detection_mask(freqs: np.ndarray) -> np.ndarray:
     inside = (freqs >= DETECTION_LOW_HZ) & (freqs <= DETECTION_HIGH_HZ)
     return inside & ~((freqs >= NOTCH_HZ[0]) & (freqs <= NOTCH_HZ[1]))
@@ -335,7 +346,7 @@ def detect_cohort_lines(grid: Grid) -> pd.DataFrame:
 
     peaks = hd.cluster_peaks(significant, np.nan_to_num(cohort, nan=-np.inf))
     if not peaks:
-        raise RuntimeError("No line survived FDR control; nothing to characterise.")
+        raise NoLinesDetected("No line survived FDR control; nothing to characterise.")
 
     # Each participant is scored against their own null so prevalence is not driven by
     # whichever participants happen to have the largest lines.

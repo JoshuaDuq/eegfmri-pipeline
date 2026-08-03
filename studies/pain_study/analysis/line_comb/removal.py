@@ -136,6 +136,31 @@ class PreservationGate:
     max_nonline_change_db: float = 0.2
     max_burst_energy_deviation: float = 0.05
     min_burst_correlation: float = 0.99
+    max_intrinsic_energy_ratio: float = 1.05
+    """Most of the injected transient's energy that may come back.
+
+    A floor alone cannot catch a removal that *adds* energy where the transient was, which
+    is as much a defect as one that takes it away. The superseded gate covered this and the
+    replacement has to keep it.
+    """
+    min_intrinsic_energy_ratio: float = 0.85
+    """Least of the injected transient's window energy that must survive removal.
+
+    This is the criterion the transient gates were missing. They compared the removal's
+    effect on data+probe against its effect on the probe alone, and spectrum_fit is linear
+    in the data -- measured here at 7.6e-14 relative -- so those two quantities are equal
+    by construction. Both gates read exactly 1.0 on every run of every benchmark, for any
+    settings, and could not fail. ``intrinsic_energy_ratio`` was computed all along and
+    reported "as information rather than as a criterion"; on the delivered benchmark it
+    ranged 0.899 to 0.960, so it is the quantity that actually varies.
+
+    The floor is derived rather than read off those numbers. A 50 ms Gaussian burst at
+    40 Hz has a spectral width of 1/(2*pi*0.05) = 3.2 Hz, so it spans about 13 Hz and
+    crosses roughly eleven comb lines at 1.2 Hz spacing. Each line is subtracted over
+    freq/450 = 0.089 Hz there, giving an expected loss near 11 * 0.089 / 13 = 7.5%. The
+    floor sits at twice that expected loss: enough headroom for a transient that lands
+    less favourably, and still failing anything that loses a sixth of its energy.
+    """
     max_band_fraction_removed: float = 0.15
     """Most of the analysis band the removal may touch.
 
@@ -152,14 +177,23 @@ class PreservationGate:
 
     def evaluate(self, metrics: dict[str, float]) -> dict[str, bool]:
         return {
-            "lines_suppressed": metrics["median_residual_prominence_db"]
+            # The maximum, not the median. Gating the median lets half a run's targets
+            # stand above the threshold: the 90-run manifest passed every gate while
+            # carrying nineteen residuals over 1 dB and a worst of +13.90 dB.
+            "lines_suppressed": metrics["max_residual_prominence_db"]
             <= self.max_residual_prominence_db,
             "suppression_sufficient": metrics["median_suppression_db"]
             >= self.min_median_suppression_db,
             "sinusoids_preserved": metrics["max_probe_deviation_db"] <= self.max_probe_deviation_db,
             "spectrum_preserved": metrics["max_nonline_change_db"] <= self.max_nonline_change_db,
-            "transient_preserved": abs(metrics["burst_energy_ratio"] - 1.0)
-            <= self.max_burst_energy_deviation,
+            "transient_preserved": (
+                self.min_intrinsic_energy_ratio
+                <= metrics["intrinsic_energy_ratio"]
+                <= self.max_intrinsic_energy_ratio
+            ),
+            # Kept because it can still catch a genuinely non-linear failure -- a filter
+            # length that makes the removal state-dependent, say -- but on a linear
+            # operator it is an invariant, not a test. test_removal_gates.py pins why.
             "transient_undistorted": metrics["burst_correlation"] >= self.min_burst_correlation,
             "band_mostly_untouched": metrics["removed_band_fraction"]
             <= self.max_band_fraction_removed,
@@ -369,9 +403,19 @@ LINE_WIDTH_CEILING_HZ = 0.25
 #: targeting it would take the same spectrum twice.
 COMB_CLEARANCE_HZ = 0.20
 
-#: Clear space required from the benchmark's probe tones. The probes exist to demonstrate
-#: that signal survives the removal; detecting and removing them would manufacture that
-#: demonstration.
+#: Clear space required from any tone passed in ``probe_hz``. Nothing is protected by
+#: default, and that default is the point.
+#:
+#: This was 0.35 Hz around the benchmark's five probe tones, on the reasoning that
+#: detecting them would manufacture the proof that signal survives. The reasoning was
+#: wrong: ``benchmark_run`` chooses targets from the raw recording and injects the probe
+#: afterwards, so those tones are not in the spectrum detection sees. The exclusion
+#: protected nothing and left five permanent 0.7 Hz blind spots in delivered data --
+#: five 30 dB lines placed on 35.55, 40, 44.05, 65.35 and 78.45 Hz were all rejected.
+#:
+#: ``check_probe_clearance`` is the guard that actually matters and it stays: if a real
+#: line ever does sit on a probe tone it raises, which says move the probe rather than
+#: stop looking.
 PROBE_CLEARANCE_HZ = 0.35
 
 #: How far a peak must stand above the comb harmonic beside it to count as its own line
@@ -469,7 +513,7 @@ def detect_isolated_lines(
     comb_clearance_hz: float = COMB_CLEARANCE_HZ,
     carrier_margin_db: float = CARRIER_MARGIN_DB,
     probe_clearance_hz: float = PROBE_CLEARANCE_HZ,
-    probe_hz: Sequence[float] | None = None,
+    probe_hz: Sequence[float] | None = None,  # nothing protected unless asked
     max_line_width_hz: float = LINE_WIDTH_CEILING_HZ,
     claim_hz: float = _LINE_CLAIM_HZ,
     max_lines: int = MAX_ISOLATED_LINES,
@@ -514,10 +558,7 @@ def detect_isolated_lines(
         if not np.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be a finite positive number.")
 
-    if probe_hz is None:
-        probe = Probe()
-        probe_hz = probe.sinusoid_hz + (probe.burst_hz,)
-    protected = np.asarray(list(probe_hz), dtype=float)
+    protected = np.asarray(list(probe_hz or ()), dtype=float)
 
     # Clearance is owed to every comb position in the scanned range, not only to the
     # harmonics the comb pass removes. A peak 1 mHz from harmonic 17 is the comb whether or

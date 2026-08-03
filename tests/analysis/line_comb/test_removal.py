@@ -426,7 +426,9 @@ class TestPreservationGate:
     def _metrics(self, **overrides):
         base = {
             "median_residual_prominence_db": -15.0,
+            "max_residual_prominence_db": -12.0,
             "median_suppression_db": 28.0,
+            "intrinsic_energy_ratio": 0.95,
             "max_probe_deviation_db": 0.01,
             "max_nonline_change_db": 0.001,
             "burst_energy_ratio": 0.998,
@@ -443,7 +445,7 @@ class TestPreservationGate:
 
     def test_leftover_lines_fail(self):
         gate = lr.PreservationGate()
-        verdict = gate.evaluate(self._metrics(median_residual_prominence_db=6.0))
+        verdict = gate.evaluate(self._metrics(max_residual_prominence_db=6.0))
         assert not verdict["lines_suppressed"]
 
     def test_a_removed_probe_fails(self):
@@ -456,11 +458,11 @@ class TestPreservationGate:
 
     def test_a_flattened_transient_fails(self):
         gate = lr.PreservationGate()
-        assert not gate.evaluate(self._metrics(burst_energy_ratio=0.80))["transient_preserved"]
+        assert not gate.evaluate(self._metrics(intrinsic_energy_ratio=0.80))["transient_preserved"]
 
     def test_an_inflated_transient_also_fails(self):
         gate = lr.PreservationGate()
-        assert not gate.evaluate(self._metrics(burst_energy_ratio=1.20))["transient_preserved"]
+        assert not gate.evaluate(self._metrics(intrinsic_energy_ratio=1.20))["transient_preserved"]
 
     def test_emptying_the_band_fails_even_when_every_line_is_gone(self):
         # The failure mode that hid behind a guard band: lines suppressed, probes intact,

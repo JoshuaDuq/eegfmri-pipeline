@@ -271,6 +271,50 @@ def clean_raw(raw, targets, *, filter_length: str, mt_bandwidth: float, notch_wi
         )
 
 
+def settings_fingerprint(settings: RemovalSettings) -> str:
+    """A short stable hash of every setting that changes what the removal does.
+
+    Binds a benchmark to the configuration it measured, so a stale or mismatched
+    benchmark.tsv cannot stand in for one describing the settings about to be applied.
+    """
+    import hashlib
+    from dataclasses import asdict
+
+    payload = repr(sorted(asdict(settings).items())).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def require_passing_benchmark(path, settings: RemovalSettings) -> None:
+    """Refuse to write derived data without a passing benchmark of these settings.
+
+    Each clause here is a way this went wrong in practice rather than a hypothetical. A
+    benchmark.tsv from an earlier configuration was read as though it described the current
+    one. A benchmark that raised on its second recording left the previous run's file in
+    place, so the gates appeared to pass. And an apply was started under gates that were
+    later found unable to fail at all.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise RuntimeError(
+            f"Refusing to apply: no benchmark at {path}. Run `line-comb benchmark` first; "
+            "the criteria are stated before the measurement for a reason."
+        )
+    frame = pd.read_csv(path, sep="	")
+    expected = settings_fingerprint(settings)
+    recorded = set(frame.get("settings_fingerprint", pd.Series(dtype=str)).dropna().unique())
+    if recorded != {expected}:
+        raise RuntimeError(
+            f"Refusing to apply: {path} was produced under different settings "
+            f"({recorded or 'none recorded'} against {expected}). Re-run the benchmark."
+        )
+    if not bool(frame["gate_passed"].all()):
+        failed = int((~frame["gate_passed"].astype(bool)).sum())
+        raise RuntimeError(
+            f"Refusing to apply: {failed} of {len(frame)} benchmarked runs did not pass. "
+            "A failure means the settings are wrong, not that the criteria should move."
+        )
+
+
 def search_for(settings: RemovalSettings) -> float:
     """The refinement window that matches where the nominals came from.
 
@@ -600,7 +644,9 @@ def verify_cohort(bids_root: Path, cleaned_root: Path, settings: RemovalSettings
     for label, grid in grids.items():
         try:
             lines = ds.detect_cohort_lines(grid)
-        except RuntimeError:
+        except ds.NoLinesDetected:
+            # A clean stage. Anything else -- no usable window, no usable background --
+            # is the analysis failing and must not be written here as zero lines.
             report.append(
                 {"stage": label, "n_lines": 0, "n_comb_lines": 0, "max_prominence_db": float("nan")}
             )
@@ -737,6 +783,7 @@ def run(args: argparse.Namespace) -> None:
                 f"{'PASS' if row['gate_passed'] else 'FAIL'} ({time.time()-started:.0f}s)"
             )
         frame = pd.DataFrame(rows)
+        frame["settings_fingerprint"] = settings_fingerprint(settings)
         frame.to_csv(args.report_dir / "benchmark.tsv", sep="\t", index=False, float_format="%.6g")
         gate_columns = [c for c in frame.columns if c.startswith("gate_") and c != "gate_passed"]
         print(f"\npassed {int(frame.gate_passed.sum())}/{len(frame)} runs")
@@ -744,6 +791,12 @@ def run(args: argparse.Namespace) -> None:
             print(f"  {column:32s} {int(frame[column].sum())}/{len(frame)}")
         print(f"  wrote {args.report_dir/'benchmark.tsv'}")
         return
+
+    # Nothing is written before this passes. The benchmark's criteria are stated ahead of
+    # the measurement precisely so that they can refuse; letting apply run regardless made
+    # them advisory.
+    require_passing_benchmark(args.report_dir / "benchmark.tsv", settings)
+    print(f"Benchmark {settings_fingerprint(settings)} passed; applying.")
 
     print(f"Mirroring sidecars into {args.output_root}")
     print(f"  copied {mirror_sidecars(args.bids_root, args.output_root)} files")
