@@ -96,7 +96,31 @@ line_comb_removal:
   # Listing it as an isolated line is both redundant and rejected: estimate_comb refuses a
   # seed within isolated_search_hz of a comb position, because the search would just find
   # the comb. See exclude_mains below.
-  isolated_hz: [23.7776, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 81.1111, 82.2228, 94.0748]
+  # Seed positions are the midrange of where each line actually sits across the cohort,
+  # measured on the uncleaned root (outputs/line_comb_mains/seed_positions.csv). A seed
+  # covers +/- isolated_search_hz, so a line drifting wider than 0.30 Hz between
+  # participants needs two seeds rather than one.
+  #
+  # 93.80 and 94.30 are the second and third seeds for the 94 Hz line. That line spans
+  # 0.595 Hz cohort-wide (93.750 in sub-0001 to 94.345 in sub-0008), far more than one
+  # seed can cover and more than the guard permits any window to be. With 94.0748 alone
+  # it was caught in 11 of 15 participants, and in the four it missed it was left standing
+  # at +20.5 to +28.0 dB -- in sub-0008 the delivered data was *worse* after cleaning,
+  # +28.0 dB to +31.2 dB, because its neighbours went and it did not. The three together
+  # cover 93.65-94.45.
+  #
+  # 93.80 is the tightest of the three at 0.202 Hz from comb harmonic 78 (93.5984). Its
+  # window stops at 93.65, so the harmonic stays outside it and the search cannot lock on.
+  #
+  # 23.75 replaces 23.7776, the same line re-centred: sub-0001 and sub-0003 carry it at
+  # 23.6225 Hz, 5 mHz outside the old window. The new window keeps the upper end (23.8311).
+  #
+  # Two apparent misses are deliberately NOT chased. sub-0001's 46.8741 Hz peak sits
+  # 0.075 Hz from comb harmonic 39, so it is the comb, which is exactly what the narrow
+  # isolated_search_hz exists to keep the search off. And 82.2228 stays put despite three
+  # participants carrying it 0.18-0.28 Hz high: it is gradient harmonic 74 at TR = 0.9 s
+  # (74/0.9 = 82.2222), a physically pinned position, and the misses are 6.5-8.3 dB.
+  isolated_hz: [23.7500, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 81.1111, 82.2228, 93.8000, 94.0748, 94.3000]
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets
