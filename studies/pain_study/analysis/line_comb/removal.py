@@ -87,6 +87,16 @@ MIN_HARMONICS_FOR_FIT = 20
 #: above every real run and below the constructed failure.
 MAX_FIT_RESIDUAL_RMS_HZ = 0.20
 
+#: How far either side of a target a residual is still that target's responsibility.
+#:
+#: The notch's own width is the wrong region to search. The failure being looked for is a
+#: target that missed, and a missed line then sits just outside what the notch claimed --
+#: precisely where the claimed width cannot see. This is the frequency-uncertainty scale of
+#: the estimate instead: comb harmonics wander with the fundamental times the harmonic
+#: index, and the isolated lines are searched over the same 0.15 Hz. Kept well inside the
+#: 0.6 Hz half-spacing so one target is never charged with the next harmonic's line.
+RESIDUAL_SEARCH_HZ = 0.15
+
 
 @dataclass(frozen=True)
 class CombEstimate:
@@ -147,6 +157,16 @@ class PreservationGate:
     everything else alone.
     """
 
+    max_residual_excess_db: float = 1.0
+    """How far the worst residual may stand above a blind control of the same search.
+
+    Replaces a fixed bound on the residual itself. Searching a window around every target
+    to catch a displaced line means taking the maximum of roughly a thousand bins, whose
+    noise floor is several dB before any line survives. Control windows of the same width,
+    placed where no target is, measure that floor on the same data, so what is gated is the
+    excess over it -- a criterion that means the same thing at any search width or noise
+    level.
+    """
     max_residual_prominence_db: float = 1.0
     min_median_suppression_db: float = 10.0
     max_probe_deviation_db: float = 0.5
@@ -194,11 +214,12 @@ class PreservationGate:
 
     def evaluate(self, metrics: dict[str, float]) -> dict[str, bool]:
         return {
-            # The maximum, not the median. Gating the median lets half a run's targets
-            # stand above the threshold: the 90-run manifest passed every gate while
-            # carrying nineteen residuals over 1 dB and a worst of +13.90 dB.
-            "lines_suppressed": metrics["max_residual_prominence_db"]
-            <= self.max_residual_prominence_db,
+            # The maximum against a blind control, not the median against a constant.
+            # Gating the median let half a run's targets stand above the threshold -- the
+            # 90-run manifest passed every gate carrying nineteen residuals over 1 dB and a
+            # worst of +13.90 dB -- while a constant bound cannot survive widening the
+            # search to where a displaced line actually sits.
+            "lines_suppressed": metrics["residual_excess_db"] <= self.max_residual_excess_db,
             "suppression_sufficient": metrics["median_suppression_db"]
             >= self.min_median_suppression_db,
             "sinusoids_preserved": metrics["max_probe_deviation_db"] <= self.max_probe_deviation_db,
@@ -750,6 +771,7 @@ def line_suppression(
     prominence_after: Sequence[float],
     targets: Sequence[float],
     widths: Sequence[float] | None = None,
+    search_hz: float = RESIDUAL_SEARCH_HZ,
 ) -> dict[str, float]:
     """How far the targeted lines fell, in local prominence.
 
@@ -780,21 +802,57 @@ def line_suppression(
         centre = int(np.argmin(np.abs(frequency_array - frequency)))
         if not (np.isfinite(before[centre]) and np.isfinite(after[centre])):
             continue
-        inside = np.abs(frequency_array - frequency) <= max(width, 0.0) / 2.0
+        reach = max(max(width, 0.0) / 2.0, search_hz)
+        inside = np.abs(frequency_array - frequency) <= reach
         inside[centre] = True
         window_after = after[inside]
         finite = window_after[np.isfinite(window_after)]
         rows.append((before[centre], float(np.max(finite)) if finite.size else after[centre]))
     if not rows:
         raise ValueError("No target frequency had a usable prominence estimate.")
+    # A blind control for the same search. Windows of the same width, as many of them,
+    # placed where no target is: the largest background bin they hold is the floor this
+    # search has by construction. Without it a fixed threshold cannot tell a surviving line
+    # from the maximum of a thousand noise bins, which is what a +/-0.15 Hz window around
+    # sixty-odd targets amounts to.
+    control = _control_maximum(frequency_array, after, target_array, search_hz)
+
     values = np.asarray(rows)
+    max_residual = float(np.max(values[:, 1]))
     return {
         "n_targets": float(len(values)),
         "median_prominence_before_db": float(np.median(values[:, 0])),
         "median_residual_prominence_db": float(np.median(values[:, 1])),
-        "max_residual_prominence_db": float(np.max(values[:, 1])),
+        "max_residual_prominence_db": max_residual,
+        "control_max_prominence_db": control,
+        "residual_excess_db": max_residual - control,
         "median_suppression_db": float(np.median(values[:, 0] - values[:, 1])),
     }
+
+
+def _control_maximum(
+    frequency_array: np.ndarray,
+    after: np.ndarray,
+    targets: np.ndarray,
+    search_hz: float,
+) -> float:
+    """Largest prominence in as many target-free windows as there are targets."""
+    if targets.size == 0:
+        return float("-inf")
+    away = np.ones(frequency_array.size, dtype=bool)
+    for frequency in targets:
+        away &= np.abs(frequency_array - frequency) > 2.0 * search_hz
+    away &= np.isfinite(after)
+    candidates = np.flatnonzero(away)
+    if candidates.size == 0:
+        return float("-inf")
+
+    step = max(1, candidates.size // max(int(targets.size), 1))
+    maxima = [
+        float(np.max(after[candidates[start : start + step]]))
+        for start in range(0, candidates.size - step + 1, step)
+    ]
+    return float(np.max(maxima)) if maxima else float(np.max(after[candidates]))
 
 
 def probe_preservation(

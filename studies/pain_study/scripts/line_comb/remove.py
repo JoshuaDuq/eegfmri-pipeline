@@ -278,7 +278,9 @@ def write_derivative_description(
         }
     )
     described["GeneratedBy"] = generated
-    described["SourceDatasets"] = [{"URI": f"file://{Path(source_root).resolve()}"}]
+    described["SourceDatasets"] = [
+        {"URL": Path(source_root).name, "Version": _source_digest()}
+    ]
 
     path.write_text(json.dumps(described, indent=2) + "\n", encoding="utf-8")
     return path
@@ -340,6 +342,30 @@ def clean_raw(raw, targets, *, filter_length: str, mt_bandwidth: float, notch_wi
         )
 
 
+def _source_digest() -> str:
+    """Content hash of the modules that decide what the removal does.
+
+    A commit id is not enough: on a dirty tree it reads the same for every uncommitted
+    state, so two different implementations would share a fingerprint, which is the one
+    thing the fingerprint exists to prevent. Untracked files are invisible to it as well.
+    Hashing the sources themselves has neither problem.
+    """
+    import hashlib
+
+    here = Path(__file__).resolve().parent
+    package = here.parent.parent / "analysis" / "line_comb"
+    sources = sorted(
+        list(here.glob("*.py")) + list(package.glob("*.py")), key=lambda q: q.name
+    )
+    if not sources:
+        return "unknown"
+    digest = hashlib.sha256()
+    for source in sources:
+        digest.update(source.name.encode("utf-8"))
+        digest.update(source.read_bytes())
+    return digest.hexdigest()[:16]
+
+
 def _code_revision() -> str:
     """Short git revision of the tree, so a benchmark cannot outlive the code it measured."""
     import subprocess
@@ -369,8 +395,14 @@ def settings_fingerprint(
     import hashlib
     from dataclasses import asdict
 
+    digest = _source_digest()
+    if digest == "unknown":
+        raise RuntimeError(
+            "Cannot identify the removal source, so a benchmark cannot be bound to it. "
+            "Refusing to fingerprint rather than certify data against unknown code."
+        )
     payload = repr(
-        (sorted(asdict(settings).items()), fundamental_scope, _code_revision())
+        (sorted(asdict(settings).items()), fundamental_scope, digest)
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
 
@@ -910,9 +942,13 @@ def run(args: argparse.Namespace) -> None:
         for index, vhdr in enumerate(sample, start=1):
             started = time.time()
             subject = vhdr.stem.split("_")[0]
-            row = benchmark_run(
-                vhdr, settings, session_lists.get(subject), session_estimates.get(subject)
+            # Score whichever fundamental the apply will use. Passing the pooled
+            # estimate regardless would certify pooled cleaning and then apply per-run
+            # cleaning -- the same defect this round of the audit just removed.
+            scoped = (
+                session_estimates.get(subject) if args.fundamental_scope == "session" else None
             )
+            row = benchmark_run(vhdr, settings, session_lists.get(subject), scoped)
             rows.append(row)
             print(
                 f"[{index}/{len(sample)}] {vhdr.stem[:44]:44s} "

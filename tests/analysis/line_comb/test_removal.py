@@ -427,6 +427,8 @@ class TestPreservationGate:
         base = {
             "median_residual_prominence_db": -15.0,
             "max_residual_prominence_db": -12.0,
+            "control_max_prominence_db": -8.0,
+            "residual_excess_db": -4.0,
             "median_suppression_db": 28.0,
             "intrinsic_energy_ratio": 0.95,
             "max_probe_deviation_db": 0.01,
@@ -445,7 +447,7 @@ class TestPreservationGate:
 
     def test_leftover_lines_fail(self):
         gate = lr.PreservationGate()
-        verdict = gate.evaluate(self._metrics(max_residual_prominence_db=6.0))
+        verdict = gate.evaluate(self._metrics(residual_excess_db=6.0))
         assert not verdict["lines_suppressed"]
 
     def test_a_removed_probe_fails(self):

@@ -99,3 +99,21 @@ def test_a_benchmark_missing_a_subject_does_not_authorise_it(tmp_path):
     ).to_csv(path, sep="\t", index=False)
     with pytest.raises(RuntimeError, match="did not cover"):
         rlc.require_passing_benchmark(path, settings, subjects={"sub-0000", "sub-0001"})
+
+
+def test_the_fingerprint_tracks_source_content_not_just_a_commit_id():
+    """A commit id plus '+dirty' is the same string for every dirty tree.
+
+    Two different uncommitted implementations would share a benchmark fingerprint, which is
+    the failure the fingerprint exists to prevent.
+    """
+    digest = rlc._source_digest()
+    assert len(digest) >= 12
+    assert "dirty" not in digest
+    assert digest != "unknown"
+
+
+def test_an_unidentifiable_source_is_an_error_not_a_shrug(monkeypatch):
+    monkeypatch.setattr(rlc, "_source_digest", lambda: "unknown")
+    with pytest.raises(RuntimeError, match="identify"):
+        rlc.settings_fingerprint(rlc.RemovalSettings())
