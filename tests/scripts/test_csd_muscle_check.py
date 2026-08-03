@@ -58,3 +58,42 @@ def test_the_two_arms_disagree_on_channel_count_when_there_are_bads():
 def test_no_bads_means_the_arms_agree_on_channels():
     epochs = _epochs(n_bads=0)
     assert set(cmc.csd_arm(epochs).ch_names) == set(cmc.voltage_arm(epochs).ch_names)
+
+
+def test_the_line_mask_is_read_from_the_removal_config_not_copied():
+    """A hardcoded copy of the line list drifts away from what is actually removed.
+
+    It had drifted: the copy masked 61.0353 Hz, dropped from the removal for sitting
+    0.128 Hz from comb harmonic 51, while masking nothing near 94 Hz -- where the
+    strongest residual line in the cohort sits, at 10.1% of sub-0008's gamma 62-95 power
+    and 10.9% of sub-0001's. The muscle index this script builds is a 62-95 Hz ratio, so
+    that line landed in the numerator of the very measurement it was meant to be kept out
+    of.
+    """
+    from studies.pain_study.scripts.workflow_config import load_workflow_config
+
+    configured = [
+        float(f) for f in load_workflow_config("line_comb").get("line_comb_removal.isolated_hz")
+    ]
+    assert sorted(cmc.LINES) == sorted(configured), (
+        "the mask must come from line_comb_removal.isolated_hz so the two cannot drift"
+    )
+
+
+def test_the_mask_covers_the_94_hz_line_across_the_cohort():
+    """The line spans 93.750 Hz (sub-0001) to 94.345 Hz (sub-0008); both must be masked."""
+    covered = lambda f: any(lo <= f <= hi for lo, hi in cmc.MASK)
+
+    for frequency, subject in ((93.7503, "sub-0001"), (94.3453, "sub-0008")):
+        assert covered(frequency), (
+            f"{subject} carries the 94 Hz line at {frequency} Hz and the mask misses it"
+        )
+
+
+def test_the_mask_does_not_carry_a_frequency_the_removal_dropped():
+    """61.0353 Hz is not a removal target, so masking it discards real spectrum."""
+    covered = lambda f: any(lo <= f <= hi for lo, hi in cmc.MASK)
+    assert not covered(61.0353), (
+        "61.0353 Hz was dropped from isolated_hz for sitting 0.128 Hz from comb harmonic "
+        "51; masking it removes band power that was never contaminated"
+    )

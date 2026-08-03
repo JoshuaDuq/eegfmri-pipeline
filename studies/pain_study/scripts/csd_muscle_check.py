@@ -24,8 +24,29 @@ import pandas as pd
 from scipy.stats import pearsonr
 
 from studies.pain_study.analysis.line_comb import diagnosis as hd
+from studies.pain_study.scripts.workflow_config import load_workflow_config
 
-LINES = (23.7776, 29.6854, 46.5839, 57.1925, 59.0168, 61.0353, 61.4039, 99.5982)
+
+def _removal_targets() -> tuple[float, ...]:
+    """The isolated lines ``line-comb`` targets, read from its config rather than copied.
+
+    This was a hardcoded tuple and it drifted from the removal it was meant to track. It
+    masked 61.0353 Hz, which was dropped for sitting 0.128 Hz from comb harmonic 51, and
+    masked nothing near 94 Hz -- where the strongest residual line in the cohort sits, at
+    10.1% of sub-0008's 62-95 Hz power and 10.9% of sub-0001's. Since the muscle index
+    below is a 62-95 Hz ratio, that line sat in the numerator of the measurement the mask
+    exists to protect.
+
+    Only the isolated lines are masked, not the comb harmonics. The harmonics are removed
+    and so read as holes rather than excess: they lower the index by a near-constant
+    fraction in every participant, which the across-channel correlation is insensitive to,
+    whereas a surviving line raises it in some participants only.
+    """
+    workflow = load_workflow_config("line_comb")
+    return tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
+
+
+LINES = _removal_targets()
 MASK = hd.line_exclusion_windows(LINES, half_width_hz=0.25)
 BANDS = {"gamma_low": (30.1, 45.0), "gamma_mid": (45.0, 58.0), "gamma_high": (62.0, 95.0)}
 CSD_LAMBDA2 = 1.0e-5
