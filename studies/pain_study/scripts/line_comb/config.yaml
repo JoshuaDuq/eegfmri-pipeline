@@ -156,6 +156,16 @@ line_comb_removal:
   # all seven of its lines in all six runs. Without this the budget was being spent
   # arbitrating between one-off noise peaks.
   min_runs_per_line: 2
+  # Refinement window for a detected nominal. It sits on the summit already, so it needs
+  # only enough room to refine sub-bin -- and it must stay narrow, because estimate_comb
+  # refuses a nominal within its search window of a comb position, on the grounds that a
+  # search that wide refines onto the harmonic instead. At 0.15 Hz it does: sub-0001's
+  # 93.759 Hz line is 0.137 Hz from harmonic 78, so the detector offered it and the
+  # estimator raised, stopping the benchmark. Kept below the detector's own floor of one
+  # line width (0.109 Hz) so a line detection admits can never be one the estimator
+  # refuses. isolated_search_hz above still applies to the curated fallback, which needs
+  # the wide window to find a line that has drifted since it was listed.
+  detection_search_hz: 0.05
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
   isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets

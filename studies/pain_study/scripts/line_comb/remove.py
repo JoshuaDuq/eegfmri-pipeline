@@ -107,6 +107,19 @@ class RemovalSettings:
     detection_low_hz: float = 20.0
     detection_high_hz: float = 100.0
     max_isolated_lines: int = lr.MAX_ISOLATED_LINES
+    detection_search_hz: float = 0.05
+    """Refinement window for a nominal that came from detection.
+
+    Detected nominals sit on the summit already, so they need only enough room to refine
+    sub-bin -- and the window has to stay narrow, because ``estimate_comb`` refuses a
+    nominal within ``isolated_search_hz`` of a comb position on the grounds that a search
+    that wide would refine onto the harmonic instead. It is right to: at 0.15 Hz it would.
+    sub-0001's 93.759 Hz line sits 0.137 Hz from harmonic 78, so the detector offered it
+    and the estimator raised, stopping the benchmark.
+
+    Kept below the detector's own floor of one line width, so a line the detector admits
+    can never be one the estimator refuses.
+    """
     min_runs_per_line: int = 2
     """Runs of a session a line must appear in before it is removed from any of them.
 
@@ -160,6 +173,9 @@ class RemovalSettings:
             ),
             min_runs_per_line=int(
                 block.get("min_runs_per_line", defaults.min_runs_per_line)
+            ),
+            detection_search_hz=float(
+                block.get("detection_search_hz", defaults.detection_search_hz)
             ),
             exclude_mains=bool(block.get("exclude_mains", defaults.exclude_mains)),
         )
@@ -255,6 +271,16 @@ def clean_raw(raw, targets, *, filter_length: str, mt_bandwidth: float, notch_wi
         )
 
 
+def search_for(settings: RemovalSettings) -> float:
+    """The refinement window that matches where the nominals came from.
+
+    Detected nominals are already on the summit and must stay clear of the comb; the
+    curated fallback still needs the wide window, because a listed frequency has to find a
+    line that has drifted since it was listed.
+    """
+    return settings.detection_search_hz if settings.detect_isolated else settings.isolated_search_hz
+
+
 def isolated_nominals(
     freqs, spectrum_db, prominence, settings: RemovalSettings
 ) -> tuple[float, ...]:
@@ -277,7 +303,7 @@ def isolated_nominals(
         harmonic_range=settings.harmonic_range,
         isolated_nominal_hz=(),
         search_hz=settings.search_hz,
-        isolated_search_hz=settings.isolated_search_hz,
+        isolated_search_hz=search_for(settings),
         min_prominence_db=settings.min_prominence_db,
     )
     return lr.detect_isolated_lines(
@@ -314,7 +340,7 @@ def estimate_and_targets(
         harmonic_range=settings.harmonic_range,
         isolated_nominal_hz=nominals,
         search_hz=settings.search_hz,
-        isolated_search_hz=settings.isolated_search_hz,
+        isolated_search_hz=search_for(settings),
         min_prominence_db=settings.min_prominence_db,
     )
     targets = lr.removal_frequencies(
@@ -476,7 +502,7 @@ def estimate_session(vhdrs, settings: RemovalSettings):
             harmonic_range=settings.harmonic_range,
             isolated_nominal_hz=nominals,
             search_hz=settings.search_hz,
-            isolated_search_hz=settings.isolated_search_hz,
+            isolated_search_hz=search_for(settings),
             min_prominence_db=settings.min_prominence_db,
         )
         for freqs, spectrum_db, prominence in spectra

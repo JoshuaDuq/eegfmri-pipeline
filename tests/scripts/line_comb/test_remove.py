@@ -397,3 +397,30 @@ def test_a_single_run_session_can_still_contribute_lines():
     settings = rlc.RemovalSettings(detect_isolated=True)
     kept = rlc.session_nominals([_synthetic_spectrum(peaks=[(47.043, 23.0)])], settings)
     assert any(abs(f - 47.043) < 0.02 for f in kept), kept
+
+
+def test_detected_lines_always_clear_the_estimator_guard():
+    """The detector and the estimator must not disagree about what is too close to the comb.
+
+    estimate_comb refuses a nominal within isolated_search_hz of a comb position, because a
+    search that wide reaches across and refines onto the harmonic instead. Detection admits
+    a peak once it is more than one line width away and outranks the harmonic beside it --
+    and those two thresholds were 0.109 Hz against 0.15 Hz, so the detector offered
+    sub-0001's 93.759 Hz line and the estimator raised on it, stopping the benchmark.
+
+    Detected nominals sit on the summit already, so they need only a narrow refinement.
+    Keeping that search below the detector's own floor makes the disagreement impossible
+    rather than unlikely.
+    """
+    settings = rlc.RemovalSettings(detect_isolated=True)
+    assert settings.detection_search_hz < lr._LINE_CLAIM_HZ, (
+        "a line the detector admits could still be refused by estimate_comb"
+    )
+
+
+def test_the_search_narrows_only_when_detection_supplies_the_nominals():
+    """The curated fallback still needs the wide window to follow lines that drift."""
+    detecting = rlc.RemovalSettings(detect_isolated=True)
+    listed = rlc.RemovalSettings(detect_isolated=False)
+    assert rlc.search_for(detecting) == detecting.detection_search_hz
+    assert rlc.search_for(listed) == listed.isolated_search_hz
