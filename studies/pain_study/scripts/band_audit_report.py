@@ -19,12 +19,33 @@ import pandas as pd
 
 from studies.pain_study.analysis import band_audit as ba
 from studies.pain_study.analysis.line_comb import diagnosis as hd
+from studies.pain_study.scripts.workflow_config import load_workflow_config
 
 TR = 0.9
 KEEP_HIGH_HZ = 125.0
 
-#: Narrowband features belonging to neither comb, measured on the delivered epochs.
-INDEPENDENT_HZ = (23.7776, 29.6854, 46.5839, 57.1925, 59.0168, 61.0353, 61.4039, 99.5982)
+
+def _audited_lines() -> tuple[float, ...]:
+    """The isolated lines the removal targets, read from its config rather than copied.
+
+    Not a stylistic preference: a copy drifts, and this one had. It carried 61.0353 Hz,
+    dropped from the removal for sitting 0.128 Hz from comb harmonic 51, plus four more
+    frequencies nothing targets -- and carried nothing near 94 Hz, where the strongest
+    residual in the cohort sits. Since this report is what judges whether the line work
+    helped, a drifted list charges excess where nothing was removed and leaves what was
+    removed unscored.
+
+    TR above is deliberately still a literal. The distinction is whether a constant varies
+    between participants: the isolated lines scatter 0.19-0.595 Hz across the cohort and so
+    must be read, while TR is 0.9 s by the Volume markers for everyone, and k/TR is the
+    honest way to name the gradient comb.
+    """
+    workflow = load_workflow_config("line_comb")
+    return tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
+
+
+#: Narrowband features belonging to neither comb, as configured for the removal.
+INDEPENDENT_HZ = _audited_lines()
 #: Gradient volume comb. The centres are nulled by the volume-average subtraction; what is
 #: measured here is the sideband energy beside them.
 COMB_HZ = tuple(k / TR for k in range(1, 91))
