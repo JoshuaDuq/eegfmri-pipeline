@@ -77,29 +77,26 @@ def test_the_same_line_is_found_wherever_the_participant_puts_it():
         assert found and found[0] == pytest.approx(position, abs=0.01), position
 
 
-def test_the_one_comb_adjacent_member_of_that_span_is_declined():
-    """sub-0001's 93.7503 Hz peak is not the same line, and must not be taken as one.
-
-    Measured against the fitted fundamental it sits 0.152 Hz from comb harmonic 78, while
-    the other twelve participants carry the line 0.336 to 0.747 Hz clear of any harmonic.
-    Inside that distance a peak cannot be told from a harmonic's sideband -- and sidebands
-    are the residual a fixed-frequency notch cannot follow, so removing it would claim a
-    fix it cannot deliver. Declining it is the conservative reading and the honest one.
-    """
-    freqs, spec, prom = _spectrum(peaks=[(93.7503, 26.4)], f0=1.19998)
-    assert _detect(freqs, spec, prom, fundamental_hz=1.19998) == ()
-
-
 def test_a_comb_harmonic_is_not_taken_as_an_isolated_line():
     """The comb pass removes those; taking them here would target them twice."""
     freqs, spec, prom = _spectrum(harmonics=[(60, 25.0), (65, 20.0)])
     assert _detect(freqs, spec, prom) == ()
 
 
-def test_a_line_just_off_the_comb_is_still_rejected_within_the_clearance():
-    """Inside the clearance the detector cannot tell a sideband from a separate line."""
-    freqs, spec, prom = _spectrum(peaks=[(60 * 1.2 + 0.1, 25.0)])
-    assert _detect(freqs, spec, prom, comb_clearance_hz=0.2) == ()
+def test_a_peak_just_off_the_comb_is_judged_by_strength_not_distance():
+    """Proximity alone does not decide it; the carrier beside it does.
+
+    This test used to assert that anything inside the clearance was rejected, with no
+    harmonic in the spectrum at all -- so it proved only that the distance rule fired, not
+    that the peak was a sideband. Under a carrier of equal height the peak is the comb's
+    and goes; 17 dB above it, it is its own line and stays.
+    """
+    near = 60 * 1.2 + 0.12
+    beneath = _spectrum(harmonics=[(60, 25.0)], peaks=[(near, 19.0)])
+    assert not any(abs(f - near) < 0.05 for f in _detect(*beneath))
+
+    above = _spectrum(harmonics=[(60, 9.0)], peaks=[(near, 26.0)])
+    assert any(abs(f - near) < 0.05 for f in _detect(*above))
 
 
 def test_a_benchmark_probe_tone_is_never_taken():
@@ -197,3 +194,53 @@ def test_the_cap_leaves_room_for_what_the_cohort_actually_carries():
     measurement. At the calibrated floor this cohort yields 7.2 lines per participant and
     at most 12, so the cap bounds pathology without shaping the ordinary result."""
     assert lr.MAX_ISOLATED_LINES > 12
+
+
+def test_a_line_stronger_than_the_harmonic_beside_it_is_taken():
+    """sub-0001 carries a line 0.139 Hz from harmonic 78 that is 17 dB above it.
+
+    A blanket clearance treated "near the comb" as "is comb" and declined it, and the apply
+    then made that participant worse than before cleaning: its neighbours went, it did not,
+    and it rose from 7.1% to 10.6% of the participant's 62-95 Hz power. But a sideband
+    cannot exceed its own carrier, so a peak this far above the local harmonic is not one.
+    """
+    freqs, spec, prom = _spectrum(
+        harmonics=[(78, 9.3)], peaks=[(93.7503, 26.4)], f0=1.20015
+    )
+    found = _detect(freqs, spec, prom, fundamental_hz=1.20015)
+    assert any(abs(f - 93.7503) < 0.02 for f in found), (
+        f"a line 17 dB above the neighbouring harmonic was declined as its sideband: {found}"
+    )
+
+
+def test_a_sideband_weaker_than_its_carrier_is_still_declined():
+    """The +/-0.11 Hz population is what the clearance is for, and it must stay rejected."""
+    freqs, spec, prom = _spectrum(harmonics=[(60, 25.0)], peaks=[(60 * 1.2 + 0.11, 19.0)])
+    found = _detect(freqs, spec, prom)
+    assert not any(abs(f - (60 * 1.2 + 0.11)) < 0.05 for f in found), found
+
+
+def test_a_peak_sitting_on_a_harmonic_is_still_declined():
+    """sub-0011's 20.401 Hz is 0.001 Hz from harmonic 17: it has no excess over itself."""
+    freqs, spec, prom = _spectrum(peaks=[(20.401, 14.1)], f0=1.19998)
+    found = _detect(
+        freqs, spec, prom, fundamental_hz=1.19998, harmonic_range=(22, 83), low_hz=18.0
+    )
+    assert found == (), f"a comb harmonic was taken as an isolated line: {found}"
+
+
+def test_a_peak_within_one_line_width_of_a_harmonic_is_always_declined():
+    """Inside a line width the strength comparison measures the candidate against itself.
+
+    sub-0001 has a peak 0.064 Hz from harmonic 39. That is closer than the 0.109 Hz a line
+    occupies, so the "harmonic strength" sampled at the comb position is really that peak's
+    own skirt, and it outranks itself by construction. Admitting it would hand the comb
+    pass's own harmonic back as an isolated line and target it twice.
+    """
+    f0 = 1.20015
+    near = 39 * f0 + 0.064
+    freqs, spec, prom = _spectrum(peaks=[(near, 24.0)], f0=f0)
+    found = _detect(freqs, spec, prom, fundamental_hz=f0)
+    assert not any(abs(f - near) < 0.05 for f in found), (
+        f"a peak 0.064 Hz from harmonic 39 was taken as its own line: {found}"
+    )

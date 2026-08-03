@@ -374,6 +374,17 @@ COMB_CLEARANCE_HZ = 0.20
 #: demonstration.
 PROBE_CLEARANCE_HZ = 0.35
 
+#: How far a peak must stand above the comb harmonic beside it to count as its own line
+#: rather than that harmonic's sideband.
+#:
+#: The physics does the work: a sideband is weaker than the carrier it modulates, and a
+#: peak sitting on a harmonic has no excess over itself. Measured on sub-0001, whose peak
+#: 0.139 Hz from harmonic 78 stands 17.1 dB above it -- far too strong to be its sideband,
+#: and declining it left that participant worse after cleaning than before. Against the
+#: cases this must still reject: sub-0011's peak 0.001 Hz from harmonic 17 has no excess,
+#: and the +/-0.11 Hz sideband population sits below its carriers by construction.
+CARRIER_MARGIN_DB = 6.0
+
 #: Most lines one run may contribute. A cap bounds how much spectrum removal can claim
 #: however noisy a recording is; the cohort has needed at most twelve.
 MAX_ISOLATED_LINES = 16
@@ -456,6 +467,7 @@ def detect_isolated_lines(
     low_hz: float = 20.0,
     high_hz: float = 100.0,
     comb_clearance_hz: float = COMB_CLEARANCE_HZ,
+    carrier_margin_db: float = CARRIER_MARGIN_DB,
     probe_clearance_hz: float = PROBE_CLEARANCE_HZ,
     probe_hz: Sequence[float] | None = None,
     max_line_width_hz: float = LINE_WIDTH_CEILING_HZ,
@@ -535,11 +547,31 @@ def detect_isolated_lines(
         summit & inside & np.isfinite(prominence_array) & (prominence_array >= min_prominence_db)
     )
     if comb_positions.size:
-        near_comb = (
-            np.abs(frequency_array[:, None] - comb_positions[None, :]).min(axis=1)
-            <= comb_clearance_hz
+        distance = np.abs(frequency_array[:, None] - comb_positions[None, :])
+        near_comb = distance.min(axis=1) <= comb_clearance_hz
+        nearest = distance.argmin(axis=1)
+        harmonic_strength = np.array(
+            [
+                prominence_array[int(np.argmin(np.abs(frequency_array - position)))]
+                for position in comb_positions
+            ]
         )
-        candidate &= ~near_comb
+        # Proximity alone does not make a peak part of the comb. A sideband cannot exceed
+        # its own carrier, and a peak sitting on a harmonic has no excess over itself, so
+        # a peak that clears the harmonic beside it by this margin is a line that happens
+        # to land nearby. sub-0001 carries one 0.139 Hz from harmonic 78 and 17.1 dB above
+        # it; declining that as a sideband left the participant worse after cleaning than
+        # before, its neighbours removed and it not.
+        #
+        # The comparison only means anything beyond one line width. Closer than that, the
+        # strength sampled at the comb position is the candidate's own skirt, so it
+        # outranks itself: sub-0001 has a peak 0.064 Hz from harmonic 39 that would be
+        # handed back as an isolated line and targeted twice. Separations here are cleanly
+        # bimodal -- 0.002 and 0.064 Hz for peaks that are the comb, 0.147 Hz for the line
+        # that is not.
+        outranks = prominence_array - harmonic_strength[nearest] >= carrier_margin_db
+        resolvable = distance.min(axis=1) > claim_hz
+        candidate &= ~(near_comb & ~(resolvable & outranks))
     if protected.size:
         near_probe = (
             np.abs(frequency_array[:, None] - protected[None, :]).min(axis=1)
