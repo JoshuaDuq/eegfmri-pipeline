@@ -6,6 +6,14 @@
 **Run:** `eeg-pipeline line-comb {benchmark,apply,verify,report}`.
 **Configuration:** `line_comb_removal` in `studies/pain_study/scripts/line_comb/config.yaml`.
 
+> **Current status (2026-08-05).** The session-pooled implementation and all earlier
+> benchmark tables are superseded. The current implementation is block-adaptive, reads
+> BIDS channel types, and gives every -5 to +15 second `Trig_therm/T  1` study interval
+> its own immutable, data-local transform and audit. `sub-0000` run 1 was repaired by cropping its second
+> scanner-acquisition block and remains eligible; all six correctly trimmed `sub-0001`
+> recordings also remain eligible. A fresh 90-recording benchmark is required before
+> `apply` will run.
+
 ---
 
 ## What this removes and why it is worth removing
@@ -39,11 +47,9 @@ enters between-participant comparisons as a systematic offset, not as noise.
 
 ## Why sinusoidal regression rather than a notch
 
-The lines are monochromatic (0.109 Hz half-power width, at the measurement floor),
-stationary in frequency, and stable in amplitude within a session. That is exactly the
-case where fitting and subtracting a sinusoid beats filtering it out: the fit removes the
-line and returns the rest of the band untouched, where fifty narrow notches would take the
-band with them and ring.
+The lines are narrow enough for sinusoidal regression, but their frequencies are not
+stationary over a run. Fitting and subtracting local sinusoids remains preferable to a
+bank of broad FIR notches, provided frequency is estimated and applied locally.
 
 The implementation is MNE's `notch_filter(method="spectrum_fit")`, which is Thomson's
 multitaper line-removal (the method behind CleanLine): overlap-add windows, a multitaper
@@ -62,20 +68,82 @@ fundamental is the weighted least-squares slope through the origin over harmonic
 Harmonic *k* carries the fundamental's error multiplied by *k*, so fitting all of them at
 once determines the fundamental far more sharply than its own bin could.
 
-**Estimates are pooled over a session, not used per run.** This was measured, not assumed:
+Each run is estimated in 54-second windows (60 scanner TRs) with 50% overlap. Every window
+must independently support at least the configured number of harmonics and a finite,
+positive delete-one-harmonic standard error; there is no stationary or session-pooled
+fallback. Window-specific targets are filtered separately and reconstructed with
+normalized squared-sine overlap-add. The whole-run estimate is retained for provenance,
+not used as a substitute for a failed local estimate.
 
-| | |
-|---|---|
-| Per-run estimate scatter, within one session | 124 µHz (sub-0009), 277 µHz (sub-0000) |
-| Per-run scatter across the benchmark sample | 399 µHz |
-| True between-session variability (from the diagnosis) | **61 µHz** |
+The 54-second duration resolves the 1.2 Hz spacing while the 27-second hop follows the
+observed within-run movement. On the eligible validation run, 17 windows spanned 1.11 mHz
+in fundamental frequency, large enough to invalidate one constant run or session value.
 
-The per-run estimate is therefore mostly measurement error — it scatters four to six times
-more than the quantity it is tracking. Taking the median over a session's six runs removes
-most of that while still allowing one session to differ from the next. It also fixes a
-concrete failure: sub-0000 run-1 estimated 1.199340 Hz, 660 µHz below its own session
-median of 1.199982, and left a line 1.3 dB above background; with the session estimate the
-same run leaves it at −1.1 dB.
+Recordings are read with `mne_bids.read_raw_bids`, with sidecar/header disagreement set to
+raise. This makes `channels.tsv` authoritative: ECG and EOG remain in the written dataset
+but neither enters an EEG artifact endpoint nor receives the EEG line-comb transform. Two
+apparent focal benchmark failures were ECG lines misclassified by the bare BrainVision
+reader; changing the reader fixed the measurement rather than suppressing the auxiliary
+signal.
+
+The same raw recording also supplies one 20-second spectrum for every exact study interval
+(-5 to +15 seconds around each of the 11 `Trig_therm/T  1` events). The complete recording
+is first cleaned with the overlapping 54-second plan. The samples in each exact study
+interval are then replaced by an independently fitted 20-second transform; the exact
+samples are unblended, and their correction is tapered only into samples outside the
+analysis interval to avoid a step discontinuity. A line observed
+only outside an interval cannot authorize an isolated or comb-adjacent target inside it.
+The validated arithmetic comb remains the physical prior in every interval, with its local
+position inherited from the best-overlapping supported 54-second estimate; this is the only
+deliberate use of evidence extending beyond the 20-second interval.
+
+Residual refinement is performed once per statistical family. What licenses a second
+subtraction is a Thomson multitaper F-test—the same sinusoid test underlying MNE's
+spectrum-fit detector—applied to the first pass's own output, which is the raw data with
+the already-modelled component accounted for and is how a line hidden under a stronger
+neighbour's skirt becomes visible. A frequency the whole array evidences is fitted jointly;
+one that fewer than half the channels evidence is subtracted only where it was found. The
+search is restricted to ±0.15 Hz of an already authorized artifact target, so it cannot
+discover and remove an unrelated oscillation elsewhere in the spectrum.
+
+No detection threshold here is derived from the acceptance tolerances the benchmark
+applies. An earlier version selected residual targets by the preservation gate's own
+maximum permitted excess, which removed precisely what the gate would flag: the suppression
+gates could then only fail where the second subtraction itself fell short, never because a
+line had been missed, so they measured the search's stopping rule rather than the method.
+Detection and acceptance are now different statistics with separately declared thresholds,
+and `tests/analysis/line_comb/test_removal.py` fails if the two objects ever share a field.
+The consequence is deliberate: a residual carrying power without being a resolvable
+sinusoid—a drifting or nonstationary one—is left in place and reported as a gate failure
+instead of being subtracted.
+
+Whether any sinusoid survived is then decided over the cohort, not inside each recording,
+for the same reason the seam criterion is. Requiring zero significant residuals within
+every recording rejects a clean cohort at the test's own error rate: at a 5% family-wise
+rate over ninety recordings the expected number of false failures is four or five, which
+is what was measured when it was tried. Each recording instead contributes one probability
+—its smallest, corrected for the size of the family it searched—and Benjamini–Hochberg over
+those decides whether any recording is genuinely unclean. `apply` refuses if it is, and
+refuses outright if the benchmark predates the column.
+
+### What the removal costs at its own targets
+
+Every probe described above sits where nothing is removed, so it measures the transform
+away from its targets and cannot report a loss. One further probe sits *on* the targets,
+at four positions taken from each recording's own fitted plan, and reports the fraction of
+its power that survives. This is a measurement and never a criterion: a narrowband signal
+at an artifact frequency is not separable from the artifact, so what it quantifies is the
+method's unavoidable cost rather than a defect. Interpreting it requires knowing whether
+any neural activity is expected at those frequencies—see the mains-notch collateral
+analysis for the equivalent argument about the gamma band.
+
+Continuous refinement is scored on the reconstructed overlap-add output, not on each
+window in isolation. A detected residual is routed to every overlapping synthesis window
+that contributes to the evidenced samples. Those already-authorized residual frequencies
+are removed by a joint sliding sinusoid regression with sub-bin frequency refinement, at
+half the main spectrum-fit duration so amplitude and phase can follow the non-stationarity
+that survived the first pass. This is the regression principle used by CleanLine, without
+letting a blind search remove frequencies outside an authorized artifact neighborhood.
 
 ---
 
@@ -83,9 +151,15 @@ same run leaves it at −1.1 dB.
 
 Three settings decide the outcome, and each was swept rather than defaulted.
 
-**Window length.** Four-second windows fail outright — they cannot resolve a 1.2 Hz
-spacing, and leave lines up to 11 dB above background. Ten and twenty seconds both work;
-20 s was taken for the smaller collateral change.
+**Adaptive estimation window.** The fundamental and target positions are estimated in
+54-second windows with 50% overlap. The duration was chosen to resolve the 1.2 Hz spacing
+and require at least 20 independently supported harmonics even in the cohort's weakest
+window. Short windows do not supply enough frequency information; whole-run or
+session-pooled estimates cannot follow the measured within-run motion.
+
+**Sinusoid-fit window.** The subtraction uses a 27-second `spectrum_fit` window. It is
+shorter than the estimation window so amplitude and phase can adapt, while its nominal
+37 mHz frequency resolution separates the narrow shoulders observed in the real data.
 
 **Multitaper bandwidth**, which sets how many tapers estimate each amplitude. At 0.6 Hz
 the estimation band reaches ±0.3 Hz, half the distance to the neighbouring comb line, so
@@ -115,32 +189,86 @@ every line below its own local background:
 Below `freq/450` the high harmonics escape the window their own wander needs. Note the
 last row: a single-bin notch removes 1.55 µV, almost exactly the 1.52 µV the comb carries,
 and still leaves the worst line 9 dB up — the artifact is not where a single bin says it
-is. `freq/450` is the setting in the configuration, with a floor of 0.05 Hz (one bin at
-20 s) for the lowest harmonics.
+is. `freq/450` is the setting in the configuration, with a 0.05 Hz floor. The current
+adaptive plan then expands each comb width by two propagated standard errors. Isolated
+lines start at the larger of `freq/450`, 0.05 Hz, and one 27-second spectrum-fit bin;
+same-window observed support and statistically evidenced residuals expand only the source
+that needs it. Across the earlier 90 fitted continuous plans, base widths
+cost at most 13.591% of 28--95 Hz and the uncertainty-expanded widths at most 17.017%.
+The base number is retained as a descriptive decomposition, not a gate: a separate 15%
+ceiling had no scientific meaning. The sole 18% opportunity-cost criterion now measures
+the largest transform that is actually applied, including common and channel-local
+exact-study refinements.
+
+## Detecting non-comb lines automatically
+
+There is no static isolated-frequency list. A narrow peak must first clear the line-shape,
+prominence, and comb-separation checks. A session target then needs replication in at least
+three runs, or strong block evidence in at least two runs. A source confined to one
+recording can still be removed, but only in that recording and only in the adaptive windows
+that support it: at least one interval must exceed 15 dB and the source must recur in three
+non-overlapping evidence intervals. Those intervals may be 54-second continuous windows or
+exact thermal-study intervals; overlapping intervals do not count as independent evidence.
+
+A separate evidence path handles a distinct line beside a validated comb harmonic. Such a
+candidate must be a local summit in the channel-median EEG spectrum, reach the existing
+10 dB prominence floor, be no wider than 0.25 Hz at 3 dB down, fall inside the already
+declared ±0.15 Hz residual-responsibility region, and sit outside the parent target's
+actual removal support. Proximity to a proven electrical comb, line shape, and spatial
+replication jointly identify it as artifact. It receives its own narrow `freq/450` target;
+the parent notch is not widened.
+
+Evidence may come from the whole run, a 54-second adaptive window, or a study interval. An
+accepted source is routed to every continuous overlap-add window contributing samples to
+its evidence interval. Exact study plans are stricter: only evidence from that same exact
+interval may add an isolated or comb-adjacent exact-study target. This prevents an untreated
+continuous neighbor from reintroducing a line while preventing outside-interval evidence
+from changing the frequencies removed from the study samples.
+
+Source clustering also retains a cannot-link constraint: two resolvable summits observed in
+the same spectrum cannot be the same drifting source, even when they lie within the measured
+0.109 Hz line-claim distance. This prevents two simultaneous electrical lines from being
+collapsed into one target. Ordinary and comb-adjacent evidence are reconciled only after the
+exact per-window targets and widths are known; a narrow target is omitted only when an
+already fitted target's removal support physically covers it.
+
+This recording-local path matters scientifically. It detects strong but intermittent
+machine sidebands that a session-recurrence rule misses without granting permission to
+remove every isolated spectral maximum. There is no count budget: every source satisfying
+the predeclared evidence rules is retained in the immutable plan. Source count remains an
+audit quantity, while the removed-band, residual, injected-signal, transient, and
+study-window gates decide whether the resulting transform is scientifically acceptable.
+The fitted target follows the measured peak position in each supporting window.
 
 ---
 
 ## The preservation gate
 
-Criteria fixed before the measurement, mirroring the ones the earlier residual-OBS
-benchmark used so the two decisions stay comparable. Each benchmarked run has probes
-injected — four sinusoids clear of every target, and a 50 ms 40 Hz burst — then the lines
-are removed and the probes are measured.
+Each benchmarked run receives four off-target sinusoids and a 50 ms 40 Hz burst. The
+current decision rules are maxima or explicit preservation quantities; median suppression
+is reported but cannot gate because a line beginning below 10 dB cannot lose 10 dB without
+mandating a trough.
 
-| Criterion | Threshold | Result across 5 runs |
-|---|---|---|
-| Median residual prominence | ≤ 1 dB | −20.9 to −16.4 dB |
-| Median suppression | ≥ 10 dB | 19.9 to 25.7 dB |
-| Injected sinusoids | within ±0.5 dB | 0.000 dB |
-| Untouched spectrum | within ±0.2 dB | ≤ 0.001 dB |
-| Transient energy | within ±5% | ratio 1.000 |
-| Transient shape | *r* ≥ 0.99 | 1.000 |
-| Band touched | ≤ 15% | 12.1% |
+| Criterion | Current threshold |
+|---|---:|
+| Worst channel-median residual above a complete target-free matched search | ≤ 1 dB |
+| Worst channel × window residual above its matched multiple-search control | ≤ 1 dB |
+| Same two residual endpoints in the exact -5/+15 s study windows | ≤ 1 dB each |
+| Significant Thomson-F residuals in exact authorized regions | descriptive provenance |
+| Seams, cohort randomization test over matched shifted maxima | familywise *p* ≤ 0.05 |
+| Injected sinusoids | within ±0.5 dB |
+| Off-target spectrum | within ±0.2 dB |
+| Study-window injected sinusoids / off-target spectrum | ±0.5 / ±0.2 dB |
+| Intrinsic burst-energy retention | 0.85–1.05 |
+| Burst shape correlation | ≥ 0.99 |
+| Largest continuous or exact channel-level 28–95 Hz cost | ≤ 18%, with half-bin tolerance |
 
-**5 of 5 runs passed every criterion.**
-
-One gap in this gate is worth naming: it tests the *median* residual across a run's lines,
-not the worst one. Applied to the cohort that turned out to matter — see below.
+Targeted regression checks cover the four recordings that exposed the superseded method:
+`sub-0007` run 5, `sub-0009` run 5, `sub-0010` run 6, and `sub-0015` run 2. All four now
+pass the aggregate and focal full-run/study endpoints, signal-preservation checks, and 18%
+total-cost criterion. The two runs needing aggregate exact-epoch refinement also have zero
+post-clean Thomson-F residuals. These are implementation checks, not a substitute for the
+required cohort benchmark.
 
 Two things about this gate are worth stating plainly, because both were mistakes caught
 during the work rather than foresight.
@@ -158,13 +286,20 @@ loses about 18% of its energy. A longer, more physiological gamma burst loses fa
 The gate measured spectral change only at bins more than 0.4 Hz from any target — which
 excluded exactly the bins MNE's default width was emptying. Every other criterion passed
 while a quarter of the band was being removed. The gate now measures how much of the band
-the removal touches at all, and the threshold was revised from 8% to 15% once the wander
-physics showed that 12.1% is the floor for full suppression. The revision is recorded in
-the code rather than quietly applied.
+the removal touches at all. An early 8% limit was incompatible with the measured 12.1%
+minimum for suppression; a later 15% base-width limit was redundant and arbitrary. The
+retained 18% ceiling is applied to the total actual transform and still rejects MNE's
+roughly 25% default-width removal.
 
 ---
 
-## Cohort result
+## Superseded historical cohort result
+
+The numbers in this section describe the old session-pooled transform before the current
+adaptive implementation and are retained only as an audit trail. They are not evidence
+that the current adaptive transform passes the cohort gate. A fresh benchmark must cover
+exactly the 90 current recordings and bind their content digests and fitted-plan digests
+before apply is authorized.
 
 All 90 runs, session-pooled frequencies, harmonics 22–79 plus the four isolated lines
 (61 targets per run), `freq/450` widths.
@@ -258,7 +393,7 @@ is now claimed once, strongest first, which is what lets the pair be separated a
 ## Running it
 
 ```bash
-eeg-pipeline line-comb benchmark --limit 5
+eeg-pipeline line-comb benchmark
 ```
 
 ```bash
@@ -283,8 +418,10 @@ paths:
 ```
 
 Outputs land in `outputs/line_comb_removal/`: `benchmark.tsv` with every gate metric per
-run, and `removal_manifest.tsv` with each run's estimated frequencies, session-pooled
-fundamental, suppression achieved and round-trip deviation.
+run, and `removal_manifest.tsv` with every run's window-specific estimates, automatic
+targets, suppression achieved, content identity, fitted-plan identity, and round-trip
+deviation. Benchmark and apply are bound to those identities; a changed input, setting, or
+implementation invalidates authorization instead of silently reusing it.
 
 ---
 
@@ -339,13 +476,12 @@ Two caveats that belong in a methods section rather than in a band definition:
   sits inside the 45–58 Hz window. If that neighbourhood carries the hypothesis, check
   `per_line_residual.tsv` per participant before relying on it.
 
-**This is a projection, not a measurement of the final epochs.** The numbers above come
-from the cleaned continuous BIDS runs; MNE-BIDS-Pipeline has not yet been re-run on them.
-Its remaining operations — band-pass, mains notch, resampling, ICA, epoching — do not
-reintroduce narrowband lines, and the blind detector finding nothing in the cleaned
-continuous data is the strongest available evidence short of producing the epochs. Confirm
-by re-running `eeg-pipeline line-comb diagnose --stage all` against the new derivatives once
-they exist.
+**The task samples are now measured directly, but they are not the final downstream
+epochs.** The benchmark audits the exact -5/+15 second raw intervals that enter the
+studies, before MNE-BIDS-Pipeline band-pass, mains notch, resampling, ICA, and epoch
+rejection. Re-run downstream preprocessing and its scanner-harmonic QC after applying the
+validated continuous transform; do not treat this pre-preprocessing audit as permission to
+reuse old derivatives.
 
 ## What has to happen afterwards
 
@@ -360,31 +496,47 @@ participant-specific, so it is correlated with whatever else varies between part
 cap fit, head geometry. There is no correction factor; the analyses have to be run again on
 the cleaned data.
 
-**Nothing below 30 Hz needs revisiting.** Delta through beta carry 0–2.2% of this
-contamination and the removal touches nothing below 28.8 Hz.
+**All downstream derivatives still need regeneration.** Most contamination is in gamma,
+but the adaptive transform changes the continuous input and includes documented isolated
+targets below 30 Hz. Do not carry old ICA, epoch, or feature outputs forward selectively.
 
 ---
 
 ## Limitations
 
-- The injected-probe gate was run on five runs spanning the cohort, not on all ninety.
-  Per-run suppression is recorded for every run in the manifest, but signal preservation
-  was verified on the sample.
-- The gate tests the median residual across a run's lines, not the worst. Twenty-nine of
-  90 runs keep at least one line above their own background; no cohort-level line survives
-  detection, but a single-run analysis should consult the manifest.
-- 12.1% of 28–95 Hz is removed. That is the price of taking out 55 wandering lines, and it
-  is lower than masking them in analysis would cost (about 22%), but it is not free: any
-  genuine narrowband activity at a comb frequency goes with the artifact, and there is no
-  way to tell the two apart at the same frequency.
-- Frequencies are pooled per session. A source that drifted materially within a single run
-  would be tracked less well than one that does not; the measured within-session scatter
-  says that is not happening here, but it is an assumption the design makes.
+- The current adaptive gate has four targeted full-channel real-data regression checks. The
+  required 90-recording benchmark has not yet been run, and apply will refuse to proceed
+  until every eligible recording passes with the same settings, source hash, input digest,
+  and fitted-plan digest.
+- The total 28–95 Hz cost varies with target evidence and estimator uncertainty. The gate
+  permits at most 18% for the worst continuous or exact channel-level transform. This is not free: genuine
+  activity at an artifact frequency is not identifiable from the artifact and is removed
+  with it.
+- Frequencies are locally constant within each 54-second estimation window and blended
+  across 27-second hops. Faster movement than those windows can resolve remains a limit;
+  every window must nevertheless supply its own supported estimate, with no pooled value
+  substituted on failure.
+- Exact study intervals are temporally isolated for isolated and adjacent-line evidence,
+  but not for comb identity: the arithmetic family and local fundamental come from the
+  best-overlapping supported 54-second estimate. This improves 20-second frequency
+  localization but assumes that the already validated room comb remains the same physical
+  source across the overlap. Exact residual searches and signal-preservation gates test the
+  consequence on the study samples themselves.
 - Short broadband transients overlapping the comb lose real energy — about 18% for a 50 ms
   burst at 40 Hz. Longer events lose proportionally less.
-- The four isolated lines are removed at their measured positions, but their origin is
-  still unidentified, and a source that can drift 190 mHz between sessions could in
-  principle move further in a session not yet recorded.
+- Isolated-line origins remain unidentified. Session-level lines require run replication;
+  strong recording-specific lines require independent temporal replication and are removed
+  only where supported. A new line family outside those physical constraints correctly
+  fails the evidence or residual gate instead of being silently added to a manual list.
+- Automatic detection does not make artifact identity omniscient. A genuine neural
+  oscillation exactly coincident with a narrow electrical line is not identifiable from
+  EEG alone and will be subtracted with that line. Conversely, diffuse muscle, ocular,
+  pulse, gradient, and broadband transient artifacts are outside this tool's narrow-line
+  model and require their own automated stages and QC.
+- The software is reusable, but the supplied defaults are not site-universal. The 1.2 Hz
+  nominal, harmonic ranges, and evidence calibration describe this scanner room. A public
+  deployment at another site must diagnose and configure its own physical comb; failure to
+  support at least 20 harmonics surfaces as an error rather than silently applying this one.
 - Nothing here addresses the source. Pausing the cold head during acquisition, and lead
   management to reduce the pickup loop, remain the only fixes that would stop the artifact
   reaching the amplifier at all.

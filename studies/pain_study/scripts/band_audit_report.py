@@ -26,12 +26,12 @@ TR = 0.9
 KEEP_HIGH_HZ = 125.0
 
 
-#: Where the removal records what it actually took, per recording.
-MANIFEST = Path("outputs/line_comb_mains/removal_manifest.tsv")
+#: Where the configured removal workflow records what it actually took, per recording.
+MANIFEST = load_workflow_config("line_comb").path("removal_dir") / "removal_manifest.tsv"
 
 
-def _audited_lines() -> tuple[float, ...]:
-    """The isolated lines the removal acted on: the manifest first, the config as fallback.
+def _audited_lines(subject: str) -> tuple[float, ...]:
+    """The isolated lines the removal acted on, read from its required manifest.
 
     Not a stylistic preference: a copy drifts, and this one had. It carried 61.0353 Hz,
     dropped from the removal for sitting 0.128 Hz from comb harmonic 51, plus four more
@@ -40,22 +40,18 @@ def _audited_lines() -> tuple[float, ...]:
     helped, a drifted list charges excess where nothing was removed and leaves what was
     removed unscored.
 
-    Reading the config fixed that drift but is no longer sufficient on its own: the lines
-    are detected per session now, so ``isolated_hz`` names the fallback list rather than
-    what was removed. The manifest is the only record of the latter.
+    The lines are detected per session, so the manifest is the only record of what was
+    removed. If it is absent or malformed the audit stops instead of substituting unrelated
+    historical targets.
 
     TR above is deliberately still a literal. The distinction is whether a constant varies
     between participants: the isolated lines scatter 0.19-0.595 Hz across the cohort and so
     must be read, while TR is 0.9 s by the Volume markers for everyone, and k/TR is the
     honest way to name the gradient comb.
     """
-    workflow = load_workflow_config("line_comb")
-    configured = tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
-    return lr.removed_isolated_lines(MANIFEST, fallback=configured)
+    return lr.removed_isolated_lines(MANIFEST, subject=subject)
 
 
-#: Narrowband features belonging to neither comb, as the removal recorded them.
-INDEPENDENT_HZ = _audited_lines()
 #: Gradient volume comb. The centres are nulled by the volume-average subtraction; what is
 #: measured here is the sideband energy beside them.
 COMB_HZ = tuple(k / TR for k in range(1, 91))
@@ -125,13 +121,14 @@ def main(argv: list[str] | None = None) -> None:
     for subject in subjects:
         path = args.deriv_root / subject / "eeg" / f"{subject}_task-thermalactive_epo.fif"
         freqs, spectrum = subject_spectrum(path)
+        independent_hz = _audited_lines(subject)
         for band, (low, high) in BANDS.items():
             costs = ba.band_costs(
                 freqs,
                 spectrum,
                 low_hz=low,
                 high_hz=high,
-                independent_hz=INDEPENDENT_HZ,
+                independent_hz=independent_hz,
                 comb_hz=COMB_HZ,
             )
             rows.append({"subject": subject.replace("sub-", ""), "band": band, **costs})

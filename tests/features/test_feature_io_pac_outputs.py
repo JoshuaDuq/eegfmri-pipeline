@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
 
 import pandas as pd
-
-sys.modules.setdefault("mne_bids", types.SimpleNamespace(BIDSPath=object))
 
 from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.utils.data.feature_discovery import (

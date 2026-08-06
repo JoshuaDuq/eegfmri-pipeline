@@ -10,10 +10,7 @@ the pipeline silently preprocesses uncleaned data, which is what used to happen 
 
 from __future__ import annotations
 
-import pytest
-
 from eeg_pipeline.utils.config.loader import load_config
-from studies.pain_study.analysis.line_comb import removal as lr
 from studies.pain_study.scripts.workflow_config import load_workflow_config
 
 
@@ -51,91 +48,20 @@ def test_the_workflow_reads_the_uncleaned_root_not_its_own_output() -> None:
     )
 
 
-#: Measured on the delivered epochs, 14 participants, sub-0008 excluded. Each entry is the
-#: frequency, how many participants carry it, and what it is.
-#: 61.0353 Hz is absent on purpose: it falls 0.128 Hz from comb harmonic 51, inside
-#: isolated_search_hz, so estimate_comb rejects it as a seed that would find the comb. It
-#: sits in the unanalysed 58-62 gap and the comb already covers that position.
-AUDITED_RESIDUALS = {
-    23.7776: "narrow, off both combs, 7/14, beta",
-    29.6854: "narrow, off both combs, 9/14, 0.41 Hz below the gamma_low edge",
-    81.1111: "gradient harmonic 73 at TR = 0.9 s, 3/14, inside 62-95 Hz",
-}
-
-
-def test_the_audited_residual_lines_are_all_targeted():
+def test_static_isolated_line_targets_are_not_configurable():
     _, workflow = _configs()
-    isolated = workflow.get("line_comb_removal.isolated_hz")
-    search = float(workflow.get("line_comb_removal.isolated_search_hz"))
-
-    for frequency, why in AUDITED_RESIDUALS.items():
-        nearest = min(isolated, key=lambda seed: abs(seed - frequency))
-        assert abs(nearest - frequency) <= search, (
-            f"{frequency} Hz ({why}) has no seed within the {search} Hz search window; "
-            f"nearest is {nearest}"
-        )
+    block = workflow.get("line_comb_removal")
+    assert "isolated_hz" not in block
+    assert "isolated_search_hz" not in block
+    assert "detect_isolated" not in block
 
 
-#: Where the 94 Hz line actually sits, per participant, measured on the uncleaned root
-#: (outputs/line_comb_mains/seed_positions.csv). It spans 0.595 Hz, which no single seed
-#: can cover: the widest isolated_search_hz the guard permits is 0.224 Hz, set by how close
-#: the 23.75 seed sits to comb harmonic 20.
-NINETY_FOUR_HZ_SPAN = (93.7503, 94.3453)
-
-
-def test_the_94_hz_line_has_enough_seeds_to_span_the_cohort():
-    """One seed caught 11 of 15 and left the rest at +20.5 to +28.0 dB.
-
-    In sub-0008 the missed line was *worse* in the delivered data than before cleaning,
-    +28.0 dB against +31.2 dB, because the neighbours around it were removed and it was
-    not. Two seeds are needed because the line drifts further between participants than a
-    single window reaches.
-    """
+def test_automatic_detection_covers_the_observed_isolated_line_range():
     _, workflow = _configs()
-    isolated = workflow.get("line_comb_removal.isolated_hz")
-    search = float(workflow.get("line_comb_removal.isolated_search_hz"))
-
-    lo, hi = NINETY_FOUR_HZ_SPAN
-    covered = [
-        seed for seed in isolated if lo - search <= seed <= hi + search
-    ]
-    assert len(covered) >= 2, (
-        f"the 94 Hz line spans {hi - lo:.3f} Hz across the cohort but only {len(covered)} "
-        f"seed(s) sit near it; one window reaches {2 * search:.2f} Hz"
-    )
-
-    for position, subject in ((lo, "sub-0001"), (hi, "sub-0008")):
-        nearest = min(covered, key=lambda seed: abs(seed - position))
-        assert abs(nearest - position) <= search, (
-            f"{subject} carries the line at {position} Hz; nearest seed {nearest} is "
-            f"{abs(nearest - position):.3f} Hz away, outside the {search} Hz window"
-        )
-
-
-def test_no_isolated_seed_collides_with_a_benchmark_probe():
-    _, workflow = _configs()
-    isolated = workflow.get("line_comb_removal.isolated_hz")
-    probe = lr.Probe()
-
-    for frequency in isolated:
-        for sinusoid in probe.sinusoid_hz + (probe.burst_hz,):
-            assert abs(frequency - sinusoid) > 0.3, (
-                f"seed {frequency} Hz sits on probe tone {sinusoid} Hz; the benchmark would "
-                "remove the probe by design and report it as signal loss"
-            )
-
-
-def test_the_gradient_harmonics_are_derived_from_a_nine_tenths_second_tr():
-    _, workflow = _configs()
-    isolated = workflow.get("line_comb_removal.isolated_hz")
-
-    for harmonic in (73, 74):
-        expected = harmonic / 0.9
-        nearest = min(isolated, key=lambda seed: abs(seed - expected))
-        assert nearest == pytest.approx(expected, abs=0.01), (
-            f"gradient harmonic {harmonic} should be seeded at {expected:.4f} Hz "
-            f"(TR is exactly 0.9 s by the Volume markers), found {nearest}"
-        )
+    assert workflow.get("line_comb_removal.detection_low_hz") <= 23.62
+    assert workflow.get("line_comb_removal.detection_high_hz") >= 94.35
+    assert workflow.get("line_comb_removal.min_runs_per_line") >= 2
+    assert workflow.get("line_comb_removal.min_runs_per_block_line") >= 2
 
 
 def test_exactly_one_stage_removes_mains():

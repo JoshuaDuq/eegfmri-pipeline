@@ -20,6 +20,67 @@ Follow-up:
 
 ## Issues
 
+### 2026-08-03 - `sub-0000` Run 1 - Two Scanner Acquisitions In One Run
+
+Study/stage: EEG BIDS conversion and every Study 1 analysis reading this run.
+
+Issue: The scanner stopped and restarted inside `sub-0000` run 1 while the EEG kept
+recording. The run held two acquisition blocks: 570 volumes from 0 to 512.1 s, a 63.5 s
+scanner-off gap, then 117 volumes from 575.6 to 680.0 s. Only the first block has an
+fMRI counterpart; `sub-0000_task-thermalactive_run-01_bold.nii.gz` is 570 volumes.
+`trim_to_volume_bounds` crops between the first and last volume marker, so both blocks
+survived conversion and the run reported 687 volume markers against the BOLD's 570 --
+the only run in the cohort with more EEG volume markers than BOLD volumes. PsychoPy was
+restarted in the second block, which is where the two `BAD_restart` triggers from the
+2026-05-16 repair live.
+
+A whole-run measurement of volume-locked residual is inflated by the second block and
+was first read as a scanner artifact correction failure. Measured per block, the
+volume-locked average is 6.0 microvolts peak-to-peak in block A against 28.1 in block B
+(runs 2-6: 4.0 to 6.4). Restricted to the 11 stimulation windows (-5 to +15 s around
+each `Trig_therm`), block A sits inside the range of this participant's other five runs
+on every measure taken: volume-locked residual 3.21 microvolts median (others 2.69 to
+3.20), residual comb prominence 0.23 dB median (others 0.04 to 0.50), 0.937 pulse
+markers per volume and 1.53 microvolts of R-locked residual, both the best of the six,
+and no missed-beat gap inside any window. All 11 windows fall inside block A on an
+unbroken 0.9 s volume train, ending 19.2 s before the scanner stopped.
+
+Decision: Crop the run to its first acquisition block rather than exclude it. Applied
+with `scripts/crop_restart_scanner_block.py` to both `data/bids_output/eeg` and
+`data/bids_output/eeg_linecleaned` at 513.0 s (the last block-A volume plus one
+repetition time), leaving 570 volume markers that match the BOLD exactly. The `.eeg`
+binary is truncated byte-wise, so retained samples are bit-identical. Pre-crop copies
+are kept alongside each file with a `.precrop.bak` suffix.
+
+Follow-up: This repair lives in the delivered BIDS root, not in the conversion, so a
+regeneration of `sub-0000` from source will reintroduce both blocks -- re-run the crop
+script after any reconversion. The current adaptive line-comb workflow refits this cropped
+source directly; the obsolete line-cleaned derivative had instead inherited a model fitted
+to the full recording and must not be reused. The EEG/fMRI alignment table
+`data/derivatives_local/qc/eeg_fmri_alignment/run_qc.tsv` still carries a pre-trim row
+for this run (688 markers, 757.032 s) and needs a cohort regeneration to catch up. No
+Study 1 derivative had been built from this run, so nothing else needed regenerating.
+
+### 2026-08-04 - `sub-0001` - Volume-Bound Trimming Verified
+
+Study/stage: EEG BIDS conversion and every Study 1 analysis reading `sub-0001`.
+
+Issue: A previous trim was suspected of using the wrong end boundary. The six current BIDS
+runs were rechecked from their BrainVision sample counts and volume markers. Each starts at
+0.0 s and ends one 0.9 s repetition time after its last retained volume marker. Their
+retained marker counts are 541, 544, 531, 536, 510, and 512 for runs 1--6, respectively.
+The corresponding durations are 486.9, 489.6, 477.9, 482.4, 459.0, and 460.8 s.
+
+Decision: Include all six `sub-0001` runs. The current files have the intended trim
+geometry and are the inputs to the fresh line-comb benchmark, tests, and removal.
+
+Follow-up: Regenerate `data/derivatives_local/qc/eeg_fmri_alignment/run_qc.tsv`; its
+`sub-0001` rows describe the earlier files and are each approximately one marker and a
+fraction of a second longer. Archive the newer trimming script in this repository before
+the next conversion. The tracked `scripts/trim_brainvision_to_volume_bounds.py` currently
+implements the older boundary convention in which the last volume marker is the final
+sample, so it cannot reproduce the verified one-TR-after-last-marker files by itself.
+
 ### 2026-07-24 - Cohort - Analyzer Pulse Artifact Correction Failed On 39% Of Runs
 
 Study/stage: BrainVision Analyzer scanner artifact correction, upstream of all EEG
@@ -54,9 +115,10 @@ about 18 times higher in the affected runs (11 to 12 microvolts against 0.6 to 0
 consistent with real uncorrected artifact rather than a measurement quirk.
 
 Decision: Treat runs below the marker threshold as **not pulse-corrected**. Do not
-assume Analyzer correction succeeded for any run without checking its marker count. No
-exclusion decision is recorded yet, because the affected fraction is large enough that
-exclusion would compromise the analytic sample; repair is the preferred route.
+assume Analyzer correction succeeded for any run without checking its marker count. A
+cohort-wide exclusion decision is not recorded because the affected fraction is large
+enough to compromise the analytic sample; repair is preferred. The later 2026-08-03
+entry records the scanner-restart crop that keeps `sub-0000` run 1 eligible.
 
 Follow-up: Investigate why Analyzer fails to mark R peaks on roughly 40% of runs when
 the ECG channel is healthy, most plausibly a detection-parameter or channel-scaling

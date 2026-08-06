@@ -31,7 +31,7 @@ def setup_line_comb(subparsers: argparse._SubParsersAction) -> argparse.Argument
         "--subjects",
         nargs="*",
         default=None,
-        help="Restrict to these subjects (default: every subject found)",
+        help="diagnose: restrict to these subjects (default: every subject found)",
     )
     parser.add_argument(
         "--config",
@@ -52,15 +52,6 @@ def setup_line_comb(subparsers: argparse._SubParsersAction) -> argparse.Argument
     parser.add_argument("--deriv-root", type=str, default=None, help="diagnose: preprocessed EEG")
     parser.add_argument("--source-root", type=str, default=None, help="diagnose: source data root")
     parser.add_argument(
-        "--limit", type=int, default=None, help="benchmark: number of runs to sample"
-    )
-    parser.add_argument(
-        "--fundamental-scope",
-        choices=("session", "run"),
-        default="session",
-        help="Pool the frequency estimate over a session (default) or use each run's own",
-    )
-    parser.add_argument(
         "--stage",
         choices=("cache", "analyse", "all"),
         default="all",
@@ -79,6 +70,11 @@ def run_line_comb(args: argparse.Namespace, subjects: List[str], config: Any) ->
 
     if subjects and not args.subjects:
         args.subjects = list(subjects)
+    if args.mode in {"benchmark", "apply", "verify"} and args.subjects:
+        raise ValueError(
+            f"line-comb {args.mode} must use all recordings; subject subsets cannot certify "
+            "or transform the cohort."
+        )
 
     if args.mode == "diagnose":
         diagnose.run(args)
@@ -87,7 +83,6 @@ def run_line_comb(args: argparse.Namespace, subjects: List[str], config: Any) ->
         plot.run(args)
     elif args.mode == "report":
         args.removal_dir = args.report_dir
-        args.diagnosis_dir = args.output_dir
         report.run(args)
     else:
         args.stage = args.mode

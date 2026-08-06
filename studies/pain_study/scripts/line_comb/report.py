@@ -1,8 +1,8 @@
 """Summarise what the line removal achieved, band by band.
 
-Reads only what the earlier stages wrote -- the diagnosis catalogue, the removal manifest
-and the verification spectra -- and turns them into the outcome tables and figure that
-back ``docs/scanner_harmonic_removal.md``.
+Reads only what the removal wrote -- participant-specific transform provenance and
+verification spectra -- and turns them into the outcome tables and figure that back
+``docs/scanner_harmonic_removal.md``.
 
     eeg-pipeline line-comb report
 """
@@ -22,6 +22,7 @@ import pandas as pd  # noqa: E402
 
 from studies.pain_study.analysis.line_comb import diagnosis as hd  # noqa: E402
 from studies.pain_study.analysis.line_comb import removal as lr  # noqa: E402
+from studies.pain_study.scripts.line_comb.remove import RemovalSettings  # noqa: E402
 
 WORKFLOW = "line_comb"
 
@@ -39,94 +40,193 @@ MAINS_NOTCH_HZ = (59.5, 60.5)
 LINE_HALF_WIDTH_HZ = 0.15
 
 
-def artifact_share(freqs, psd, band, lines, half_width_bins):
-    """Fraction of a band's power sitting above background at the lines, per participant."""
-    inside = [f for f in lines if band[0] <= f <= band[1]]
-    if not inside:
-        return np.zeros(psd.shape[0]), 0
-    shares = [
-        hd.line_excess_fraction(
-            freqs,
-            spectrum,
-            low_hz=band[0],
-            high_hz=band[1],
-            line_freqs=lines,
-            half_width_bins=half_width_bins,
-            line_half_width_hz=LINE_HALF_WIDTH_HZ,
+def _artifact_frequencies(cell) -> tuple[float, ...]:
+    if cell is None or (isinstance(cell, float) and np.isnan(cell)):
+        return ()
+    values = tuple(float(piece) for piece in str(cell).split(";") if piece.strip())
+    if not all(np.isfinite(value) for value in values):
+        raise ValueError("Removal manifest contains a non-finite artifact frequency.")
+    return values
+
+
+def subject_artifact_targets(
+    manifest: pd.DataFrame,
+    subjects: tuple[str, ...],
+    settings: RemovalSettings,
+) -> dict[str, tuple[float, ...]]:
+    """Artifact frequencies actually authorised for each participant."""
+    required = {"recording", "fundamental_hz", "isolated_hz", "adjacent_hz"}
+    if not required.issubset(manifest.columns):
+        raise ValueError(f"Removal manifest is missing columns: {sorted(required - set(manifest))}")
+
+    targets = {}
+    for subject in subjects:
+        rows = manifest[manifest.recording.astype(str).str.startswith(f"{subject}_")]
+        if rows.empty:
+            raise ValueError(f"Removal manifest has no manifest rows for {subject}.")
+        frequencies = []
+        for row in rows.itertuples(index=False):
+            fundamental_hz = float(row.fundamental_hz)
+            if not np.isfinite(fundamental_hz) or fundamental_hz <= 0.0:
+                raise ValueError(f"Removal manifest has an invalid fundamental for {subject}.")
+            frequencies.extend(
+                harmonic * fundamental_hz
+                for harmonic in range(
+                    settings.removal_harmonic_range[0],
+                    settings.removal_harmonic_range[1] + 1,
+                )
+            )
+            frequencies.extend(_artifact_frequencies(row.isolated_hz))
+            frequencies.extend(_artifact_frequencies(row.adjacent_hz))
+        targets[subject] = tuple(
+            sorted(
+                {
+                    frequency
+                    for frequency in frequencies
+                    if settings.low_hz <= frequency <= settings.high_hz
+                    and (
+                        not settings.exclude_mains
+                        or not MAINS_NOTCH_HZ[0] <= frequency <= MAINS_NOTCH_HZ[1]
+                    )
+                }
+            )
         )
-        for spectrum in psd
-    ]
-    return np.asarray(shares), len(inside)
+    return targets
 
 
-def residual_prominence(freqs, psd, lines, half_width_bins):
-    """Local prominence at each line, per participant."""
-    prominence = np.stack(
-        [hd.prominence_db(hd.to_db(spectrum), half_width_bins=half_width_bins) for spectrum in psd]
-    )
-    index = [int(np.argmin(np.abs(freqs - f))) for f in lines]
-    return prominence[:, index]
+def _line_sources(frequencies: tuple[float, ...]) -> tuple[float, ...]:
+    """Collapse within-source drift while preserving neighbouring physical lines."""
+    clusters: list[list[float]] = []
+    for frequency in sorted(frequencies):
+        eligible = [
+            cluster
+            for cluster in clusters
+            if abs(frequency - float(np.median(cluster))) <= lr._LINE_CLAIM_HZ
+        ]
+        if eligible:
+            nearest = min(
+                eligible,
+                key=lambda cluster: abs(frequency - float(np.median(cluster))),
+            )
+            nearest.append(frequency)
+        else:
+            clusters.append([frequency])
+    return tuple(float(np.median(cluster)) for cluster in clusters)
 
 
-def build_report(removal_dir: Path, diagnosis_dir: Path) -> dict:
+def artifact_share_by_subject(
+    freqs,
+    psd,
+    band,
+    subject_targets: dict[str, tuple[float, ...]],
+    subjects: tuple[str, ...],
+    half_width_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Line-excess share using each participant's own detected target set."""
+    if psd.shape[0] != len(subjects):
+        raise ValueError("The spectrum rows must align one-to-one with subjects.")
+    shares = []
+    counts = []
+    for subject, spectrum in zip(subjects, psd):
+        lines = tuple(
+            frequency for frequency in subject_targets[subject] if band[0] <= frequency <= band[1]
+        )
+        counts.append(len(_line_sources(lines)))
+        shares.append(
+            hd.line_excess_fraction(
+                freqs,
+                spectrum,
+                low_hz=band[0],
+                high_hz=band[1],
+                line_freqs=lines,
+                half_width_bins=half_width_bins,
+                line_half_width_hz=LINE_HALF_WIDTH_HZ,
+            )
+            if lines
+            else 0.0
+        )
+    return np.asarray(shares), np.asarray(counts, dtype=int)
+
+
+def _per_subject_residuals(
+    freqs: np.ndarray,
+    cleaned: np.ndarray,
+    subjects: tuple[str, ...],
+    subject_targets: dict[str, tuple[float, ...]],
+    half_width_bins: int,
+) -> pd.DataFrame:
+    rows = []
+    for subject, spectrum in zip(subjects, cleaned):
+        prominence = hd.prominence_db(hd.to_db(spectrum), half_width_bins=half_width_bins)
+        narrow = lr._narrow_peak_mask(freqs, prominence)
+        for frequency in _line_sources(subject_targets[subject]):
+            inside = np.abs(freqs - frequency) <= lr.RESIDUAL_SEARCH_HZ
+            candidates = np.flatnonzero(inside & narrow & np.isfinite(prominence))
+            index = (
+                int(candidates[np.argmax(prominence[candidates])])
+                if candidates.size
+                else int(np.argmin(np.abs(freqs - frequency)))
+            )
+            rows.append(
+                {
+                    "subject": subject,
+                    "target_frequency_hz": frequency,
+                    "residual_frequency_hz": float(freqs[index]),
+                    "residual_prominence_db": float(prominence[index]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_report(removal_dir: Path, settings: RemovalSettings) -> dict:
     with np.load(removal_dir / "verification_spectra.npz", allow_pickle=False) as handle:
         freqs = handle["freqs"]
         original = handle["original"]
         cleaned = handle["cleaned"]
-    catalogue = pd.read_csv(diagnosis_dir / "cohort_line_catalog.tsv", sep="\t")
-    artifact = sorted(catalogue.loc[catalogue["kind"].isin(("comb", "isolated")), "refined_hz"])
+        subjects = tuple(str(value) for value in handle["subjects"])
     manifest = pd.read_csv(removal_dir / "removal_manifest.tsv", sep="\t")
+    subject_targets = subject_artifact_targets(manifest, subjects, settings)
 
     half_width = int(round((100.0 / 21.6) / float(freqs[1] - freqs[0])))
     rows = []
     for name, band in BANDS.items():
-        before, n_lines = artifact_share(freqs, original, band, artifact, half_width)
-        after, _ = artifact_share(freqs, cleaned, band, artifact, half_width)
-        removed = (
-            lr.removed_band_fraction(
-                freqs,
-                [f for f in artifact if band[0] <= f <= band[1]] or [band[0]],
-                lr.notch_widths_for(
-                    np.array([f for f in artifact if band[0] <= f <= band[1]] or [band[0]]),
-                    ratio=450.0,
-                    minimum_hz=0.05,
-                ),
-                band_hz=band,
-            )
-            if n_lines
-            else 0.0
+        before, counts = artifact_share_by_subject(
+            freqs, original, band, subject_targets, subjects, half_width
+        )
+        after, _ = artifact_share_by_subject(
+            freqs, cleaned, band, subject_targets, subjects, half_width
         )
         rows.append(
             {
                 "band": name,
                 "low_hz": band[0],
                 "high_hz": band[1],
-                "n_artifact_lines": n_lines,
+                "median_artifact_sources": float(np.median(counts)),
+                "min_artifact_sources": int(np.min(counts)),
+                "max_artifact_sources": int(np.max(counts)),
                 "artifact_share_before": float(np.median(before)),
                 "artifact_share_before_max": float(np.max(before)),
                 "artifact_share_after": float(np.median(after)),
                 "artifact_share_after_max": float(np.max(after)),
-                "band_fraction_removed": float(removed),
             }
         )
 
-    residual = residual_prominence(freqs, cleaned, artifact, half_width)
-    per_line = pd.DataFrame(
-        {
-            "frequency_hz": artifact,
-            "median_residual_db": np.median(residual, axis=0),
-            "max_residual_db": np.max(residual, axis=0),
-            "n_participants_above_1db": (residual > 1.0).sum(axis=0),
-        }
+    per_subject_lines = _per_subject_residuals(
+        freqs,
+        cleaned,
+        subjects,
+        subject_targets,
+        half_width,
     )
     return {
         "bands": pd.DataFrame(rows),
-        "per_line": per_line,
+        "per_subject_lines": per_subject_lines,
         "manifest": manifest,
         "freqs": freqs,
         "original": original,
         "cleaned": cleaned,
-        "artifact": artifact,
+        "subjects": subjects,
+        "subject_targets": subject_targets,
     }
 
 
@@ -149,14 +249,12 @@ def figure(report: dict, path: Path) -> None:
         lw=0.6,
         label="after removal",
     )
-    axes[0].axvspan(95, 100, color="#FEE2E2", zorder=0)
     axes[0].axvspan(*MAINS_NOTCH_HZ, color="#E5E7EB", zorder=0)
     axes[0].legend(loc="upper right", fontsize=9)
     axes[0].set_ylabel("cohort median PSD (dB re 1 V²/Hz)")
     axes[0].set_title(
-        "Line removal, 15 runs one per participant. Grey band: mains notch applied later "
-        "by the pipeline.\nRed band: above the 95 Hz removal ceiling, where the comb "
-        "continues and is not removed."
+        "Line removal across participant-median spectra. Grey band: mains notch applied "
+        "later by the pipeline."
     )
 
     half_width = int(round((100.0 / 21.6) / float(freqs[1] - freqs[0])))
@@ -167,7 +265,7 @@ def figure(report: dict, path: Path) -> None:
         )
         axes[1].plot(freqs[band], prom[band], color=colour, lw=0.6, label=label)
     axes[1].axhline(0, color="#6B7280", lw=0.6, ls="--")
-    axes[1].axvspan(95, 100, color="#FEE2E2", zorder=0)
+    axes[1].axvspan(*MAINS_NOTCH_HZ, color="#E5E7EB", zorder=0)
     axes[1].set_xlabel("frequency (Hz)")
     axes[1].set_ylabel("local prominence (dB)")
     axes[1].set_xlim(3, 100)
@@ -179,7 +277,6 @@ def figure(report: dict, path: Path) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--removal-dir", type=Path, default=None)
-    parser.add_argument("--diagnosis-dir", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -192,34 +289,37 @@ def run(args: argparse.Namespace) -> None:
 
     config = load_workflow_config(WORKFLOW, getattr(args, "config", None))
     args.removal_dir = config.path("removal_dir", override=args.removal_dir)
-    args.diagnosis_dir = config.path("diagnosis_dir", override=args.diagnosis_dir)
 
-    report = build_report(args.removal_dir, args.diagnosis_dir)
+    settings = RemovalSettings.from_config(config)
+    report = build_report(args.removal_dir, settings)
     report["bands"].to_csv(
         args.removal_dir / "band_outcomes.tsv", sep="\t", index=False, float_format="%.6g"
     )
-    report["per_line"].to_csv(
-        args.removal_dir / "per_line_residual.tsv", sep="\t", index=False, float_format="%.6g"
+    report["per_subject_lines"].to_csv(
+        args.removal_dir / "per_subject_line_residual.tsv",
+        sep="\t",
+        index=False,
+        float_format="%.6g",
     )
     figure(report, args.removal_dir / "removal_before_after.png")
 
     frame = report["bands"]
-    print(f"{'band':20s} {'lines':>6s} {'before':>9s} {'after':>9s} {'bins removed':>13s}")
+    print(f"{'band':20s} {'sources':>9s} {'before':>9s} {'after':>9s}")
     for _, row in frame.iterrows():
         print(
-            f"{row['band']:20s} {int(row['n_artifact_lines']):6d} "
-            f"{100*row['artifact_share_before']:8.2f}% {100*row['artifact_share_after']:8.2f}% "
-            f"{100*row['band_fraction_removed']:12.1f}%"
+            f"{row['band']:20s} {row['median_artifact_sources']:8.1f} "
+            f"{100*row['artifact_share_before']:8.2f}% "
+            f"{100*row['artifact_share_after']:8.2f}%"
         )
-    per_line = report["per_line"]
+    per_line = report["per_subject_lines"]
     print(
-        f"\nlines still above 1 dB in any participant: "
-        f"{int((per_line.max_residual_db > 1).sum())}/{len(per_line)}"
+        f"\nparticipant-specific line positions still above 1 dB: "
+        f"{int((per_line.residual_prominence_db > 1).sum())}/{len(per_line)}"
     )
-    print(per_line.nlargest(6, "max_residual_db").to_string(index=False))
+    print(per_line.nlargest(10, "residual_prominence_db").to_string(index=False))
     print(
-        f"\n  wrote {args.removal_dir/'band_outcomes.tsv'}, per_line_residual.tsv, "
-        f"removal_before_after.png"
+        f"\n  wrote {args.removal_dir/'band_outcomes.tsv'}, "
+        "per_subject_line_residual.tsv, removal_before_after.png"
     )
 
 

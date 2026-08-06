@@ -11,12 +11,6 @@ import pytest
 
 from studies.pain_study.analysis.line_comb import removal as lr
 from studies.pain_study.scripts import band_audit_report as bar
-from studies.pain_study.scripts.workflow_config import load_workflow_config
-
-
-def _configured_lines() -> list[float]:
-    workflow = load_workflow_config("line_comb")
-    return [float(f) for f in workflow.get("line_comb_removal.isolated_hz")]
 
 
 STALE_HARDCODED = (23.7776, 29.6854, 46.5839, 57.1925, 59.0168, 61.0353, 61.4039, 99.5982)
@@ -29,31 +23,29 @@ def test_the_independent_lines_are_not_a_hardcoded_copy():
     harmonic 51. Since this report is what judges whether the line work helped, a drifted
     list charges excess where nothing was removed and leaves what was removed unscored.
     """
-    assert tuple(bar.INDEPENDENT_HZ) != STALE_HARDCODED
-    assert not any(abs(f - 61.0353) <= 0.05 for f in bar.INDEPENDENT_HZ), (
+    lines = bar._audited_lines("sub-0000")
+    assert tuple(lines) != STALE_HARDCODED
+    assert not any(abs(f - 61.0353) <= 0.05 for f in lines), (
         "61.0353 Hz is not a removal target; masking it discards untouched spectrum"
     )
 
 
 def test_the_independent_lines_track_what_the_removal_recorded():
-    """The manifest is the source, with the configured list as the fallback.
+    """The required manifest is the source.
 
     Reading the config was the first fix, and it is no longer sufficient: lines are
-    detected per session now, so ``isolated_hz`` names the fallback rather than what was
-    removed. Only the manifest knows the latter, and it changes with each apply -- which is
-    the point, since the audit scores the derivatives that apply produced.
+    detected per session now, so only the manifest knows the latter, and it changes with
+    each apply -- which is the point, since the audit scores the derivatives that apply
+    produced.
     """
-    assert tuple(bar.INDEPENDENT_HZ) == lr.removed_isolated_lines(
-        bar.MANIFEST, fallback=_configured_lines()
+    assert tuple(bar._audited_lines("sub-0000")) == lr.removed_isolated_lines(
+        bar.MANIFEST,
+        subject="sub-0000",
     )
 
 
-def test_the_audit_falls_back_to_the_configured_list_without_a_manifest(tmp_path):
-    """Before any apply has run there is nothing recorded, and the audit still has to work."""
-    configured = _configured_lines()
-    assert lr.removed_isolated_lines(tmp_path / "absent.tsv", fallback=configured) == tuple(
-        configured
-    )
+def test_the_audit_uses_the_active_workflow_report_directory():
+    assert bar.MANIFEST.parent.name == "line_comb_removal"
 
 
 def test_the_gradient_comb_stays_derived_from_tr_not_listed():

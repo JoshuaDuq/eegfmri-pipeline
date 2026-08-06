@@ -61,7 +61,7 @@ def test_no_bads_means_the_arms_agree_on_channels():
 
 
 def test_the_line_mask_tracks_what_the_removal_recorded():
-    """The manifest is the source, with the configured list as the fallback.
+    """The required manifest is the source.
 
     A hardcoded copy drifted once already: it masked 61.0353 Hz, dropped from the removal
     for sitting 0.128 Hz from comb harmonic 51, while masking nothing near 94 Hz -- where
@@ -73,17 +73,19 @@ def test_the_line_mask_tracks_what_the_removal_recorded():
     session now, so only the manifest records what was actually removed.
     """
     from studies.pain_study.analysis.line_comb import removal as lr
-    from studies.pain_study.scripts.workflow_config import load_workflow_config
-
-    configured = tuple(
-        float(f) for f in load_workflow_config("line_comb").get("line_comb_removal.isolated_hz")
+    assert tuple(cmc._removal_targets("sub-0000")) == lr.removed_isolated_lines(
+        cmc.MANIFEST,
+        subject="sub-0000",
     )
-    assert tuple(cmc.LINES) == lr.removed_isolated_lines(cmc.MANIFEST, fallback=configured)
 
 
 def test_the_mask_does_not_carry_a_frequency_the_removal_dropped():
     """61.0353 Hz is not a removal target, so masking it discards real spectrum."""
-    covered = lambda f: any(lo <= f <= hi for lo, hi in cmc.MASK)
+    mask = cmc.hd.line_exclusion_windows(
+        cmc._removal_targets("sub-0000"),
+        half_width_hz=0.25,
+    )
+    covered = lambda f: any(lo <= f <= hi for lo, hi in mask)
     assert not covered(61.0353), (
         "61.0353 Hz was dropped from isolated_hz for sitting 0.128 Hz from comb harmonic "
         "51; masking it removes band power that was never contaminated"

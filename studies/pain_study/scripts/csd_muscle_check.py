@@ -28,12 +28,12 @@ from studies.pain_study.analysis.line_comb import removal as hd_removal
 from studies.pain_study.scripts.workflow_config import load_workflow_config
 
 
-#: Where the removal records what it actually took, per recording.
-MANIFEST = Path("outputs/line_comb_mains/removal_manifest.tsv")
+#: Where the configured removal workflow records what it actually took, per recording.
+MANIFEST = load_workflow_config("line_comb").path("removal_dir") / "removal_manifest.tsv"
 
 
-def _removal_targets() -> tuple[float, ...]:
-    """The isolated lines the removal acted on: the manifest first, the config as fallback.
+def _removal_targets(subject: str) -> tuple[float, ...]:
+    """The isolated lines the removal acted on, read from its required manifest.
 
     This was a hardcoded tuple and it drifted from the removal it was meant to track. It
     masked 61.0353 Hz, which was dropped for sitting 0.128 Hz from comb harmonic 51, and
@@ -42,22 +42,18 @@ def _removal_targets() -> tuple[float, ...]:
     below is a 62-95 Hz ratio, that line sat in the numerator of the measurement the mask
     exists to protect.
 
-    Reading the config fixed the drift but is no longer sufficient on its own: the lines
-    are detected per session now, so ``isolated_hz`` names the fallback list rather than
-    what was removed. The manifest is the only record of the latter.
+    The lines are detected per session, so the manifest is the only record of what was
+    removed. Missing or malformed provenance is an error rather than permission to mask a
+    historical frequency list.
 
     Only the isolated lines are masked, not the comb harmonics. The harmonics are removed
     and so read as holes rather than excess: they lower the index by a near-constant
     fraction in every participant, which the across-channel correlation is insensitive to,
     whereas a surviving line raises it in some participants only.
     """
-    workflow = load_workflow_config("line_comb")
-    configured = tuple(float(f) for f in workflow.get("line_comb_removal.isolated_hz"))
-    return hd_removal.removed_isolated_lines(MANIFEST, fallback=configured)
+    return hd_removal.removed_isolated_lines(MANIFEST, subject=subject)
 
 
-LINES = _removal_targets()
-MASK = hd.line_exclusion_windows(LINES, half_width_hz=0.25)
 BANDS = {"gamma_low": (30.1, 45.0), "gamma_mid": (45.0, 58.0), "gamma_high": (62.0, 95.0)}
 CSD_LAMBDA2 = 1.0e-5
 CSD_STIFFNESS = 4.0
@@ -76,9 +72,9 @@ def csd_arm(epochs):
     )
 
 
-def _band_power(freqs, spectrum, low, high):
+def _band_power(freqs, spectrum, low, high, mask):
     return 10.0 ** (
-        hd.band_power_db(freqs, spectrum, low_hz=low, high_hz=high, excluded_hz=MASK) / 10.0
+        hd.band_power_db(freqs, spectrum, low_hz=low, high_hz=high, excluded_hz=mask) / 10.0
     )
 
 
@@ -89,21 +85,22 @@ def _spectra(epochs, pain):
     return freqs, psd[pain == 1].mean(axis=0), psd[pain == 0].mean(axis=0), psd.mean(axis=0)
 
 
-def correlations(epochs, pain) -> dict[str, float]:
+def correlations(epochs, pain, isolated_hz) -> dict[str, float]:
     """Across-channel correlation of the muscle index with the pain-minus-warm change."""
     freqs, painful, warm, overall = _spectra(epochs, pain)
+    mask = hd.line_exclusion_windows(isolated_hz, half_width_hz=0.25)
     index, contrast = [], {band: [] for band in BANDS}
     for channel in range(overall.shape[0]):
         index.append(
-            _band_power(freqs, overall[channel], 62.0, 95.0)
-            / _band_power(freqs, overall[channel], 8.0, 30.0)
+            _band_power(freqs, overall[channel], 62.0, 95.0, mask)
+            / _band_power(freqs, overall[channel], 8.0, 30.0, mask)
         )
         for band, (low, high) in BANDS.items():
             contrast[band].append(
                 10.0
                 * np.log10(
-                    _band_power(freqs, painful[channel], low, high)
-                    / _band_power(freqs, warm[channel], low, high)
+                    _band_power(freqs, painful[channel], low, high, mask)
+                    / _band_power(freqs, warm[channel], low, high, mask)
                 )
             )
     muscle = np.asarray(index)
@@ -136,10 +133,11 @@ def main(argv: list[str] | None = None) -> None:
         if len(events) != len(epochs):
             raise ValueError(f"{subject}: {len(events)} event rows vs {len(epochs)} epochs")
         pain = events["pain_binary_coded"].to_numpy()
+        isolated_hz = _removal_targets(subject)
 
         entry = {"subject": subject.replace("sub-", "")}
         for arm, data in (("voltage", voltage_arm(epochs)), ("csd", csd_arm(epochs))):
-            for band, value in correlations(data, pain).items():
+            for band, value in correlations(data, pain, isolated_hz).items():
                 entry[f"{arm}_{band}_r"] = value
         rows.append(entry)
         print(f"  {subject} done", flush=True)

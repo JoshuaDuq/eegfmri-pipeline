@@ -41,7 +41,7 @@ marker names downstream code reads from `events.tsv` survive.
 | `diagnose.py` | Measures which narrowband lines exist and which belong to the comb. Two stages: `cache` reads the recordings once to disk, `analyse` reworks every statistic from that cache in about a minute without touching the drive again. |
 | `plot.py` | Draws the diagnosis. Reads only what `diagnose` wrote, so figures can be restyled without recomputing. |
 | `remove.py` | The removal itself, plus the benchmark that must pass before it is trusted and the verification that re-measures what was written. |
-| `report.py` | Turns the diagnosis catalogue, removal manifest and verification spectra into the band-by-band outcome tables behind the removal doc. |
+| `report.py` | Resolves each participant's actual manifest targets against the verification spectra and writes participant-specific residual and band tables. |
 | `config.yaml` | Every number above, and where the inputs and outputs live. |
 
 ## Stage order
@@ -56,7 +56,40 @@ eeg-pipeline line-comb report       # band-by-band outcome tables
 ```
 
 **Run `benchmark` before `apply`.** Its criteria are stated before the measurement is
-taken. A failure means the settings are wrong, not that the criteria should move.
+taken. A failure starts a root-cause investigation: it may reveal a defective estimator,
+an unsupported artifact, excessive collateral cost, or a poorly calibrated decision rule.
+A narrow miss is not evidence that the entire method is invalid, but the threshold is not
+moved after seeing the result without an independently justified recalibration.
+
+Detection covers the complete continuous run (whole-run plus overlapping 54-second
+spectra) and every exact -5 to +15 second interval around `Trig_therm/T  1`. Evidence from
+those intervals contributes to the continuous plan only where the sample ranges overlap.
+Each exact interval also has its own immutable 20-second transform, which replaces the
+continuous result on every exact sample and tapers only outside it. Outside-interval
+evidence cannot authorize an isolated or comb-adjacent exact target. A Thomson F-test on
+the first pass's own output resolves residuals once inside already authorized artifact
+regions, using thresholds declared independently of the acceptance gate, so the gate can
+still fail on a residual the detector does not reach. Continuous residuals are measured
+after overlap-add and routed across the synthesis windows that create the evidenced
+samples. Simultaneous resolvable summits remain distinct sources. The benchmark reports
+continuous and exact study-window residual, focal, injected-sinusoid, and
+off-target-spectrum endpoints separately.
+
+Two criteria are decided over the cohort rather than inside each run, because at their
+per-run error rates neither survives being applied ninety times: the seam criterion, and
+whether any sinusoid remains in an authorized region. The second gives each recording one
+Bonferroni-corrected probability and applies Benjamini-Hochberg across recordings. `apply`
+consults both and refuses on either.
+
+The benchmark also reports `min_in_band_probe_survival` and
+`median_in_band_probe_survival` — the fraction of a narrowband probe placed *on* four of
+the plan's own targets that survives removal. Every other probe sits where nothing is
+removed and so cannot report a loss; this one measures the cost at the frequencies the
+method does act on. It is reported, never gated, because signal at an artifact frequency is
+not separable from the artifact.
+
+MNE-BIDS loading makes `channels.tsv` authoritative, so ECG/EOG remain byte-for-byte data
+channels outside the EEG transform and its gates.
 
 To make the rest of the pipeline read the cleaned data, point `paths.bids_root` in the core
 `eeg_config.yaml` at the directory `apply` wrote (`paths.output_root` here).

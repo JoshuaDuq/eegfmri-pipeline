@@ -2,9 +2,10 @@
 #
 # What is being removed is characterised in docs/scanner_harmonic_diagnosis.md: a comb at
 # multiples of about 1.2 Hz that is mains-synchronous, independent of the imaging
-# gradients, and present before the scanner starts, plus four lines that drift on their
-# own. Every run gets its own frequency estimate; the values below are only where the
-# search starts. They describe one room and mean nothing for another site.
+# gradients, and present before the scanner starts, plus independently moving narrow
+# electrical lines. Every recording and adaptive window gets its own measured targets;
+# the value below is only where the comb search starts. It describes one room and means
+# nothing for another site.
 #
 # This is not a stage of MNE-BIDS-Pipeline. Its notch is FIR, and fifty narrow FIR notches
 # would take the surrounding band with them. The removal runs before the pipeline reads
@@ -55,107 +56,55 @@ line_comb_removal:
   # (+3.9 to +13.2 dB per subject) so it is a line rather than a filter-edge artifact.
   removal_harmonic_range: [22, 83]
 
-  # Not on the comb, and they drift. 57.3485 and 58.3442 were added on 2026-07-31 after
-  # sub-0012's cleaned data showed them standing 9.8 and 10.0 dB above background, the two
-  # largest narrowband residuals left in the analysis band; both are 0.05-0.07 Hz wide,
-  # which is the spectral resolution, so neither is a rhythm. Cohort presence measured on
-  # pre-removal data: 57.3485 in 12 of 15 participants, 58.3442 in 7 of 15.
+  # Isolated lines are detected automatically. No historical frequency list is accepted:
+  # the 94 Hz source alone spans 0.595 Hz between participants, so a static seed either
+  # misses artifacts or needs a window broad enough to threaten signal.
   #
-  # 57.2247 and 57.3485 are 0.124 Hz apart, closer than isolated_search_hz, so their search
-  # windows overlap and the stronger of the two (about 17 dB stronger here) was being handed
-  # to both. Narrowing the window cannot fix it: 57.2247 wanders up to 147 mHz across the
-  # cohort and needs a wide one to be followed. estimate_comb instead resolves these
-  # strongest first and lets each line be claimed once.
-  # 82.2228 is NOT a room-comb member and does not drift with mains: it is the imaging
-  # gradient's 74th harmonic, 74/TR at TR = 0.899994 s, and it is here because the audit
-  # found it 3.0 dB over background in 9 of 15 participants inside the 62-95 Hz gamma
-  # window. Everything else in this list wanders with the room; this one is locked to the
-  # scanner clock and has the tightest scatter of any line measured (0.12 Hz). Re-derive it
-  # if the sequence TR ever changes -- it is the one entry here that is not a property of
-  # the room.
+  # Rechecked on 2026-08-03 across all fifteen run-1 recordings after sub-0000's scanner-
+  # restart crop: the exact detector below with its cap disabled returned 2-6 candidates
+  # at 10 dB (mean 3.67), against 3-10 at 6 dB (mean 6.07). The 10 dB floor is retained
+  # as the conservative setting; the replication rules below supply independent evidence.
   #
-  # Added 2026-08-02 from an audit of the delivered epochs (14 participants, sub-0008
-  # excluded). 23.7776 and 29.6854 are narrow, on neither comb, and present in 7 and 9 of
-  # 14; 29.6854 matters because it sits 0.41 Hz below the 30.1 Hz gamma_low edge, close
-  # enough that any spectral smoothing pulls it in. 81.1111 is the imaging gradient's 73rd
-  # harmonic at TR = 0.9 s -- the partner of 82.2228 above, with the same nulled centre and
-  # elevated shoulders, and like it must be re-derived if the sequence TR ever changes.
-  #
-  # The audit's 61.0353 Hz was tried here and removed again: it falls 0.128 Hz from comb
-  # harmonic 51 at 61.1629 Hz, inside isolated_search_hz, so estimate_comb rejects it --
-  # the search would find the comb. It may simply be harmonic 51 rather than the mains
-  # sideband the audit took it for. Either way it sits in the unanalysed 58-62 gap, the
-  # comb already covers that position, and nothing is lost by leaving it out.
-  #
-  # 93.76 Hz is deliberately absent: 16.6 dB, but in one participant only, and a cohort
-  # notch for one participant is the wrong trade. 59.02 Hz is absent too -- 4 of 14, and
-  # inside the 60 Hz notch skirt.
-  #
-  # Mains is deliberately NOT here. This comb is mains-synchronous -- its fundamental is
-  # mains/50 -- so 60 Hz is comb harmonic 50, already inside removal_harmonic_range below.
-  # Listing it as an isolated line is both redundant and rejected: estimate_comb refuses a
-  # seed within isolated_search_hz of a comb position, because the search would just find
-  # the comb. See exclude_mains below.
-  # Seed positions are the midrange of where each line actually sits across the cohort,
-  # measured on the uncleaned root (outputs/line_comb_mains/seed_positions.csv). A seed
-  # covers +/- isolated_search_hz, so a line drifting wider than 0.30 Hz between
-  # participants needs two seeds rather than one.
-  #
-  # 93.80 and 94.30 are the second and third seeds for the 94 Hz line. That line spans
-  # 0.595 Hz cohort-wide (93.750 in sub-0001 to 94.345 in sub-0008), far more than one
-  # seed can cover and more than the guard permits any window to be. With 94.0748 alone
-  # it was caught in 11 of 15 participants, and in the four it missed it was left standing
-  # at +20.5 to +28.0 dB -- in sub-0008 the delivered data was *worse* after cleaning,
-  # +28.0 dB to +31.2 dB, because its neighbours went and it did not. The three together
-  # cover 93.65-94.45.
-  #
-  # 93.80 is the tightest of the three at 0.202 Hz from comb harmonic 78 (93.5984). Its
-  # window stops at 93.65, so the harmonic stays outside it and the search cannot lock on.
-  #
-  # 23.75 replaces 23.7776, the same line re-centred: sub-0001 and sub-0003 carry it at
-  # 23.6225 Hz, 5 mHz outside the old window. The new window keeps the upper end (23.8311).
-  #
-  # Two apparent misses are deliberately NOT chased. sub-0001's 46.8741 Hz peak sits
-  # 0.075 Hz from comb harmonic 39, so it is the comb, which is exactly what the narrow
-  # isolated_search_hz exists to keep the search off. And 82.2228 stays put despite three
-  # participants carrying it 0.18-0.28 Hz high: it is gradient harmonic 74 at TR = 0.9 s
-  # (74/0.9 = 82.2222), a physically pinned position, and the misses are 6.5-8.3 dB.
-  isolated_hz: [23.7500, 29.6854, 47.0362, 57.2247, 57.3485, 58.1807, 58.3442, 81.1111, 82.2228, 93.8000, 94.0748, 94.3000]
-  # Find each session's isolated lines in its own spectra rather than using the list above.
-  #
-  # The list is kept as the record of what was curated, and as the fallback when this is
-  # false, but it cannot be right for everyone: measured on the uncleaned root these lines
-  # scatter up to 0.595 Hz between participants while one seed covers 2 * 0.15 = 0.30 Hz.
-  # The 94 Hz line was reached in 11 of 15 participants and left standing at +20 to +28 dB
-  # in the other four -- and in sub-0008 the delivered data came out worse than it went in,
-  # +28.0 dB before cleaning against +31.2 dB after, because the neighbours around it were
-  # removed and it was not. Detection reaches it in 14 of 15, including three of those four.
-  #
-  # Calibrated on the fifteen uncleaned run-1 recordings. Of 889 peaks clearing 6 dB three
-  # quarters sat at or below 8.3 dB, and dropping the floor from 10 dB to 6 dB took the
-  # count from 7.2 to 59.3 peaks per participant while adding no frequency that recurs
-  # across the cohort. At 10 dB what survives lands on the known lines and nothing else:
-  # 23.776 Hz in 10 participants, 29.684 in 8, 47.046 in 13, 57.234 in 15, 58.193 in 14,
-  # 94.091 in 14. It also finds ~28 Hz at +19 to +22 dB, which the curated list never
-  # carried and which cleaning therefore never touched.
-  #
-  # What keeps it from removing signal: peaks within 0.20 Hz of any comb position are left
-  # to the comb pass, peaks within 0.35 Hz of a benchmark probe tone are left alone, and
-  # peaks wider than 0.25 Hz measured 3 dB down are left alone because a scanner line is a
-  # sinusoid while alpha and beta rhythms are whole hertz wide.
-  detect_isolated: true
+  # What keeps it from removing signal: peaks inside the comb model's 0.06 Hz membership
+  # tolerance are left to the comb pass, and peaks wider than 0.25 Hz measured 3 dB down
+  # are left alone because a scanner line is a sinusoid while alpha and beta rhythms are
+  # whole hertz wide. Detection is deliberately not blind at benchmark-probe frequencies;
+  # if a real artifact collides with a probe, the benchmark fails and the probe must move.
   detection_min_prominence_db: 10.0
+  # A candidate may be weaker than 10 dB in an individual run only when the same narrow
+  # summit recurs in at least three runs and one independent run clears 10 dB. This joint
+  # rule recovers stable machine lines such as 58.426 Hz without treating 6 dB as a
+  # sufficient single-run detection threshold.
+  detection_candidate_prominence_db: 6.0
+  # A block scan makes many more comparisons than a whole-run scan. Replication alone is
+  # insufficient: ordinary 54 s spectra produced recurrent 10-13 dB narrow local maxima
+  # around 39-45 Hz. The measured non-stationary 27.519 Hz machine line is 16.71 dB on a
+  # run-balanced basis and is the only block-only sub-0011 cluster above this floor.
+  detection_block_min_prominence_db: 15.0
   detection_low_hz: 20.0           # below this the spec finds no removable lines at all
   detection_high_hz: 100.0
-  max_isolated_lines: 16           # cohort needs at most 12; this bounds a pathological run
-  # A line must appear in at least this many runs of a session before it is removed from
-  # any of them. The runs are replication already in hand -- one machine, minutes apart --
-  # and they separate a line from a fluctuation cleanly: on sub-0000 fifteen of twenty
-  # candidates appeared in exactly one of six runs, while the five that recurred are the
-  # known lines (28.278, 57.296, 58.185, 82.204, 93.944 Hz). sub-0008 is the clean case,
-  # all seven of its lines in all six runs. Without this the budget was being spent
-  # arbitrating between one-off noise peaks.
-  min_runs_per_line: 2
+  # Session-wide targets require this many runs. The runs are replication already in hand
+  # -- one machine, minutes apart -- and they separate a persistent source from a one-run
+  # fluctuation. A separate path below handles a real source confined to one recording.
+  min_runs_per_line: 3
+  # Whole-run spectra dilute intermittent machine lines. A second path may authorize one
+  # session-wide when it appears in at least two runs. A line confined to one recording is
+  # instead removed only from the exact adaptive windows that detected it, after it clears
+  # the 15 dB strong-line threshold and recurs in at least three non-overlapping 54 s
+  # windows. Adjacent 50%-overlap windows do not count as independent evidence.
+  min_runs_per_block_line: 2
+  min_independent_windows_per_line: 3
+
+  # The continuous detector remains primary, but the benchmark must also guarantee the
+  # exact samples entering Studies 1-3. Evidence found in one interval is routed to
+  # overlapping continuous windows, while its exact 20 s transform accepts isolated and
+  # adjacent targets only from that same interval. The exact result replaces the continuous
+  # result on every analysis sample; only its correction taper extends outside the interval
+  # to prevent a step discontinuity. The event count is part of the protocol and a mismatch
+  # is an error.
+  study_event_name: "Trig_therm/T  1"
+  study_epoch_s: [-5.0, 15.0]
+  expected_study_events_per_run: 11
   # Refinement window for a detected nominal. It sits on the summit already, so it needs
   # only enough room to refine sub-bin -- and it must stay narrow, because estimate_comb
   # refuses a nominal within its search window of a comb position, on the grounds that a
@@ -163,13 +112,12 @@ line_comb_removal:
   # 93.759 Hz line is 0.137 Hz from harmonic 78, so the detector offered it and the
   # estimator raised, stopping the benchmark. Kept below the detector's own floor of one
   # line width (0.109 Hz) so a line detection admits can never be one the estimator
-  # refuses. isolated_search_hz above still applies to the curated fallback, which needs
-  # the wide window to find a line that has drifted since it was listed.
+  # refuses.
   detection_search_hz: 0.05
   search_hz: 0.25                  # comb search half-width, below half the 1.2 Hz spacing
-  isolated_search_hz: 0.15         # narrower: 47.036 Hz sits 0.24 Hz from comb harmonic 39
   min_prominence_db: 1.0           # a line weaker than this joins neither the fit nor the targets
-  filter_length: "20s"             # 4 s windows cannot resolve a 1.2 Hz spacing and fail the gate
+  filter_length: "27s"             # Half the 54 s block; resolves the sub-0011 harmonic shoulder
+  filter_jobs: 4                    # Shared-memory threads; avoids process copies and semaphores
   mt_bandwidth: 0.6                # +/-0.3 Hz, half the distance to the neighbouring line
 
   # How much spectrum each line costs. spectrum_fit subtracts a sinusoid at every bin
@@ -179,7 +127,21 @@ line_comb_removal:
   # the narrowest setting measured to push every line below background, at 12% of the
   # band. Raising the ratio further leaves the high harmonics standing.
   notch_width_ratio: 450
-  notch_width_min_hz: 0.05         # one bin at the 20 s working resolution
+  notch_width_min_hz: 0.05         # wider than one bin at the 27 s working resolution
+  # Propagate each adaptive window's f0 uncertainty to harmonic k as k * SE(f0).
+  #
+  # Validated harmonics retain their measured peak positions; unsupported harmonics are
+  # extrapolated from the independently fitted arithmetic grid. The uncertainty term is
+  # therefore still required for estimated f0 error, while physical within-run wander is
+  # separately covered by the empirically calibrated freq/450 base width.
+  #
+  # Across the earlier 90 continuous plans, empirical base widths touched at most 13.591%
+  # of 28-95 Hz and the two-standard-error expansion reached 17.017%. Base cost is now
+  # descriptive rather than separately capped: the sole 18% opportunity-cost gate measures
+  # the maximum actual continuous or exact channel-level transform, including data-local
+  # residual targets. Two standard errors cover per-window estimation error; a remaining
+  # line is resolved by matched same-scope controls, not by post-hoc global widening.
+  uncertainty_confidence_z: 2.0
   low_hz: 3.0
   # Raised from 99.0 on 2026-08-02 so harmonic 83 (99.6 Hz) is reachable. Still under the
   # 100 Hz lowpass the pipeline applies, and the removal notch there is freq/450 = 0.22 Hz

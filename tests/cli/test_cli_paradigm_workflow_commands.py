@@ -14,6 +14,7 @@ import argparse
 import pytest
 
 from studies.pain_study.cli import command_registry
+from studies.pain_study.cli import line_comb as line_comb_cli
 
 WORKFLOW_COMMANDS = {
     "line-comb": (
@@ -87,6 +88,24 @@ def test_an_unknown_stage_is_rejected(name: str) -> None:
 
     with pytest.raises(SystemExit):
         parser.parse_args([name, "not-a-stage"])
+
+
+@pytest.mark.parametrize("obsolete", ["--limit", "--fundamental-scope"])
+def test_line_comb_parser_rejects_obsolete_benchmark_controls(obsolete: str) -> None:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command")
+    line_comb_cli.setup_line_comb(subparsers)
+    value = "1" if obsolete == "--limit" else "session"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["line-comb", "benchmark", obsolete, value])
+
+
+def test_line_comb_removal_rejects_subject_subsets() -> None:
+    args = argparse.Namespace(mode="benchmark", subjects=["sub-0001"])
+
+    with pytest.raises(ValueError, match="all recordings"):
+        line_comb_cli.run_line_comb(args, [], config=None)
 
 
 @pytest.mark.parametrize("name", sorted(WORKFLOW_COMMANDS))

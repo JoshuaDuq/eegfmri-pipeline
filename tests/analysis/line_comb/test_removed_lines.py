@@ -44,21 +44,43 @@ def test_the_result_is_ordered(manifest):
     assert list(found) == sorted(found)
 
 
-def test_a_missing_manifest_falls_back_to_the_given_list(tmp_path):
-    """Before an apply has run there is nothing to read, and the audit still has to work."""
-    fallback = (23.75, 94.0748)
-    found = lr.removed_isolated_lines(tmp_path / "absent.tsv", fallback=fallback)
-    assert tuple(found) == fallback
+def test_lines_can_be_resolved_for_one_participant(manifest):
+    found = lr.removed_isolated_lines(manifest, subject="sub-0008")
+
+    assert any(abs(frequency - 94.37) < 0.02 for frequency in found)
+    assert not any(abs(frequency - 57.315) < 0.02 for frequency in found)
 
 
-def test_a_missing_manifest_without_a_fallback_is_empty(tmp_path):
-    assert lr.removed_isolated_lines(tmp_path / "absent.tsv") == ()
+def test_a_subject_missing_from_the_manifest_is_an_error(manifest):
+    with pytest.raises(ValueError, match="no rows for sub-9999"):
+        lr.removed_isolated_lines(manifest, subject="sub-9999")
 
 
-def test_a_manifest_without_the_column_falls_back(tmp_path):
+def test_a_missing_manifest_is_an_error(tmp_path):
+    with pytest.raises(FileNotFoundError, match="manifest not found"):
+        lr.removed_isolated_lines(tmp_path / "absent.tsv")
+
+
+def test_a_manifest_without_the_column_is_an_error(tmp_path):
     path = tmp_path / "removal_manifest.tsv"
-    pd.DataFrame([{"recording": "sub-0000_run-1"}]).to_csv(path, sep="\t", index=False)
-    assert lr.removed_isolated_lines(path, fallback=(47.0,)) == (47.0,)
+    pd.DataFrame([{"recording": "missing-isolated-column"}]).to_csv(
+        path,
+        sep="\t",
+        index=False,
+    )
+    with pytest.raises(ValueError, match="no isolated_hz column"):
+        lr.removed_isolated_lines(path)
+
+
+def test_a_malformed_frequency_is_an_error(tmp_path):
+    path = tmp_path / "removal_manifest.tsv"
+    pd.DataFrame([{"recording": "a", "isolated_hz": "47.0;not-a-frequency"}]).to_csv(
+        path,
+        sep="\t",
+        index=False,
+    )
+    with pytest.raises(ValueError, match="could not convert string to float"):
+        lr.removed_isolated_lines(path)
 
 
 def test_blank_and_nan_entries_are_skipped(tmp_path):
