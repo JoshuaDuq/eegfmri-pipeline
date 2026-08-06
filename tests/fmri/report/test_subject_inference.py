@@ -12,7 +12,10 @@ import pytest
 from fmri_pipeline.analysis.plotting_config import FmriReportConfig
 from fmri_pipeline.analysis.report import subject
 from fmri_pipeline.analysis.report.figures import coverage
-from fmri_pipeline.analysis.report.manifest import ContrastManifest
+from fmri_pipeline.analysis.report.manifest import (
+    REPORT_MANIFEST_SCHEMA_VERSION,
+    ContrastManifest,
+)
 
 
 def _stat(tmp_path: Path, name: str = "z.nii.gz", seed: int = 0) -> Path:
@@ -38,6 +41,7 @@ def _mask(tmp_path: Path, name: str = "mask.nii.gz") -> Path:
 
 def _manifest(tmp_path: Path, **overrides) -> ContrastManifest:
     base = dict(
+        schema_version=REPORT_MANIFEST_SCHEMA_VERSION,
         subject="sub-01",
         task="heat",
         contrast_name="heat-warm",
@@ -57,13 +61,16 @@ def _manifest(tmp_path: Path, **overrides) -> ContrastManifest:
         contrast_columns=(),
         included_runs=("run-01",),
         excluded_runs=(),
-        bold_paths=(),
+        bold_paths=(_bold(tmp_path, "run-01_bold.nii.gz"),),
         confounds_paths=(),
         t_r=2.0,
         smoothing_fwhm=6.0,
         signal_scaling=False,
         confound_strategy="auto",
         mask_is_analysis_mask=True,
+        residual_paths=(_model_series(tmp_path, "run-01_residual.nii.gz"),),
+        predicted_paths=(_model_series(tmp_path, "run-01_predicted.nii.gz"),),
+        retained_frame_indices=(tuple(range(12)),),
     )
     base.update(overrides)
     return ContrastManifest(**base)
@@ -88,9 +95,7 @@ def test_statistic_values_are_taken_inside_the_mask_not_over_the_volume(
 def test_a_mask_that_does_not_fit_falls_back_and_says_so(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     wrong = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.uint8), np.eye(4))
-    _values, source = subject.masked_stat_values(
-        nib.load(str(manifest.stat_map)), wrong
-    )
+    _values, source = subject.masked_stat_values(nib.load(str(manifest.stat_map)), wrong)
     assert "no usable mask" in source
 
 
@@ -141,9 +146,7 @@ def _cfg(**kwargs) -> FmriReportConfig:
 
 def test_an_fdr_contrast_gets_a_thresholded_panel(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path, threshold_mode="fdr", fdr_q=0.05)
-    section = subject.build_contrast_section(
-        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
-    )
+    section = subject.build_contrast_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
     assert "thresholded" in str(section).lower()
 
 
@@ -153,9 +156,7 @@ def test_a_contrast_with_no_resolved_threshold_still_gets_calibration(
     # The panel that says where a threshold would fall is most valuable precisely
     # when none was applied.
     manifest = _manifest(tmp_path, threshold_mode="none")
-    section = subject.build_contrast_section(
-        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
-    )
+    section = subject.build_contrast_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
     assert "calibration" in str(section).lower()
 
 
@@ -171,11 +172,12 @@ def test_the_calibration_panel_leads_no_contrast_into_the_diagnostics_drawer(
     # It sits in the contrast section, not the collapsed diagnostics: a reader who
     # never opens that block would read every result above at face value.
     manifest = _manifest(tmp_path)
-    contrast = subject.build_contrast_section(
-        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
-    )
+    contrast = subject.build_contrast_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
     diagnostics = subject.build_diagnostics_section(
-        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
+        manifest=manifest,
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(),
     )
     assert any("calibration" in title for title in _titles(contrast))
     assert not any("calibration" in title for title in _titles(diagnostics))
@@ -185,9 +187,7 @@ def test_the_calibration_panel_leads_no_contrast_into_the_diagnostics_drawer(
 def test_the_cluster_caption_states_the_maps_smoothness(tmp_path: Path) -> None:
     # A cluster-extent count is not comparable to anything without it.
     manifest = _manifest(tmp_path, cluster_min_voxels=10)
-    section = subject.build_contrast_section(
-        manifest=manifest, out_dir=tmp_path, cfg=_cfg()
-    )
+    section = subject.build_contrast_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
     text = str(section)
     assert "FWHM" in text
     assert "resels" in text
@@ -196,7 +196,22 @@ def test_the_cluster_caption_states_the_maps_smoothness(tmp_path: Path) -> None:
 def test_smoothness_facts_survive_a_map_they_cannot_measure(tmp_path: Path) -> None:
     # An unresolved measurement is not a reason to lose the cluster table.
     tiny = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
-    assert subject.smoothness_facts(tiny, mask_img=None, cluster_min_voxels=10) == []
+    smoothness = subject.smoothness_facts(tiny, mask_img=None, cluster_min_voxels=10)
+    assert smoothness.facts == []
+    assert smoothness.resels is None
+
+
+def test_smoothness_reports_the_resel_count_as_a_number(tmp_path: Path) -> None:
+    # Not only as prose. The random-field height is computed from this count, and a
+    # sentence in a caption cannot be handed to the threshold table.
+    manifest = _manifest(tmp_path, cluster_min_voxels=10)
+    smoothness = subject.smoothness_facts(
+        nib.load(str(manifest.stat_map)),
+        mask_img=nib.load(str(manifest.mask)),
+        cluster_min_voxels=10,
+        threshold=2.3,
+    )
+    assert smoothness.resels is not None and smoothness.resels > 0
 
 
 # --- smoothness is a property of the noise, not of the signal -------------
@@ -260,13 +275,69 @@ def test_the_cluster_caption_states_the_search_volume_in_resels(tmp_path: Path) 
     # Every corrected height in this report divides alpha across voxels; the resel
     # count is what says how far that overshoots the family of independent tests.
     manifest = _manifest(tmp_path, cluster_min_voxels=10)
-    facts = subject.smoothness_facts(
+    smoothness = subject.smoothness_facts(
         nib.load(str(manifest.stat_map)),
         mask_img=nib.load(str(manifest.mask)),
         cluster_min_voxels=10,
         threshold=2.3,
     )
-    assert any("search volume" in fact and "resels" in fact for fact in facts)
+    assert any(
+        "search volume" in fact and "resels" in fact for fact in smoothness.facts
+    )
+
+
+# --- smoothness from the residual field -----------------------------------
+
+
+def _residual_series(fwhm_mm: float = 6.0, voxel_mm: float = 3.0, frames: int = 12):
+    """A residual series smoothed to a known FWHM, carrying no signal at all."""
+    from scipy import ndimage
+
+    rng = np.random.default_rng(3)
+    sigma_voxels = (fwhm_mm / voxel_mm) / np.sqrt(8.0 * np.log(2.0))
+    volumes = []
+    for _ in range(frames):
+        volume = ndimage.gaussian_filter(rng.standard_normal((40, 40, 40)), sigma_voxels)
+        volumes.append(volume / volume.std())
+    affine = np.diag([voxel_mm, voxel_mm, voxel_mm, 1.0])
+    return nib.Nifti1Image(np.stack(volumes, axis=-1).astype(np.float32), affine)
+
+
+def test_smoothness_from_residuals_recovers_the_applied_kernel() -> None:
+    # Smoothness is a property of the residual field. The pipeline now writes those
+    # residuals, so the estimate no longer has to be taken from the statistic map and
+    # then defended.
+    _stat_img, mask = _smoothed_map_with_a_blob()
+    fwhm = coverage.estimate_fwhm_from_residuals(_residual_series(), mask=mask)
+    assert float(np.mean(fwhm)) == pytest.approx(6.0, rel=0.15)
+
+
+def test_residuals_beat_an_unthresholded_statistic_map() -> None:
+    # The case the statistic map cannot handle. Under ``threshold_mode: none`` there
+    # is no height to exclude the activation by, so the map-based estimate is an
+    # admitted upper bound -- while the residual field carries no activation to begin
+    # with and needs no heuristic.
+    stat_img, mask = _smoothed_map_with_a_blob()
+    whole, source = subject.noise_mask(stat_img, mask_img=mask, threshold=None)
+    from_map = float(np.mean(coverage.estimate_fwhm(stat_img, mask=whole)))
+    from_residuals = float(
+        np.mean(coverage.estimate_fwhm_from_residuals(_residual_series(), mask=mask))
+    )
+    assert "upper bound" in source
+    assert abs(from_residuals - 6.0) < abs(from_map - 6.0)
+
+
+def test_smoothness_facts_prefer_the_residual_field_when_it_is_given() -> None:
+    stat_img, mask = _smoothed_map_with_a_blob()
+    smoothness = subject.smoothness_facts(
+        stat_img,
+        mask_img=mask,
+        cluster_min_voxels=0,
+        threshold=2.3,
+        residual_img=_residual_series(),
+    )
+    assert any("residual" in fact for fact in smoothness.facts)
+    assert smoothness.resels is not None
 
 
 # --- the anatomical underlay ----------------------------------------------
@@ -277,9 +348,7 @@ def test_volume_panels_are_drawn_over_the_discovered_anatomy(tmp_path: Path) -> 
     # space and could not be judged against grey matter or a ventricle.
     manifest = _manifest(tmp_path)
     background = nib.Nifti1Image(np.ones((16, 16, 16), dtype=np.float32), np.eye(4))
-    with patch(
-        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic"
-    ) as mosaic:
+    with patch("fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic") as mosaic:
         mosaic.side_effect = RuntimeError("stop after the call is recorded")
         subject.build_contrast_section(
             manifest=manifest, out_dir=tmp_path, cfg=_cfg(), background=background
@@ -291,22 +360,30 @@ def test_the_report_trims_the_underlay_to_what_was_modelled(tmp_path: Path) -> N
     # Nilearn picks slice positions across the underlay's extent, so a whole-head T1w
     # put the vertex and the neck in every mosaic and left the brain occupying about
     # half of each tile.
-    manifest = _manifest(tmp_path)
-    background = nib.Nifti1Image(
-        np.ones((60, 60, 60), dtype=np.float32), np.eye(4)
+    bold_path = _bold(tmp_path, "underlay_run-01_bold.nii.gz")
+    manifest = _manifest(
+        tmp_path,
+        bold_paths=(bold_path,),
+        residual_paths=(_model_series(tmp_path, "run-01_residual.nii.gz"),),
+        predicted_paths=(_model_series(tmp_path, "run-01_predicted.nii.gz"),),
+        retained_frame_indices=(tuple(range(12)),),
     )
+    background = nib.Nifti1Image(np.ones((60, 60, 60), dtype=np.float32), np.eye(4))
     captured = {}
 
     def _record(figure, **kwargs):
         captured["bg"] = kwargs.get("bg_img")
         raise RuntimeError("stop after the call is recorded")
 
-    with patch(
-        "fmri_pipeline.analysis.report.subject.load_background",
-        return_value=(background, "anat.nii.gz"),
-    ), patch(
-        "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic",
-        side_effect=_record,
+    with (
+        patch(
+            "fmri_pipeline.analysis.report.subject.load_background",
+            return_value=(background, "anat.nii.gz"),
+        ),
+        patch(
+            "fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic",
+            side_effect=_record,
+        ),
     ):
         subject.build_subject_report(
             manifests=[manifest],
@@ -325,9 +402,7 @@ def test_the_report_trims_the_underlay_to_what_was_modelled(tmp_path: Path) -> N
 def test_a_missing_background_is_reported_rather_than_left_to_assumption(
     tmp_path: Path,
 ) -> None:
-    background, reason = subject.load_background(
-        deriv_root=tmp_path, manifest=_manifest(tmp_path)
-    )
+    background, reason = subject.load_background(deriv_root=tmp_path, manifest=_manifest(tmp_path))
     assert background is None
     assert "no anatomical image" in reason
 
@@ -352,9 +427,7 @@ def test_the_header_declines_the_claim_for_a_merely_discovered_mask(
 ) -> None:
     # A discovered mask is a single run's; the fitted one is the intersection. Only
     # the second justifies "voxels outside this were not tested".
-    section = subject.build_header_section(
-        [_manifest(tmp_path, mask_is_analysis_mask=False)]
-    )
+    section = subject.build_header_section([_manifest(tmp_path, mask_is_analysis_mask=False)])
     assert "not verified as the fitted mask" in str(section)
 
 
@@ -371,6 +444,15 @@ def _bold(tmp_path: Path, name: str, n_frames: int = 12) -> Path:
     return path
 
 
+def _model_series(tmp_path: Path, name: str, n_frames: int = 12) -> Path:
+    path = tmp_path / name
+    time = np.arange(n_frames, dtype=np.float32)
+    values = 0.1 * time if "predicted" in name else np.where(time.astype(int) % 2 == 0, 0.25, -0.25)
+    data = np.broadcast_to(values, (16, 16, 16, n_frames)).copy()
+    nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
+    return path
+
+
 def test_the_carpet_is_built_from_the_analysis_mask_not_the_field_of_view(
     tmp_path: Path,
 ) -> None:
@@ -379,7 +461,7 @@ def test_the_carpet_is_built_from_the_analysis_mask_not_the_field_of_view(
     # caption said "as modelled".
     manifest = _manifest(
         tmp_path,
-        bold_paths=(_bold(tmp_path, "r1.nii.gz"),),
+        bold_paths=(_bold(tmp_path, "run-01_bold.nii.gz"),),
         included_runs=("run-01",),
     )
     captured = {}
@@ -388,9 +470,7 @@ def test_the_carpet_is_built_from_the_analysis_mask_not_the_field_of_view(
         captured.update(kwargs)
         raise RuntimeError("stop once the call is recorded")
 
-    with patch(
-        "fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record
-    ):
+    with patch("fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record):
         subject.build_qc_sections(
             manifests=[manifest],
             deriv_root=tmp_path,
@@ -403,7 +483,7 @@ def test_the_carpet_is_built_from_the_analysis_mask_not_the_field_of_view(
 def test_the_carpet_falls_back_when_no_fitted_mask_was_recorded(tmp_path: Path) -> None:
     manifest = _manifest(
         tmp_path,
-        bold_paths=(_bold(tmp_path, "r2.nii.gz"),),
+        bold_paths=(_bold(tmp_path, "run-01_bold.nii.gz"),),
         included_runs=("run-01",),
         mask_is_analysis_mask=False,
     )
@@ -413,9 +493,7 @@ def test_the_carpet_falls_back_when_no_fitted_mask_was_recorded(tmp_path: Path) 
         captured.update(kwargs)
         raise RuntimeError("stop once the call is recorded")
 
-    with patch(
-        "fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record
-    ):
+    with patch("fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record):
         subject.build_qc_sections(
             manifests=[manifest],
             deriv_root=tmp_path,
@@ -439,9 +517,7 @@ def test_the_standard_error_colourbar_is_not_labelled_effect(tmp_path: Path) -> 
 def test_scaled_models_carry_percent_signal_change_into_the_error_units(
     tmp_path: Path,
 ) -> None:
-    manifest = _manifest(
-        tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean"
-    )
+    manifest = _manifest(tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean")
     assert subject._error_units(manifest) == "standard error (% signal change)"
 
 
@@ -450,9 +526,7 @@ def test_voxel_mean_scaling_puts_percent_signal_change_on_the_effect_colourbar(
 ) -> None:
     # The units the maps have actually been in all along. Dividing each voxel by its
     # own temporal mean is what makes an effect a percentage of that voxel's baseline.
-    manifest = _manifest(
-        tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean"
-    )
+    manifest = _manifest(tmp_path, signal_scaling=True, signal_scaling_mode="voxel-mean")
     assert subject._effect_units(manifest) == "% signal change"
 
 
@@ -460,9 +534,7 @@ def test_grand_mean_scaling_is_not_called_percent_signal_change(tmp_path: Path) 
     # A different denominator is a different quantity. Both modes answer "scaled", and
     # collapsing them onto one label would put a number on the colourbar that the map
     # does not carry.
-    manifest = _manifest(
-        tmp_path, signal_scaling=True, signal_scaling_mode="grand-mean"
-    )
+    manifest = _manifest(tmp_path, signal_scaling=True, signal_scaling_mode="grand-mean")
     assert subject._effect_units(manifest) == "% of the grand mean signal"
 
 

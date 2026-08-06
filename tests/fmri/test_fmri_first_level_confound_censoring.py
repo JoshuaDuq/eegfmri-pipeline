@@ -90,8 +90,18 @@ class _RecordingFirstLevelModel:
     def fit(self, imgs: Any, events: Any = None, confounds: Any = None, **kwargs: Any) -> None:
         self.fit_kwargs = {"imgs": imgs, "events": events, "confounds": confounds, **kwargs}
         n_runs = len(imgs) if isinstance(imgs, (list, tuple)) else 1
+        sample_masks = kwargs.get("sample_masks")
+        retained_counts = (
+            [len(mask) for mask in sample_masks] if sample_masks is not None else [60] * n_runs
+        )
         self.design_matrices_ = [
-            pd.DataFrame({"cond_a_pain": [1.0, 0.0], "constant": [1.0, 1.0]}) for _ in range(n_runs)
+            pd.DataFrame(
+                {
+                    "cond_a_pain": np.zeros(retained_count),
+                    "constant": np.ones(retained_count),
+                }
+            )
+            for retained_count in retained_counts
         ]
 
 
@@ -125,7 +135,7 @@ def _run_multi_run_fit(
         ),
         patch("fmri_pipeline.analysis.contrast_builder._validate_design_matrices"),
     ):
-        fit_first_level_glm_multi_run(
+        model.glm_result = fit_first_level_glm_multi_run(
             bold_paths=bold_paths,
             events_paths=events_paths,
             confounds_paths=confounds_paths,
@@ -150,6 +160,15 @@ def test_multi_run_fit_censors_leading_nan_volume_via_sample_masks(tmp_path: Pat
         retained = np.asarray(mask, dtype=int)
         assert 0 not in retained, "leading non-finite volume was not censored"
         assert retained.size == 59
+
+
+def test_multi_run_fit_records_the_exact_retained_frame_indices(tmp_path: Path) -> None:
+    model = _run_multi_run_fit(tmp_path)
+
+    assert model.glm_result.retained_frame_indices == [
+        tuple(range(1, 60)),
+        tuple(range(1, 60)),
+    ]
 
 
 def test_multi_run_fit_never_passes_nonfinite_confounds_to_nilearn(tmp_path: Path) -> None:

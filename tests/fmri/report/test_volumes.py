@@ -86,14 +86,6 @@ def test_per_run_medians_expose_a_single_bad_run() -> None:
     assert result.per_run_median[0] > result.per_run_median[1] * 2
 
 
-def test_per_run_tsnr_figure_labels_every_run() -> None:
-    result = volumes.compute_tsnr([_bold(0), _bold(1)])
-    figure = volumes.per_run_tsnr_figure(result, run_labels=["run-01", "run-02"])
-    text = " ".join(t.get_text() for t in figure.findobj(plt.Text))
-    assert "run-01" in text and "run-02" in text
-    plt.close(figure)
-
-
 def test_sample_mask_length_must_match_the_run() -> None:
     with pytest.raises(ValueError, match="frames"):
         volumes.compute_tsnr([_bold()], sample_masks=[np.ones(5, dtype=bool)])
@@ -126,7 +118,47 @@ def _tsnr_plot_kwargs():
 def test_tsnr_volume_renders_through_nilearn_rather_than_slicing_the_array() -> None:
     # Voxel-axis slicing labels panels by anatomy without consulting the affine,
     # which is wrong for any non-RAS-canonical image.
-    assert _tsnr_plot_kwargs()["display_mode"] == "ortho"
+    assert _tsnr_plot_kwargs()["display_mode"] in {"x", "y", "z"}
+
+
+def test_tsnr_volume_is_a_mosaic_rather_than_three_slices() -> None:
+    # A tSNR map is read for *where* the measurement falls off, and the ortho view
+    # this used to draw shows three slices -- a dropout can miss all three.
+    result = volumes.compute_tsnr([_bold()])
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            volumes.tsnr_volume(result)
+        except Exception:
+            pass
+    directions = {call.kwargs["display_mode"] for call in mock_plot.call_args_list}
+    assert directions == {"x", "y", "z"}
+    # Several cuts per direction, not one.
+    assert all(len(call.kwargs["cut_coords"]) > 1 for call in mock_plot.call_args_list)
+
+
+def test_the_tsnr_colour_limit_uses_the_analysis_mask_it_is_given() -> None:
+    # The median printed on this panel has always come from the mask. The colour
+    # limit did not: the panel said "no mask supplied" in its own provenance while
+    # the number beside it described a different population of voxels.
+    result = volumes.compute_tsnr([_bold()])
+    mask = nib.Nifti1Image(
+        np.ones(result.mean_img.shape[:3], dtype=np.uint8), result.mean_img.affine
+    )
+    figure = volumes.tsnr_volume(result, mask_img=mask)
+    provenance = " ".join(artist.get_text() for artist in figure.texts)
+    assert "analysis mask" in provenance
+    assert "no mask supplied" not in provenance
+    plt.close(figure)
+
+
+def test_the_tsnr_panel_reports_its_own_low_tail() -> None:
+    # A measurement, not a verdict: absolute tSNR depends on field strength, voxel
+    # size, coil, and echo time, so the quartile is taken from this map itself.
+    result = volumes.compute_tsnr([_bold()])
+    note = volumes.dropout_note(result)
+    assert "lowest quartile" in note
+    assert "voxels" in note
 
 
 def test_tsnr_volume_uses_the_single_hue_magnitude_colormap() -> None:
@@ -304,89 +336,6 @@ def _result(medians, iqr=None, dropped=None) -> volumes.TsnrResult:
         frames_dropped=tuple(dropped or [0] * len(medians)),
         per_run_iqr=tuple(iqr or [(m - 5, m + 5) for m in medians]),
     )
-
-
-def test_the_panel_scales_to_the_data_rather_than_anchoring_at_zero() -> None:
-    # Six runs between 58.6 and 60.5 drew six visually identical bars on a 0-60 axis,
-    # so the between-run variation the panel exists to show was invisible.
-    figure = volumes.per_run_tsnr_figure(
-        _result([59.0, 58.6, 60.5, 60.3, 60.4, 60.2]),
-        run_labels=[f"run-{i:02d}" for i in range(1, 7)],
-    )
-    low, _high = figure.axes[0].get_xlim()
-    assert low > 10.0, "the axis still spends its range on the distance from zero"
-    plt.close(figure)
-
-
-def test_a_truncated_axis_says_that_it_is_truncated() -> None:
-    # A truncated axis on a ratio quantity is only honest when the reader is told the
-    # origin is off the figure.
-    figure = volumes.per_run_tsnr_figure(
-        _result([59.0, 60.5]), run_labels=["run-01", "run-02"]
-    )
-    text = " ".join(artist.get_text() for artist in figure.texts)
-    assert "does not start at zero" in text
-    plt.close(figure)
-
-
-def test_the_panel_draws_no_bars_from_a_baseline() -> None:
-    # Dots carry no baseline claim, which is what makes scaling the axis honest.
-    figure = volumes.per_run_tsnr_figure(
-        _result([59.0, 60.5]), run_labels=["run-01", "run-02"]
-    )
-    assert not figure.axes[0].patches, "bars imply a zero baseline the axis does not show"
-    plt.close(figure)
-
-
-def test_the_panel_shows_each_run_s_spread_not_only_its_centre() -> None:
-    # A median alone cannot separate a run that lost signal everywhere from one that
-    # lost it in a region: both move the centre, only the second widens the spread.
-    narrow = volumes.per_run_tsnr_figure(
-        _result([60.0, 60.0], iqr=[(58, 62), (30, 90)]),
-        run_labels=["run-01", "run-02"],
-    )
-    spans = [
-        abs(line.get_xdata()[1] - line.get_xdata()[0])
-        for line in narrow.axes[0].lines
-        if len(line.get_xdata()) == 2 and line.get_ydata()[0] == line.get_ydata()[1]
-    ]
-    assert max(spans) > min(spans), "both runs drew the same spread"
-    plt.close(narrow)
-
-
-def test_the_panel_marks_the_across_run_median_as_a_reference() -> None:
-    figure = volumes.per_run_tsnr_figure(
-        _result([50.0, 60.0, 70.0]), run_labels=["a", "b", "c"]
-    )
-    text = " ".join(t.get_text() for t in figure.axes[0].texts)
-    assert "across-run median 60.0" in text
-    plt.close(figure)
-
-
-def test_the_panel_reports_the_range_across_runs() -> None:
-    figure = volumes.per_run_tsnr_figure(
-        _result([50.0, 60.0, 70.0]), run_labels=["a", "b", "c"]
-    )
-    text = " ".join(artist.get_text() for artist in figure.texts)
-    assert "20.0 tSNR" in text
-    plt.close(figure)
-
-
-def test_censored_frames_are_named_in_the_run_s_own_label() -> None:
-    # Floated beside the dot the note landed between two rows and could be read as
-    # belonging to either run.
-    figure = volumes.per_run_tsnr_figure(
-        _result([59.0, 60.0], dropped=[7, 0]), run_labels=["run-01", "run-02"]
-    )
-    labels = [t.get_text() for t in figure.axes[0].get_yticklabels()]
-    assert labels[0] == "run-01\n(7 censored)"
-    assert labels[1] == "run-02"
-    plt.close(figure)
-
-
-def test_the_panel_refuses_an_empty_result() -> None:
-    with pytest.raises(ValueError, match="at least one run"):
-        volumes.per_run_tsnr_figure(_result([]), run_labels=[])
 
 
 def test_compute_tsnr_reports_each_run_s_quartiles() -> None:

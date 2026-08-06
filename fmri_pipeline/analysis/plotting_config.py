@@ -92,9 +92,24 @@ class FmriReportConfig:
     include_design_qc: bool = True
     embed_images: bool = True
 
+    #: Label volume naming the structure each cluster peak falls in, and an optional
+    #: index-to-name table for it.
+    #:
+    #: Supplied by the study rather than downloaded, so a report built from a
+    #: derivatives tree needs no network and is pinned to a file the study controls.
+    #: Read only for contrasts in MNI space; see
+    #: :func:`fmri_pipeline.analysis.report.atlas.atlas_applies_to`.
+    atlas_labels_img: Optional[str] = None
+    atlas_labels_tsv: Optional[str] = None
+
     def validate(self) -> None:
         if not self.enabled:
             return
+        if self.atlas_labels_tsv and not self.atlas_labels_img:
+            raise ValueError(
+                "atlas_labels_tsv names labels for an atlas, but atlas_labels_img is "
+                "unset; there is nothing for the table to name."
+            )
         if self.threshold_mode not in _ALLOWED_THRESHOLD_MODES:
             raise ValueError(
                 f"threshold mode must be one of {sorted(_ALLOWED_THRESHOLD_MODES)}, "

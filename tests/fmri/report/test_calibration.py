@@ -122,6 +122,27 @@ def test_the_table_states_how_many_voxels_survive_each_threshold() -> None:
     assert f"{context.bonferroni_survivors:,}" in table
 
 
+def test_the_table_carries_a_random_field_row_when_smoothness_is_known() -> None:
+    values = _values()
+    context = _context(values, n_resels=5_037.0)
+    table, _rows = distributions.threshold_table(context)
+    assert "random field" in table.lower()
+    assert f"{context.rft_survivors:,}" in table
+
+
+def test_the_table_names_the_resel_count_the_random_field_row_charges_for() -> None:
+    # The row is only readable against the search volume it corrects over: the same
+    # height means different things at 500 resels and at 5,000.
+    table, _rows = distributions.threshold_table(_context(_values(), n_resels=5_037.0))
+    assert "5,037" in table
+
+
+def test_the_table_omits_the_random_field_row_when_smoothness_is_unknown() -> None:
+    # Smoothness is best-effort. A missing estimate costs the row, not the table.
+    table, _rows = distributions.threshold_table(_context(_values()))
+    assert "random field" not in table.lower()
+
+
 def test_the_table_states_the_survivors_expected_under_the_null() -> None:
     # The number that makes an uncorrected threshold legible.
     table, _rows = distributions.threshold_table(_context(_values()))

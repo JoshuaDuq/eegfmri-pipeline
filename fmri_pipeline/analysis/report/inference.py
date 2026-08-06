@@ -160,7 +160,20 @@ class ThresholdContext:
     bonferroni: float
     alpha: float
     bonferroni_survivors: int
-    null: Optional[EmpiricalNull]
+    #: The random-field familywise height over the mask's resel count, and how many
+    #: voxels clear it. ``None`` when no smoothness could be estimated, and when the
+    #: search volume is too small for the approximation to admit a solution.
+    #:
+    #: Reported *beside* Bonferroni rather than in place of it. Both are valid
+    #: familywise bounds and which one is tighter is a property of the smoothness:
+    #: at this study's roughly ten voxels per resel the Euler-characteristic form
+    #: overshoots and Bonferroni is the tighter of the two, while on heavily smoothed
+    #: data the ranking reverses. Quoting either alone as "the" corrected height
+    #: hands the reader whichever bound happens to be looser.
+    rft: Optional[float] = None
+    rft_survivors: int = 0
+    n_resels: Optional[float] = None
+    null: Optional[EmpiricalNull] = None
     #: Every threshold re-read against the map's own null, or ``None`` when no null
     #: could be fitted.
     #:
@@ -168,7 +181,7 @@ class ThresholdContext:
     #: was true and useless: it divides by the null's scale and ignores its centre, so
     #: on a null centred at -0.61 it reads as a sigma count that neither tail actually
     #: has. The tail probabilities below are what that number was reaching for.
-    calibration: Optional[EmpiricalCalibration]
+    calibration: Optional[EmpiricalCalibration] = None
     #: The run sign-flip null's summary, or ``None`` for a single-run contrast and for
     #: a manifest written before the null existed.
     sign_flip: Optional[SignFlipSummary] = None
@@ -281,6 +294,94 @@ def bonferroni_threshold(*, n: int, alpha: float, two_sided: bool) -> float:
 
     per_test = float(alpha) / float(n)
     return float(stats.norm.isf(per_test / 2.0 if two_sided else per_test))
+
+
+#: Peak of the 3D Euler-characteristic density, at z = sqrt(3).
+#:
+#: ``rho_3`` carries a factor of ``(z**2 - 1)``, so it is negative below z = 1, rises
+#: to a maximum here, and decays monotonically above it. Only the decaying arm is a
+#: threshold: the root the solver wants is the one to the right of this peak, and
+#: bracketing from here is what keeps it from returning the spurious low-z crossing.
+_EC_DENSITY_PEAK = float(np.sqrt(3.0))
+
+
+def _ec_density_3d(z: float) -> float:
+    """Worsley's Euler-characteristic density for a 3D Gaussian field, per resel."""
+    return (
+        (4.0 * np.log(2.0)) ** 1.5
+        / (2.0 * np.pi) ** 2
+        * (float(z) ** 2 - 1.0)
+        * float(np.exp(-(float(z) ** 2) / 2.0))
+    )
+
+
+def rft_voxel_threshold(*, n_resels: float, alpha: float, two_sided: bool) -> float:
+    """The height at which a Gaussian field of ``n_resels`` yields a max above it
+    with probability ``alpha``.
+
+    The familywise correction this pipeline had the inputs for and did not perform.
+    Bonferroni divides alpha across voxels, and after 6 mm of smoothing on a 3 mm grid
+    neighbouring voxels are not separate tests: on this study's own contrast that is
+    50,626 tests charged for a family of about 5,000, and the resulting height
+    (|z| > 4.89) is stricter than the data warrant.
+
+    Random field theory charges for the resels instead. The expected Euler
+    characteristic of the excursion set above ``z`` is ``R * rho_3(z)``, and at the
+    heights that matter it approximates the probability that the field's maximum
+    exceeds ``z`` -- so setting it equal to alpha and solving gives the corrected
+    height. Worsley et al. (1996) is the reference.
+
+    Only the 3D term is carried. The full expansion adds the lower-dimensional resel
+    counts, whose contribution is negligible for a search volume of thousands of
+    resels and which would require the mask's intrinsic volumes rather than one
+    number. This is the same approximation SPM's single-resel-count form makes.
+
+    Two-sided inference splits alpha between the tails, which are asymptotically
+    independent for a smooth field.
+
+    Raises when the search volume is too small for the approximation to admit a
+    solution, which is a statement about applicability rather than a failure: below
+    roughly one resel per unit of alpha the excursion set's expected Euler
+    characteristic never reaches alpha at all, and no RFT height exists to return.
+    """
+    if not np.isfinite(n_resels) or n_resels <= 0:
+        raise ValueError(f"A search volume needs at least one resel, got {n_resels!r}.")
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError(f"alpha must lie in (0, 1], got {alpha!r}.")
+
+    from scipy import optimize
+
+    target = float(alpha) / 2.0 if two_sided else float(alpha)
+    resels = float(n_resels)
+
+    def excess(z: float) -> float:
+        return resels * _ec_density_3d(z) - target
+
+    if excess(_EC_DENSITY_PEAK) <= 0.0:
+        raise ValueError(
+            f"A search volume of {resels:.3g} resels never reaches an expected Euler "
+            f"characteristic of {target:.3g}, so no random-field height exists for it."
+        )
+
+    # The density decays to zero, so a bracket wide enough to cross the target always
+    # exists; 50 is far past any height a z map reaches.
+    height = float(optimize.brentq(excess, _EC_DENSITY_PEAK, 50.0, xtol=1e-12))
+
+    # ``E[EC] ~= P(max > z)`` holds in the tail, and a small enough search volume puts
+    # the root back down where it does not. The tell is a familywise height that is
+    # more permissive than running one uncorrected test at the same alpha, which no
+    # correction can honestly be: at half a resel the solver returns 1.91 against an
+    # uncorrected 1.96. Rejecting there keeps a nonsense row out of the table.
+    from scipy import stats
+
+    uncorrected = float(stats.norm.isf(target))
+    if height <= uncorrected:
+        raise ValueError(
+            f"A search volume of {resels:.3g} resels puts the random-field height at "
+            f"{height:.3g}, at or below the uncorrected {uncorrected:.3g}; the "
+            f"Euler-characteristic approximation does not hold there."
+        )
+    return height
 
 
 def expected_false_positives(*, n: int, threshold: float, two_sided: bool) -> float:
@@ -408,6 +509,7 @@ def threshold_context(
     alpha: float,
     two_sided: bool,
     sign_flip: Optional[SignFlipSummary] = None,
+    n_resels: Optional[float] = None,
 ) -> ThresholdContext:
     """Assemble everything the calibration panel states about a threshold.
 
@@ -442,6 +544,17 @@ def threshold_context(
     fdr = fdr_threshold(finite, q=fdr_q, two_sided=two_sided)
     bonferroni = bonferroni_threshold(n=n, alpha=alpha, two_sided=two_sided)
 
+    rft: Optional[float] = None
+    if n_resels is not None:
+        try:
+            rft = rft_voxel_threshold(
+                n_resels=float(n_resels), alpha=alpha, two_sided=two_sided
+            )
+        except ValueError:
+            # A search volume too small for the Euler-characteristic approximation is
+            # a statement about this mask, not a reason to lose the other rows.
+            rft = None
+
     applied = None if applied_threshold is None else float(applied_threshold)
     return ThresholdContext(
         n_voxels=n,
@@ -461,6 +574,9 @@ def threshold_context(
         bonferroni=bonferroni,
         alpha=float(alpha),
         bonferroni_survivors=_survivors(finite, bonferroni, two_sided=two_sided),
+        rft=rft,
+        rft_survivors=_survivors(finite, rft, two_sided=two_sided),
+        n_resels=None if n_resels is None else float(n_resels),
         null=null,
         calibration=calibration,
         sign_flip=sign_flip,
@@ -481,5 +597,6 @@ __all__ = [
     "fdr_p_cutoff",
     "fdr_threshold",
     "p_values",
+    "rft_voxel_threshold",
     "threshold_context",
 ]

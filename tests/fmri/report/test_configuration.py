@@ -18,11 +18,19 @@ import pytest
 
 from fmri_pipeline.analysis.report import subject
 from fmri_pipeline.analysis.report.manifest import (
+    REPORT_MANIFEST_SCHEMA_VERSION,
     ContrastManifest,
     model_settings_from_config,
     read_manifest,
-    write_report_manifest,
+    write_report_manifest as _write_report_manifest,
 )
+
+
+def write_report_manifest(*, stat_map: Path, **kwargs) -> Path:
+    """Supply valid model-fit artifacts for configuration-focused tests."""
+    kwargs.setdefault("residual_paths", (stat_map,))
+    kwargs.setdefault("predicted_paths", (stat_map,))
+    return _write_report_manifest(stat_map=stat_map, **kwargs)
 
 
 @dataclass
@@ -42,6 +50,7 @@ class _Cfg:
 
 def _manifest(**overrides) -> ContrastManifest:
     base = dict(
+        schema_version=REPORT_MANIFEST_SCHEMA_VERSION,
         subject="sub-01",
         task="heat",
         contrast_name="pain-vs-warm",
@@ -110,9 +119,7 @@ def test_no_config_yields_no_settings() -> None:
     assert model_settings_from_config(None) == ()
 
 
-def test_an_unreadable_setting_is_omitted_rather_than_guessed() -> None:
-    # A wrong value here is worse than a missing one: the reader cannot check it
-    # against the maps.
+def test_an_unreadable_setting_surfaces_the_configuration_error() -> None:
     class _Exploding:
         hrf_model = "glover"
 
@@ -120,7 +127,8 @@ def test_an_unreadable_setting_is_omitted_rather_than_guessed() -> None:
         def high_pass_hz(self):
             raise RuntimeError("boom")
 
-    assert dict(model_settings_from_config(_Exploding())) == {"HRF model": "glover"}
+    with pytest.raises(RuntimeError, match="boom"):
+        model_settings_from_config(_Exploding())
 
 
 # --- round trip -----------------------------------------------------------
@@ -135,7 +143,15 @@ def test_the_settings_survive_a_manifest_round_trip(tmp_path: Path) -> None:
         task="heat",
         contrast_name="c",
         stat_map=stat,
-        run_meta={"tr": 0.9, "confound_columns": ["trans_x", "csf"]},
+        mask=stat,
+        mask_is_analysis_mask=True,
+        run_meta={
+            "analysis_space": "T1w",
+            "tr": 0.9,
+            "included_bold_paths": ["/d/sub-01_task-heat_run-01_bold.nii.gz"],
+            "retained_frame_indices": [[0]],
+            "confound_columns": ["trans_x", "csf"],
+        },
         contrast_cfg=_Cfg(),
     )
     loaded = read_manifest(written)
@@ -143,20 +159,25 @@ def test_the_settings_survive_a_manifest_round_trip(tmp_path: Path) -> None:
     assert loaded.confound_columns == ("trans_x", "csf")
 
 
-def test_a_manifest_without_configuration_still_loads(tmp_path: Path) -> None:
+def test_a_manifest_without_contrast_configuration_is_rejected(tmp_path: Path) -> None:
     stat = tmp_path / "z.nii.gz"
     nib.save(nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.float32), np.eye(4)), str(stat))
-    written = write_report_manifest(
-        contrast_dir=tmp_path,
-        subject="sub-01",
-        task="heat",
-        contrast_name="c",
-        stat_map=stat,
-        run_meta={"tr": 0.9},
-    )
-    loaded = read_manifest(written)
-    assert loaded.model_settings == ()
-    assert loaded.confound_columns == ()
+
+    with pytest.raises(ValueError, match="contrast_cfg"):
+        write_report_manifest(
+            contrast_dir=tmp_path,
+            subject="sub-01",
+            task="heat",
+            contrast_name="c",
+            stat_map=stat,
+            mask=stat,
+            mask_is_analysis_mask=True,
+            run_meta={
+                "analysis_space": "T1w",
+                "tr": 0.9,
+                "included_bold_paths": ["/d/sub-01_task-heat_run-01_bold.nii.gz"],
+            },
+        )
 
 
 # --- the report section ---------------------------------------------------

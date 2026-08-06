@@ -193,102 +193,38 @@ def compute_tsnr(
     )
 
 
-def per_run_tsnr_figure(
-    result: TsnrResult,
-    *,
-    run_labels: Sequence[str],
-    title: str = "",
-) -> plt.Figure:
-    """Draw each run's tSNR distribution, with the frames censored from each.
+def dropout_note(result: TsnrResult, *, mask_img: Any = None) -> str:
+    """State how much of the mask sits in the low tail of its own tSNR.
 
-    Exists because the mean map cannot show that one run was bad. The question is
-    therefore whether any run is unlike the others, which makes the comparison a
-    relative one.
+    A tSNR map is read for where the measurement fails, and "fails" only means
+    anything relative to the rest of this acquisition: absolute tSNR depends on field
+    strength, voxel size, coil, and echo time, so a fixed cutoff would be a verdict
+    invented here rather than a measurement. The quartile is a property of this map.
 
-    Dots with an interquartile bar, not bars from zero. A bar chart anchors at zero
-    and spends the whole axis on the distance from it: measured on real data, six runs
-    between 58.6 and 60.5 drew six visually identical bars on a 0-60 axis, so the
-    between-run variation the panel exists to show was invisible. Dots carry no
-    baseline claim, which is what makes it honest to scale the axis to the data --
-    and the axis says that it does not start at zero.
-
-    The interquartile bar separates a run that lost signal everywhere from one that
-    lost it in a region. Both move the median; only the second widens the spread.
+    Reported as a count and a share, with no judgement attached to either.
     """
-    medians = np.asarray(result.per_run_median, dtype=float)
-    if medians.size == 0:
-        raise ValueError("per_run_tsnr_figure requires at least one run.")
-    positions = np.arange(len(medians))
-    quartiles = result.per_run_iqr or tuple((m, m) for m in medians)
-
-    with plot_context():
-        figure, axis = plt.subplots(figsize=(6.8, 0.42 * len(medians) + 1.9))
-
-        for index, (low, high) in enumerate(quartiles[: len(medians)]):
-            axis.plot(
-                [low, high],
-                [index, index],
-                color=OKABE_ITO["sky_blue"],
-                linewidth=3.0,
-                solid_capstyle="butt",
-                alpha=0.55,
-                zorder=2,
-            )
-        axis.scatter(
-            medians, positions, s=42, color=OKABE_ITO["blue"], zorder=3, label="median"
-        )
-
-        # The across-run median, so "unlike the others" is a comparison the reader
-        # makes against a drawn reference rather than by eye.
-        centre = float(np.median(medians))
-        axis.axvline(centre, color=GUIDE_COLOR, linestyle="--", linewidth=1.0, zorder=1)
-        axis.annotate(
-            f"across-run median {centre:.1f}",
-            xy=(centre, 1.0),
-            xycoords=("data", "axes fraction"),
-            xytext=(3, -9),
-            textcoords="offset points",
-            fontsize=7,
-            color=GUIDE_COLOR,
-        )
-
-        # Censoring goes in the run's own label. Floated beside the dot it landed
-        # between two rows and could be read as belonging to either.
-        labels = list(run_labels)[: len(medians)]
-        while len(labels) < len(medians):
-            labels.append(f"run-{len(labels) + 1:02d}")
-        annotated = [
-            f"{label}\n({drop} censored)" if drop else label
-            for label, drop in zip(labels, result.frames_dropped)
-        ]
-        axis.set_yticks(positions)
-        axis.set_yticklabels(annotated, fontsize=8)
-        axis.set_ylim(len(medians) - 0.5, -0.5)
-        axis.set_xlabel("tSNR in the mask (dot: median, bar: interquartile range)")
-        if title:
-            axis.set_title(title)
-
-        spread = float(np.max(medians) - np.min(medians))
-        annotate_provenance(
-            figure,
-            [
-                f"{len(medians)} run(s)",
-                f"{sum(result.frames_used):,} frames used, "
-                f"{sum(result.frames_dropped):,} censored",
-                f"median range across runs: {spread:.1f} tSNR",
-                # Said outright, because a truncated axis on a ratio quantity is only
-                # honest when the reader is told the origin is off the figure.
-                "x axis does not start at zero",
-            ],
-        )
-        figure.tight_layout()
-        return figure
+    data = np.asarray(result.mean_img.get_fdata())
+    inside = np.isfinite(data) & (data > 0)
+    if mask_img is not None:
+        mask = np.asanyarray(mask_img.dataobj).astype(bool)
+        if mask.shape == data.shape:
+            inside &= mask
+    values = data[inside]
+    if values.size == 0:
+        return "no voxels with measurable tSNR"
+    quartile = float(np.percentile(values, 25))
+    below = int(np.count_nonzero(values < quartile))
+    return (
+        f"lowest quartile of tSNR is below {quartile:.0f} "
+        f"({below:,} of {values.size:,} voxels)"
+    )
 
 
 def tsnr_volume(
     result: TsnrResult,
     *,
     bg_img: Any = None,
+    mask_img: Any = None,
     title: str = "",
     vmax: Optional[float] = None,
     radiological: bool = RADIOLOGICAL,
@@ -307,6 +243,12 @@ def tsnr_volume(
     low end of the ramp and painted a solid block across the field-of-view box --
     hiding the anatomy the background exists for, and reading as a tSNR of nearly
     zero where in fact nothing was measured.
+
+    ``mask_img`` is the analysis mask, and it is what the colour limit is taken
+    inside. Without it the panel fell back on excluding exact zeros and said
+    ``no mask supplied`` in its own provenance line, while the median beside it had
+    been computed from the mask all along -- two numbers on one figure describing
+    different populations of voxels.
     """
     from fmri_pipeline.analysis.report.figures.stat_maps import magnitude_mosaic
 
@@ -318,15 +260,16 @@ def tsnr_volume(
     return magnitude_mosaic(
         result.mean_img,
         bg_img=bg_img,
+        mask_img=mask_img,
         vmax=vmax,
         radiological=radiological,
         title=title,
         cbar_label="tSNR",
-        display_mode="ortho",
         extra_provenance=[
             f"median tSNR {float(np.median(positive)):.1f}",
             f"mean of {len(result.per_run_median)} run(s); "
             f"{sum(result.frames_dropped):,} frames censored",
+            dropout_note(result, mask_img=mask_img),
             # Named so this tSNR can be compared against one computed elsewhere. Two
             # pipelines differing only in drift handling report visibly different
             # numbers for identical data.
@@ -339,6 +282,6 @@ __all__ = [
     "TsnrResult",
     "compute_tsnr",
     "detrended_temporal_sd",
-    "per_run_tsnr_figure",
+    "dropout_note",
     "tsnr_volume",
 ]

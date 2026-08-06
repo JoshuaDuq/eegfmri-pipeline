@@ -249,7 +249,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
             runs = [int(r) for r in runs_raw]
         elif isinstance(runs_raw, str):
             runs = [int(r.strip()) for r in runs_raw.split(",") if r.strip()]
-        
+
         # If explicitly empty list/string, treat as None (auto-detect) per comment in yaml
         if runs is not None and len(runs) == 0:
             runs = None
@@ -1243,7 +1243,8 @@ class MultiRunGLMResult:
     included_bold_paths: List[Path]
     included_events_paths: List[Path]
     included_confounds_paths: List[Optional[Path]]
-    skipped_runs: List[Tuple[int, str]]  # (run_idx, reason)
+    retained_frame_indices: List[Tuple[int, ...]]
+    skipped_runs: List[Tuple[str, str]]  # (BIDS run label, reason)
     total_cond_a_events: int
     total_cond_b_events: int
 
@@ -1275,6 +1276,33 @@ def _validate_consistent_trs(bold_paths: List[Path]) -> float:
             f"Reference TR={reference_tr:.6f}s; mismatched runs: {formatted}."
         )
     return reference_tr
+
+
+def _retained_frame_indices(
+    designs: Sequence[pd.DataFrame],
+    sample_masks: Optional[Sequence[np.ndarray]],
+) -> List[Tuple[int, ...]]:
+    """Return the exact source-frame indices represented by each fitted design."""
+    if sample_masks is None:
+        return [tuple(range(len(design))) for design in designs]
+    if len(sample_masks) != len(designs):
+        raise ValueError("Fitted sample masks must align with design matrices.")
+
+    retained: List[Tuple[int, ...]] = []
+    for run_index, (design, sample_mask) in enumerate(
+        zip(designs, sample_masks),
+        start=1,
+    ):
+        indices = np.asarray(sample_mask)
+        if indices.ndim != 1 or not np.issubdtype(indices.dtype, np.integer):
+            raise TypeError(f"Run {run_index} fitted sample mask must contain integer indices.")
+        if len(indices) != len(design):
+            raise ValueError(
+                f"Run {run_index} fitted sample mask has {len(indices)} indices; "
+                f"the fitted design has {len(design)} rows."
+            )
+        retained.append(tuple(int(index) for index in indices))
+    return retained
 
 
 def fit_first_level_glm_multi_run(
@@ -1453,6 +1481,10 @@ def fit_first_level_glm_multi_run(
         context="Multi-run first-level GLM",
         min_residual_dof=1,
     )
+    retained_frame_indices = _retained_frame_indices(
+        flm.design_matrices_,
+        sample_masks_arg,
+    )
 
     return MultiRunGLMResult(
         flm=flm,
@@ -1463,6 +1495,7 @@ def fit_first_level_glm_multi_run(
         included_bold_paths=valid_bold_paths,
         included_events_paths=valid_events_paths,
         included_confounds_paths=valid_confounds_paths,
+        retained_frame_indices=retained_frame_indices,
         skipped_runs=[],
         total_cond_a_events=total_cond_a_events,
         total_cond_b_events=total_cond_b_events,
@@ -1642,11 +1675,14 @@ def build_contrast_from_runs_detailed(
             str(p) if p is not None else None
             for p in glm_result.included_confounds_paths
         ],
+        "retained_frame_indices": [
+            list(indices) for indices in glm_result.retained_frame_indices
+        ],
         # Skipped runs with reasons
         "n_runs_skipped": len(glm_result.skipped_runs),
         "skipped_runs": [
-            {"run_index": idx, "reason": reason}
-            for idx, reason in glm_result.skipped_runs
+            {"run_label": run_label, "reason": reason}
+            for run_label, reason in glm_result.skipped_runs
         ],
         # Event counts
         "total_cond_a_events": glm_result.total_cond_a_events,
@@ -2091,4 +2127,3 @@ def ensure_fmri_stats_map(
     if resolved_path is not None:
         return resolved_path
     return built_path
-

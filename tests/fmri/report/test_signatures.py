@@ -221,3 +221,31 @@ def test_an_empty_table_yields_nothing(tmp_path) -> None:
     path = tmp_path / "signature_expression.tsv"
     path.write_text("")
     assert signatures.read_expression_tsv(path) == []
+
+
+# --- a table when a plot would add nothing --------------------------------
+#
+# A lollipop chart is read for the ordering across many marks. Two marks on an axis
+# are two numbers, and the report printed those same two numbers immediately beneath
+# the figure -- the same values twice on one screen.
+
+
+def test_the_table_carries_every_quantity() -> None:
+    points = [
+        signatures.SignaturePoint(
+            name="NPS", dot=1.25, cosine=0.034, pearson_r=0.031, n_voxels=76_963
+        ),
+        signatures.SignaturePoint(
+            name="SIIPS1", dot=9.4, cosine=0.158, pearson_r=None, n_voxels=252_312
+        ),
+    ]
+    table, rows = signatures.signature_table(points)
+    assert "Cosine" in table and "Dot product" in table and "Voxels" in table
+    assert "+0.034" in table and "76,963" in table
+    # An unmeasured correlation is not a correlation of zero.
+    assert "n/a" in table
+    assert len(rows) == 3
+
+
+def test_the_plot_is_reserved_for_enough_signatures_to_order() -> None:
+    assert signatures.MIN_SIGNATURES_FOR_A_PLOT > 2

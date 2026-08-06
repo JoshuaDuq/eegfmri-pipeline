@@ -39,13 +39,68 @@ def test_thresholded_mosaic_colour_limit_exceeds_its_threshold_for_a_noise_map()
 
 
 def test_mosaic_keeps_coordinate_and_laterality_annotation() -> None:
+    # Drawn by the layout rather than by nilearn. Nilearn writes each tile's
+    # coordinate at that tile's own bottom-left, where on a packed row it runs under
+    # the neighbouring tile, and marks left/right on all fourteen tiles of a row.
+    # The information has to survive; the collisions do not.
+    figure = stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3)
+    texts = [artist.get_text() for artist in figure.texts]
+    assert any(text.startswith("z = ") for text in texts)
+    assert any(text.startswith("x = ") for text in texts)
+    assert "L" in texts and "R" in texts
+    plt.close(figure)
+
+
+def test_the_mosaic_does_not_let_nilearn_annotate_the_tiles() -> None:
     with patch("nilearn.plotting.plot_stat_map") as mock_plot:
         mock_plot.return_value.figure = None
         try:
             stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3)
         except Exception:
             pass
-    assert mock_plot.call_args.kwargs["annotate"] is True
+    assert mock_plot.call_args.kwargs["annotate"] is False
+
+
+def test_the_mosaic_draws_three_projections_with_several_cuts_each() -> None:
+    # Nilearn's own "mosaic" mode spreads its cuts across the underlay's extent,
+    # which put tiles at z = -71 and y = 80 -- outside the brain -- while the
+    # interesting slices got one tile apiece.
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3)
+        except Exception:
+            pass
+    calls = mock_plot.call_args_list
+    assert {call.kwargs["display_mode"] for call in calls} == {"x", "y", "z"}
+    assert all(len(call.kwargs["cut_coords"]) > 1 for call in calls)
+
+
+def test_a_thresholded_mosaic_marks_the_band_it_does_not_draw() -> None:
+    # Stating a threshold in prose leaves a reader to work out which values are
+    # missing from the picture. The colourbar shows it.
+    figure = stat_maps.stat_map_mosaic(_noise_img(), threshold=2.3, two_sided=True)
+    hatched = [
+        patch_artist
+        for axes in figure.axes
+        for patch_artist in axes.patches
+        if patch_artist.get_hatch()
+    ]
+    assert hatched, "the suppressed band is not marked on the colourbar"
+    plt.close(figure)
+
+
+def test_an_unthresholded_mosaic_marks_no_suppressed_band() -> None:
+    # Nothing is hidden, so hatching a band would claim otherwise.
+    figure = stat_maps.stat_map_mosaic(_noise_img(), threshold=None)
+    hatched = [
+        patch_artist
+        for axes in figure.axes
+        for patch_artist in axes.patches
+        if patch_artist.get_hatch()
+    ]
+    assert not hatched
+    plt.close(figure)
 
 
 def test_signed_maps_use_the_diverging_colormap_and_symmetric_bar() -> None:
@@ -346,3 +401,65 @@ def test_a_glass_brain_without_peaks_draws_no_numbers() -> None:
         assert numeric == []
     finally:
         plt.close(figure)
+
+
+# --- the glass brain ------------------------------------------------------
+
+
+def test_the_glass_brain_title_sits_outside_the_projections() -> None:
+    # Nilearn draws it inside the axes, where it lands on the sagittal projection.
+    figure = stat_maps.glass_brain(_noise_img(), threshold=2.3, title="a contrast")
+    with patch("nilearn.plotting.plot_glass_brain") as mock_plot:
+        mock_plot.return_value.axes = {}
+        try:
+            stat_maps.glass_brain(_noise_img(), threshold=2.3, title="a contrast")
+        except Exception:
+            pass
+    assert mock_plot.call_args.kwargs.get("title") in (None, "")
+    assert any(a.get_text() == "a contrast" for a in figure.texts)
+    plt.close(figure)
+
+
+def test_the_glass_brain_marks_peaks_in_a_colour_outside_the_map_s_ramp() -> None:
+    # Marked in the neutral guide grey, the markers were invisible against a dense
+    # projection -- which is most of them, since a glass brain fills wherever
+    # anything survives the threshold.
+    assert stat_maps.PEAK_MARKER_COLOR not in {"0.35", "black", "white"}
+    figure = stat_maps.glass_brain(
+        _noise_img(), threshold=2.3, peak_coords=[(1.0, 2.0, 3.0)], peak_labels=["1"]
+    )
+    labelled = [
+        artist
+        for axes in figure.axes
+        for artist in axes.texts
+        if artist.get_text() == "1"
+    ]
+    assert labelled, "the peak label is missing"
+    # Haloed, so it survives being drawn over a saturated projection.
+    assert all(artist.get_path_effects() for artist in labelled)
+    plt.close(figure)
+
+
+def test_the_glass_brain_states_that_it_is_a_projection() -> None:
+    # A saturated projection otherwise reads as a very strong result.
+    figure = stat_maps.glass_brain(_noise_img(), threshold=2.3)
+    text = " ".join(artist.get_text() for artist in figure.texts)
+    assert "maximum-intensity projection" in text
+    plt.close(figure)
+
+
+def test_the_glass_brain_marks_the_band_it_does_not_draw() -> None:
+    figure = stat_maps.glass_brain(_noise_img(), threshold=2.3, two_sided=True)
+    hatched = [p for axes in figure.axes for p in axes.patches if p.get_hatch()]
+    assert hatched
+    plt.close(figure)
+
+
+def test_a_peak_label_count_mismatch_is_rejected() -> None:
+    with pytest.raises(ValueError, match="peak labels"):
+        stat_maps.glass_brain(
+            _noise_img(),
+            threshold=2.3,
+            peak_coords=[(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)],
+            peak_labels=["1"],
+        )

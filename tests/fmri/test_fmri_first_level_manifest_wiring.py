@@ -72,6 +72,17 @@ def _image(fill: float = 1.0) -> nib.Nifti1Image:
     return nib.Nifti1Image(np.full(SHAPE, fill, dtype=np.float32), np.eye(4))
 
 
+def _series(fill: float = 1.0, frames: int = 30) -> nib.Nifti1Image:
+    shape = (*SHAPE, frames)
+    return nib.Nifti1Image(np.full(shape, fill, dtype=np.float32), np.eye(4))
+
+
+class _Masker:
+    def inverse_transform(self, series: np.ndarray) -> nib.Nifti1Image:
+        data = np.asarray(series, dtype=np.float32).T.reshape(*SHAPE, -1)
+        return nib.Nifti1Image(data, np.eye(4))
+
+
 def _design_tsv(directory: Path, run: str) -> Path:
     rng = np.random.default_rng(0)
     frame = pd.DataFrame(rng.standard_normal((30, len(COLUMNS))), columns=COLUMNS)
@@ -90,7 +101,15 @@ def _fitted_model() -> SimpleNamespace:
     def compute_contrast(_argument, output_type: str):
         return _image(2.0 if output_type == "effect_size" else 0.25)
 
-    return SimpleNamespace(design_matrices_=[frame], compute_contrast=compute_contrast)
+    coefficients = np.zeros((len(COLUMNS), int(np.prod(SHAPE))))
+    response = np.full((len(frame), int(np.prod(SHAPE))), 0.25)
+    return SimpleNamespace(
+        design_matrices_=[frame],
+        labels_=[np.zeros(int(np.prod(SHAPE)))],
+        results_=[{0.0: SimpleNamespace(theta=coefficients, Y=response)}],
+        masker_=_Masker(),
+        compute_contrast=compute_contrast,
+    )
 
 
 @pytest.fixture
@@ -103,7 +122,15 @@ def exploding_contrast() -> SimpleNamespace:
     def compute_contrast(_argument, output_type: str):
         raise RuntimeError("contrast could not be computed")
 
-    return SimpleNamespace(design_matrices_=[frame], compute_contrast=compute_contrast)
+    coefficients = np.zeros((len(COLUMNS), int(np.prod(SHAPE))))
+    response = np.full((len(frame), int(np.prod(SHAPE))), 0.25)
+    return SimpleNamespace(
+        design_matrices_=[frame],
+        labels_=[np.zeros(int(np.prod(SHAPE)))],
+        results_=[{0.0: SimpleNamespace(theta=coefficients, Y=response)}],
+        masker_=_Masker(),
+        compute_contrast=compute_contrast,
+    )
 
 
 @pytest.fixture
@@ -147,6 +174,7 @@ def run_first_level(tmp_path: Path):
             "design_matrix_tsv_paths": design_paths,
             "included_bold_paths": [str(tmp_path / "sub-0001_run-01_bold.nii.gz")],
             "included_confounds_paths": [],
+            "retained_frame_indices": [list(range(30))],
             "skipped_runs": [],
         }
 
@@ -158,9 +186,7 @@ def run_first_level(tmp_path: Path):
             resample_to_freesurfer=lambda img, _dir, **_kw: img,
             ContrastBuilderConfig=type(cfg),
         )
-        with patch.dict(
-            sys.modules, {"fmri_pipeline.analysis.contrast_builder": fake_builder}
-        ):
+        with patch.dict(sys.modules, {"fmri_pipeline.analysis.contrast_builder": fake_builder}):
             pipeline.process_subject(
                 "0001",
                 "heat",
@@ -191,6 +217,22 @@ def test_the_variance_map_is_written_and_recorded(run_first_level) -> None:
     manifest = run_first_level()
     assert manifest.variance_map is not None
     assert Path(manifest.variance_map).exists()
+
+
+def test_the_model_response_residual_series_is_written_and_recorded(run_first_level) -> None:
+    manifest = run_first_level()
+
+    assert len(manifest.residual_paths) == 1
+    assert manifest.residual_paths[0].is_file()
+    assert nib.load(str(manifest.residual_paths[0])).shape == (*SHAPE, 30)
+
+
+def test_the_model_response_predicted_series_is_written_and_recorded(run_first_level) -> None:
+    manifest = run_first_level()
+
+    assert len(manifest.predicted_paths) == 1
+    assert manifest.predicted_paths[0].is_file()
+    assert nib.load(str(manifest.predicted_paths[0])).shape == (*SHAPE, 30)
 
 
 def test_the_fitted_mask_is_written_and_claimed_as_the_fitted_one(run_first_level) -> None:

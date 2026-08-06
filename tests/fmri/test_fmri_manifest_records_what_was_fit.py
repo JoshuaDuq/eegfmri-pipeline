@@ -33,9 +33,7 @@ def _design(columns=("pain", "nonpain", "trans_x", "constant"), n=40) -> pd.Data
 
 
 def _glm(design_matrices) -> types.SimpleNamespace:
-    return types.SimpleNamespace(
-        flm=types.SimpleNamespace(design_matrices_=design_matrices)
-    )
+    return types.SimpleNamespace(flm=types.SimpleNamespace(design_matrices_=design_matrices))
 
 
 # --- the contrast vector --------------------------------------------------
@@ -129,9 +127,7 @@ def test_the_detail_maps_are_gated_on_intent_not_on_plotting_being_enabled() -> 
     effect, variance = _pipeline()._contrast_detail_maps(
         glm_result=types.SimpleNamespace(flm=model),
         contrast_def="pain - nonpain",
-        plotting_cfg=types.SimpleNamespace(
-            include_effect_size=False, include_standard_error=False
-        ),
+        plotting_cfg=types.SimpleNamespace(include_effect_size=False, include_standard_error=False),
     )
     assert model.calls == []
     assert effect is None and variance is None
@@ -169,27 +165,66 @@ def test_an_unwritable_path_costs_the_map_and_not_the_run(tmp_path: Path) -> Non
     assert _pipeline()._save_optional(img, tmp_path / "no" / "such" / "dir.nii.gz") is None
 
 
+def test_saving_a_required_image_returns_where_it_went(tmp_path: Path) -> None:
+    img = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.float32), np.eye(4))
+    path = _pipeline()._save_required(
+        img,
+        tmp_path / "analysis_mask.nii.gz",
+        artifact_name="fitted analysis mask",
+    )
+
+    assert path.exists()
+
+
+def test_saving_an_absent_required_image_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="fitted analysis mask"):
+        _pipeline()._save_required(
+            None,
+            tmp_path / "analysis_mask.nii.gz",
+            artifact_name="fitted analysis mask",
+        )
+
+
+def test_a_required_image_write_surfaces_the_original_error(tmp_path: Path) -> None:
+    img = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.float32), np.eye(4))
+
+    with pytest.raises(FileNotFoundError):
+        _pipeline()._save_required(
+            img,
+            tmp_path / "no" / "such" / "analysis_mask.nii.gz",
+            artifact_name="fitted analysis mask",
+        )
+
+
 # --- the analysis mask claim ----------------------------------------------
 
 
-def test_a_discovered_mask_is_never_recorded_as_the_fitted_one(tmp_path: Path) -> None:
+def test_a_discovered_mask_is_rejected_from_the_report_contract(tmp_path: Path) -> None:
     # The two differ: the fitted mask is the intersection across runs, a discovered
     # one is a single run's. The coverage panel makes a claim only the first earns.
-    from fmri_pipeline.analysis.report.manifest import read_manifest, write_report_manifest
+    from fmri_pipeline.analysis.report.manifest import write_report_manifest
 
     stat = tmp_path / "z.nii.gz"
     nib.save(nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.float32), np.eye(4)), str(stat))
-    written = write_report_manifest(
-        contrast_dir=tmp_path,
-        subject="sub-01",
-        task="heat",
-        contrast_name="c",
-        stat_map=stat,
-        run_meta={"tr": 2.0},
-        mask=stat,
-        mask_is_analysis_mask=False,
-    )
-    assert read_manifest(written).mask_is_analysis_mask is False
+    with pytest.raises(ValueError, match="fitted analysis mask"):
+        write_report_manifest(
+            contrast_dir=tmp_path,
+            subject="sub-01",
+            task="heat",
+            contrast_name="c",
+            stat_map=stat,
+            residual_paths=(stat,),
+            predicted_paths=(stat,),
+            run_meta={
+                "analysis_space": "T1w",
+                "tr": 2.0,
+                "included_bold_paths": ["/d/sub-01_run-01_bold.nii.gz"],
+                "retained_frame_indices": [[0]],
+            },
+            mask=stat,
+            mask_is_analysis_mask=False,
+            contrast_cfg=types.SimpleNamespace(hrf_model="spm"),
+        )
 
 
 def test_the_fitted_mask_is_recorded_as_such(tmp_path: Path) -> None:
@@ -203,32 +238,48 @@ def test_the_fitted_mask_is_recorded_as_such(tmp_path: Path) -> None:
         task="heat",
         contrast_name="c",
         stat_map=stat,
-        run_meta={"tr": 2.0},
+        residual_paths=(stat,),
+        predicted_paths=(stat,),
+        run_meta={
+            "analysis_space": "T1w",
+            "tr": 2.0,
+            "included_bold_paths": ["/d/sub-01_run-01_bold.nii.gz"],
+            "retained_frame_indices": [[0]],
+        },
         mask=stat,
         mask_is_analysis_mask=True,
+        contrast_cfg=types.SimpleNamespace(hrf_model="spm"),
     )
     assert read_manifest(written).mask_is_analysis_mask is True
 
 
 def test_the_claim_cannot_be_made_without_a_mask(tmp_path: Path) -> None:
-    from fmri_pipeline.analysis.report.manifest import read_manifest, write_report_manifest
+    from fmri_pipeline.analysis.report.manifest import write_report_manifest
 
     stat = tmp_path / "z.nii.gz"
     nib.save(nib.Nifti1Image(np.zeros((4, 4, 4), dtype=np.float32), np.eye(4)), str(stat))
-    written = write_report_manifest(
-        contrast_dir=tmp_path,
-        subject="sub-01",
-        task="heat",
-        contrast_name="c",
-        stat_map=stat,
-        run_meta={"tr": 2.0},
-        mask=None,
-        mask_is_analysis_mask=True,
-    )
-    assert read_manifest(written).mask_is_analysis_mask is False
+    with pytest.raises(ValueError, match="fitted analysis mask"):
+        write_report_manifest(
+            contrast_dir=tmp_path,
+            subject="sub-01",
+            task="heat",
+            contrast_name="c",
+            stat_map=stat,
+            residual_paths=(stat,),
+            predicted_paths=(stat,),
+            run_meta={
+                "analysis_space": "T1w",
+                "tr": 2.0,
+                "included_bold_paths": ["/d/sub-01_run-01_bold.nii.gz"],
+                "retained_frame_indices": [[0]],
+            },
+            mask=None,
+            mask_is_analysis_mask=True,
+            contrast_cfg=types.SimpleNamespace(hrf_model="spm"),
+        )
 
 
-def test_a_manifest_written_before_the_field_existed_still_loads(tmp_path: Path) -> None:
+def test_a_manifest_written_before_the_schema_version_is_rejected(tmp_path: Path) -> None:
     import json
 
     from fmri_pipeline.analysis.report.manifest import read_manifest
@@ -265,8 +316,8 @@ def test_a_manifest_written_before_the_field_existed_still_loads(tmp_path: Path)
             }
         )
     )
-    # Loads, and loads as the conservative answer.
-    assert read_manifest(path).mask_is_analysis_mask is False
+    with pytest.raises(ValueError, match="schema_version"):
+        read_manifest(path)
 
 
 # --- signal scaling, off the model rather than off the config -------------
@@ -286,9 +337,7 @@ def test_grand_mean_scaling_is_named_separately_from_per_voxel_scaling() -> None
 
 def test_a_model_that_scaled_nothing_reports_no_mode() -> None:
     assert (
-        bold_discovery.fitted_signal_scaling_mode(
-            types.SimpleNamespace(signal_scaling=False)
-        )
+        bold_discovery.fitted_signal_scaling_mode(types.SimpleNamespace(signal_scaling=False))
         is None
     )
 
@@ -311,3 +360,4 @@ def test_the_module_exposes_the_helpers_the_pipeline_calls() -> None:
     assert hasattr(pipeline_module, "_contrast_vector_for_design")
     assert hasattr(FmriAnalysisPipeline, "_contrast_detail_maps")
     assert hasattr(FmriAnalysisPipeline, "_save_optional")
+    assert hasattr(FmriAnalysisPipeline, "_save_required")

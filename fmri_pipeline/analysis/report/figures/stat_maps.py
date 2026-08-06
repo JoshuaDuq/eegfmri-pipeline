@@ -5,12 +5,19 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional, Sequence, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 
-from fmri_pipeline.analysis.report.figures._display import figure_of, label_colorbar
+from fmri_pipeline.analysis.report.figures._mosaic import (
+    DEFAULT_CUTS_PER_ROW,
+    ColorbarSpec,
+    draw_colorbar,
+    mosaic_figure,
+    suppressed_band,
+)
 from fmri_pipeline.analysis.report.style import (
-    GUIDE_COLOR,
     MAGNITUDE_CMAP,
+    OKABE_ITO,
     SIGNED_CMAP,
     annotate_provenance,
     clipped_fraction,
@@ -154,12 +161,16 @@ def stat_map_mosaic(
     title: str = "",
     cbar_label: str = "z",
     cmap: str = SIGNED_CMAP,
+    n_cuts: int = DEFAULT_CUTS_PER_ROW,
 ) -> Any:
     """Draw a slice mosaic of ``stat_img``.
 
-    ``annotate`` stays on: a mosaic without slice coordinates and left/right markers
-    tells a reader neither where a cluster is nor which hemisphere it is in, which
-    is most of what the panel exists to say.
+    Laid out by :func:`~fmri_pipeline.analysis.report.figures._mosaic.mosaic_figure`
+    rather than by nilearn's ``display_mode="mosaic"``, which drew the title on top of
+    the first tile and spread its cuts across the underlay rather than the mask. Slice
+    coordinates and a left/right key are still drawn -- a mosaic without them tells a
+    reader neither where a cluster is nor which hemisphere it is in -- but by the
+    layout, where they cannot collide with a neighbouring tile.
     """
     from nilearn import plotting
 
@@ -168,27 +179,42 @@ def stat_map_mosaic(
         stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img
     )
     plotted = apply_sidedness(stat_img, two_sided=two_sided)
-    with plot_context():
-        display = plotting.plot_stat_map(
+
+    def draw(figure, rect, direction, cuts):
+        plotting.plot_stat_map(
             plotted,
             bg_img=bg_img,
-            title=title or None,
-            display_mode="mosaic",
+            display_mode=direction,
+            cut_coords=list(cuts),
             threshold=float(threshold) if threshold else None,
-            colorbar=True,
+            colorbar=False,
             vmax=resolved_vmax,
             cmap=cmap,
             dim=0,
             black_bg=False,
             symmetric_cbar=True,
-            annotate=True,
+            annotate=False,
             radiological=radiological,
+            figure=figure,
+            axes=rect,
         )
-        label_colorbar(display, cbar_label)
-        figure = figure_of(display)
-        annotate_provenance(
-            figure,
-            _provenance(
+
+    with plot_context():
+        return mosaic_figure(
+            draw,
+            reference_img=stat_img,
+            mask_img=mask_img,
+            n_cuts=n_cuts,
+            title=title,
+            radiological=radiological,
+            colorbar=ColorbarSpec(
+                cmap=cmap,
+                vmin=-resolved_vmax,
+                vmax=resolved_vmax,
+                label=cbar_label,
+                suppressed=suppressed_band(threshold, two_sided=two_sided),
+            ),
+            provenance=_provenance(
                 values,
                 threshold=threshold,
                 limit=resolved_vmax,
@@ -197,7 +223,6 @@ def stat_map_mosaic(
                 limit_source=limit_source,
             ),
         )
-        return figure
 
 
 def magnitude_mosaic(
@@ -210,7 +235,7 @@ def magnitude_mosaic(
     title: str = "",
     cbar_label: str = "",
     cmap: str = MAGNITUDE_CMAP,
-    display_mode: str = "mosaic",
+    n_cuts: int = DEFAULT_CUTS_PER_ROW,
     extra_provenance: Sequence[str] = (),
 ) -> Any:
     """Draw a slice mosaic of an unsigned magnitude -- a standard error, a tSNR.
@@ -226,6 +251,10 @@ def magnitude_mosaic(
     The limit therefore comes from :func:`robust_upper_limit` over the positive
     values, the scale runs from zero, and non-positive voxels are left transparent so
     the background shows through.
+
+    Drawn as a full mosaic rather than the three-slice ``ortho`` this used to use. A
+    tSNR or standard-error map is read for *where* the measurement falls off, and
+    three slices cannot show a dropout that misses all three.
     """
     from nilearn import plotting
 
@@ -235,32 +264,42 @@ def magnitude_mosaic(
         raise ValueError("A magnitude panel requires at least one positive voxel.")
     resolved_vmax = float(vmax) if vmax is not None else robust_upper_limit(positive)
 
-    with plot_context():
-        display = plotting.plot_stat_map(
+    def draw(figure, rect, direction, cuts):
+        plotting.plot_stat_map(
             img,
             bg_img=bg_img,
-            title=title or None,
-            display_mode=display_mode,
+            display_mode=direction,
+            cut_coords=list(cuts),
             # Just above zero: hides the background without hiding any measurement,
             # since a magnitude of exactly zero is an absent voxel rather than a small
             # one. Left unthresholded, those voxels take the ramp's low colour and
             # paint a solid block over the anatomy that reads as a measured value.
             threshold=float(np.finfo(np.float32).tiny),
-            colorbar=True,
+            colorbar=False,
             vmin=0.0,
             vmax=resolved_vmax,
             cmap=cmap,
             dim=0,
             black_bg=False,
             symmetric_cbar=False,
-            annotate=True,
+            annotate=False,
             radiological=radiological,
+            figure=figure,
+            axes=rect,
         )
-        label_colorbar(display, cbar_label)
-        figure = figure_of(display)
-        annotate_provenance(
-            figure,
-            [
+
+    with plot_context():
+        return mosaic_figure(
+            draw,
+            reference_img=img,
+            mask_img=mask_img,
+            n_cuts=n_cuts,
+            title=title,
+            radiological=radiological,
+            colorbar=ColorbarSpec(
+                cmap=cmap, vmin=0.0, vmax=resolved_vmax, label=cbar_label
+            ),
+            provenance=[
                 f"n = {positive.size:,} voxels",
                 *extra_provenance,
                 f"scale 0–{resolved_vmax:.3g} "
@@ -270,7 +309,6 @@ def magnitude_mosaic(
                 orientation_label(radiological),
             ],
         )
-        return figure
 
 
 def dual_coded_mosaic(
@@ -285,6 +323,7 @@ def dual_coded_mosaic(
     radiological: bool = False,
     title: str = "",
     cbar_label: str = "effect",
+    n_cuts: int = DEFAULT_CUTS_PER_ROW,
 ) -> Any:
     """Draw effect magnitude in hue and statistical evidence in opacity.
 
@@ -317,29 +356,46 @@ def dual_coded_mosaic(
     # clipped -- a number computed over voxels the panel does not draw.
     values, limit_source = _masked_values(effect_img, mask_img)
     resolved_vmax = float(vmax) if vmax is not None else robust_symmetric_limit(values)
-    with plot_context():
-        display = plotting.plot_stat_map(
-            apply_sidedness(effect_img, two_sided=two_sided),
+    plotted = apply_sidedness(effect_img, two_sided=two_sided)
+
+    def draw(figure, rect, direction, cuts):
+        plotting.plot_stat_map(
+            plotted,
             bg_img=bg_img,
-            title=title or None,
-            display_mode="mosaic",
+            display_mode=direction,
+            cut_coords=list(cuts),
             threshold=None,
             transparency=stat_img,
             transparency_range=[0.5 * float(threshold), float(threshold)],
-            colorbar=True,
+            colorbar=False,
             vmax=resolved_vmax,
             cmap=SIGNED_CMAP,
             dim=0,
             black_bg=False,
             symmetric_cbar=True,
-            annotate=True,
+            annotate=False,
             radiological=radiological,
+            figure=figure,
+            axes=rect,
         )
-        label_colorbar(display, cbar_label)
-        figure = figure_of(display)
-        annotate_provenance(
-            figure,
-            [
+
+    with plot_context():
+        return mosaic_figure(
+            draw,
+            reference_img=effect_img,
+            mask_img=mask_img,
+            n_cuts=n_cuts,
+            title=title,
+            radiological=radiological,
+            # No suppressed band: dual coding hides nothing, which is its whole
+            # point. Hatching one here would claim the panel drops what it fades.
+            colorbar=ColorbarSpec(
+                cmap=SIGNED_CMAP,
+                vmin=-resolved_vmax,
+                vmax=resolved_vmax,
+                label=cbar_label,
+            ),
+            provenance=[
                 f"n = {values.size:,} voxels",
                 f"hue: effect · opacity: |z| ramped "
                 f"{0.5 * float(threshold):.2f}–{float(threshold):.2f}",
@@ -349,11 +405,20 @@ def dual_coded_mosaic(
                 orientation_label(radiological),
             ],
         )
-        return figure
 
 
 #: Which two world axes each glass-brain projection preserves.
 _PROJECTION_AXES = {"x": (1, 2), "y": (0, 2), "z": (0, 1), "l": (1, 2), "r": (1, 2)}
+
+
+#: Colour for peak markers on a glass brain.
+#:
+#: Deliberately outside the diverging ramp the projection is drawn in. Marked in the
+#: neutral guide grey, the markers were invisible against a dense single-subject
+#: projection -- which is most of them, since a glass brain projects the maximum along
+#: each axis and an uncorrected height fills it. Green is in neither half of RdBu_r,
+#: so it cannot be mistaken for a value.
+PEAK_MARKER_COLOR = OKABE_ITO["bluish_green"]
 
 
 def _annotate_peaks(
@@ -367,7 +432,13 @@ def _annotate_peaks(
     which the map already showed; the number is what lets a cluster in the table be
     located in the projection. Previously the index reached only a debug log, so the
     caption promised a key the figure did not carry.
+
+    Both the marker and its label carry a white halo. A glass brain fills with colour
+    wherever anything survives the threshold, and an unhaloed grey marker on top of it
+    is not findable -- which costs the caption's promise a second time.
     """
+    from matplotlib import patheffects
+
     labels = (
         [str(label) for label in peak_labels]
         if peak_labels is not None
@@ -380,11 +451,14 @@ def _annotate_peaks(
 
     display.add_markers(
         [tuple(c) for c in peak_coords],
-        marker_color=GUIDE_COLOR,
-        marker_size=18,
+        marker_color=PEAK_MARKER_COLOR,
+        marker_size=26,
         marker="o",
+        edgecolors="white",
+        linewidths=0.8,
     )
 
+    halo = [patheffects.withStroke(linewidth=2.0, foreground="white")]
     for direction, projection in display.axes.items():
         pair = _PROJECTION_AXES.get(str(direction))
         if pair is None:
@@ -395,12 +469,13 @@ def _annotate_peaks(
             projection.ax.annotate(
                 label,
                 xy=(float(coord[first]), float(coord[second])),
-                xytext=(4, 3),
+                xytext=(5, 4),
                 textcoords="offset points",
-                fontsize=7,
+                fontsize=7.5,
                 fontweight="bold",
-                color=GUIDE_COLOR,
+                color="#111111",
                 annotation_clip=False,
+                path_effects=halo,
             )
 
 
@@ -433,22 +508,43 @@ def glass_brain(
         stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img
     )
     with plot_context():
+        # Laid out here for the same reasons as the mosaics: nilearn draws its title
+        # inside the axes, where on a glass brain it lands on the sagittal projection,
+        # and its colourbar sits at the figure edge with the ticks clipped.
+        figure = plt.figure(figsize=(9.2, 3.5))
+        figure.patch.set_facecolor("white")
         display = plotting.plot_glass_brain(
             apply_sidedness(stat_img, two_sided=two_sided),
-            title=title or None,
             threshold=float(threshold) if threshold else None,
-            colorbar=True,
+            colorbar=False,
             vmax=resolved_vmax,
             cmap=SIGNED_CMAP,
             plot_abs=False,
             symmetric_cbar=True,
             black_bg=False,
             radiological=radiological,
+            figure=figure,
+            axes=(0.02, 0.06, 0.84, 0.84),
         )
-        label_colorbar(display, cbar_label)
         if peak_coords:
             _annotate_peaks(display, peak_coords, peak_labels)
-        figure = figure_of(display)
+
+        draw_colorbar(
+            figure,
+            ColorbarSpec(
+                cmap=SIGNED_CMAP,
+                vmin=-resolved_vmax,
+                vmax=resolved_vmax,
+                label=cbar_label,
+                suppressed=suppressed_band(threshold, two_sided=two_sided),
+            ),
+            rect=(0.905, 0.16, 0.016, 0.66),
+        )
+        if title:
+            figure.text(
+                0.02, 0.965, title, ha="left", va="center", fontsize=11,
+                fontweight="bold",
+            )
         annotate_provenance(
             figure,
             _provenance(
@@ -458,7 +554,14 @@ def glass_brain(
                 two_sided=two_sided,
                 radiological=radiological,
                 limit_source=limit_source,
-            ),
+            )
+            + [
+                # A glass brain projects the maximum along each axis, so it fills
+                # wherever anything survives -- and on an uncorrected single-subject
+                # height that is most of the brain. Said outright, because a saturated
+                # projection otherwise reads as a very strong result.
+                "maximum-intensity projection: a voxel anywhere along a ray fills it"
+            ],
         )
         return figure
 

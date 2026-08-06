@@ -981,13 +981,54 @@ def noise_mask(
     return combined, "sub-threshold voxels of the statistic map"
 
 
+def _first_residual_image(manifest: ContrastManifest) -> Any:
+    """The residual series smoothness should be estimated from, or ``None``.
+
+    One run rather than all of them. The estimate is a property of the acquisition and
+    the smoothing kernel, both of which are fixed across a subject's runs, so pooling
+    six series would multiply the read cost to tighten a number already stable to a few
+    percent within one run.
+
+    ``None`` for a manifest written before the fit stored residuals, which is what
+    keeps those reports rendering against the statistic map as they always did.
+    """
+    for path in manifest.residual_paths:
+        try:
+            import nibabel as nib
+
+            return nib.load(str(path))
+        except Exception as exc:
+            logger.info("Could not open residuals at %s (%s)", path, exc)
+    return None
+
+
+@dataclass(frozen=True)
+class Smoothness:
+    """What a map's smoothness is, and what it makes a voxel count mean.
+
+    The resel count travels as a number rather than only inside the prose because two
+    consumers need it and only one of them is a caption: the cluster table states it,
+    and the random-field familywise height is computed from it. Formatting it into a
+    sentence and reformatting it back out would be the kind of coupling that lets the
+    two disagree.
+
+    ``resels`` is ``None`` when no smoothness could be estimated, which is an
+    unresolved measurement rather than a fault -- the cluster table still draws.
+    """
+
+    facts: List[str]
+    resels: Optional[float] = None
+    fwhm: Optional[Tuple[float, float, float]] = None
+
+
 def smoothness_facts(
     stat_img: Any,
     *,
     mask_img: Any,
     cluster_min_voxels: int,
     threshold: Optional[float] = None,
-) -> List[str]:
+    residual_img: Any = None,
+) -> Smoothness:
     """Describe the map's spatial smoothness and what it makes a voxel count mean.
 
     ``cluster_min_voxels`` is configured as a bare count, and a bare count is not
@@ -1006,27 +1047,44 @@ def smoothness_facts(
     """
     from fmri_pipeline.analysis.report.figures import coverage as coverage_figures
 
-    try:
-        mask, source = noise_mask(stat_img, mask_img=mask_img, threshold=threshold)
-        fwhm = coverage_figures.estimate_fwhm(stat_img, mask=mask)
-    except Exception as exc:
-        logger.info("Could not estimate smoothness (%s)", exc)
-        return []
+    fwhm: Optional[Tuple[float, float, float]] = None
+    source = ""
+    if residual_img is not None:
+        # Preferred whenever the fit wrote residuals. The map-based estimate has to
+        # exclude activation by height to avoid measuring the signal's own spatial
+        # structure, and under ``threshold_mode: none`` there is no height to exclude
+        # by; the residual field has nothing to exclude in the first place.
+        try:
+            fwhm = coverage_figures.estimate_fwhm_from_residuals(
+                residual_img, mask=mask_img
+            )
+            source = "model residuals"
+        except Exception as exc:
+            logger.info("Could not estimate smoothness from residuals (%s)", exc)
+
+    if fwhm is None:
+        try:
+            mask, source = noise_mask(stat_img, mask_img=mask_img, threshold=threshold)
+            fwhm = coverage_figures.estimate_fwhm(stat_img, mask=mask)
+        except Exception as exc:
+            logger.info("Could not estimate smoothness (%s)", exc)
+            return Smoothness(facts=[])
 
     facts = [coverage_figures.smoothness_note(fwhm, source=source)]
+    search_resels: Optional[float] = None
     if mask_img is not None:
         with _panel("search volume in resels"):
-            resels = coverage_figures.search_volume_resels(mask_img, fwhm=fwhm)
+            search_resels = coverage_figures.search_volume_resels(mask_img, fwhm=fwhm)
             facts.append(
-                f"the search volume is {resels:,.0f} resels; the corrected heights "
-                f"above divide alpha across voxels, not resels"
+                f"the search volume is {search_resels:,.0f} resels, which is what the "
+                f"random-field height in the threshold table corrects over"
             )
     if cluster_min_voxels > 0:
         resels = coverage_figures.extent_in_resels(
             cluster_min_voxels, reference_img=stat_img, fwhm=fwhm
         )
         facts.append(f"the {cluster_min_voxels}-voxel extent filter is {resels:.2f} resels")
-    return facts
+    return Smoothness(facts=facts, resels=search_resels, fwhm=fwhm)
 
 
 def _peak_values(img: Any, coords: Sequence[Tuple[float, float, float]]) -> List[float]:
@@ -1512,26 +1570,32 @@ def build_contrast_section(
                     )
                 )
 
+    # Computed before the threshold branch, not inside it. The resel count is what the
+    # random-field height in the calibration panel corrects over, and that panel draws
+    # whether or not a height was applied -- under ``threshold_mode: none`` it is the
+    # reader who most needs to be told where the corrected heights fall.
+    #
+    # Named for what it is. Called `facts`, this shadowed the SummaryFacts parameter of
+    # the same name with a list of strings for the rest of the function, so every later
+    # panel that recorded a summary fact raised AttributeError -- swallowed by _panel,
+    # which made the panel vanish from the document with only a log line to say why.
+    smoothness = smoothness_facts(
+        stat_img,
+        mask_img=mask_img,
+        cluster_min_voxels=manifest.cluster_min_voxels,
+        threshold=threshold,
+        residual_img=_first_residual_image(manifest),
+    )
+
     table, peaks = (None, ())
     if threshold:
-        # Named for what it is. Called `facts`, this shadowed the SummaryFacts
-        # parameter of the same name with a list of strings for the rest of the
-        # function, so every later panel that recorded a summary fact raised
-        # AttributeError -- swallowed by _panel, which made the panel vanish from the
-        # document with only a log line to say why.
-        smoothness = smoothness_facts(
-            stat_img,
-            mask_img=mask_img,
-            cluster_min_voxels=manifest.cluster_min_voxels,
-            threshold=threshold,
-        )
         with _panel(f"cluster table for {manifest.contrast_name}"):
             table, peaks = build_cluster_table(
                 manifest=manifest,
                 out_dir=out_dir,
                 threshold=threshold,
                 threshold_label=threshold_label,
-                extra_facts=smoothness,
+                extra_facts=smoothness.facts,
                 labeller=resolve_labeller(manifest, cfg),
             )
 
@@ -1664,6 +1728,7 @@ def build_contrast_section(
             alpha=0.05,
             two_sided=manifest.two_sided,
             sign_flip=_sign_flip_summary(manifest),
+            n_resels=smoothness.resels,
         )
 
         if context.applied_survivors is not None:

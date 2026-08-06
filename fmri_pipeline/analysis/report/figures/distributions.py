@@ -290,6 +290,31 @@ def threshold_table(context: ThresholdContext) -> Tuple[str, List[str]]:
         ]
     )
 
+    # Beside Bonferroni, never instead of it. Both control the familywise rate and
+    # neither dominates: Bonferroni charges for every voxel and is loose when smoothing
+    # has made neighbours the same measurement, while the Euler-characteristic form
+    # charges for the resels and overshoots once the search volume is small in resel
+    # terms -- which is this study's own regime, where it lands above Bonferroni. The
+    # resel count rides in the label because the height is unreadable without it.
+    if context.rft is not None:
+        rows.append(
+            [
+                f"Random field FWE {context.alpha:g}"
+                + (
+                    f" ({context.n_resels:,.0f} resels)"
+                    if context.n_resels is not None
+                    else ""
+                ),
+                _region(
+                    _symmetric(context.rft, two_sided=context.two_sided),
+                    comparison=comparison,
+                ),
+                f"{context.rft_survivors:,}",
+                "n/a",
+                "n/a",
+            ]
+        )
+
     # Last, because it is the only row whose null is the data's own. Both expectation
     # columns are "n/a" for it by construction: the height comes from a permutation
     # distribution rather than from a fitted or theoretical one, so there is no

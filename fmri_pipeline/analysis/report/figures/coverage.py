@@ -18,11 +18,11 @@ from typing import Any, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fmri_pipeline.analysis.report.figures._display import figure_of
-from fmri_pipeline.analysis.report.style import (
-    annotate_provenance,
-    plot_context,
+from fmri_pipeline.analysis.report.figures._mosaic import (
+    DEFAULT_CUTS_PER_ROW,
+    mosaic_figure,
 )
+from fmri_pipeline.analysis.report.style import plot_context
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,78 @@ def estimate_fwhm(
     return (fwhm[0], fwhm[1], fwhm[2])
 
 
+#: Residual volumes drawn when estimating smoothness from a 4D series.
+#:
+#: The estimate is a median over per-volume estimates and settles within a few percent
+#: well before this many frames, while the series itself runs to several hundred
+#: frames per run across six runs. Reading all of them would cost minutes per subject
+#: to move an answer that has already converged.
+_RESIDUAL_VOLUMES_SAMPLED = 24
+
+
+def estimate_fwhm_from_residuals(
+    residual_img: Any, *, mask: Any = None
+) -> Tuple[float, float, float]:
+    """Estimate spatial smoothness from a 4D residual series, in millimetres.
+
+    The right input for the estimator, and the one this pipeline could not offer until
+    it began writing residuals. Smoothness is a property of the noise field; taken from
+    a statistic map instead, real activation inflates it, because signal is spatially
+    structured and the estimator cannot tell that structure from smoothing. Excluding
+    suprathreshold voxels recovers most of the difference and is what the map-based
+    path does -- but under ``threshold_mode: none`` there is no height to exclude by,
+    and that estimate can only be reported as an upper bound.
+
+    A residual field carries no activation to exclude, so no heuristic is needed and
+    the answer is an estimate rather than a bound.
+
+    Each sampled volume is estimated separately and the per-axis median is returned.
+    The median rather than the mean because a single volume caught mid-motion is
+    spatially structured in a way that inflates its own estimate and nothing else's.
+    """
+    import nibabel as nib
+
+    # Sliced from ``dataobj`` a volume at a time rather than materialised. A run's
+    # residual series is several hundred frames over the whole mask, and six of them
+    # per subject; reading all of it to estimate from two dozen volumes would cost
+    # more memory than the rest of the report together.
+    data = residual_img.dataobj
+    shape = tuple(data.shape)
+    if len(shape) != 4:
+        raise ValueError(f"Residual smoothness needs a 4D series, got shape {shape}.")
+    if shape[3] == 0:
+        raise ValueError("Residual smoothness needs at least one volume.")
+
+    mask_array: Optional[np.ndarray] = None
+    if mask is not None:
+        mask_array = np.asarray(
+            mask if isinstance(mask, np.ndarray) else mask.dataobj
+        ).astype(bool)
+
+    # Evenly spaced across the series rather than the first N, so a run whose start is
+    # atypical -- settling gradients, an early motion spike -- does not decide the
+    # estimate on its own.
+    count = min(_RESIDUAL_VOLUMES_SAMPLED, int(shape[3]))
+    indices = np.unique(np.linspace(0, shape[3] - 1, count).astype(int))
+
+    estimates = []
+    for index in indices:
+        volume = nib.Nifti1Image(
+            np.asarray(data[..., int(index)], dtype=float), residual_img.affine
+        )
+        try:
+            estimates.append(estimate_fwhm(volume, mask=mask_array))
+        except ValueError:
+            # A constant volume carries no smoothness. One such frame is not a reason
+            # to lose the estimate the rest of the series supports.
+            continue
+    if not estimates:
+        raise ValueError("No residual volume carried enough spread to estimate from.")
+
+    median = np.median(np.asarray(estimates, dtype=float), axis=0)
+    return (float(median[0]), float(median[1]), float(median[2]))
+
+
 def mask_volume_mm3(mask_img: Any) -> Tuple[int, float]:
     """Return the voxel count of a mask and the volume it occupies, in mm^3.
 
@@ -112,6 +184,8 @@ def coverage_figure(
     extent_note: str = "",
     smoothness_note: str = "",
     title: str = "",
+    radiological: bool = False,
+    n_cuts: int = DEFAULT_CUTS_PER_ROW,
 ) -> plt.Figure:
     """Draw the analysis mask over the background, with its extent stated.
 
@@ -119,6 +193,11 @@ def coverage_figure(
     which anatomy fell outside the model, which is the only reading that matters --
     and that reading requires ``bg_img``. Over an empty background the panel shows a
     blob whose missing regions cannot be named.
+
+    Drawn as a full mosaic rather than the three-slice ``ortho`` it used to use. This
+    panel exists to show *which* anatomy fell outside the model, and orbitofrontal
+    and inferior temporal dropout -- the regions it is most often read for -- can miss
+    all three ortho slices entirely.
 
     ``extent_note`` describes how the mask was derived, and is supplied by the caller
     rather than assumed here. This panel previously asserted "intersection across N
@@ -133,12 +212,12 @@ def coverage_figure(
             "Coverage figure requires a mask with at least one voxel; got no voxels."
         )
 
-    with plot_context():
-        display = plotting.plot_roi(
+    def draw(figure, rect, direction, cuts):
+        plotting.plot_roi(
             mask_img,
             bg_img=bg_img,
-            title=title or None,
-            display_mode="ortho",
+            display_mode=direction,
+            cut_coords=list(cuts),
             # Two entries, the first fully transparent. Handed a continuous colormap,
             # nilearn maps the mask's zeros to its low colour and paints them, so the
             # panel drew a solid block over the whole field-of-view box -- covering
@@ -154,23 +233,36 @@ def coverage_figure(
             # override the per-colour alpha and paint the transparent entry too.
             dim=0,
             black_bg=False,
-            annotate=True,
+            annotate=False,
+            radiological=radiological,
             # A mask is in or out. A 0-to-1 colour scale beside it invites a reading
             # of degree that the two states do not carry.
             colorbar=False,
+            figure=figure,
+            axes=rect,
         )
-        figure = figure_of(display)
-        # The old first line was "N voxels modelled of M in the field of view". M
-        # counts air, so the ratio measured how much empty space the acquisition box
-        # contained and told a reader nothing about coverage.
-        lines = [f"{voxels:,} voxels modelled ({volume / 1000.0:,.1f} cm³)"]
-        if extent_note:
-            lines.append(extent_note)
-        if smoothness_note:
-            lines.append(smoothness_note)
-        lines.append("voxels outside this mask were not tested")
-        annotate_provenance(figure, lines)
-        return figure
+
+    # The old first line was "N voxels modelled of M in the field of view". M counts
+    # air, so the ratio measured how much empty space the acquisition box contained
+    # and told a reader nothing about coverage.
+    lines = [f"{voxels:,} voxels modelled ({volume / 1000.0:,.1f} cm³)"]
+    if extent_note:
+        lines.append(extent_note)
+    if smoothness_note:
+        lines.append(smoothness_note)
+    lines.append("voxels outside this mask were not tested")
+
+    with plot_context():
+        return mosaic_figure(
+            draw,
+            reference_img=mask_img,
+            mask_img=mask_img,
+            n_cuts=n_cuts,
+            title=title,
+            radiological=radiological,
+            colorbar=None,
+            provenance=lines,
+        )
 
 
 def smoothness_note(fwhm: Tuple[float, float, float], *, source: str) -> str:
@@ -229,6 +321,7 @@ def search_volume_resels(mask_img: Any, *, fwhm: Tuple[float, float, float]) -> 
 __all__ = [
     "coverage_figure",
     "estimate_fwhm",
+    "estimate_fwhm_from_residuals",
     "extent_in_resels",
     "mask_volume_mm3",
     "search_volume_resels",

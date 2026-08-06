@@ -130,6 +130,108 @@ def test_expected_false_positives_needs_a_positive_threshold() -> None:
         inference.expected_false_positives(n=10, threshold=0.0, two_sided=True)
 
 
+# --- random field theory --------------------------------------------------
+
+
+def test_the_rft_threshold_rises_with_the_search_volume() -> None:
+    small = inference.rft_voxel_threshold(n_resels=100.0, alpha=0.05, two_sided=True)
+    large = inference.rft_voxel_threshold(n_resels=10_000.0, alpha=0.05, two_sided=True)
+    assert small < large
+
+
+def test_the_one_sided_rft_threshold_is_less_strict() -> None:
+    two = inference.rft_voxel_threshold(n_resels=5_000.0, alpha=0.05, two_sided=True)
+    one = inference.rft_voxel_threshold(n_resels=5_000.0, alpha=0.05, two_sided=False)
+    assert one < two
+
+
+def test_the_rft_threshold_beats_bonferroni_only_on_a_smooth_field() -> None:
+    # Which of the two valid bounds is tighter is a property of the smoothness, not a
+    # ranking that holds in general -- and assuming the ranking is how a report ends up
+    # quoting the looser one as its correction.
+    #
+    # Heavily smoothed: 32,768 voxels over 318 resels, about a hundred voxels each.
+    # Bonferroni charges for a family that is not there and RFT wins.
+    assert inference.rft_voxel_threshold(
+        n_resels=318.0, alpha=0.05, two_sided=False
+    ) < inference.bonferroni_threshold(n=32_768, alpha=0.05, two_sided=False)
+
+    # This study's own regime: 50,626 voxels over 5,037 resels, about ten voxels each.
+    # The Euler-characteristic approximation overshoots and Bonferroni is tighter.
+    assert inference.rft_voxel_threshold(
+        n_resels=5_037.0, alpha=0.05, two_sided=True
+    ) > inference.bonferroni_threshold(n=50_626, alpha=0.05, two_sided=True)
+
+
+def test_the_rft_threshold_solves_the_euler_characteristic_equation() -> None:
+    # The defining property: at the returned height, the expected Euler
+    # characteristic of the excursion set equals alpha. Computed here from the
+    # Worsley (1996) 3D density directly, so the test does not restate the solver.
+    resels, alpha = 5_037.0, 0.05
+    height = inference.rft_voxel_threshold(
+        n_resels=resels, alpha=alpha, two_sided=False
+    )
+    density = (
+        (4.0 * np.log(2.0)) ** 1.5
+        / (2.0 * np.pi) ** 2
+        * (height**2 - 1.0)
+        * np.exp(-(height**2) / 2.0)
+    )
+    assert resels * density == pytest.approx(alpha, rel=1e-6)
+
+
+def test_the_rft_threshold_controls_the_familywise_error_rate() -> None:
+    # The property the height is sold on, measured rather than assumed: over
+    # realisations of a smooth null field, the share in which any voxel clears the
+    # height must land near alpha. A formula error shows up here as a rate off by
+    # orders of magnitude, so the bound is deliberately loose -- RFT is an
+    # approximation and its exactness is not what is being asserted.
+    from scipy import ndimage
+
+    rng = np.random.default_rng(7)
+    sigma, pad, core, trials = 2.0, 12, 32, 300
+
+    def realisation() -> np.ndarray:
+        # Smoothed on a padded grid and cropped back. ``gaussian_filter`` reflects at
+        # the boundary, which leaves edge voxels with more variance than the interior;
+        # normalising the whole volume by one standard deviation then pushes the
+        # maximum onto that rim. Uncropped, this test measures an edge artefact and
+        # reads a 56% familywise error rate off a correct height.
+        field = ndimage.gaussian_filter(
+            rng.standard_normal((core + 2 * pad,) * 3), sigma=sigma
+        )
+        field = field[pad : pad + core, pad : pad + core, pad : pad + core]
+        return field / field.std()
+
+    def fwhm_of(field: np.ndarray) -> float:
+        variance = field.var()
+        widths = []
+        for axis in range(3):
+            ratio = np.diff(field, axis=axis).var() / (2.0 * variance)
+            widths.append(
+                np.sqrt(-1.0 / (4.0 * np.log(1.0 - ratio))) * np.sqrt(8.0 * np.log(2.0))
+            )
+        return float(np.mean(widths))
+
+    fields = [realisation() for _ in range(trials)]
+    resels = core**3 / float(np.mean([fwhm_of(field) for field in fields]) ** 3)
+    height = inference.rft_voxel_threshold(
+        n_resels=resels, alpha=0.05, two_sided=False
+    )
+
+    rate = np.mean([field.max() > height for field in fields])
+    # Conservative but not by an order of magnitude: measured at 0.031 against a
+    # nominal 0.05, which is the mild overshoot the approximation is known for.
+    assert 0.005 <= rate <= 0.05
+
+
+def test_the_rft_threshold_validates_its_inputs() -> None:
+    with pytest.raises(ValueError, match="resel"):
+        inference.rft_voxel_threshold(n_resels=0.0, alpha=0.05, two_sided=True)
+    with pytest.raises(ValueError, match="alpha"):
+        inference.rft_voxel_threshold(n_resels=100.0, alpha=0.0, two_sided=True)
+
+
 # --- the assembled summary ------------------------------------------------
 
 
@@ -158,6 +260,33 @@ def test_the_summary_survives_an_fdr_that_rejects_nothing() -> None:
     summary = _summary(np.random.default_rng(8).standard_normal(20_000))
     assert summary.fdr is None
     assert summary.fdr_survivors == 0
+    assert summary.bonferroni > 0
+
+
+def test_the_summary_carries_a_random_field_height_when_given_a_search_volume() -> None:
+    values = np.random.default_rng(10).standard_normal(50_000)
+    summary = _summary(values, n_resels=5_037.0)
+    assert summary.n_resels == pytest.approx(5_037.0)
+    assert summary.rft == pytest.approx(
+        inference.rft_voxel_threshold(n_resels=5_037.0, alpha=0.05, two_sided=True)
+    )
+    assert summary.rft_survivors == 0
+
+
+def test_the_summary_has_no_random_field_height_without_a_search_volume() -> None:
+    # Smoothness cannot always be estimated, and a report that loses its whole
+    # threshold table over a missing resel count is worse than one without the row.
+    summary = _summary(np.random.default_rng(11).standard_normal(20_000))
+    assert summary.n_resels is None
+    assert summary.rft is None
+    assert summary.rft_survivors == 0
+
+
+def test_the_summary_survives_a_search_volume_too_small_for_random_field_theory() -> None:
+    summary = _summary(
+        np.random.default_rng(12).standard_normal(20_000), n_resels=0.5
+    )
+    assert summary.rft is None
     assert summary.bonferroni > 0
 
 
