@@ -2069,19 +2069,17 @@ def require_passing_benchmark(
             f"scale (count p={seam['count_p_value']:.4f}, maximum p="
             f"{seam['max_p_value']:.4f}), worst ratio {seam['max_ratio']:.2f}."
         )
-    if "study_residual_sinusoid_p" not in frame.columns:
-        raise RuntimeError(
-            f"Refusing to apply: {path} carries no residual-sinusoid probabilities, so the "
-            "cohort criterion cannot be evaluated. Re-run the benchmark."
-        )
-    sinusoids = lr.residual_sinusoid_verdict(frame["study_residual_sinusoid_p"].to_numpy())
-    if not sinusoids["passed"]:
-        raise RuntimeError(
-            "Refusing to apply: the cohort residual-sinusoid criterion failed -- "
-            f"{int(sinusoids['n_discoveries'])} of {int(sinusoids['n_runs'])} recordings still "
-            f"carry a sinusoid in an authorised region (smallest run p="
-            f"{sinusoids['min_run_p_value']:.3g})."
-        )
+    # The residual-sinusoid probabilities are deliberately NOT consulted here. Residual
+    # targets are selected by Thomson's F test on each exact epoch, and this criterion
+    # repeats that same test on the same epochs after removing exactly what it found. The
+    # multiplicity arithmetic is sound, but the inference is post-selection: it measures
+    # whether the selected sinusoids were subtracted, not whether the detector missed one,
+    # so it cannot certify detection completeness. Measured symptom -- p=0.70 on sub-0009
+    # runs 1 and 4 while 8-11 dB residuals stood at 57.2 Hz.
+    #
+    # The independent acceptance test is the PSD matched-control gate, which scores a
+    # different statistic that the detector does not optimise. The probabilities stay in
+    # the benchmark and the cohort verdict is still printed, as provenance.
 
 
 def _boundary_metrics(
@@ -2503,7 +2501,7 @@ def _refine_window_residual_plan(
         settings=settings,
     )
 
-    for frequency_hz in shared_candidates:
+    for frequency_hz in shared_candidates:  # always empty; the shared route is gone
         if not _already_searched(frequency_hz, aggregate_targets, residual_width_hz):
             aggregate_targets.append(frequency_hz)
     for channel_index, channel_candidates in enumerate(focal_candidates):
@@ -2522,7 +2520,15 @@ def _residual_line_candidates(
     window: AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan,
     settings: RemovalSettings,
 ) -> tuple[tuple[float, ...], tuple[tuple[float, ...], ...]]:
-    """Sinusoids evidenced in one window's data, the shared ones and the focal ones.
+    """Sinusoids evidenced in one window's data, per channel.
+
+    Every candidate is channel-local, and nothing is subtracted from a channel that did
+    not evidence it. An earlier version routed a frequency carried by half the array into
+    every channel's plan; ``_clean_channel_residuals`` then searched each channel
+    separately and subtracted whichever fluctuation was largest inside the width, so in a
+    channel without the artifact it removed whatever was there, possibly signal. It was
+    never the joint array estimate its docstring claimed. It produced zero shared targets
+    on both sub-0009 runs measured, so the route is gone rather than repaired.
 
     The state passed is the first pass's own output, which is the raw data with the
     already-modelled component accounted for: that is how a line hidden under a stronger
@@ -2551,7 +2557,6 @@ def _residual_line_candidates(
         "widths_hz": window.notch_widths_hz,
         "responsibility_hz": lr.RESIDUAL_SEARCH_HZ,
     }
-    shared: list[float] = []
     focal: list[list[float]] = [[] for _ in range(states[0].shape[0])]
     for state in states:
         frequencies, statistic, threshold, _ = lr.thomson_f_statistics(
@@ -2559,15 +2564,6 @@ def _residual_line_candidates(
             sampling_frequency_hz=sampling_frequency_hz,
             bandwidth_hz=settings.mt_bandwidth,
             family_alpha=detection.family_alpha,
-        )
-        shared.extend(
-            lr.shared_residual_line_candidates(
-                frequencies,
-                statistic,
-                threshold=threshold,
-                min_channel_fraction=detection.min_shared_channel_fraction,
-                **neighbourhood,
-            )
         )
         channel_candidates = lr.focal_residual_line_candidates(
             frequencies,
@@ -2577,7 +2573,7 @@ def _residual_line_candidates(
         )
         for channel_index, values in enumerate(channel_candidates):
             focal[channel_index].extend(values)
-    return tuple(sorted(shared)), tuple(tuple(sorted(values)) for values in focal)
+    return (), tuple(tuple(sorted(values)) for values in focal)
 
 
 def _already_searched(

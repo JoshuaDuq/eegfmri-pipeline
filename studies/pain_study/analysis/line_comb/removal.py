@@ -306,24 +306,9 @@ class ResidualDetection:
     ``thomson_f_statistics`` applies and MNE's own detector.
     """
 
-    min_shared_channel_fraction: float = 0.5
-    """Share of channels carrying the sinusoid before it is fitted across the array.
-
-    A routing rule rather than an evidence threshold: every channel counted here cleared
-    the F test on its own. Below it the line is subtracted only from the channels that
-    evidence it. At or above it the channels are fitted jointly, which conditions one
-    estimate on the array instead of on each electrode's noise, and in exchange subtracts
-    from the minority that did not evidence it -- a cost the preservation gates measure.
-    """
-
     def __post_init__(self) -> None:
         if not np.isfinite(self.family_alpha) or not 0.0 < self.family_alpha < 1.0:
             raise ValueError("family_alpha must lie strictly between zero and one.")
-        if (
-            not np.isfinite(self.min_shared_channel_fraction)
-            or not 0.0 < self.min_shared_channel_fraction <= 1.0
-        ):
-            raise ValueError("min_shared_channel_fraction must lie in (0, 1].")
 
 
 def focal_residual_line_candidates(
@@ -362,53 +347,6 @@ def focal_residual_line_candidates(
                 candidates.append(float(frequency_array[index]))
         results.append(tuple(candidates))
     return tuple(results)
-
-
-def shared_residual_line_candidates(
-    freqs: Sequence[float],
-    statistic: np.ndarray,
-    *,
-    threshold: float,
-    targets_hz: Sequence[float],
-    widths_hz: Sequence[float],
-    responsibility_hz: float,
-    min_channel_fraction: float,
-) -> tuple[float, ...]:
-    """Sinusoids enough of the array evidences to fit jointly rather than per channel.
-
-    Agreement across channels is what distinguishes an array-wide electrical line from a
-    channel-local one; it is not what makes either of them real. Every channel counted
-    here already cleared the F test on its own.
-    """
-    frequency_array = np.asarray(freqs, dtype=float)
-    values = np.asarray(statistic, dtype=float)
-    if values.ndim != 2 or values.shape[1] != frequency_array.size:
-        raise ValueError("statistic must have channel and frequency axes.")
-    if not np.isfinite(threshold) or threshold <= 0.0:
-        raise ValueError("threshold must be finite and positive.")
-    if not np.isfinite(min_channel_fraction) or not 0.0 < min_channel_fraction <= 1.0:
-        raise ValueError("min_channel_fraction must lie in (0, 1].")
-    authorised = authorised_residual_bins(
-        frequency_array,
-        targets_hz,
-        widths_hz,
-        responsibility_hz,
-    )
-
-    significant = np.isfinite(values) & (values > threshold)
-    share = significant.mean(axis=0)
-    strength = np.median(np.where(significant, values, 0.0), axis=0)
-    indices = np.flatnonzero(authorised & (share >= min_channel_fraction))
-    groups = np.split(indices, np.flatnonzero(np.diff(indices) > 1) + 1)
-
-    candidates = []
-    for group in groups:
-        if not group.size:
-            continue
-        # Widest agreement wins the group, the strongest median statistic breaks a tie.
-        chosen = int(group[np.lexsort((strength[group], share[group]))[-1]])
-        candidates.append(float(frequency_array[chosen]))
-    return tuple(candidates)
 
 
 def authorised_residual_bins(

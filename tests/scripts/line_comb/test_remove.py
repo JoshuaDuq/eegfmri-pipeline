@@ -432,8 +432,13 @@ def test_residual_planning_leaves_power_without_a_significant_sinusoid(monkeypat
     assert refined.study_windows[0].channel_residual_targets_hz == ((), ())
 
 
-def test_study_refinement_fits_an_array_wide_residual_jointly(monkeypatch):
-    """A sinusoid the whole array evidences is fitted once, not channel by channel."""
+def test_residual_removal_never_reaches_a_channel_without_evidence(monkeypatch):
+    """Even a line the whole array carries is subtracted channel by channel.
+
+    There is no shared route. Adding a frequency to every channel's plan would have
+    _clean_channel_residuals search each channel independently and subtract whatever
+    fluctuation is largest there, which in a channel without the artifact may be signal.
+    """
     import mne
 
     raw = mne.io.RawArray(
@@ -454,8 +459,10 @@ def test_study_refinement_fits_an_array_wide_residual_jointly(monkeypatch):
 
     refined = rlc._refine_study_residual_plans(raw, plan, rlc.RemovalSettings())
 
-    assert refined.study_windows[0].aggregate_residual_targets_hz == pytest.approx((27.7,))
-    assert refined.study_windows[0].channel_residual_targets_hz == ((), ())
+    assert refined.study_windows[0].aggregate_residual_targets_hz == ()
+    channels = refined.study_windows[0].channel_residual_targets_hz
+    assert len(channels) == 2
+    assert all(values == pytest.approx((27.7,)) for values in channels)
 
 
 def test_continuous_residual_support_reaches_every_overlapping_synthesis_window():

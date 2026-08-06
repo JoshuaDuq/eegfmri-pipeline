@@ -45,11 +45,13 @@ def _benchmark(
     return path
 
 
-def test_apply_refuses_when_the_cohort_sinusoid_criterion_fails(tmp_path):
-    """A surviving sinusoid is decided over the cohort for the same reason the seam is.
+def test_apply_does_not_consult_the_post_selection_sinusoid_criterion(tmp_path):
+    """That criterion tests its own detector's subtraction, so it cannot block apply.
 
-    Requiring zero significant residuals inside every recording rejects a clean cohort at
-    the test's own error rate, so the per-run gate does not contain it.
+    Residual targets are selected by the F test on each exact epoch and the criterion
+    repeats that test on the same epochs afterwards. A recording carrying a significant
+    residual by that measure is reported, not refused; the PSD matched-control gate is
+    the acceptance test, and it scores a statistic the detector does not optimise.
     """
     settings = rlc.RemovalSettings()
     path = _benchmark(
@@ -57,17 +59,8 @@ def test_apply_refuses_when_the_cohort_sinusoid_criterion_fails(tmp_path):
         rlc.settings_fingerprint(settings),
         sinusoid_p=[1e-9, 0.9, 0.9],
     )
-    with pytest.raises(RuntimeError, match="residual-sinusoid"):
-        rlc.require_passing_benchmark(path, settings)
 
-
-def test_apply_refuses_a_benchmark_with_no_sinusoid_probabilities(tmp_path):
-    settings = rlc.RemovalSettings()
-    path = _benchmark(tmp_path / "benchmark.tsv", rlc.settings_fingerprint(settings))
-    frame = pd.read_csv(path, sep="\t").drop(columns=["study_residual_sinusoid_p"])
-    frame.to_csv(path, sep="\t", index=False)
-    with pytest.raises(RuntimeError, match="residual-sinusoid probabilities"):
-        rlc.require_passing_benchmark(path, settings)
+    rlc.require_passing_benchmark(path, settings)
 
 
 def test_apply_refuses_when_the_cohort_seam_criterion_fails(tmp_path):

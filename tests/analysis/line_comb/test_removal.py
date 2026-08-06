@@ -48,64 +48,6 @@ def test_focal_residual_candidates_stay_inside_authorised_neighborhoods():
     assert candidates[1] == ()
 
 
-def test_shared_residual_candidates_need_agreement_across_the_array():
-    freqs = np.arange(20.0, 30.0, 0.05)
-    statistic = np.zeros((4, freqs.size))
-    shared = int(np.argmin(np.abs(freqs - 25.10)))
-    lone = int(np.argmin(np.abs(freqs - 24.95)))
-    statistic[:3, shared] = 100.0
-    statistic[0, lone] = 100.0
-
-    candidates = lr.shared_residual_line_candidates(
-        freqs,
-        statistic,
-        threshold=10.0,
-        targets_hz=(25.0,),
-        widths_hz=(0.1,),
-        responsibility_hz=0.15,
-        min_channel_fraction=0.5,
-    )
-
-    assert candidates == pytest.approx((25.10,))
-
-
-def test_shared_residual_candidates_stay_inside_authorised_neighborhoods():
-    freqs = np.arange(20.0, 30.0, 0.05)
-    statistic = np.zeros((2, freqs.size))
-    statistic[:, np.argmin(np.abs(freqs - 27.00))] = 100.0
-
-    candidates = lr.shared_residual_line_candidates(
-        freqs,
-        statistic,
-        threshold=10.0,
-        targets_hz=(25.0,),
-        widths_hz=(0.1,),
-        responsibility_hz=0.15,
-        min_channel_fraction=0.5,
-    )
-
-    assert candidates == ()
-
-
-def test_shared_residual_candidates_do_not_reject_within_window_drift():
-    freqs = np.arange(20.0, 30.0, 0.05)
-    statistic = np.zeros((2, freqs.size))
-    statistic[:, np.abs(freqs - 25.0) <= 0.15] = 100.0
-
-    candidates = lr.shared_residual_line_candidates(
-        freqs,
-        statistic,
-        threshold=10.0,
-        targets_hz=(25.0,),
-        widths_hz=(0.1,),
-        responsibility_hz=0.15,
-        min_channel_fraction=0.5,
-    )
-
-    assert len(candidates) == 1
-    assert abs(candidates[0] - 25.0) <= 0.15
-
-
 def test_benjamini_hochberg_rejects_the_step_up_set():
     p_values = [0.001, 0.008, 0.039, 0.041, 0.900]
 
