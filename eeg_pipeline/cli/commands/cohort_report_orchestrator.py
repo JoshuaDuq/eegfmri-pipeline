@@ -25,10 +25,7 @@ def run_cohort_report(args: argparse.Namespace, subjects: list[str], config: Any
         task=getattr(args, "task", None),
         subjects=selected,
     )
-    gates = BandGates(
-        min_subjects_for_median=int(args.min_subjects_for_median),
-        min_subjects_for_outer_band=int(args.min_subjects_for_outer_band),
-    )
+    gates = _resolved_gates(args, config)
     output_dir = (
         Path(args.output_dir)
         if getattr(args, "output_dir", None)
@@ -53,6 +50,29 @@ def run_cohort_report(args: argparse.Namespace, subjects: list[str], config: Any
     print(f"Wrote cohort log: {paths.log}")
     for path in paths.audit:
         print(f"Wrote audit table: {path}")
+
+
+def _resolved_gates(args: argparse.Namespace, config: Any) -> BandGates:
+    """The band gates this run draws under: the config's, unless a flag overrode one.
+
+    The config is the source, so the gates a cohort was drawn under travel with the study
+    rather than with whoever typed the command, and the report's own log records them.
+    The flags remain for a one-off run against a different threshold and are ``None``
+    unless given, which is what distinguishes "not passed" from "passed the default".
+    """
+    from eeg_pipeline.preprocessing.report.settings import ReportSettings
+
+    settings = ReportSettings.from_config(config)
+    median = getattr(args, "min_subjects_for_median", None)
+    outer = getattr(args, "min_subjects_for_outer_band", None)
+    return BandGates(
+        min_subjects_for_median=(
+            settings.min_subjects_for_median if median is None else int(median)
+        ),
+        min_subjects_for_outer_band=(
+            settings.min_subjects_for_outer_band if outer is None else int(outer)
+        ),
+    )
 
 
 def _resolved_task(args: argparse.Namespace, cohort) -> str | None:

@@ -38,6 +38,9 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.sidecar import AcquisitionContext
+from eeg_pipeline.preprocessing.report.analyzer_qc import (
+    DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
+)
 from eeg_pipeline.preprocessing.report.tables import MISSING, Align, Column, grid_table
 
 ANALYZER_SECTION = "Scanner artifact correction (Analyzer)"
@@ -47,7 +50,11 @@ ANALYZER_TAG = "cohort-analyzer"
 #: Intervals outside this range are not a heart rate. Used to count implausible intervals,
 #: never to reject a participant: the count is the measurement, and what it means about a
 #: recording is the reader's call.
-PLAUSIBLE_BPM = (30.0, 220.0)
+#:
+#: The default for ``report.thresholds.plausible_heart_rate_bpm``, which is the same
+#: statement the subject tachogram shades. Both read one setting, so the two documents
+#: cannot disagree about what is possible the way the two constants they replaced did.
+PLAUSIBLE_BPM = DEFAULT_PLAUSIBLE_HEART_RATE_BPM
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,9 @@ class AnalyzerCohort:
     """
 
     frame: pd.DataFrame
+    #: The range ``implausible_rate`` was decided at, carried so the note beneath the
+    #: table quotes the bounds that were applied rather than the module default.
+    plausible_bpm: tuple[float, float] = PLAUSIBLE_BPM
 
     @property
     def n_participants(self) -> int:
@@ -85,7 +95,12 @@ def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(frame[column], errors="coerce").astype(float)
 
 
-def _participant_row(subject: str, runs: pd.DataFrame) -> dict[str, object]:
+def _participant_row(
+    subject: str,
+    runs: pd.DataFrame,
+    *,
+    plausible_bpm: tuple[float, float] = PLAUSIBLE_BPM,
+) -> dict[str, object]:
     """Reduce one participant's runs to the row the cohort panels read.
 
     Sensitivity and precision are pooled from their primitive counts. They answer different
@@ -126,7 +141,7 @@ def _participant_row(subject: str, runs: pd.DataFrame) -> dict[str, object]:
     row["median_bpm"] = float(measured_rate.median()) if not measured_rate.empty else float("nan")
     row["implausible_rate"] = (
         bool(
-            (row["median_bpm"] < PLAUSIBLE_BPM[0]) or (row["median_bpm"] > PLAUSIBLE_BPM[1])
+            (row["median_bpm"] < plausible_bpm[0]) or (row["median_bpm"] > plausible_bpm[1])
         )
         if np.isfinite(row["median_bpm"])
         else False
@@ -144,7 +159,11 @@ def _participant_row(subject: str, runs: pd.DataFrame) -> dict[str, object]:
     return row
 
 
-def analyzer_cohort(cohort: Cohort) -> AnalyzerCohort | None:
+def analyzer_cohort(
+    cohort: Cohort,
+    *,
+    plausible_bpm: tuple[float, float] = PLAUSIBLE_BPM,
+) -> AnalyzerCohort | None:
     """Assemble the per-participant frame, or nothing outside a scanner.
 
     Restricted to in-scanner participants by the recorded context rather than by whether a
@@ -154,7 +173,7 @@ def analyzer_cohort(cohort: Cohort) -> AnalyzerCohort | None:
     """
     in_scanner = cohort.select(context=AcquisitionContext.IN_SCANNER)
     rows = [
-        _participant_row(participant.subject, participant.runs)
+        _participant_row(participant.subject, participant.runs, plausible_bpm=plausible_bpm)
         for participant in in_scanner.participants
         if not participant.runs.empty
     ]
@@ -165,7 +184,7 @@ def analyzer_cohort(cohort: Cohort) -> AnalyzerCohort | None:
         frame[["marker_agreement", "marker_precision", "median_bpm", "dropout_fraction"]]
     ).any().any():
         return None
-    return AnalyzerCohort(frame=frame)
+    return AnalyzerCohort(frame=frame, plausible_bpm=tuple(plausible_bpm))
 
 
 def analyzer_audit(analyzer: AnalyzerCohort) -> pd.DataFrame:
@@ -220,17 +239,18 @@ def implausible_note(analyzer: AnalyzerCohort) -> str:
     participant but a detector that was not tracking beats, and the correction built on it
     describes something other than the pulse.
     """
+    low, high = analyzer.plausible_bpm
     flagged = analyzer.frame[analyzer.frame["implausible_rate"].astype(bool)]
     if flagged.empty:
         return (
             "<p>Every participant's median interval sits inside a physiologically possible "
-            f"heart rate ({PLAUSIBLE_BPM[0]:.0f}&ndash;{PLAUSIBLE_BPM[1]:.0f} bpm), so no "
+            f"heart rate ({low:.0f}&ndash;{high:.0f} bpm), so no "
             "interval series can be ruled out as a detection failure on its own terms.</p>"
         )
     named = ", ".join(str(subject) for subject in flagged["subject"])
     return (
         f"<p><strong>{named}</strong> recorded a median interval outside a physiologically "
-        f"possible heart rate ({PLAUSIBLE_BPM[0]:.0f}&ndash;{PLAUSIBLE_BPM[1]:.0f} bpm). "
+        f"possible heart rate ({low:.0f}&ndash;{high:.0f} bpm). "
         "That is a statement about the detector rather than about the participant: an "
         "interval series that is not a heart rate was not tracking beats, and the pulse "
         "correction built on it removed something other than the pulse.</p>"
@@ -242,9 +262,10 @@ def add_analyzer_section(
     report: mne.Report,
     cohort: Cohort,
     gates: BandGates = DEFAULT_GATES,
+    plausible_bpm: tuple[float, float] = PLAUSIBLE_BPM,
 ) -> AnalyzerCohort | None:
     """Add the Analyzer section, or nothing when no participant was in a scanner."""
-    analyzer = analyzer_cohort(cohort)
+    analyzer = analyzer_cohort(cohort, plausible_bpm=plausible_bpm)
     correction = correction_html(cohort)
     if analyzer is None:
         # No agreement to measure and no heart rate, which is what a cohort whose runs

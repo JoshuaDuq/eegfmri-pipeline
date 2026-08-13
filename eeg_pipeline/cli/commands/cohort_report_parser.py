@@ -58,20 +58,22 @@ def setup_cohort_report(subparsers: argparse._SubParsersAction) -> argparse.Argu
     parser.add_argument(
         "--min-subjects-for-median",
         type=int,
-        default=DEFAULT_GATES.min_subjects_for_median,
+        default=None,
         help=(
-            "Participants required before a panel draws a median and interquartile band "
-            f"(default: {DEFAULT_GATES.min_subjects_for_median}). A value that would "
-            "extrapolate a quartile beyond the observed participants is rejected."
+            "Participants required before a panel draws a median and interquartile band. "
+            "Overrides report.thresholds.min_subjects_for_median, which defaults to "
+            f"{DEFAULT_GATES.min_subjects_for_median}. A value that would extrapolate a "
+            "quartile beyond the observed participants is rejected."
         ),
     )
     parser.add_argument(
         "--min-subjects-for-outer-band",
         type=int,
-        default=DEFAULT_GATES.min_subjects_for_outer_band,
+        default=None,
         help=(
             "Participants required before a panel additionally draws the 10th-to-90th "
-            f"band (default: {DEFAULT_GATES.min_subjects_for_outer_band})."
+            "band. Overrides report.thresholds.min_subjects_for_outer_band, which "
+            f"defaults to {DEFAULT_GATES.min_subjects_for_outer_band}."
         ),
     )
     parser.add_argument(

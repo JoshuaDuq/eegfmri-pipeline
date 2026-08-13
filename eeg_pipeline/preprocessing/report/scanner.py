@@ -38,7 +38,11 @@ from matplotlib.lines import Line2D
 
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets, onset_events
 from eeg_pipeline.preprocessing.report.cohort.noise_floor import measure_locked_average
-from eeg_pipeline.preprocessing.report.filtering import in_notch, notch_windows
+from eeg_pipeline.preprocessing.report.filtering import (
+    NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    in_notch,
+    notch_windows,
+)
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,
@@ -307,6 +311,7 @@ def compute_comb_residual(
     band_hz: tuple[float, float] = (15.0, 90.0),
     welch_seconds: float = COMB_WELCH_SECONDS,
     line_frequency: float | None = None,
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> CombResidual | None:
     """Measure the gradient comb against its background, before and after ICA.
 
@@ -343,7 +348,14 @@ def compute_comb_residual(
     if harmonics.size == 0:
         return None
 
-    notched = in_notch(harmonics, notch_windows(line_frequency, fmax=float(harmonics[-1])))
+    notched = in_notch(
+        harmonics,
+        notch_windows(
+            line_frequency,
+            fmax=float(harmonics[-1]),
+            half_width=notch_half_width_hz,
+        ),
+    )
     if notched.all():
         # Every line sits in a stopband, so there is no comb left to measure. Reported as
         # an absent measurement rather than a table of filter depths.

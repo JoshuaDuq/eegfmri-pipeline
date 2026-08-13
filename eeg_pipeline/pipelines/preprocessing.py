@@ -2034,6 +2034,7 @@ class PreprocessingPipeline(PipelineBase):
             trials_by_condition=presented,
             retained_by_condition=retained,
             measurements=latest_measurements(record),
+            label_patterns=settings.component_label_patterns,
             settings=asdict(settings),
             versions=_recorded_versions(record),
             acquisition_date=evidence.acquisition_date,

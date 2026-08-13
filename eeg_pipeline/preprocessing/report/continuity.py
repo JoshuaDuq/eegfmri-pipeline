@@ -188,21 +188,28 @@ def _volume_gaps(
 
 #: Annotation descriptions that are not task events.
 #:
-#: Everything the acquisition and this pipeline write for their own purposes: scanner
-#: volume and R markers, BAD spans, recording-segment boundaries. Identified by exclusion
-#: rather than by listing the event names, because the event names belong to whatever
-#: paradigm produced the data and cannot be enumerated here.
-_NON_EVENT_PREFIXES = ("BAD", "EDGE", "NEW SEGMENT", "VOLUME/", "R  ", "R/", "RESPONSE/")
+#: Identified by exclusion rather than by listing the event names, because the event names
+#: belong to whatever paradigm produced the data and cannot be enumerated here.
+#:
+#: The default names only what this pipeline and MNE write for their own purposes: BAD
+#: spans, filter edge markers, recording-segment boundaries. The acquisition's own
+#: bookkeeping is not listed, because the configured volume and pulse marker descriptions
+#: are merged in at the call site and already cover it. Anything else a site writes that
+#: is not a trial -- a response marker in a paradigm where responses are not the event, a
+#: stimulus-computer heartbeat -- belongs in ``report.acquisition.non_event_prefixes``
+#: rather than here, where it would silently suppress another lab's events.
+NON_EVENT_PREFIXES = ("BAD", "EDGE", "NEW SEGMENT")
 
 
 def _event_onsets(
     raw: mne.io.BaseRaw,
     *,
     marker_descriptions: Sequence[str],
+    non_event_prefixes: Sequence[str] = NON_EVENT_PREFIXES,
 ) -> tuple[float, ...]:
     """Return the onset of every task event, in seconds from the run start."""
     start = raw.first_time
-    excluded = set(_NON_EVENT_PREFIXES)
+    excluded = {prefix.upper() for prefix in non_event_prefixes if prefix}
     excluded.update(description.upper() for description in marker_descriptions if description)
     onsets = []
     for annotation in raw.annotations:
@@ -250,6 +257,7 @@ def compute_run_continuity(
     edge_support_seconds: float = 0.0,
     volume_description: str | None = None,
     pulse_description: str | None = None,
+    non_event_prefixes: Sequence[str] = NON_EVENT_PREFIXES,
 ) -> RunContinuity:
     """Measure windowed amplitude across one continuous run."""
     if window_seconds <= 0:
@@ -310,6 +318,7 @@ def compute_run_continuity(
         event_onsets=_event_onsets(
             raw,
             marker_descriptions=(volume_description or "", pulse_description or ""),
+            non_event_prefixes=non_event_prefixes,
         ),
         has_volume_markers=bool(volume_onsets.size),
         ordered_by_position=ordered_by_position,

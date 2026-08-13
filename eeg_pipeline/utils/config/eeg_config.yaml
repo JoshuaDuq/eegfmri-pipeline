@@ -656,6 +656,42 @@ report:
     # resolution cannot separate the comb, the section reports itself absent rather than
     # returning a number set by the window.
     comb_welch_seconds: 8.0
+    # Physiologically possible heart rate. One statement, two readers: the subject
+    # tachogram shades the interval range it implies and the cohort panel counts
+    # participants whose median falls outside it. Neither rejects anybody — the count is
+    # the measurement and what it means is the reviewer's call. 30–220 bpm covers an
+    # adult at rest through an adult under load; a developmental or paediatric cohort
+    # sits higher and should say so here.
+    plausible_heart_rate_bpm: [30.0, 220.0]
+    # Distance within which a beat marker and an ECG-detected R peak are taken to be the
+    # same beat. Two detectors pick different samples of the same beat and routinely
+    # differ by tens of milliseconds. Must stay below half the shortest interval the
+    # heart rate above allows, or a marker can match the beat after the one it belongs
+    # to and report agreement the detectors never had.
+    marker_agreement_tolerance_s: 0.1
+    # Half-width of the band a notch filter is treated as having removed, in hertz.
+    # Every measurement that reads power at a frequency uses it to tell filter from
+    # data: the aperiodic fit excludes it, the spectral axis ignores it, and a gradient
+    # harmonic landing inside it is drawn but not scored. Sized for the FIR notch this
+    # pipeline applies (0.97 Hz wide); a wider filter, or a different line-removal
+    # method, owns a different span of bins.
+    notch_exclusion_half_width_hz: 2.0
+    # Repetition times within this of each other are one sequence, so that ordinary
+    # scatter in the marker train does not force the cohort comb onto a harmonic-index
+    # axis when every participant was scanned identically.
+    repetition_time_tolerance_s: 0.001
+    # Electrode positions within this of each other are the same site on the head.
+    # Positions come from digitisation or a montage lookup, so nominally identical
+    # electrodes differ by rounding rather than by millimetres.
+    channel_position_tolerance_m: 0.005
+    # Participants required before a cohort panel draws a median and interquartile band,
+    # and before it additionally draws the 10th-to-90th band. Distinct from
+    # min_runs_for_quantile_band above, which gates a band over one participant's runs.
+    # Neither may be set low enough to extrapolate a quantile beyond the participants
+    # actually observed; a value that would is rejected rather than drawn. The cohort
+    # command's --min-subjects-* flags override these for a one-off run.
+    min_subjects_for_median: 5
+    min_subjects_for_outer_band: 10
   display:
     # Percentile of absolute values defining symmetric colour limits, so that one
     # extreme component cannot flatten every other to the neutral colour.
@@ -688,12 +724,57 @@ report:
     response_window_s: [0.0, 1.0]
     # Posterior rhythm band used as signal-preservation evidence.
     alpha_band_hz: [7.0, 14.0]
+    # Neighbourhood the posterior rhythm is scored against. The prominence is the peak's
+    # excess over a background fitted outside the band, so this must surround
+    # alpha_band_hz and moves with it: a band shifted down for a developmental cohort
+    # needs its reference window shifted too, or the peak is scored against a background
+    # fitted where the peak now is.
+    alpha_reference_band_hz: [3.0, 25.0]
+    # Beat-locked residual: the epoch cut around each R peak, the baseline removed from
+    # it, and the window the residual amplitude is read in. All three describe the
+    # artifact's timing rather than the estimator — the ballistocardiogram follows the R
+    # peak by roughly a fifth of a second at 3 T, which is a property of the field and
+    # the population. The baseline and the measurement window must both lie inside the
+    # epoch; a baseline outside it is silently no baseline.
+    bcg_residual_window_s: [-0.2, 0.6]
+    bcg_residual_baseline_s: [-0.2, -0.1]
+    bcg_residual_measurement_s: [0.0, 0.5]
   acquisition:
     # Exact annotation descriptions written by the scanner and Analyzer acquisition.
     volume_marker_description: "Volume/V  1"
     pulse_marker_description: "Pulse Artifact/R"
     # Electrode names eligible for the posterior-rhythm measurement.
     posterior_channel_pattern: '^(P[0-9z]|PO[0-9z]|O[0-9z]|Oz|POz|Pz)'
+    # Annotation prefixes that are not task events, so the event rug under the "Data
+    # quality over time" trace counts trials rather than the acquisition's bookkeeping.
+    # Matched case-insensitively against the start of each annotation.
+    #
+    # The default names only what this pipeline and MNE write for themselves. The volume
+    # and pulse marker descriptions above are excluded automatically and need no entry.
+    # Add whatever else your acquisition writes that is not a trial — a stimulus-computer
+    # heartbeat, a scanner trigger spelled its own way, a response marker in a paradigm
+    # where the response is not the event. Do NOT add a prefix your trials start with:
+    # the rug would then report zero events on a run full of them.
+    non_event_prefixes: ["BAD", "EDGE", "NEW SEGMENT"]
+    # Detector prose mapped to the class a cohort counts an excluded ICA component
+    # under, matched lowercase as a substring of the detector's status description.
+    #
+    # Order decides which of two overlapping patterns wins, so it is preserved as
+    # written: "channel noise" must precede anything matching bare "noise". A
+    # description no pattern matches is counted under "other" rather than dropped, so a
+    # site whose detectors write different prose gets a cohort where every exclusion is
+    # unclassified rather than one that is wrong — set your own patterns instead.
+    # Classes: eye, heart, muscle, line, channel.
+    component_label_patterns:
+      - ["eye blink", "eye"]
+      - ["eog", "eye"]
+      - ["ocular", "eye"]
+      - ["heart beat", "heart"]
+      - ["ecg", "heart"]
+      - ["cardiac", "heart"]
+      - ["muscle", "muscle"]
+      - ["line noise", "line"]
+      - ["channel noise", "channel"]
 
 # 4.2a ICA Component Time-Frequency Analysis
 component_time_frequency:

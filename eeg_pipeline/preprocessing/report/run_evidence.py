@@ -172,6 +172,7 @@ def _measure_gradient(
         band_hz=settings.comb_frequency_range_hz,
         welch_seconds=settings.comb_welch_seconds,
         line_frequency=settings.spectra_line_frequency,
+        notch_half_width_hz=settings.notch_exclusion_half_width_hz,
     )
     if comb is not None:
         evidence.combs.append(comb)
@@ -232,6 +233,7 @@ def measure_runs(
                 line_frequency=settings.spectra_line_frequency,
                 gradient_fundamental_hz=None if timing is None else timing.fundamental_hz,
                 aperiodic_fit_range_hz=settings.aperiodic_fit_range_hz,
+                notch_half_width_hz=settings.notch_exclusion_half_width_hz,
             )
         )
         evidence.continuity.append(
@@ -242,6 +244,7 @@ def measure_runs(
                 edge_support_seconds=edge_support_seconds,
                 volume_description=settings.volume_marker_description,
                 pulse_description=settings.pulse_marker_description,
+                non_event_prefixes=settings.non_event_prefixes,
             )
         )
         intervals = compute_rr_intervals(
@@ -258,6 +261,7 @@ def measure_runs(
             raw,
             recording_id=recording_id,
             description=settings.pulse_marker_description,
+            tolerance_s=settings.marker_agreement_tolerance_s,
         )
         if agreement is not None:
             evidence.marker_agreements.append(agreement)
@@ -271,6 +275,9 @@ def measure_runs(
                 raw,
                 recording_id=recording_id,
                 marker_description=settings.pulse_marker_description,
+                window_s=settings.bcg_residual_window_s,
+                baseline_s=settings.bcg_residual_baseline_s,
+                measurement_s=settings.bcg_residual_measurement_s,
             )
         )
 
@@ -289,11 +296,13 @@ def measure_runs(
         before_alpha = compute_posterior_alpha(
             raw,
             band_hz=settings.alpha_band_hz,
+            reference_band_hz=settings.alpha_reference_band_hz,
             pattern=settings.posterior_channel_pattern,
         )
         after_alpha = compute_posterior_alpha(
             cleaned,
             band_hz=settings.alpha_band_hz,
+            reference_band_hz=settings.alpha_reference_band_hz,
             pattern=settings.posterior_channel_pattern,
         )
         if before_alpha is not None and after_alpha is not None:
@@ -353,6 +362,7 @@ def add_run_evidence_sections(
             marked_frequencies=(
                 tuple(settings.spectra_marked_frequencies) + evidence.gradient_marks_hz
             ),
+            notch_half_width_hz=settings.notch_exclusion_half_width_hz,
         )
     if evidence.has_scanner_evidence:
         add_scanner_residual_section(
@@ -367,6 +377,7 @@ def add_run_evidence_sections(
             report=report,
             series=evidence.rr_intervals,
             missing=evidence.rr_missing,
+            plausible_rr_range_s=settings.plausible_rr_range_s,
         )
     if evidence.marker_agreements:
         add_marker_agreement_section(

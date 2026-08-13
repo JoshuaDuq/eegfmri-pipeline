@@ -102,8 +102,10 @@ def _args(**overrides) -> argparse.Namespace:
         "task": None,
         "deriv_root": None,
         "output_dir": None,
-        "min_subjects_for_median": 5,
-        "min_subjects_for_outer_band": 10,
+        # None as the parser now leaves them: unset means "take the config's value",
+        # which is what distinguishes not passing a flag from passing its default.
+        "min_subjects_for_median": None,
+        "min_subjects_for_outer_band": None,
         "title": None,
     }
     defaults.update(overrides)
@@ -249,6 +251,71 @@ def test_the_gates_reach_the_document(deriv_root, tmp_path) -> None:
         "min_subjects_for_median": 6,
         "min_subjects_for_outer_band": 12,
     }
+
+
+class _GateConfig:
+    """A config carrying only the report block, read through dotted-key lookup."""
+
+    def __init__(self, **thresholds) -> None:
+        self._report = {"thresholds": dict(thresholds)}
+
+    def get(self, key: str, default=None):
+        return self._report if key == "report" else default
+
+
+def test_the_gates_come_from_the_config_when_no_flag_was_given(deriv_root, tmp_path) -> None:
+    """The gates a cohort was drawn under travel with the study, not with the command."""
+    output = tmp_path / "group"
+
+    run_cohort_report(
+        _args(deriv_root=str(deriv_root), output_dir=str(output)),
+        [],
+        _GateConfig(min_subjects_for_median=7, min_subjects_for_outer_band=14),
+    )
+
+    log = json.loads(
+        (output / "task-thermalactive_desc-cohort_log.json").read_text(encoding="utf-8")
+    )
+    assert log["band_gates"] == {
+        "min_subjects_for_median": 7,
+        "min_subjects_for_outer_band": 14,
+    }
+
+
+def test_a_flag_overrides_the_configured_gate(deriv_root, tmp_path) -> None:
+    """The flags remain, for a one-off run against a different threshold."""
+    output = tmp_path / "group"
+
+    run_cohort_report(
+        _args(
+            deriv_root=str(deriv_root),
+            output_dir=str(output),
+            min_subjects_for_median=6,
+        ),
+        [],
+        _GateConfig(min_subjects_for_median=7, min_subjects_for_outer_band=14),
+    )
+
+    log = json.loads(
+        (output / "task-thermalactive_desc-cohort_log.json").read_text(encoding="utf-8")
+    )
+    # The flag moved its own gate; the one not passed still came from the config.
+    assert log["band_gates"] == {
+        "min_subjects_for_median": 6,
+        "min_subjects_for_outer_band": 14,
+    }
+
+
+def test_a_configured_gate_that_would_extrapolate_is_refused_like_a_flag(
+    deriv_root, tmp_path
+) -> None:
+    """Config is not a way around the arithmetic the flags are checked against."""
+    with pytest.raises(ValueError, match="extrapolate"):
+        run_cohort_report(
+            _args(deriv_root=str(deriv_root), output_dir=str(tmp_path / "group")),
+            [],
+            _GateConfig(min_subjects_for_median=2),
+        )
 
 
 def test_a_gate_that_would_extrapolate_a_quantile_is_refused(deriv_root, tmp_path) -> None:

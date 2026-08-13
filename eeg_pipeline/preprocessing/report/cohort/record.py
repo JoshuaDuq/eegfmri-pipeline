@@ -44,6 +44,9 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
     run_columns_for,
 )
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
+from eeg_pipeline.preprocessing.report.settings import (
+    DEFAULT_COMPONENT_LABEL_PATTERNS,
+)
 from eeg_pipeline.preprocessing.report.preservation import PosteriorAlpha
 from eeg_pipeline.preprocessing.report.scanner import CombResidual, VolumeLockedAverage
 from eeg_pipeline.preprocessing.report.spectra import RunSpectra
@@ -304,25 +307,21 @@ def comb_curves(combs: Sequence[CombResidual]) -> pd.DataFrame:
 #:
 #: Reading prose is fragile and is done here, once, at write time, rather than in the
 #: cohort command: a description this table does not recognise lands in ``other`` and is
-#: still counted, which is the failure mode worth having.
-_LABEL_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("eye blink", "eye"),
-    ("eog", "eye"),
-    ("ocular", "eye"),
-    ("heart beat", "heart"),
-    ("ecg", "heart"),
-    ("cardiac", "heart"),
-    ("muscle", "muscle"),
-    ("line noise", "line"),
-    ("channel noise", "channel"),
-)
+#: still counted, which is the failure mode worth having. A site whose detectors write
+#: different prose sets ``report.acquisition.component_label_patterns`` rather than
+#: accepting a cohort where every exclusion is unclassified.
+_LABEL_PATTERNS: tuple[tuple[str, str], ...] = DEFAULT_COMPONENT_LABEL_PATTERNS
 
 #: Classes a cohort reports, in reading order. ``other`` collects descriptions no pattern
 #: matched; ``unrecorded`` counts exclusions no detector explained.
 COMPONENT_LABEL_CLASSES = ("eye", "heart", "muscle", "line", "channel", "other", "unrecorded")
 
 
-def component_label_counts(components: pd.DataFrame | None) -> dict[str, int]:
+def component_label_counts(
+    components: pd.DataFrame | None,
+    *,
+    label_patterns: Sequence[tuple[str, str]] = _LABEL_PATTERNS,
+) -> dict[str, int]:
     """Count the excluded components under each detector class.
 
     A cohort panel built on these separates "twelve components removed" from "twelve
@@ -341,7 +340,7 @@ def component_label_counts(components: pd.DataFrame | None) -> dict[str, int]:
         if not text:
             counts["unrecorded"] += 1
             continue
-        for pattern, label in _LABEL_PATTERNS:
+        for pattern, label in label_patterns:
             if pattern in text:
                 counts[label] += 1
                 break
@@ -538,6 +537,7 @@ def build_subject_sidecar(
     settings: Mapping[str, Any] | None = None,
     versions: Mapping[str, str] | None = None,
     acquisition_date: str | None = None,
+    label_patterns: Sequence[tuple[str, str]] = _LABEL_PATTERNS,
 ) -> SubjectSidecar:
     """Assemble one participant's sidecar from what the measuring pass produced."""
     if not spectra:
@@ -550,7 +550,9 @@ def build_subject_sidecar(
     combined: dict[str, Any] = dict(measurements or {})
     combined.update(alpha_measurements(alpha))
     if components is not None:
-        for label, count in component_label_counts(components).items():
+        for label, count in component_label_counts(
+            components, label_patterns=label_patterns
+        ).items():
             combined[f"n_excluded_{label}"] = count
 
     return SubjectSidecar(

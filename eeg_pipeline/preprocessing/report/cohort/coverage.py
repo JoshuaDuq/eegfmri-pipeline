@@ -27,6 +27,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import PercentFormatter
 
+from eeg_pipeline.preprocessing.report.settings import (
+    DEFAULT_CHANNEL_POSITION_TOLERANCE_M,
+)
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.style import (
     apply_report_style,
@@ -41,7 +44,7 @@ COVERAGE_TAG = "cohort-coverage"
 #: Distance below which two recordings are taken to have placed a sensor in the same spot,
 #: in metres. Sensor positions come from digitisation or a montage lookup, so nominally
 #: identical electrodes differ by rounding rather than by millimetres.
-POSITION_TOLERANCE_M = 5e-3
+POSITION_TOLERANCE_M = DEFAULT_CHANNEL_POSITION_TOLERANCE_M
 
 #: Electrodes listed in the ranked table. The rest are named in the audit table rather
 #: than filling a page with channels no participant had trouble with.
@@ -62,7 +65,11 @@ class CohortCoverage:
         return not self.disagreeing_subjects and self.channels[["x", "y", "z"]].notna().all().all()
 
 
-def cohort_coverage(cohort: Cohort) -> CohortCoverage | None:
+def cohort_coverage(
+    cohort: Cohort,
+    *,
+    position_tolerance_m: float = POSITION_TOLERANCE_M,
+) -> CohortCoverage | None:
     """Count, per electrode, how many participants had it bad and how many had it at all.
 
     The denominator is per electrode, not per cohort. A montage that gained two channels
@@ -96,7 +103,7 @@ def cohort_coverage(cohort: Cohort) -> CohortCoverage | None:
             positions.setdefault(name, []).append(location)
             if name not in reference:
                 reference[name] = location
-            elif float(np.linalg.norm(location - reference[name])) > POSITION_TOLERANCE_M:
+            elif float(np.linalg.norm(location - reference[name])) > position_tolerance_m:
                 disagreeing.add(subject)
 
     rows = []
@@ -234,9 +241,14 @@ def participant_table(cohort: Cohort) -> str:
     return grid_table(columns, rows)
 
 
-def add_coverage_section(*, report: mne.Report, cohort: Cohort) -> CohortCoverage | None:
+def add_coverage_section(
+    *,
+    report: mne.Report,
+    cohort: Cohort,
+    position_tolerance_m: float = POSITION_TOLERANCE_M,
+) -> CohortCoverage | None:
     """Add the cohort coverage section, or nothing when no participant recorded channels."""
-    coverage = cohort_coverage(cohort)
+    coverage = cohort_coverage(cohort, position_tolerance_m=position_tolerance_m)
     if coverage is None:
         return None
 

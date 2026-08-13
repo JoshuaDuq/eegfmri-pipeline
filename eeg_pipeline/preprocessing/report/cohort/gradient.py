@@ -45,6 +45,9 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
     pool_participants_curve,
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
+from eeg_pipeline.preprocessing.report.settings import (
+    DEFAULT_REPETITION_TIME_TOLERANCE_S,
+)
 from eeg_pipeline.preprocessing.report.cohort.sidecar import SubjectSidecar
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
@@ -62,7 +65,7 @@ GRADIENT_TAG = "cohort-gradient"
 
 #: Repetition times within this of each other are treated as one rate, so that ordinary
 #: measurement scatter in the marker train does not force a cohort onto the index axis.
-REPETITION_TIME_TOLERANCE_S = 1e-3
+REPETITION_TIME_TOLERANCE_S = DEFAULT_REPETITION_TIME_TOLERANCE_S
 
 #: Excess of a comb line over the background beside it, below which the line is
 #: indistinguishable from the surrounding spectrum. Zero by construction, drawn as a guide
@@ -138,7 +141,12 @@ def _repetition_times(cohort: Cohort) -> tuple[float, ...]:
     return tuple(values)
 
 
-def cohort_comb(cohort: Cohort, *, gates: BandGates = DEFAULT_GATES) -> CohortComb | None:
+def cohort_comb(
+    cohort: Cohort,
+    *,
+    gates: BandGates = DEFAULT_GATES,
+    repetition_time_tolerance_s: float = REPETITION_TIME_TOLERANCE_S,
+) -> CohortComb | None:
     """Pool the comb across participants, choosing the axis they can share.
 
     Returns ``None`` when no participant resolved a comb, which is an ordinary outcome:
@@ -171,7 +179,7 @@ def cohort_comb(cohort: Cohort, *, gates: BandGates = DEFAULT_GATES) -> CohortCo
         ]
 
     rates = _repetition_times(cohort)
-    shared_rate = bool(rates) and float(np.ptp(rates)) <= REPETITION_TIME_TOLERANCE_S
+    shared_rate = bool(rates) and float(np.ptp(rates)) <= repetition_time_tolerance_s
     harmonic_hz = None
     if shared_rate:
         reference = combs[sorted(combs)[0]]
@@ -419,9 +427,12 @@ def add_gradient_section(
     report: mne.Report,
     cohort: Cohort,
     gates: BandGates = DEFAULT_GATES,
+    repetition_time_tolerance_s: float = REPETITION_TIME_TOLERANCE_S,
 ) -> CohortComb | None:
     """Add the cohort gradient section, or nothing when no participant was in a scanner."""
-    comb = cohort_comb(cohort, gates=gates)
+    comb = cohort_comb(
+        cohort, gates=gates, repetition_time_tolerance_s=repetition_time_tolerance_s
+    )
     timing = timing_table(cohort)
     if comb is None and not timing:
         return None

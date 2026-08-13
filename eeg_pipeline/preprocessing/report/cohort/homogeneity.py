@@ -37,9 +37,20 @@ COMPARED_SETTINGS = (
     "continuity_window_seconds",
     "spectra_fmax",
     "spectra_line_frequency",
+    "notch_exclusion_half_width_hz",
     "aperiodic_fit_range_hz",
     "alpha_band_hz",
+    "alpha_reference_band_hz",
+    # Selects the sensors the rhythm is measured over, so it changes the pooled
+    # prominence as much as the band does. Configurable since the panel was written and
+    # absent from this list until the rest of the acquisition settings joined it.
+    "posterior_channel_pattern",
     "response_window_s",
+    "plausible_heart_rate_bpm",
+    "marker_agreement_tolerance_s",
+    "bcg_residual_window_s",
+    "bcg_residual_baseline_s",
+    "bcg_residual_measurement_s",
 )
 
 
@@ -61,7 +72,15 @@ def _disagreements(
 
 
 def _hashable(value: Any) -> Any:
-    return tuple(value) if isinstance(value, list) else value
+    """A comparable form of a setting, whatever depth JSON gave it back at.
+
+    Recursive because a setting may be a list of pairs -- the detector-prose patterns are
+    -- and a one-level conversion leaves the inner lists unhashable, which fails the
+    comparison with a TypeError instead of reporting a disagreement.
+    """
+    if isinstance(value, (list, tuple)):
+        return tuple(_hashable(item) for item in value)
+    return value
 
 
 def version_disagreements(cohort: Cohort) -> dict[str, dict[str, Any]]:

@@ -45,6 +45,27 @@
 #   eeg.eog_channels                 Fp1/Fp2 surrogates; name a real EOG lead if you have one
 #   preprocessing.resample_freq      500 Hz
 #   preprocessing.notch_freq         60 Hz — set 50 outside North America
+#   rois                             easycap-M1 10-20 names, and the Left/Right labels are
+#                                    valid only for consistent left-side stimulation. They
+#                                    drive the report's region-coverage table, so a
+#                                    different montage gets regions with no channels in them
+#
+# The subject report assumes things about your paradigm too, and each is one line:
+#
+#   report.analysis.response_window_s        [0.0, 1.0] s — where the split-half evoked
+#                                            reliability is measured. A paradigm whose
+#                                            response falls outside it reports a
+#                                            reliability near zero for a sound dataset
+#   report.analysis.alpha_band_hz            [7.0, 14.0] — the rhythm used as preservation
+#   report.analysis.alpha_reference_band_hz  [3.0, 25.0] — must surround the band above
+#   report.acquisition.posterior_channel_pattern
+#                                            10-20 names; a different naming scheme leaves
+#                                            the preservation panel with no channels
+#   report.acquisition.non_event_prefixes    annotation prefixes that are not trials. Add
+#                                            what your acquisition writes for itself; never
+#                                            add a prefix your own trials start with
+#   report.thresholds.plausible_heart_rate_bpm
+#                                            [30, 220] — an adult range
 #
 # 'eeg-pipeline validate --config-only' reports whatever is still contradictory.
 

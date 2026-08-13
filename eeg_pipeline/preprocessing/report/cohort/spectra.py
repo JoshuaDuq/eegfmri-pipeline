@@ -47,7 +47,10 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
     AcquisitionContext,
     SubjectSidecar,
 )
-from eeg_pipeline.preprocessing.report.filtering import notch_windows
+from eeg_pipeline.preprocessing.report.filtering import (
+    NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    notch_windows,
+)
 from eeg_pipeline.preprocessing.report.spectra import POWER_UNIT_LABEL
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
@@ -197,7 +200,12 @@ def _agreed_setting(cohort: Cohort, key: str) -> float | None:
     return float(next(iter(values)))
 
 
-def _power_limits(spectra: CohortSpectra, *, line_frequency: float | None) -> tuple[float, float]:
+def _power_limits(
+    spectra: CohortSpectra,
+    *,
+    line_frequency: float | None,
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+) -> tuple[float, float]:
     """Bound the power axis by the spectra rather than by the notch they contain.
 
     A notch drives its band to the numerical floor, tens of decibels below anything else.
@@ -206,7 +214,11 @@ def _power_limits(spectra: CohortSpectra, *, line_frequency: float | None) -> tu
     simply leaves the axis, which reads as a filtered band rather than as missing data.
     """
     keep = np.ones_like(spectra.frequencies, dtype=bool)
-    for low, high in notch_windows(line_frequency, fmax=float(spectra.frequencies[-1])):
+    for low, high in notch_windows(
+        line_frequency,
+        fmax=float(spectra.frequencies[-1]),
+        half_width=notch_half_width_hz,
+    ):
         keep &= (spectra.frequencies < low) | (spectra.frequencies > high)
     if not keep.any():
         keep = np.ones_like(spectra.frequencies, dtype=bool)
@@ -302,6 +314,7 @@ def plot_cohort_spectra(
     *,
     line_frequency: float | None = None,
     marked_frequencies: Sequence[float] = (),
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> plt.Figure:
     """Draw the cohort spectra with every participant visible beneath the summary."""
     apply_report_style()
@@ -309,7 +322,11 @@ def plot_cohort_spectra(
     n_participants = spectra.after.denominator.n_subjects
     trace_alpha = float(np.clip(3.0 / max(n_participants, 1), 0.08, 0.45))
     label_traces = n_participants <= MAX_LABELLED_PARTICIPANTS
-    limits = _power_limits(spectra, line_frequency=line_frequency)
+    limits = _power_limits(
+        spectra,
+        line_frequency=line_frequency,
+        notch_half_width_hz=notch_half_width_hz,
+    )
     view = _informative_range(spectra, floor_db=limits[0])
     # The label belongs where the trace leaves the panel, not where the grid ends. Anchored
     # to the last grid point it lands beyond the right spine, out where every participant
@@ -720,6 +737,10 @@ def add_spectra_section(
     if spectra is None:
         return None
     line_frequency = _agreed_setting(cohort, "spectra_line_frequency")
+    # The half-width the participants were measured at, where they agree. Where they do
+    # not, the cohort has no single answer for how wide the filtered band is, so the
+    # packaged width draws the axis and the homogeneity panel reports the disagreement.
+    notch_half_width_hz = _agreed_setting(cohort, "notch_exclusion_half_width_hz")
     marks = tuple(marked_frequencies) or gradient_marks(cohort)
 
     report.add_figure(
@@ -727,6 +748,11 @@ def add_spectra_section(
             spectra,
             line_frequency=line_frequency,
             marked_frequencies=marks,
+            notch_half_width_hz=(
+                NOTCH_EXCLUSION_HALF_WIDTH_HZ
+                if notch_half_width_hz is None
+                else notch_half_width_hz
+            ),
         ),
         title="Cohort spectrum before and after ICA",
         section=SPECTRA_SECTION,

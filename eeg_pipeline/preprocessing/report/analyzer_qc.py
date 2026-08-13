@@ -54,12 +54,28 @@ MINIMUM_BEATS = 3
 #: Multiple of the run's median interval at which a single missed beat lands.
 MISSED_BEAT_FACTOR = 1.5
 
-#: Interval range a working detector on a resting or task recording stays inside.
+#: Physiologically possible heart rate, in beats per minute.
 #:
-#: 0.3–2.0 s spans 200 down to 30 bpm, which covers every rate such a recording plausibly
-#: contains including the extremes. This is the physiological statement; it is not the
-#: axis. See :data:`DRAWN_RR_RANGE_S`.
-PLAUSIBLE_RR_RANGE_S = (0.3, 2.0)
+#: The default for ``report.thresholds.plausible_heart_rate_bpm``. 30–220 bpm covers an
+#: adult at rest through an adult under load; a paediatric or developmental cohort sits
+#: higher and configures it.
+#:
+#: Stated in bpm because that is the unit the claim is made in, and because the cohort
+#: panel counts against it directly. The subject tachogram needs it as intervals and
+#: derives them below rather than carrying a second number: the two constants this
+#: replaced were a range in seconds here and a range in bpm in the cohort module, and
+#: they disagreed at the ceiling — 200 against 220 — so a participant at 210 bpm was
+#: implausible in one document and ordinary in the other.
+DEFAULT_PLAUSIBLE_HEART_RATE_BPM = (30.0, 220.0)
+
+#: Interval range a working detector stays inside, as the rate above implies.
+#:
+#: Derived, never written down separately, so the seconds and the bpm cannot drift apart.
+#: This is the physiological statement; it is not the axis. See :data:`DRAWN_RR_RANGE_S`.
+PLAUSIBLE_RR_RANGE_S = (
+    60.0 / DEFAULT_PLAUSIBLE_HEART_RATE_BPM[1],
+    60.0 / DEFAULT_PLAUSIBLE_HEART_RATE_BPM[0],
+)
 
 #: Interval window the tachogram panels are drawn over, in seconds, on a log axis.
 #:
@@ -436,6 +452,9 @@ def compute_cardiac_residual(
     recording_id: str,
     ecg_channel: str = "ECG",
     marker_description: str = PULSE_MARKER_DESCRIPTION,
+    window_s: tuple[float, float] = RESIDUAL_WINDOW_S,
+    baseline_s: tuple[float, float] = RESIDUAL_BASELINE_S,
+    measurement_s: tuple[float, float] = RESIDUAL_MEASUREMENT_S,
 ) -> CardiacResidual:
     """Measure the beat-locked EEG deflection one run still carries.
 
@@ -472,9 +491,9 @@ def compute_cardiac_residual(
         raw,
         detection.events,
         event_id=int(detection.events[0, 2]),
-        tmin=RESIDUAL_WINDOW_S[0],
-        tmax=RESIDUAL_WINDOW_S[1],
-        baseline=RESIDUAL_BASELINE_S,
+        tmin=window_s[0],
+        tmax=window_s[1],
+        baseline=tuple(baseline_s),
         picks="eeg",
         preload=True,
         reject=None,
@@ -488,9 +507,7 @@ def compute_cardiac_residual(
     # which sensor carries it depends on head position, so a fixed channel would measure
     # where the artifact happened to land rather than how large it was.
     rms = np.sqrt((evoked.get_data() ** 2).mean(axis=0)) * 1e6
-    inside = (evoked.times >= RESIDUAL_MEASUREMENT_S[0]) & (
-        evoked.times <= RESIDUAL_MEASUREMENT_S[1]
-    )
+    inside = (evoked.times >= measurement_s[0]) & (evoked.times <= measurement_s[1])
     if not inside.any():
         return CardiacResidual(recording_id, marker_count, detection.source, None, coverage)
     return CardiacResidual(
@@ -686,6 +703,20 @@ def _nearest_marker_lags(*, markers: np.ndarray, detected: np.ndarray) -> np.nda
     return detected - nearer
 
 
+def _stated_tolerance_ms(agreements: Sequence[MarkerAgreement]) -> str:
+    """Render the tolerance the table was actually built at.
+
+    Read from the measurements rather than from the module default, so a configured
+    tolerance cannot be applied to the numbers while the prose beside them quotes another.
+    Runs are measured in one pass and share a tolerance; should they ever not, every
+    distinct value is named rather than one of them chosen to stand for the rest.
+    """
+    values = sorted({float(agreement.tolerance_s) for agreement in agreements})
+    if not values:
+        return "the configured tolerance"
+    return " / ".join(f"{value * 1000:.0f} ms" for value in values)
+
+
 def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
     """Render the two beat counts per run, side by side."""
     columns = (
@@ -722,7 +753,7 @@ def marker_agreement_html(agreements: Sequence[MarkerAgreement]) -> str:
         "precision is matched beats divided by Analyzer markers. The first reveals missed "
         "markers and the second reveals unsupported extra markers.</p>"
         + "<p>A beat counts as matched when a marker falls within "
-        f"{MARKER_AGREEMENT_TOLERANCE_S * 1000:.0f} ms of it, and each marker is spent on "
+        f"{_stated_tolerance_ms(agreements)} of it, and each marker is spent on "
         "at most one beat. Beat sensitivity is left blank when no beats were detected, "
         "because then there is nothing to take a share of.</p>"
         "<p>The last two columns say what a low share is made of. They give the signed "
@@ -871,6 +902,7 @@ def compute_run_marker_agreement(
     *,
     recording_id: str,
     description: str | None = None,
+    tolerance_s: float = MARKER_AGREEMENT_TOLERANCE_S,
 ) -> MarkerAgreement | None:
     """Reconcile one run's Analyzer markers against R peaks detected from its ECG.
 
@@ -899,6 +931,7 @@ def compute_run_marker_agreement(
         recording_id=recording_id,
         marker_onsets_s=markers,
         detected_onsets_s=detected,
+        tolerance_s=tolerance_s,
     )
 
 
@@ -974,6 +1007,7 @@ def plot_rr_intervals(
     series: Sequence[RrIntervals],
     *,
     missing: Sequence[str] = (),
+    plausible_rr_range_s: tuple[float, float] = PLAUSIBLE_RR_RANGE_S,
 ) -> plt.Figure:
     """Plot the beat-to-beat interval series for every run.
 
@@ -1057,7 +1091,7 @@ def plot_rr_intervals(
         # The band a working detector stays inside, drawn so the widened axis still says
         # where "plausible" ends without clipping anything to it.
         axis.axhspan(
-            *PLAUSIBLE_RR_RANGE_S,
+            *plausible_rr_range_s,
             color=GUIDE_COLOR,
             alpha=0.07,
             linewidth=0,
@@ -1073,7 +1107,7 @@ def plot_rr_intervals(
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
     axes[-1, 0].set_xlabel("Time in run (min)")
-    plausible_low, plausible_high = PLAUSIBLE_RR_RANGE_S
+    plausible_low, plausible_high = plausible_rr_range_s
     caption = (
         "Beat-to-beat intervals from the R markers · dashed line is the run median\n"
         f"dotted line is {MISSED_BEAT_FACTOR:g}× the median, above which an interval is "
@@ -1093,7 +1127,11 @@ def plot_rr_intervals(
     return figure
 
 
-def plot_rr_poincare(series: Sequence[RrIntervals]) -> plt.Figure:
+def plot_rr_poincare(
+    series: Sequence[RrIntervals],
+    *,
+    plausible_rr_range_s: tuple[float, float] = PLAUSIBLE_RR_RANGE_S,
+) -> plt.Figure:
     """Plot each interval against the one after it, for every run.
 
     The time series answers "when did detection go wrong". This answers "what went
@@ -1113,7 +1151,7 @@ def plot_rr_poincare(series: Sequence[RrIntervals]) -> plt.Figure:
     """
     if not series:
         raise ValueError("The Poincaré plot requires at least one run with R markers.")
-    low, high = PLAUSIBLE_RR_RANGE_S
+    low, high = plausible_rr_range_s
     figure, axis = plt.subplots(figsize=(5.6, 5.4), layout="constrained")
 
     for index, run in enumerate(series):
@@ -1215,6 +1253,7 @@ def add_rr_interval_section(
     series: Sequence[RrIntervals],
     missing: Sequence[str] = (),
     section: str = "Scanner artifact correction (Analyzer)",
+    plausible_rr_range_s: tuple[float, float] = PLAUSIBLE_RR_RANGE_S,
 ) -> None:
     """Append the beat-detection record to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
@@ -1235,7 +1274,9 @@ def add_rr_interval_section(
         replace=True,
     )
     report.add_figure(
-        fig=plot_rr_intervals(series, missing=missing),
+        fig=plot_rr_intervals(
+            series, missing=missing, plausible_rr_range_s=plausible_rr_range_s
+        ),
         title="Beat-to-beat intervals",
         section=section,
         tags=("raw", "rr-intervals"),
@@ -1243,7 +1284,7 @@ def add_rr_interval_section(
         replace=True,
     )
     report.add_figure(
-        fig=plot_rr_poincare(series),
+        fig=plot_rr_poincare(series, plausible_rr_range_s=plausible_rr_range_s),
         title="Each interval against the next",
         section=section,
         tags=("raw", "rr-intervals"),

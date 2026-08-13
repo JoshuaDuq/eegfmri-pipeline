@@ -41,7 +41,10 @@ from eeg_pipeline.preprocessing.report.aperiodic import (
     aperiodic_line_db,
     fit_aperiodic,
 )
-from eeg_pipeline.preprocessing.report.filtering import notch_windows
+from eeg_pipeline.preprocessing.report.filtering import (
+    NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    notch_windows,
+)
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,
@@ -173,6 +176,7 @@ def _set_power_limits(
     spectra: "RunSpectra",
     *,
     line_frequency: float | None,
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> None:
     """Bound the power axis by the spectrum rather than by the notch it contains.
 
@@ -185,7 +189,11 @@ def _set_power_limits(
     through them and simply leaves the axis, which reads as a filtered band rather than as
     missing data.
     """
-    windows = notch_windows(line_frequency, fmax=float(spectra.frequencies[-1]))
+    windows = notch_windows(
+        line_frequency,
+        fmax=float(spectra.frequencies[-1]),
+        half_width=notch_half_width_hz,
+    )
     keep = np.ones_like(spectra.frequencies, dtype=bool)
     for low, high in windows:
         keep &= (spectra.frequencies < low) | (spectra.frequencies > high)
@@ -260,6 +268,7 @@ def compute_run_spectra(
     line_frequency: float | None = None,
     gradient_fundamental_hz: float | None = None,
     aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ,
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> RunSpectra:
     """Compute the across-channel sensor spectrum before and after ICA.
 
@@ -281,9 +290,9 @@ def compute_run_spectra(
 
     frequencies, before_channels = _channel_spectra_db(raw, fmin=fmin, fmax=upper)
     _, after_channels = _channel_spectra_db(cleaned, fmin=fmin, fmax=upper)
-    excluded = tuple(notch_windows(line_frequency, fmax=upper)) + gradient_windows(
-        gradient_fundamental_hz, frequencies=frequencies
-    )
+    excluded = tuple(
+        notch_windows(line_frequency, fmax=upper, half_width=notch_half_width_hz)
+    ) + gradient_windows(gradient_fundamental_hz, frequencies=frequencies)
     return RunSpectra(
         recording_id=recording_id,
         frequencies=frequencies,
@@ -344,6 +353,7 @@ def plot_run_spectra(
     *,
     line_frequency: float | None = None,
     marked_frequencies: Sequence[float] = (),
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> plt.Figure:
     """Plot the before/after spectra, the across-channel spread, and their difference.
 
@@ -371,7 +381,12 @@ def plot_run_spectra(
         ),
         ylabel=f"PSD ({POWER_UNIT_LABEL})",
     )
-    _set_power_limits(level_axis, spectra, line_frequency=line_frequency)
+    _set_power_limits(
+        level_axis,
+        spectra,
+        line_frequency=line_frequency,
+        notch_half_width_hz=notch_half_width_hz,
+    )
     level_axis.legend(frameon=False, fontsize=8)
 
     difference_axis.plot(
@@ -538,6 +553,7 @@ def add_spectra_section(
     line_frequency: float | None = None,
     marked_frequencies: Sequence[float] = (),
     section: str = "Sensor spectra before and after ICA",
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> None:
     """Append already-computed per-run spectra to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
@@ -555,6 +571,7 @@ def add_spectra_section(
             run,
             line_frequency=line_frequency,
             marked_frequencies=marked_frequencies,
+            notch_half_width_hz=notch_half_width_hz,
         )
         for run in spectra
     ]

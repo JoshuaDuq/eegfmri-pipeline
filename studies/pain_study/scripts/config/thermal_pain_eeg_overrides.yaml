@@ -15,6 +15,26 @@ event_columns:
 preprocessing:
   condition_preferred_prefixes: ["Trig_therm", "Trig_"]
 
+report:
+  acquisition:
+    # This acquisition's own bookkeeping, on top of what the pipeline writes for itself.
+    # Trials are the Trig_* markers named above, so excluding these leaves the event rug
+    # under the "Data quality over time" trace counting thermal trials and nothing else.
+    #
+    # "R  " and "R/" are Analyzer's heartbeat markers under two spellings, and "VOLUME/"
+    # is the scanner volume marker — all three are also covered by the configured marker
+    # descriptions, and are named here so a run whose markers were never sanitised is
+    # still handled. "RESPONSE/" is the button press, which is not the event this
+    # paradigm locks to; a paradigm that locks to the response must not carry this entry.
+    non_event_prefixes:
+      - "BAD"
+      - "EDGE"
+      - "NEW SEGMENT"
+      - "VOLUME/"
+      - "R  "
+      - "R/"
+      - "RESPONSE/"
+
 feature_engineering:
   sourcelocalization:
     fmri:
