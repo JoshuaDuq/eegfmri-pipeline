@@ -1757,6 +1757,52 @@ def extract_connectivity_features(
     return out, list(out.columns)
 
 
+def _eligible_epochs_for_band(
+    precomputed: Any,
+    band: str,
+    fmin: float,
+    fmax: float,
+) -> Optional[np.ndarray]:
+    """Epochs whose passband survives their recording's unavailable intervals.
+
+    Connectivity reads phase or envelope from a contiguous passband, so an epoch
+    whose notch falls inside the band contributes filter shape rather than coupling.
+    """
+    availability = getattr(precomputed, "spectral_availability", None)
+    if availability is None:
+        return None
+    if not (np.isfinite(fmin) and np.isfinite(fmax) and fmax > fmin):
+        raise ValueError(
+            f"Connectivity: band '{band}' has no finite frequency range to check "
+            "against the spectral availability contract."
+        )
+
+    eligible = availability.contiguous_band_eligible(fmin, fmax)
+    if not np.any(eligible):
+        raise ValueError(
+            f"Connectivity: no epoch retains a contiguous passband for band '{band}' "
+            f"[{fmin}, {fmax}] Hz."
+        )
+    return eligible
+
+
+def _require_min_epochs_for_band(
+    eligible: Optional[np.ndarray],
+    min_epochs: int,
+    band: str,
+    context: str,
+) -> None:
+    """Re-apply the existing minimum-epoch rule after eligibility selection."""
+    if eligible is None:
+        return
+    n_eligible = int(np.sum(eligible))
+    if n_eligible < int(min_epochs):
+        raise ValueError(
+            f"{context}: band '{band}' retains {n_eligible} eligible epochs, fewer "
+            f"than the required {int(min_epochs)}."
+        )
+
+
 def extract_connectivity_from_precomputed(
     precomputed: Any,  # PrecomputedData
     *,
@@ -2037,6 +2083,7 @@ def extract_connectivity_from_precomputed(
     ) -> pd.DataFrame:
         t0 = time.perf_counter()
         method_label = method
+        n_epochs = int(seg_data.shape[0])
 
         def _run(method_to_use: str, use_average: bool = False):
             return spectral_connectivity_time(
@@ -2183,6 +2230,7 @@ def extract_connectivity_from_precomputed(
 
     def _aec_task(seg_name: str, band: str, analytic_seg: np.ndarray) -> pd.DataFrame:
         time.perf_counter()
+        n_epochs = int(analytic_seg.shape[0])
         aec_mode = conn_cfg.aec_mode
         orthogonalize = "pairwise"
         if aec_mode in {"none", "raw", "no"}:
@@ -2405,9 +2453,28 @@ def extract_connectivity_from_precomputed(
                 freqs = valid_freqs
                 use_n_cycles = valid_cycles
 
+            band_eligible = _eligible_epochs_for_band(precomputed, band, fmin, fmax)
+            band_seg_data = seg_data if band_eligible is None else seg_data[band_eligible]
+            _require_min_epochs_for_band(
+                band_eligible, conn_cfg.min_epochs_per_group, band, "Connectivity"
+            )
+
             for method in phase_measures:
                 tasks.append(
-                    ("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles))
+                    (
+                        "phase",
+                        (
+                            seg_name,
+                            band,
+                            method,
+                            band_seg_data,
+                            freqs,
+                            fmin,
+                            fmax,
+                            use_n_cycles,
+                            band_eligible,
+                        ),
+                    )
                 )
 
             if enable_aec and band in precomputed.band_data:
@@ -2420,13 +2487,27 @@ def extract_connectivity_from_precomputed(
                     continue
                 if analytic_seg.shape[-1] < min_segment_samples:
                     continue
-                tasks.append(("aec", (seg_name, band, analytic_seg)))
+                if band_eligible is not None:
+                    analytic_seg = analytic_seg[band_eligible]
+                tasks.append(("aec", (seg_name, band, analytic_seg, band_eligible)))
+
+    def _expand_to_full_epochs(
+        frame: pd.DataFrame,
+        eligible: Optional[np.ndarray],
+    ) -> pd.DataFrame:
+        """Place eligible-epoch rows back on the full trial axis, leaving gaps NaN."""
+        if eligible is None or frame.empty:
+            return frame
+        expanded = frame.copy()
+        expanded.index = np.flatnonzero(eligible)
+        return expanded.reindex(range(n_epochs))
 
     def _run_task(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
         kind, args = task
+        *task_args, eligible = args
         if kind == "phase":
-            return _phase_task(*args)
-        return _aec_task(*args)
+            return _expand_to_full_epochs(_phase_task(*task_args), eligible)
+        return _expand_to_full_epochs(_aec_task(*task_args), eligible)
 
     roi_pair_map: Dict[str, np.ndarray] = {}
     if conn_cfg.dynamic_enabled and conn_cfg.dynamic_include_roi_pairs and output_level == "full":
@@ -2445,6 +2526,7 @@ def extract_connectivity_from_precomputed(
         windows_slices: List[Tuple[int, int]],
     ) -> pd.DataFrame:
         nonlocal dynamic_state_skip_warned
+        n_epochs = int(analytic_seg.shape[0])
         n_windows = int(len(windows_slices))
         if n_windows < int(conn_cfg.dynamic_min_windows):
             raise ValueError(
@@ -2665,9 +2747,21 @@ def extract_connectivity_from_precomputed(
                         f"Connectivity: dynamic analytic data for segment '{seg_name}' "
                         f"and band '{band}' is missing or misaligned."
                     )
+                band_range = precomputed.band_data[band]
+                band_eligible = _eligible_epochs_for_band(
+                    precomputed,
+                    band,
+                    float(getattr(band_range, "fmin", np.nan)),
+                    float(getattr(band_range, "fmax", np.nan)),
+                )
+                if band_eligible is not None:
+                    analytic_seg = analytic_seg[band_eligible]
                 for method in conn_cfg.dynamic_measures:
                     dynamic_tasks.append(
-                        ("dynamic", (seg_name, band, method, analytic_seg, windows_slices))
+                        (
+                            "dynamic",
+                            (seg_name, band, method, analytic_seg, windows_slices, band_eligible),
+                        )
                     )
 
     task_times: Dict[str, float] = {"phase": 0.0, "aec": 0.0, "dynamic": 0.0}
@@ -2702,7 +2796,8 @@ def extract_connectivity_from_precomputed(
 
     def _run_dynamic(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
         _, args = task
-        return _dynamic_task(*args)
+        *task_args, eligible = args
+        return _expand_to_full_epochs(_dynamic_task(*task_args), eligible)
 
     def _timed_run_dynamic(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
         kind, _ = task

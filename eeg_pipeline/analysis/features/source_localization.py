@@ -28,6 +28,7 @@ from eeg_pipeline.analysis.features.rest import (
     select_single_rest_analysis_segment,
 )
 from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.utils.analysis.spectral import estimator_half_support
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.data.source_localization_paths import source_localization_estimates_dir
 from eeg_pipeline.utils.config.loader import (
@@ -1492,6 +1493,7 @@ def _compute_roi_power(
     sfreq: float,
     fmin: float,
     fmax: float,
+    spectral_availability: Any = None,
 ) -> np.ndarray:
     """
     Compute band power for ROI time courses.
@@ -1533,6 +1535,7 @@ def _compute_roi_power(
         return power
 
     valid_data = roi_data[valid_mask]
+    row_epochs = np.nonzero(valid_mask)[0]
     nperseg = min(n_times, int(sfreq * 2))
 
     psds, freqs = psd_array_welch(
@@ -1555,7 +1558,17 @@ def _compute_roi_power(
 
     # Integrate discrete PSD over frequency to compute total band power
     df = freqs[1] - freqs[0] if len(freqs) > 1 else sfreq / nperseg
-    valid_power = np.sum(psds, axis=-1) * df
+
+    if spectral_availability is None:
+        valid_power = np.sum(psds, axis=-1) * df
+    else:
+        # Integrate over the bins each epoch retained rather than rejecting the
+        # whole band; an epoch left with no bin is unavailable.
+        half_support = estimator_half_support("welch", float(sfreq), n_per_seg=nperseg)
+        epoch_valid = spectral_availability.valid_frequency_mask(freqs, half_support)
+        bin_mask = epoch_valid[row_epochs]
+        valid_power = np.sum(np.where(bin_mask, psds, 0.0), axis=-1) * df
+        valid_power[~bin_mask.any(axis=-1)] = np.nan
 
     power[valid_mask] = valid_power
     power[bad_mask] = np.nan
@@ -2361,6 +2374,38 @@ def _mean_finite_source_connectivity_edges(
     return float(np.mean(edges))
 
 
+def _eligible_source_epochs(
+    spectral_availability: Any,
+    fmin: float,
+    fmax: float,
+    band: str,
+) -> Optional[np.ndarray]:
+    """Epochs whose passband survives their recording's unavailable intervals."""
+    if spectral_availability is None:
+        return None
+
+    eligible = spectral_availability.contiguous_band_eligible(float(fmin), float(fmax))
+    if not np.any(eligible):
+        raise ValueError(
+            f"Source localization: no epoch retains a contiguous passband for band "
+            f"'{band}' [{fmin}, {fmax}] Hz."
+        )
+    return eligible
+
+
+def _scatter_source_epochs(
+    values: np.ndarray,
+    eligible: Optional[np.ndarray],
+    n_epochs: int,
+) -> np.ndarray:
+    """Place eligible-epoch rows back on the full trial axis, leaving gaps NaN."""
+    if eligible is None:
+        return values
+    full = np.full((n_epochs, *values.shape[1:]), np.nan, dtype=float)
+    full[eligible] = values
+    return full
+
+
 def _append_source_band_family_features(
     *,
     records: List[Dict[str, float]],
@@ -2375,13 +2420,21 @@ def _append_source_band_family_features(
     method: str,
     band: str,
     family_prefix: str,
+    spectral_availability: Any = None,
 ) -> None:
-    power = _require_finite_source_feature_matrix(
-        _compute_roi_power(roi_data, sfreq, fmin, fmax),
-        description="power features",
-        band=band,
-        segment_label=segment_label,
-        method=method,
+    eligible = _eligible_source_epochs(spectral_availability, fmin, fmax, band)
+    band_roi_data = roi_data if eligible is None else roi_data[eligible]
+
+    power = _scatter_source_epochs(
+        _require_finite_source_feature_matrix(
+            _compute_roi_power(band_roi_data, sfreq, fmin, fmax, spectral_availability),
+            description="power features",
+            band=band,
+            segment_label=segment_label,
+            method=method,
+        ),
+        eligible,
+        n_epochs,
     )
     for roi_idx, roi_name in enumerate(label_names):
         safe_name = _sanitize_feature_token(roi_name).lower()
@@ -2396,13 +2449,17 @@ def _append_source_band_family_features(
     for epoch_idx in range(n_epochs):
         records[epoch_idx][col_name] = global_power[epoch_idx]
 
-    envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
-    mean_env = _require_finite_source_feature_matrix(
-        np.nanmean(envelope, axis=2),
-        description="envelope features",
-        band=band,
-        segment_label=segment_label,
-        method=method,
+    envelope = _compute_roi_envelope(band_roi_data, sfreq, fmin, fmax)
+    mean_env = _scatter_source_epochs(
+        _require_finite_source_feature_matrix(
+            np.nanmean(envelope, axis=2),
+            description="envelope features",
+            band=band,
+            segment_label=segment_label,
+            method=method,
+        ),
+        eligible,
+        n_epochs,
     )
     for roi_idx, roi_name in enumerate(label_names):
         safe_name = _sanitize_feature_token(roi_name).lower()
@@ -2459,6 +2516,8 @@ def extract_source_localization_features(
     if n_epochs < 2:
         logger.warning("Source localization requires at least 2 epochs")
         return pd.DataFrame(), []
+
+    spectral_availability = getattr(ctx, "spectral_availability", None)
 
     train_mask = _require_lcmv_train_mask_if_trial_safe(
         analysis_mode=analysis_mode,
@@ -2807,6 +2866,7 @@ def extract_source_localization_features(
                     method=str(src_cfg.method),
                     band=str(band),
                     family_prefix=str(family_name),
+                    spectral_availability=spectral_availability,
                 )
     else:
         for band in bands:
@@ -2824,12 +2884,19 @@ def extract_source_localization_features(
             ):
                 continue
 
-            power = _require_finite_source_feature_matrix(
-                _compute_roi_power(roi_data, sfreq, fmin, fmax),
-                description="power features",
-                band=band,
-                segment_label=str(segment_label),
-                method=str(src_cfg.method),
+            eligible = _eligible_source_epochs(spectral_availability, fmin, fmax, band)
+            band_roi_data = roi_data if eligible is None else roi_data[eligible]
+
+            power = _scatter_source_epochs(
+                _require_finite_source_feature_matrix(
+                    _compute_roi_power(band_roi_data, sfreq, fmin, fmax, spectral_availability),
+                    description="power features",
+                    band=band,
+                    segment_label=str(segment_label),
+                    method=str(src_cfg.method),
+                ),
+                eligible,
+                n_epochs,
             )
 
             for roi_idx, roi_name in enumerate(label_names):
@@ -2845,13 +2912,17 @@ def extract_source_localization_features(
             for epoch_idx in range(n_epochs):
                 records[epoch_idx][col_name] = global_power[epoch_idx]
 
-            envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
-            mean_env = _require_finite_source_feature_matrix(
-                np.nanmean(envelope, axis=2),
-                description="envelope features",
-                band=band,
-                segment_label=str(segment_label),
-                method=str(src_cfg.method),
+            envelope = _compute_roi_envelope(band_roi_data, sfreq, fmin, fmax)
+            mean_env = _scatter_source_epochs(
+                _require_finite_source_feature_matrix(
+                    np.nanmean(envelope, axis=2),
+                    description="envelope features",
+                    band=band,
+                    segment_label=str(segment_label),
+                    method=str(src_cfg.method),
+                ),
+                eligible,
+                n_epochs,
             )
 
             for roi_idx, roi_name in enumerate(label_names):
@@ -3077,6 +3148,8 @@ def extract_source_connectivity_features(
         logger.warning("Source connectivity requires at least 2 epochs")
         return pd.DataFrame(), []
 
+    spectral_availability = getattr(ctx, "spectral_availability", None)
+
     train_mask = _require_lcmv_train_mask_if_trial_safe(
         analysis_mode=analysis_mode,
         method=src_cfg.method,
@@ -3241,6 +3314,7 @@ def extract_source_connectivity_features(
             continue
 
         fmin, fmax = freq_bands[band]
+        band_eligible = _eligible_source_epochs(spectral_availability, fmin, fmax, band)
         if connectivity_method_l == "aec":
             epochs_for_source = epochs.copy().filter(fmin, fmax, n_jobs=n_jobs, verbose=False)
         else:
@@ -3285,6 +3359,14 @@ def extract_source_connectivity_features(
                 )
             roi_data = roi_data[..., segment_mask]
 
+        # Coupling across a notched passband measures the filter, so ineligible
+        # epochs leave the estimator input entirely and stay NaN in the output.
+        band_epoch_indices = (
+            np.arange(n_epochs) if band_eligible is None else np.flatnonzero(band_eligible)
+        )
+        if band_eligible is not None:
+            roi_data = roi_data[band_eligible]
+
         n_rois_band = int(roi_data.shape[1]) if np.ndim(roi_data) >= 2 else 0
         if n_rois_band < 2:
             logger.warning(
@@ -3312,15 +3394,16 @@ def extract_source_connectivity_features(
                 verbose=False,
             )
             con_data = np.asarray(con.get_data(output="dense"), dtype=float)
+            n_band_epochs = int(band_epoch_indices.size)
             if con_data.ndim == 4:
                 con_tensor = con_data[:, :, :, 0]
             elif con_data.ndim == 3:
-                if con_data.shape[0] == n_epochs:
+                if con_data.shape[0] == n_band_epochs:
                     con_tensor = con_data
                 else:
                     con_tensor = np.broadcast_to(
                         con_data[:, :, 0],
-                        (n_epochs, n_rois_band, n_rois_band),
+                        (n_band_epochs, n_rois_band, n_rois_band),
                     )
             else:
                 raise ValueError(
@@ -3333,14 +3416,14 @@ def extract_source_connectivity_features(
             if col_name not in feature_cols:
                 feature_cols.append(col_name)
 
-            for epoch_idx in range(n_epochs):
+            for band_idx, epoch_idx in enumerate(band_epoch_indices):
                 mean_conn = _mean_finite_source_connectivity_edges(
-                    con_tensor[epoch_idx][triu_idx],
+                    con_tensor[band_idx][triu_idx],
                     band=band,
                     method=src_cfg.method,
                     connectivity_method=connectivity_method_l,
                 )
-                records[epoch_idx][col_name] = mean_conn
+                records[int(epoch_idx)][col_name] = mean_conn
 
         elif connectivity_method_l in {"wpli", "plv"}:
             roi_data_fit = roi_data
@@ -3350,7 +3433,7 @@ def extract_source_connectivity_features(
                 and train_mask.shape[0] == n_epochs
                 and np.any(train_mask)
             ):
-                roi_data_fit = roi_data[train_mask]
+                roi_data_fit = roi_data[train_mask[band_epoch_indices]]
             if roi_data_fit.shape[0] < 2:
                 logger.warning(
                     "Source connectivity (%s): insufficient epochs for stable cross-epoch estimate (%d); skipping band %s.",
@@ -3397,11 +3480,12 @@ def extract_source_connectivity_features(
                 connectivity_method=connectivity_method_l,
             )
 
-            for epoch_idx in range(n_epochs):
+            # The estimate came from eligible epochs only, so only those rows carry it.
+            for epoch_idx in band_epoch_indices:
                 col_name = f"src_{src_cfg.method}_{band}_{connectivity_method_l}_global"
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)
-                records[epoch_idx][col_name] = mean_conn
+                records[int(epoch_idx)][col_name] = mean_conn
 
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
