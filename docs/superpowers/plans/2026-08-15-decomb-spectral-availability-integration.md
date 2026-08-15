@@ -8,6 +8,19 @@
 
 **Tech Stack:** Python 3.11+, NumPy, SciPy, pandas, MNE-Python 1.12, PyYAML, pytest, Ruff.
 
+**Status:** Implemented 2026-08-15. Two deviations from the steps below, both to protect
+the "no-manifest outputs are unchanged" acceptance criterion:
+
+- Task 3 Step 9 asked for `compute_frequency_weights` in `compute_psd_bandpower`. That
+  helper halves the weight of the first and last grid bin, so adopting it would have
+  changed existing band-power values. The existing `np.gradient` bin widths are kept and
+  the retained-width denominator is built from them, which keeps `sum(retained widths)`
+  equal to the bandwidth actually integrated.
+- Task 4 Step 3 asked for provenance attributes on the in-memory TFR object. MNE rebuilds
+  TFR objects on `copy`, `crop`, and indexing and discards attributes we attach, so
+  `tfr_geometry` falls back to recomputing `n_cycles` from the config. That is exact
+  because `compute_adaptive_n_cycles` is elementwise over the surviving frequencies.
+
 ---
 
 ## File structure
@@ -47,7 +60,7 @@
 - Test: `tests/spectral_availability/test_model.py`
 - Test: `tests/spectral_availability/test_estimators.py`
 
-- [ ] **Step 1: Write failing model tests**
+- [x] **Step 1: Write failing model tests**
 
 Cover strict key/interval validation, duplicate/overlap/touch merging, closed-interval overlap, per-epoch frequency masks, retained bandwidth, contiguous-band eligibility, and zero-support errors. The desired public API is:
 
@@ -70,13 +83,13 @@ assert availability.contiguous_band_eligible(8.0, 13.0).tolist() == [True, True]
 assert availability.contiguous_band_eligible(35.0, 45.0).tolist() == [True, False]
 ```
 
-- [ ] **Step 2: Run the model tests and verify RED**
+- [x] **Step 2: Run the model tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_model.py -q`
 
 Expected: collection fails because `eeg_pipeline.spectral_availability` does not exist.
 
-- [ ] **Step 3: Implement the immutable model**
+- [x] **Step 3: Implement the immutable model**
 
 Implement frozen `RecordingKey`, `FrequencyInterval`, `RecordingExclusions`, and `EpochSpectralAvailability`. Validate non-empty canonical BIDS entities, finite non-negative interval edges, positive widths, exact epoch-axis lengths, finite strictly increasing frequency grids, and scalar-or-vector non-negative half-support. Merge duplicate, overlapping, and touching intervals in one constructor helper. Use the closed-overlap rule:
 
@@ -88,13 +101,13 @@ invalid = (centres + half_support >= interval.low_hz) & (
 
 Expose `valid_frequency_mask`, `contiguous_band_eligible`, `intersections`, and `retained_bandwidth`. Do not import pandas, MNE, or Decomb.
 
-- [ ] **Step 4: Run the model tests and verify GREEN**
+- [x] **Step 4: Run the model tests and verify GREEN**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_model.py -q`
 
 Expected: all model tests pass.
 
-- [ ] **Step 5: Write failing estimator-support tests**
+- [x] **Step 5: Write failing estimator-support tests**
 
 Test these exact contracts:
 
@@ -114,17 +127,17 @@ assert multitaper_tfr_half_support(
 
 Also reject non-finite bandwidths, mismatched Morlet arrays, invalid sampling rates, unsupported windows, and fewer than two Welch samples.
 
-- [ ] **Step 6: Run estimator tests and verify RED**
+- [x] **Step 6: Run estimator tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_estimators.py -q`
 
 Expected: imports fail because estimator-support functions do not exist.
 
-- [ ] **Step 7: Implement estimator-support calculations**
+- [x] **Step 7: Implement estimator-support calculations**
 
 Use MNE's documented full multitaper bandwidth convention, the Morlet Gaussian power half-height expression, and `scipy.signal.get_window` plus a deterministic zero-padded DTFT main-lobe search for Welch. Raise when the first half-power crossing cannot be measured. Return half-support in Hz, never a bin count.
 
-- [ ] **Step 8: Run Task 1 verification and commit**
+- [x] **Step 8: Run Task 1 verification and commit**
 
 Run:
 
@@ -159,17 +172,17 @@ git commit -m "feat: add spectral availability domain model"
 - Modify: `tests/config/test_scientific_defaults.py`
 - Modify: `tests/pipelines/test_pipeline_preprocessing.py`
 
-- [ ] **Step 1: Write failing Decomb adapter tests**
+- [x] **Step 1: Write failing Decomb adapter tests**
 
 Build temporary `dataset_description.json` and TSV fixtures. Require exactly one `GeneratedBy` item whose `Name` case-insensitively equals `decomb`, all required columns, one `outcome=no_line_detected` terminal-null row per recording, paired interval fields, finite positive geometry, and parseable subject/task/run/optional-session entities. Verify all finite rows from all removal rounds are deduplicated and merged and that `sha256` equals the file bytes.
 
-- [ ] **Step 2: Run adapter tests and verify RED**
+- [x] **Step 2: Run adapter tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_decomb.py -q`
 
 Expected: imports fail because the Decomb adapter does not exist.
 
-- [ ] **Step 3: Implement strict Decomb loading**
+- [x] **Step 3: Implement strict Decomb loading**
 
 Define:
 
@@ -185,13 +198,13 @@ def load_decomb_manifest(path: str | Path) -> DecombManifest: ...
 
 Read JSON with `json.loads`, TSV with `pandas.read_csv(sep="\t", dtype=str, keep_default_na=False)`, and hash with `hashlib.sha256(path.read_bytes())`. Surface JSON, TSV, provenance, entity, and geometry errors with recording/row context. Do not search for alternate files or infer malformed values.
 
-- [ ] **Step 4: Run adapter tests and verify GREEN**
+- [x] **Step 4: Run adapter tests and verify GREEN**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_decomb.py -q`
 
 Expected: all adapter tests pass.
 
-- [ ] **Step 5: Write failing alignment tests**
+- [x] **Step 5: Write failing alignment tests**
 
 Test float `run_id` values `1.0` through `6.0`, rejection of missing/fractional/infinite runs, optional `session_id`, duplicate/ambiguous keys, unmatched epochs, and allowance for extra manifest recordings outside the selected subject. Desired API:
 
@@ -205,17 +218,17 @@ aligned = align_decomb_to_epochs(
 assert [key.run for key in aligned.recording_keys] == ["1", "2"]
 ```
 
-- [ ] **Step 6: Run alignment tests and verify RED**
+- [x] **Step 6: Run alignment tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_alignment.py -q`
 
 Expected: import fails because alignment is not implemented.
 
-- [ ] **Step 7: Implement exact epoch alignment**
+- [x] **Step 7: Implement exact epoch alignment**
 
 Canonicalize only finite integer-valued numeric identifiers, strip one BIDS entity prefix from explicit strings, and require session identity when matching manifest candidates contain sessions. Construct one exclusion tuple per event row in original order. Raise for every ambiguity or mismatch; do not use event order, participant unions, or cohort unions.
 
-- [ ] **Step 8: Write failing activation/preflight tests**
+- [x] **Step 8: Write failing activation/preflight tests**
 
 Add tests proving:
 
@@ -228,7 +241,7 @@ assert _by_key(report)["preprocessing.notch_freq"].status == "error"
 
 Also test missing manifest, invalid provenance, `notch_freq=None`, and the packaged default `paths.decomb_manifest is None`.
 
-- [ ] **Step 9: Run activation tests and verify RED**
+- [x] **Step 9: Run activation tests and verify RED**
 
 Run:
 
@@ -241,11 +254,11 @@ PYTHONPATH=. .venv/bin/python -m pytest \
 
 Expected: the new Decomb assertions fail.
 
-- [ ] **Step 10: Implement explicit activation and preflight**
+- [x] **Step 10: Implement explicit activation and preflight**
 
 Add `paths.decomb_manifest: null` with concise documentation. In preflight, do nothing when the value is null; otherwise require a file, require `preprocessing.notch_freq is None`, and call the strict adapter so provenance/manifest errors surface before processing. Apply the same validation at the start of `PreprocessingPipeline.process_subject` so direct preprocessing cannot bypass the contract. Keep imports local to the configured branch and do not catch adapter errors into warnings.
 
-- [ ] **Step 11: Run Task 2 verification and commit**
+- [x] **Step 11: Run Task 2 verification and commit**
 
 Run:
 
@@ -293,11 +306,11 @@ git commit -m "feat: load and align Decomb exclusions"
 - Modify: `tests/features/test_feature_data_contracts.py`
 - Modify: `tests/features/test_spectral_strict_failures.py`
 
-- [ ] **Step 1: Write failing shared-type and crop tests**
+- [x] **Step 1: Write failing shared-type and crop tests**
 
 Require `FeatureContext.spectral_availability`, `PrecomputedData.spectral_availability`, `BandData.eligible_epochs`, and `PSDData.valid_frequency_mask`. Verify crop/with-window operations preserve epoch availability and eligibility while clearing time-dependent PSD exactly as before.
 
-- [ ] **Step 2: Run type tests and verify RED**
+- [x] **Step 2: Run type tests and verify RED**
 
 Run:
 
@@ -309,53 +322,53 @@ PYTHONPATH=. .venv/bin/python -m pytest \
 
 Expected: constructors reject the new keywords or fields are absent.
 
-- [ ] **Step 3: Add optional shared metadata fields**
+- [x] **Step 3: Add optional shared metadata fields**
 
 Add fields with `None` defaults so no-manifest constructor behavior and array values are unchanged. Validate new masks against epoch/frequency axes only when present. Preserve them in `BandData.crop`, `PrecomputedData.crop`, and all internal clone constructors.
 
-- [ ] **Step 4: Write failing Welch PSD masking tests**
+- [x] **Step 4: Write failing Welch PSD masking tests**
 
 Generate two epochs with different exclusions and assert `compute_psd(..., spectral_availability=...)` returns the same frequency grid as the unmasked call, stores a `(epochs, freqs)` mask, and sets only invalid epoch/channel/frequency cells to `NaN`. Assert no-manifest output is bitwise equal to the existing call.
 
-- [ ] **Step 5: Run Welch tests and verify RED**
+- [x] **Step 5: Run Welch tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_shared_intermediates.py -k welch -q`
 
 Expected: `compute_psd` does not accept the availability argument.
 
-- [ ] **Step 6: Implement estimator-aware Welch masking**
+- [x] **Step 6: Implement estimator-aware Welch masking**
 
 Resolve `n_per_seg` from the exact call (`n_fft` in the shared Welch path), compute its half-power support from the configured window, build the per-epoch mask, replace invalid cells with `NaN`, and store support metadata in `PSDData`. When availability is absent, do not calculate support or copy/mask the PSD.
 
-- [ ] **Step 7: Write failing retained-bandwidth tests**
+- [x] **Step 7: Write failing retained-bandwidth tests**
 
 Use monkeypatched deterministic PSD arrays and irregular frequencies. For each epoch, assert integration uses `sum(psd * weight)` over valid bins and normalization divides by that epoch's retained `sum(weight)`, not nominal width. Assert one exhausted epoch returns `NaN`, all exhausted epochs raise, and fixed configured line masks combine with manifest masks.
 
-- [ ] **Step 8: Run bandpower tests and verify RED**
+- [x] **Step 8: Run bandpower tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_shared_intermediates.py -k bandpower -q`
 
 Expected: current bandpower uses one global mask and denominator.
 
-- [ ] **Step 9: Implement retained-width PSD band power**
+- [x] **Step 9: Implement retained-width PSD band power**
 
 Add keyword-only `spectral_availability=None` to `compute_psd_bandpower`. Use multitaper `bandwidth / 2` or measured Welch support, combine per-epoch validity with any configured fixed line mask, integrate with `compute_frequency_weights`, divide by per-epoch retained width, and raise only when no epoch has support for a requested band. Keep the return dictionary and no-manifest values unchanged.
 
-- [ ] **Step 10: Write failing contiguous-band tests**
+- [x] **Step 10: Write failing contiguous-band tests**
 
 Assert `compute_band_data` filters only eligible epochs, fills all arrays for ineligible epochs with `NaN`, stores `eligible_epochs`, and raises if every epoch overlaps the requested band. Assert a non-overlapping band is numerically identical to the no-manifest call.
 
-- [ ] **Step 11: Run contiguous-band tests and verify RED**
+- [x] **Step 11: Run contiguous-band tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_shared_intermediates.py -k band_data -q`
 
 Expected: current Hilbert computation processes every epoch.
 
-- [ ] **Step 12: Implement and thread shared availability**
+- [x] **Step 12: Implement and thread shared availability**
 
 Add keyword-only availability parameters to `compute_band_data`, `_compute_single_band`, `_compute_and_store_bands`, `_compute_psd_with_qc`, and `precompute_data`. Store the same epoch-aligned object on `PrecomputedData`; pass it to ratios/asymmetry PSD bandpower. Filtering only eligible epoch slices avoids representing notch attenuation as a computed oscillatory feature.
 
-- [ ] **Step 13: Run Task 3 verification and commit**
+- [x] **Step 13: Run Task 3 verification and commit**
 
 Run:
 
@@ -408,25 +421,25 @@ git commit -m "feat: enforce availability in shared spectral data"
 - Modify: `tests/features/test_feature_connectivity_validity_guards.py`
 - Modify: `tests/features/test_feature_source_connectivity_validity.py`
 
-- [ ] **Step 1: Write failing TFR masking tests**
+- [x] **Step 1: Write failing TFR masking tests**
 
 Use an `EpochsTFRArray` with known frequencies and adaptive `n_cycles`. Assert a helper applies Morlet half-support per frequency, preserves the 4-D shape, writes `NaN` only to invalid epoch/frequency cells, exposes the validity mask and contributing epoch counts, and raises for averaged 3-D TFR data when recording-specific availability is active.
 
-- [ ] **Step 2: Run TFR tests and verify RED**
+- [x] **Step 2: Run TFR tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_tfr_consumers.py -k mask -q`
 
 Expected: no TFR availability helper exists.
 
-- [ ] **Step 3: Implement exact TFR metadata and masking**
+- [x] **Step 3: Implement exact TFR metadata and masking**
 
 Keep the exact post-length-filtering `freqs` and `n_cycles` used by MNE together. Apply the Morlet half-power mask immediately after each power or complex TFR computation and after reuse/crop paths. Store private provenance attributes only on the in-memory TFR object; the scientific output remains explicit `NaN` plus validity/count metadata consumed by feature extraction.
 
-- [ ] **Step 4: Write failing PSD descriptor and aperiodic tests**
+- [x] **Step 4: Write failing PSD descriptor and aperiodic tests**
 
 Assert peak/IAF/centre/bandwidth/entropy never select masked bins. Assert aperiodic fitting accepts retained contiguous support, returns unavailable for an internal masked gap or too few points, and does not interpolate. Test epoch-specific masks, not a cohort union.
 
-- [ ] **Step 5: Run spectral-model tests and verify RED**
+- [x] **Step 5: Run spectral-model tests and verify RED**
 
 Run:
 
@@ -438,11 +451,11 @@ PYTHONPATH=. .venv/bin/python -m pytest \
 
 Expected: masked support is not yet enforced consistently.
 
-- [ ] **Step 6: Enforce retained support in spectral models**
+- [x] **Step 6: Enforce retained support in spectral models**
 
 In direct PSD extraction, including quality and source-ROI power paths, apply the same estimator-support mask before all channel/global/ROI reductions. Make descriptor helpers select finite retained bins. Before each aperiodic/specparam fit, require retained indices to be consecutive within the requested fit range and retain existing minimum point/range requirements; return the existing unavailable representation and record the reason rather than filling gaps.
 
-- [ ] **Step 7: Write failing contiguous-consumer tests**
+- [x] **Step 7: Write failing contiguous-consumer tests**
 
 Construct two-run synthetic precomputed/TFR inputs where only run 2 overlaps alpha. Assert:
 
@@ -453,7 +466,7 @@ Construct two-run synthetic precomputed/TFR inputs where only run 2 overlaps alp
 - source envelopes/connectivity exclude run 2 while source PSD uses retained-bin integration;
 - all-overlap inputs raise instead of returning attenuated numbers.
 
-- [ ] **Step 8: Run contiguous-consumer tests and verify RED**
+- [x] **Step 8: Run contiguous-consumer tests and verify RED**
 
 Run:
 
@@ -466,11 +479,11 @@ PYTHONPATH=. .venv/bin/python -m pytest \
 
 Expected: current cross-trial paths include every epoch.
 
-- [ ] **Step 9: Enforce band eligibility at consumer boundaries**
+- [x] **Step 9: Enforce band eligibility at consumer boundaries**
 
 Use `BandData.eligible_epochs` for Hilbert-derived burst/PAC/connectivity paths and `EpochSpectralAvailability.contiguous_band_eligible` for band reductions of complex TFR phase, source envelopes, and source connectivity. Source ROI PSD power uses retained-bin integration rather than whole-band rejection. Preserve trial axis rows with `NaN`; subset only the estimator input for cross-trial calculations, then broadcast/align results using original epoch indices. Re-run existing minimum-epoch guards after eligibility selection. Never silently substitute a different band.
 
-- [ ] **Step 10: Run Task 4 verification and commit**
+- [x] **Step 10: Run Task 4 verification and commit**
 
 Run:
 
@@ -531,21 +544,21 @@ git commit -m "feat: mask unavailable spectral feature support"
 - Test: `tests/spectral_availability/test_pipeline_integration.py`
 - Modify: `tests/pipelines/test_pipeline_features.py`
 
-- [ ] **Step 1: Write failing audit tests**
+- [x] **Step 1: Write failing audit tests**
 
 Require one row per recording and analysis target with subject/task/run/session, intersecting intervals, nominal/retained bandwidth, retained share, estimator/support rule, PSD and contiguous eligibility, aligned/eligible/ineligible epoch counts, and manifest checksum. Verify idempotent registration of an identical target, rejection of conflicting duplicate rows, deterministic sort order, and atomic replacement without a residual temporary file.
 
-- [ ] **Step 2: Run audit tests and verify RED**
+- [x] **Step 2: Run audit tests and verify RED**
 
 Run: `PYTHONPATH=. .venv/bin/python -m pytest tests/spectral_availability/test_audit.py -q`
 
 Expected: audit types do not exist.
 
-- [ ] **Step 3: Implement the subject audit collector**
+- [x] **Step 3: Implement the subject audit collector**
 
 Define a focused collector whose registration methods accept the actual estimator grid/mask or contiguous band eligibility. Aggregate epoch rows by `RecordingKey`, serialize intervals deterministically, and treat a repeated identical registration as one output row while raising on conflicting content. Write through `tempfile.NamedTemporaryFile` in the destination directory followed by `os.replace`.
 
-- [ ] **Step 4: Write failing two-run pipeline integration tests**
+- [x] **Step 4: Write failing two-run pipeline integration tests**
 
 Create temporary Decomb provenance/manifest, two-run clean events with float `run_id`, lightweight synthetic epochs, one broad PSD band, one TFR grid, and one alpha Hilbert/connectivity request. Assert exact run-specific masks, retained-width values, rejected contiguous run, and the final file name:
 
@@ -555,7 +568,7 @@ sub-0001_task-thermalactive_desc-spectralavailability.tsv
 
 Also monkeypatch the Decomb loader and prove it is not called and existing outputs are unchanged when `paths.decomb_manifest` is absent or null.
 
-- [ ] **Step 5: Run integration tests and verify RED**
+- [x] **Step 5: Run integration tests and verify RED**
 
 Run:
 
@@ -567,15 +580,15 @@ PYTHONPATH=. .venv/bin/python -m pytest \
 
 Expected: the feature pipeline neither loads nor writes spectral availability.
 
-- [ ] **Step 6: Wire activation once at the pipeline boundary**
+- [x] **Step 6: Wire activation once at the pipeline boundary**
 
 In `FeaturePipeline`, keep a per-instance manifest cache. After strict epoch/event loading and before shared TFR/precompute work, locally import the Decomb adapter only when the configured path is non-null, validate the no-notch contract, align all epochs, create one audit collector, and pass both through every full-range and per-range context. Write the audit once after all requested ranges succeed. Do not change existing feature-table schemas.
 
-- [ ] **Step 7: Register actual analysis targets**
+- [x] **Step 7: Register actual analysis targets**
 
 Have shared PSD, TFR, and contiguous-band seams register their actual frequency grid/band, estimator type, support rule, per-epoch validity, and counts with the collector. Include range/family identity in the analysis-target key so different requested outputs cannot collide. Add manifest path/checksum to extraction provenance so non-spectral outputs still identify their filtered source; non-spectral features add no masking target and continue to consume the already filtered samples.
 
-- [ ] **Step 8: Validate the mounted 90-recording structure read-only**
+- [x] **Step 8: Validate the mounted 90-recording structure read-only**
 
 Run a read-only script through the production adapter and aligner against:
 
@@ -586,7 +599,7 @@ Run a read-only script through the production adapter and aligner against:
 
 Assert 90 manifest keys, one terminal-null row per key, and exact subject/run coverage for the 15 clean-events tables. Do not use these paths in automated tests and do not rewrite current derivatives because they contain an additional 60 Hz notch.
 
-- [ ] **Step 9: Run compatibility and full verification**
+- [x] **Step 9: Run compatibility and full verification**
 
 Run:
 
@@ -622,7 +635,7 @@ git diff --check
 
 Expected: all focused/feature tests pass, Ruff reports no errors, and the diff has no whitespace errors.
 
-- [ ] **Step 10: Commit the integrated feature**
+- [x] **Step 10: Commit the integrated feature**
 
 ```bash
 git add \
@@ -653,7 +666,7 @@ git add \
 git commit -m "feat: integrate Decomb spectral availability"
 ```
 
-- [ ] **Step 11: Run final branch verification**
+- [x] **Step 11: Run final branch verification**
 
 Run:
 
