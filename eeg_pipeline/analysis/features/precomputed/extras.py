@@ -154,6 +154,7 @@ def _compute_psd_band_power_for_segment(
     band_ranges: Dict[str, Tuple[float, float]],
     config: Any,
     logger: Optional[logging.Logger] = None,
+    spectral_availability: Any = None,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Compute PSD-integrated band power for a data segment.
 
@@ -185,6 +186,7 @@ def _compute_psd_band_power_for_segment(
         line_width=psd_cfg["line_width"] if psd_cfg["exclude_line"] else None,
         n_harmonics=psd_cfg["n_harmonics"] if psd_cfg["exclude_line"] else None,
         logger=logger,
+        spectral_availability=spectral_availability,
     )
 
     if result is None:
@@ -331,7 +333,12 @@ def extract_band_ratios_from_precomputed(
 
         seg_data_all = precomputed.data[:, :, seg_mask]  # (epochs, ch, time)
         band_power = _compute_psd_band_power_for_segment(
-            seg_data_all, sfreq, band_ranges, config, logger
+            seg_data_all,
+            sfreq,
+            band_ranges,
+            config,
+            logger,
+            spectral_availability=precomputed.spectral_availability,
         )
         if band_power is None:
             continue
@@ -677,7 +684,12 @@ def extract_asymmetry_from_precomputed(
             raise ValueError(f"Asymmetry: no eligible bands for segment '{seg_label}'.")
 
         band_power_all = _compute_psd_band_power_for_segment(
-            seg_data_all, sfreq, eligible_bands if eligible_bands else band_ranges, config, logger
+            seg_data_all,
+            sfreq,
+            eligible_bands if eligible_bands else band_ranges,
+            config,
+            logger,
+            spectral_availability=precomputed.spectral_availability,
         )
         if band_power_all is None:
             band_power_all = {

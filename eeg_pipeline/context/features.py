@@ -60,6 +60,7 @@ class FeatureContext:
     explicit_windows: Optional[List[Dict[str, Any]]] = None
     train_mask: Optional[np.ndarray] = None
     analysis_mode: str = ANALYSIS_MODE_GROUP_STATS
+    spectral_availability: Optional[Any] = None
     precomputed: Optional[PrecomputedData] = None
     precomputed_by_family: Dict[str, PrecomputedData] = field(default_factory=dict)
     tfr: Optional[Any] = None

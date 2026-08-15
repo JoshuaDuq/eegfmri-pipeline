@@ -57,6 +57,7 @@ def _compute_single_band(
     *,
     pad_sec: float,
     pad_cycles: float,
+    spectral_availability: Any = None,
 ) -> Optional[Tuple[str, Any, np.ndarray, dict]]:
     """
     Compute band data for a single band (parallel worker).
@@ -72,6 +73,7 @@ def _compute_single_band(
         logger=None,
         pad_sec=pad_sec,
         pad_cycles=pad_cycles,
+        spectral_availability=spectral_availability,
     )
     if band_data is None:
         raise ValueError(f"Band computation failed for band='{band_name}' ({fmin}, {fmax}).")
@@ -579,6 +581,7 @@ def _compute_bands_parallel_or_sequential(
     band_definitions: List[Tuple[str, Tuple[float, float]]],
     config: Any,
     logger: Any,
+    spectral_availability: Any = None,
 ) -> List[Optional[Tuple[str, Any, np.ndarray, dict]]]:
     """
     Compute band data in parallel or sequential mode based on config.
@@ -590,10 +593,24 @@ def _compute_bands_parallel_or_sequential(
     pad_cycles = float(config.get("feature_engineering.band_envelope.pad_cycles", 3.0))
 
     if n_jobs == 1:
-        return _compute_bands_sequential(data, sfreq, band_definitions, pad_sec, pad_cycles)
+        return _compute_bands_sequential(
+            data,
+            sfreq,
+            band_definitions,
+            pad_sec,
+            pad_cycles,
+            spectral_availability=spectral_availability,
+        )
 
     return _compute_bands_parallel(
-        data, sfreq, band_definitions, pad_sec, pad_cycles, n_jobs, logger
+        data,
+        sfreq,
+        band_definitions,
+        pad_sec,
+        pad_cycles,
+        n_jobs,
+        logger,
+        spectral_availability=spectral_availability,
     )
 
 
@@ -605,6 +622,7 @@ def _compute_bands_parallel(
     pad_cycles: float,
     n_jobs: int,
     logger: Any,
+    spectral_availability: Any = None,
 ) -> List[Optional[Tuple[str, Any, np.ndarray, dict]]]:
     """Compute bands in parallel using joblib."""
     from joblib import Parallel, delayed
@@ -618,6 +636,7 @@ def _compute_bands_parallel(
             fmax,
             pad_sec=pad_sec,
             pad_cycles=pad_cycles,
+            spectral_availability=spectral_availability,
         )
         for band_name, (fmin, fmax) in band_definitions
     )
@@ -629,6 +648,7 @@ def _compute_bands_sequential(
     band_definitions: List[Tuple[str, Tuple[float, float]]],
     pad_sec: float,
     pad_cycles: float,
+    spectral_availability: Any = None,
 ) -> List[Optional[Tuple[str, Any, np.ndarray, dict]]]:
     """Compute bands sequentially."""
     return [
@@ -640,6 +660,7 @@ def _compute_bands_sequential(
             fmax,
             pad_sec=pad_sec,
             pad_cycles=pad_cycles,
+            spectral_availability=spectral_availability,
         )
         for band_name, (fmin, fmax) in band_definitions
     ]
@@ -668,6 +689,7 @@ def _compute_psd_with_qc(
     baseline_mask: Optional[np.ndarray],
     config: Any,
     logger: Any,
+    spectral_availability: Any = None,
 ) -> Tuple[Optional[Any], dict]:
     """
     Compute PSD and associated QC metrics.
@@ -688,7 +710,13 @@ def _compute_psd_with_qc(
         psd_input = data
         window_type = "full"
 
-    psd_data = compute_psd(psd_input, sfreq, config=config, logger=logger)
+    psd_data = compute_psd(
+        psd_input,
+        sfreq,
+        config=config,
+        logger=logger,
+        spectral_availability=spectral_availability,
+    )
 
     if psd_data is None:
         return None, {}
@@ -729,6 +757,7 @@ def precompute_data(
     feature_family: Optional[str] = None,
     train_mask: Optional[np.ndarray] = None,
     analysis_mode: Optional[str] = None,
+    spectral_availability: Any = None,
 ) -> PrecomputedData:
     """
     Precompute all intermediate data needed by feature extraction modules.
@@ -759,6 +788,9 @@ def precompute_data(
     analysis_mode : str, optional
         Analysis mode override (e.g., 'trial_ml_safe'). If omitted, uses
         feature_engineering.analysis_mode from config when available.
+    spectral_availability : Any, optional
+        Epoch-aligned unavailable frequency intervals shared by every
+        spectral intermediate computed here.
 
     Returns
     -------
@@ -802,6 +834,7 @@ def precompute_data(
         feature_family=str(feature_family).strip().lower() if feature_family else None,
         spatial_transform=str(transform_type),
         train_mask=train_mask,
+        spectral_availability=spectral_availability,
     )
 
     _populate_basic_qc(precomputed, data, sfreq)
@@ -855,6 +888,7 @@ def precompute_data(
             config,
             precomputed,
             logger,
+            spectral_availability=spectral_availability,
         )
 
     if compute_psd_data:
@@ -867,6 +901,7 @@ def precompute_data(
             baseline_mask,
             config,
             logger,
+            spectral_availability=spectral_availability,
         )
         precomputed.psd_data = psd_data
         precomputed.qc.psd = psd_qc
@@ -967,6 +1002,7 @@ def _compute_and_store_bands(
     config: Any,
     precomputed: PrecomputedData,
     logger: Any,
+    spectral_availability: Any = None,
 ) -> None:
     """Compute and store band data for specified bands."""
     if not frequency_bands:
@@ -985,6 +1021,7 @@ def _compute_and_store_bands(
         band_definitions,
         config,
         logger,
+        spectral_availability=spectral_availability,
     )
 
     _process_band_results(results, precomputed, logger)

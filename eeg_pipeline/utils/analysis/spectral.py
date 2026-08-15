@@ -16,6 +16,11 @@ import mne
 from mne.time_frequency import psd_array_multitaper, psd_array_welch
 from scipy.signal import hilbert
 
+from eeg_pipeline.spectral_availability import (
+    EpochSpectralAvailability,
+    multitaper_half_support,
+    welch_half_support,
+)
 from eeg_pipeline.types import BandData, PSDData
 
 # Filter design constants
@@ -55,6 +60,30 @@ def compute_frequency_weights(frequencies: np.ndarray) -> np.ndarray:
     if np.isfinite(fallback).any():
         return fallback
     return np.ones(n_freqs, dtype=float)
+
+
+def _check_availability_epochs(
+    availability: EpochSpectralAvailability,
+    n_epochs: int,
+) -> None:
+    """Require epoch-aligned availability to match the data epoch axis."""
+    n_keys = len(availability.recording_keys)
+    if n_keys != n_epochs:
+        raise ValueError(
+            f"spectral_availability covers {n_keys} epochs but the data has {n_epochs}."
+        )
+
+
+def _scatter_eligible(
+    computed: np.ndarray,
+    eligible: np.ndarray,
+    n_epochs: int,
+) -> np.ndarray:
+    """Place eligible-epoch results back on the full epoch axis, filling gaps."""
+    fill = complex(np.nan, np.nan) if np.iscomplexobj(computed) else np.nan
+    full = np.full((n_epochs, *computed.shape[1:]), fill, dtype=computed.dtype)
+    full[eligible] = computed
+    return full
 
 
 def _safe_filter_length(n_times: int, sfreq: float, l_freq: float) -> str:
@@ -176,6 +205,7 @@ def compute_band_data(
     pad_sec: Optional[float] = None,
     pad_cycles: Optional[float] = None,
     config: Any = None,
+    spectral_availability: Optional[EpochSpectralAvailability] = None,
 ) -> BandData:
     """
     Compute all band-related quantities once.
@@ -202,6 +232,10 @@ def compute_band_data(
         Padding in cycles (overrides config)
     config : Any
         Configuration object with padding parameters
+    spectral_availability : Optional[EpochSpectralAvailability]
+        Epoch-aligned unavailable intervals. Epochs whose intervals overlap
+        [fmin, fmax] are left unavailable instead of being filtered, because
+        phase across disconnected sub-bands has no single interpretation.
 
     Returns
     -------
@@ -225,8 +259,20 @@ def compute_band_data(
     if n_times < 1:
         raise ValueError("Data has no time samples")
 
+    eligible = None
+    band_input = data
+    if spectral_availability is not None:
+        _check_availability_epochs(spectral_availability, n_epochs)
+        eligible = spectral_availability.contiguous_band_eligible(fmin, fmax)
+        if not np.any(eligible):
+            raise ValueError(
+                f"No epoch retains contiguous support for band '{band}' "
+                f"[{fmin}, {fmax}] Hz."
+            )
+        band_input = data[eligible]
+
     try:
-        flat_data = data.reshape(-1, n_times)
+        flat_data = band_input.reshape(-1, n_times)
 
         pad_seconds, pad_cycles = _parse_padding_config(config, pad_sec, pad_cycles)
 
@@ -250,8 +296,13 @@ def compute_band_data(
 
         filtered, analytic = _remove_padding(filtered, analytic, pad_samples, n_times_padded)
 
-        filtered = filtered.reshape(n_epochs, n_channels, n_times)
-        analytic = analytic.reshape(n_epochs, n_channels, n_times)
+        n_computed = band_input.shape[0]
+        filtered = filtered.reshape(n_computed, n_channels, n_times)
+        analytic = analytic.reshape(n_computed, n_channels, n_times)
+
+        if eligible is not None and n_computed != n_epochs:
+            filtered = _scatter_eligible(filtered, eligible, n_epochs)
+            analytic = _scatter_eligible(analytic, eligible, n_epochs)
 
         envelope = np.abs(analytic)
         phase = np.angle(analytic)
@@ -266,6 +317,7 @@ def compute_band_data(
             envelope=envelope,
             phase=phase,
             power=power,
+            eligible_epochs=eligible,
         )
 
     except (ValueError, IndexError, RuntimeError) as exc:
@@ -315,6 +367,7 @@ def compute_psd(
     config: Any = None,
     logger: Optional[logging.Logger] = None,
     min_samples: int = MIN_SAMPLES_FOR_PSD,
+    spectral_availability: Optional[EpochSpectralAvailability] = None,
 ) -> PSDData:
     """
     Compute power spectral density using Welch's method.
@@ -331,6 +384,9 @@ def compute_psd(
         Logger instance for warnings and errors
     min_samples : int
         Minimum number of time samples required
+    spectral_availability : Optional[EpochSpectralAvailability]
+        Epoch-aligned unavailable intervals. Estimates whose Welch main-lobe
+        support overlaps an interval become NaN.
 
     Returns
     -------
@@ -356,6 +412,9 @@ def compute_psd(
     if psd_params["fmax"] > sfreq / 2.0:
         raise ValueError(f"fmax {psd_params['fmax']} exceeds Nyquist frequency {sfreq / 2.0}")
 
+    if spectral_availability is not None:
+        _check_availability_epochs(spectral_availability, n_epochs)
+
     try:
         psd_all, freqs = psd_array_welch(
             data,
@@ -373,7 +432,19 @@ def compute_psd(
             logger.error("PSD computation failed: %s", exc)
         raise RuntimeError(f"PSD computation failed: {exc}") from exc
 
-    return PSDData(freqs=freqs, psd=psd_all)
+    if spectral_availability is None:
+        return PSDData(freqs=freqs, psd=psd_all)
+
+    # psd_array_welch defaults n_per_seg to n_fft, so the main lobe follows n_fft.
+    half_support = welch_half_support(sfreq, psd_params["n_fft"], psd_params["window"])
+    valid = spectral_availability.valid_frequency_mask(freqs, half_support)
+
+    return PSDData(
+        freqs=freqs,
+        psd=np.where(valid[:, None, :], psd_all, np.nan),
+        valid_frequency_mask=valid,
+        half_support_hz=half_support,
+    )
 
 
 def compute_psd_bandpower(
@@ -392,6 +463,7 @@ def compute_psd_bandpower(
     line_width: Optional[float] = None,
     n_harmonics: Optional[int] = None,
     logger: Optional[logging.Logger] = None,
+    spectral_availability: Optional[EpochSpectralAvailability] = None,
 ) -> dict[str, np.ndarray]:
     """
     Compute PSD-integrated band power (scientifically valid for ratios/asymmetry).
@@ -433,6 +505,10 @@ def compute_psd_bandpower(
         Number of harmonics to exclude. Default 3.
     logger : Optional[logging.Logger]
         Logger for warnings
+    spectral_availability : Optional[EpochSpectralAvailability]
+        Epoch-aligned unavailable intervals. Integration drops bins whose
+        estimator support overlaps an interval, and bandwidth normalization
+        divides by the bandwidth each epoch actually retained.
 
     Returns
     -------
@@ -453,6 +529,11 @@ def compute_psd_bandpower(
     nyquist = sfreq / 2.0
     fmax = min(fmax, nyquist - 0.5)
 
+    if spectral_availability is not None:
+        _check_availability_epochs(spectral_availability, n_epochs)
+
+    n_per_seg = min(int(sfreq * 2.0), n_times)
+
     try:
         if psd_method == "multitaper":
             psds, freqs = psd_array_multitaper(
@@ -466,7 +547,6 @@ def compute_psd_bandpower(
                 verbose=False,
             )
         else:
-            n_per_seg = min(int(sfreq * 2.0), n_times)
             n_overlap = n_per_seg // 2
             psds, freqs = psd_array_welch(
                 data,
@@ -505,6 +585,15 @@ def compute_psd_bandpower(
             n_excluded = np.sum(line_noise_mask)
             logger.debug("Excluding %d frequency bins for line noise", n_excluded)
 
+    valid = None
+    if spectral_availability is not None:
+        if psd_method == "multitaper":
+            half_support = multitaper_half_support(bandwidth)
+        else:
+            # psd_array_welch is called without a window, so it uses its default.
+            half_support = welch_half_support(sfreq, n_per_seg, "hamming")
+        valid = spectral_availability.valid_frequency_mask(freqs, half_support)
+
     band_power: dict[str, np.ndarray] = {}
 
     for band_name, (band_fmin, band_fmax) in band_ranges.items():
@@ -527,23 +616,60 @@ def compute_psd_bandpower(
             band_power[band_name] = np.full((n_epochs, n_channels), np.nan)
             continue
 
-        # Integrate PSD over band: sum(PSD * df)
-        psd_band = psds[..., band_mask]
-        df_band = df[band_mask]
+        if valid is None:
+            # Integrate PSD over band: sum(PSD * df)
+            psd_band = psds[..., band_mask]
+            df_band = df[band_mask]
 
-        # Weighted integration (handles non-uniform frequency spacing)
-        integrated_power = np.sum(psd_band * df_band, axis=-1)
+            # Weighted integration (handles non-uniform frequency spacing)
+            integrated_power = np.sum(psd_band * df_band, axis=-1)
 
-        if normalize_by_bandwidth:
-            # Power per Hz (comparable across bands of different widths)
-            # Use actual integrated bandwidth (excluding line noise gaps)
-            actual_bandwidth = np.sum(df_band)
-            if actual_bandwidth > 0:
-                integrated_power = integrated_power / actual_bandwidth
+            if normalize_by_bandwidth:
+                # Power per Hz (comparable across bands of different widths)
+                # Use actual integrated bandwidth (excluding line noise gaps)
+                actual_bandwidth = np.sum(df_band)
+                if actual_bandwidth > 0:
+                    integrated_power = integrated_power / actual_bandwidth
 
-        band_power[band_name] = integrated_power
+            band_power[band_name] = integrated_power
+            continue
+
+        band_power[band_name] = _integrate_retained_band(
+            psds,
+            df,
+            valid & band_mask,
+            band_name,
+            normalize_by_bandwidth,
+        )
 
     return band_power
+
+
+def _integrate_retained_band(
+    psds: np.ndarray,
+    df: np.ndarray,
+    retained: np.ndarray,
+    band_name: str,
+    normalize_by_bandwidth: bool,
+) -> np.ndarray:
+    """Integrate each epoch over the bins it retained, per retained bandwidth."""
+    weights = np.where(retained, df, 0.0)
+    retained_bandwidth = weights.sum(axis=-1)
+
+    if not np.any(retained_bandwidth > 0):
+        raise ValueError(
+            f"No epoch retains spectral support for band '{band_name}'; "
+            "the requested band is entirely unavailable."
+        )
+
+    integrated_power = np.einsum("ecf,ef->ec", psds, weights)
+
+    if normalize_by_bandwidth:
+        divisor = np.where(retained_bandwidth > 0, retained_bandwidth, 1.0)
+        integrated_power = integrated_power / divisor[:, None]
+
+    integrated_power[retained_bandwidth <= 0] = np.nan
+    return integrated_power
 
 
 def subtract_evoked(

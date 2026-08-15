@@ -83,6 +83,22 @@ class BandData:
     phase: np.ndarray  # Instantaneous phase
     power: np.ndarray  # Envelope squared
 
+    # Epochs whose spectral availability permits this contiguous band
+    eligible_epochs: Optional[np.ndarray] = None
+
+    def __post_init__(self) -> None:
+        if self.eligible_epochs is None:
+            return
+
+        mask = np.asarray(self.eligible_epochs, dtype=bool)
+        n_epochs = self.filtered.shape[0]
+        if mask.ndim != 1 or len(mask) != n_epochs:
+            raise ValueError(
+                f"BandData eligible_epochs length ({mask.size}) does not match "
+                f"band epochs ({n_epochs})."
+            )
+        self.eligible_epochs = mask
+
     def crop(self, tmin_idx: int, tmax_idx: int) -> BandData:
         """Crop band data to specific time indices."""
         return BandData(
@@ -94,6 +110,7 @@ class BandData:
             envelope=self.envelope[..., tmin_idx:tmax_idx],
             phase=self.phase[..., tmin_idx:tmax_idx],
             power=self.power[..., tmin_idx:tmax_idx],
+            eligible_epochs=self.eligible_epochs,
         )
 
 
@@ -103,6 +120,23 @@ class PSDData:
 
     freqs: np.ndarray
     psd: np.ndarray  # (epochs, channels, freqs)
+
+    # Per-epoch estimator validity, set only when spectral availability is active
+    valid_frequency_mask: Optional[np.ndarray] = None
+    half_support_hz: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if self.valid_frequency_mask is None:
+            return
+
+        mask = np.asarray(self.valid_frequency_mask, dtype=bool)
+        expected = (self.psd.shape[0], len(self.freqs))
+        if mask.shape != expected:
+            raise ValueError(
+                f"PSDData valid_frequency_mask shape {mask.shape} does not match "
+                f"the (epochs, freqs) axes {expected}."
+            )
+        self.valid_frequency_mask = mask
 
 
 @dataclass
@@ -235,6 +269,9 @@ class PrecomputedData:
     feature_family: Optional[str] = None
     spatial_transform: Optional[str] = None
 
+    # Epoch-aligned unavailable frequency intervals (None when not configured)
+    spectral_availability: Optional[Any] = None
+
     def __post_init__(self) -> None:
         """Validate axis contracts shared by all feature extractors."""
         self.data = np.asarray(self.data)
@@ -272,6 +309,7 @@ class PrecomputedData:
 
         self._validate_trial_metadata(n_epochs)
         self._validate_window_masks(n_times)
+        self._validate_spectral_availability(n_epochs)
 
     def _validate_trial_metadata(self, n_epochs: int) -> None:
         """Require optional trial metadata to align with the epoch axis."""
@@ -288,6 +326,18 @@ class PrecomputedData:
         if self.train_mask is not None and len(self.train_mask) != n_epochs:
             raise ValueError(
                 f"PrecomputedData train_mask length ({len(self.train_mask)}) does not "
+                f"match data epochs ({n_epochs})."
+            )
+
+    def _validate_spectral_availability(self, n_epochs: int) -> None:
+        """Require optional spectral availability to align with the epoch axis."""
+        if self.spectral_availability is None:
+            return
+
+        n_keys = len(self.spectral_availability.recording_keys)
+        if n_keys != n_epochs:
+            raise ValueError(
+                f"PrecomputedData spectral_availability length ({n_keys}) does not "
                 f"match data epochs ({n_epochs})."
             )
 
@@ -365,6 +415,7 @@ class PrecomputedData:
             frequency_bands=self.frequency_bands,
             feature_family=self.feature_family,
             spatial_transform=self.spatial_transform,
+            spectral_availability=self.spectral_availability,
         )
 
     def _crop_band_data(self, cropped: "PrecomputedData", tmin_idx: int, tmax_idx: int) -> None:
@@ -443,4 +494,5 @@ class PrecomputedData:
             spatial_transform=self.spatial_transform,
             evoked_subtracted=self.evoked_subtracted,
             evoked_subtracted_conditionwise=self.evoked_subtracted_conditionwise,
+            spectral_availability=self.spectral_availability,
         )
