@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .Python
 build/
 develop-eggs/
@@ -24,12 +25,14 @@ wheels/
 
 ### Environment ###
 .venv/
+.venv*/
 .venv311/
 venv/
 env/
 ENV/
 eeg_pipeline/.venv311/
 .env
+.env.*
 
 ### Testing and Cache ###
 .pytest_cache/
@@ -43,10 +46,14 @@ htmlcov/
 .nox/
 .hypothesis/
 .mypy_cache/
+.dmypy.json
+dmypy.json
 .ruff_cache/
 .tmp/
 pytest-cache-files-*/
 .ipynb_checkpoints/
+*-checkpoint.ipynb
+*.nbconvert.ipynb
 .python-version
 
 ### Go (TUI) ###
@@ -71,6 +78,12 @@ skills-lock.json
 .aider*
 .continue/
 .copilot/
+.claude/
+.gemini/
+.antigravity/
+.windsurf/
+.cline/
+.roo/
 
 # Track all Sphinx documentation source files; ignore build output only
 docs/_build/
@@ -83,7 +96,18 @@ docs/plans/
 *.swo
 *~
 .DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+.AppleDouble/
+.LSOverride/
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.code-workspace
+*.bak
+*.orig
+*.rej
 
 ### Local/Temporary Files ###
 *.log
@@ -92,6 +116,7 @@ columns_sample.txt
 outputs/
 tmp/
 scratch/
+.private_repo/
 
 ### Local workflow state ###
 .superpowers/
@@ -167,12 +192,43 @@ eeg_pipeline/data/derivatives/**
 *.nii
 *.nii.gz
 *.h5
+*.hdf5
+*.hdf
 *.npy
+*.npz
 *.mat
 *.edf
 *.bdf
+*.vhdr
+*.vmrk
+*.eeg
+*.gii
+*.gii.gz
+*.mgz
+*.mgh
+*.bval
+*.bvec
+*.cnt
+*.avg
+*.pkl
+*.pickle
+*.joblib
+*.pt
+*.pth
+*.onnx
+*.parquet
+*.pq
+*.feather
+*.arrow
+*.zarr
+*.zarr/
 *.tar
 *.tar.gz
+*.zip
+*.7z
+*.rar
+*.bz2
+*.xz
 fmriprep_preprocessed_fmri.tar
 
 ### Secrets ###
