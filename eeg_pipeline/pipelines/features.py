@@ -377,6 +377,7 @@ def _precompute_intermediates_if_needed(
     bands: Optional[List[str]],
     config: Any,
     logger: Any,
+    spectral_availability: Any = None,
 ) -> Optional[PrecomputedData]:
     """Pre-compute shared intermediates if multiple ranges and precompute categories requested."""
     needs_precompute = len(time_ranges) > 1 and any(
@@ -401,7 +402,57 @@ def _precompute_intermediates_if_needed(
         logger,
         compute_psd_data=True,
         windows_spec=windows_spec,
+        spectral_availability=spectral_availability,
     )
+
+
+def _mask_precomputed_tfrs(
+    tfr: Any,
+    tfr_complex: Any,
+    spectral_availability: Any,
+    config: Any,
+) -> None:
+    """Apply the availability mask to TFRs shared across every requested range."""
+    if spectral_availability is None:
+        return
+
+    from eeg_pipeline.utils.analysis.tfr import apply_tfr_availability
+
+    for candidate in (tfr, tfr_complex):
+        if candidate is not None:
+            apply_tfr_availability(candidate, spectral_availability, config=config)
+
+
+def _register_availability_targets(audit: Any, precomputed: Optional[PrecomputedData]) -> None:
+    """Record the grids and bands the shared intermediates actually produced."""
+    from eeg_pipeline.spectral_availability.audit import (
+        ESTIMATOR_HILBERT,
+        ESTIMATOR_WELCH,
+    )
+
+    if precomputed is None:
+        return
+
+    psd_data = precomputed.psd_data
+    if psd_data is not None and psd_data.valid_frequency_mask is not None:
+        audit.register_grid(
+            "psd_welch",
+            psd_data.freqs,
+            psd_data.valid_frequency_mask,
+            estimator=ESTIMATOR_WELCH,
+            support_rule=f"half-power main lobe = {psd_data.half_support_hz:.6g} Hz",
+        )
+
+    for band, band_data in precomputed.band_data.items():
+        if band_data.eligible_epochs is None:
+            continue
+        audit.register_band(
+            f"band_{band}",
+            band_data.fmin,
+            band_data.fmax,
+            estimator=ESTIMATOR_HILBERT,
+            support_rule="contiguous passband",
+        )
 
 
 def _create_feature_accumulator() -> Dict[str, List[pd.DataFrame]]:
@@ -1022,6 +1073,58 @@ class FeaturePipeline(PipelineBase):
 
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="feature_extraction", config=config)
+        self._decomb_manifest: Any = None
+
+    def _load_spectral_availability(
+        self,
+        subject: str,
+        task: str,
+        aligned_events: pd.DataFrame,
+    ) -> tuple[Any, Any]:
+        """Resolve epoch-aligned exclusions for this subject, or (None, None).
+
+        Nothing is imported or validated unless ``paths.decomb_manifest`` names a
+        file, so datasets that do not opt in keep their existing behaviour exactly.
+        """
+        manifest_path = self.config.get("paths.decomb_manifest", None)
+        if manifest_path is None:
+            return None, None
+
+        from eeg_pipeline.spectral_availability.alignment import align_decomb_to_epochs
+        from eeg_pipeline.spectral_availability.audit import SpectralAvailabilityAudit
+        from eeg_pipeline.spectral_availability.decomb import load_decomb_manifest
+
+        notch_freq = self.config.get("preprocessing.notch_freq", None)
+        if notch_freq is not None:
+            raise ValueError(
+                "paths.decomb_manifest is configured together with "
+                f"preprocessing.notch_freq={notch_freq!r}. A second notch changes the "
+                "unavailable-frequency geometry beyond the manifest, so the analysis "
+                "contract would no longer describe the data."
+            )
+
+        if self._decomb_manifest is None or str(self._decomb_manifest.path) != str(manifest_path):
+            self._decomb_manifest = load_decomb_manifest(manifest_path)
+
+        availability = align_decomb_to_epochs(
+            self._decomb_manifest,
+            subject=subject,
+            task=task,
+            events=aligned_events,
+        )
+        audit = SpectralAvailabilityAudit(
+            availability,
+            self._decomb_manifest.sha256,
+            subject=subject,
+            task=task,
+        )
+        self.logger.info(
+            "Spectral availability: aligned %d epochs across %d recordings from %s",
+            len(availability.recording_keys),
+            len(set(availability.recording_keys)),
+            manifest_path,
+        )
+        return availability, audit
 
     def _subject_feature_output_dir(
         self,
@@ -1116,6 +1219,12 @@ class FeaturePipeline(PipelineBase):
                 self.logger.error("%s", message)
                 _fail_subject(progress, subject, "no_events", message)
 
+            spectral_availability, availability_audit = self._load_spectral_availability(
+                subject,
+                task,
+                aligned_events,
+            )
+
             input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
 
             try:
@@ -1190,7 +1299,16 @@ class FeaturePipeline(PipelineBase):
                 kwargs.get("bands"),
                 self.config,
                 self.logger,
+                spectral_availability=spectral_availability,
             )
+            _mask_precomputed_tfrs(
+                tfr_full,
+                tfr_complex_full,
+                spectral_availability,
+                self.config,
+            )
+            if availability_audit is not None:
+                _register_availability_targets(availability_audit, precomputed_full)
             if precomputed_full is not None:
                 if len(aligned_events) == int(precomputed_full.data.shape[0]):
                     precomputed_full.metadata = aligned_events.reset_index(drop=True).copy()
@@ -1276,6 +1394,7 @@ class FeaturePipeline(PipelineBase):
                     tmax=tmax,
                     name=name,
                     aggregation_method=kwargs.get("aggregation_method", "mean"),
+                    spectral_availability=spectral_availability,
                     tfr=tfr_full,
                     tfr_complex=tfr_complex_full,
                     precomputed=precomputed_full,
@@ -1286,6 +1405,7 @@ class FeaturePipeline(PipelineBase):
                         self.config.get("feature_engineering.analysis_mode", "group_stats"),
                     ),
                 )
+                ctx.spectral_availability_audit = availability_audit
                 ctx.progress = progress
                 ctx.total_steps = total_steps
                 ctx.current_step = current_step
@@ -1596,6 +1716,10 @@ class FeaturePipeline(PipelineBase):
                     if not subject_completed():
                         progress.subject_done(f"sub-{subject}", success=False)
                     raise
+
+            if availability_audit is not None:
+                audit_path = availability_audit.write(features_dir)
+                self.logger.info("Wrote spectral availability audit: %s", audit_path)
 
             progress.subject_done(f"sub-{subject}", success=True)
 

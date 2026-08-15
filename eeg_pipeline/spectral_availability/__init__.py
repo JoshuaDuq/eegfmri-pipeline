@@ -30,6 +30,16 @@ def __getattr__(name: str):
         )
 
         exports = {"align_decomb_to_epochs": align_decomb_to_epochs}
+    elif name in {"AvailabilityAuditRow", "SpectralAvailabilityAudit"}:
+        from eeg_pipeline.spectral_availability.audit import (
+            AvailabilityAuditRow,
+            SpectralAvailabilityAudit,
+        )
+
+        exports = {
+            "AvailabilityAuditRow": AvailabilityAuditRow,
+            "SpectralAvailabilityAudit": SpectralAvailabilityAudit,
+        }
     else:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -39,11 +49,13 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "AvailabilityAuditRow",
     "DecombManifest",
     "EpochSpectralAvailability",
     "FrequencyInterval",
     "RecordingExclusions",
     "RecordingKey",
+    "SpectralAvailabilityAudit",
     "align_decomb_to_epochs",
     "load_decomb_manifest",
     "morlet_half_support",
