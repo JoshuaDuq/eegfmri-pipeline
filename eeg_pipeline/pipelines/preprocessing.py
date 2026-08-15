@@ -1648,10 +1648,7 @@ class PreprocessingPipeline(PipelineBase):
                 raise FileNotFoundError(
                     f"Clean epochs not found; cannot log AutoReject for sub-{subject}, task-{task}"
                 )
-            fit_path = pre_rejection_epochs_path(
-                clean_path,
-                spatial_filter=self.config.get("ica.spatial_filter", "ica"),
-            )
+            fit_path = pre_rejection_epochs_path(clean_path)
             if not fit_path.is_file():
                 raise FileNotFoundError(
                     f"Pre-rejection epochs not found at {fit_path}; AutoReject cannot be "
