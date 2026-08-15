@@ -189,6 +189,14 @@ def test_empty_manifest_names_all_missing_required_columns(tmp_path) -> None:
     assert all(column in str(exc_info.value) for column in REQUIRED_COLUMNS)
 
 
+def test_header_only_manifest_requires_a_data_row(tmp_path) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, _ = _write_manifest(tmp_path, [])
+
+    with pytest.raises(ValueError, match="at least one data row"):
+        load_decomb_manifest(manifest_path)
+
+
 @pytest.mark.parametrize(
     "recording",
     [
@@ -236,6 +244,38 @@ def test_rejects_invalid_terminal_or_interval_blank_rows(tmp_path, rows) -> None
     manifest_path, _ = _write_manifest(tmp_path, rows)
 
     with pytest.raises(ValueError, match=r"recording|row"):
+        load_decomb_manifest(manifest_path)
+
+
+def test_accepts_scanner_harmonics_detected_finite_outcome(tmp_path) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, _ = _write_manifest(
+        tmp_path,
+        [
+            _finite_row(outcome="scanner_harmonics_detected"),
+            _terminal_row(),
+        ],
+    )
+
+    manifest = load_decomb_manifest(manifest_path)
+
+    assert [
+        (interval.low_hz, interval.high_hz) for interval in manifest.exclusions[0].intervals
+    ] == [(59.0, 61.0)]
+
+
+@pytest.mark.parametrize("outcome", ["", "line_detectd", "artifact_detected"])
+def test_rejects_unsupported_finite_outcomes_with_row_context(
+    tmp_path,
+    outcome,
+) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, _ = _write_manifest(
+        tmp_path,
+        [_finite_row(outcome=outcome), _terminal_row()],
+    )
+
+    with pytest.raises(ValueError, match=r"row 2.*recording.*outcome"):
         load_decomb_manifest(manifest_path)
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from numbers import Real
+from numbers import Integral, Real
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,11 @@ def _canonical_string_entity(value: object, entity: str) -> str:
 def _canonical_run(value: object) -> str:
     if isinstance(value, str):
         return _canonical_string_entity(value, "run")
-    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError("run_id must be an explicit string or finite integer-valued number")
+    if isinstance(value, Integral):
+        return _canonical_string_entity(str(value), "run")
+    if not isinstance(value, Real):
         raise TypeError("run_id must be an explicit string or finite integer-valued number")
 
     numeric = float(value)

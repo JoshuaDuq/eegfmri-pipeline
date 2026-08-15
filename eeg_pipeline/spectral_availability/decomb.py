@@ -33,6 +33,12 @@ _RECORDING_PATTERN = re.compile(
 )
 _NUMBER_PATTERN = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 _TERMINAL_OUTCOME = "no_line_detected"
+_FINITE_OUTCOMES = frozenset(
+    {
+        "line_detected",
+        "scanner_harmonics_detected",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -116,6 +122,8 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
     missing_columns = _REQUIRED_COLUMNS - set(frame.columns)
     if missing_columns:
         raise _missing_columns_error(missing_columns)
+    if frame.empty:
+        raise ValueError("Decomb manifest must contain at least one data row")
     return frame.to_dict(orient="records")
 
 
@@ -165,8 +173,12 @@ def load_decomb_manifest(path: str | Path) -> DecombManifest:
                 raise ValueError(f"{context} has blank interval fields without terminal outcome")
             terminal_counts[recording] += 1
             continue
-        if outcome == _TERMINAL_OUTCOME:
-            raise ValueError(f"{context} has terminal outcome with a finite interval")
+        if outcome not in _FINITE_OUTCOMES:
+            supported = ", ".join(sorted(_FINITE_OUTCOMES))
+            raise ValueError(
+                f"{context} has unsupported finite outcome {outcome!r}; "
+                f"expected one of: {supported}"
+            )
 
         intervals[recording].append(
             _frequency_interval(

@@ -71,6 +71,28 @@ def test_aligns_integer_valued_numeric_runs_in_original_event_order() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "run_id",
+    [9007199254740993, np.int64(9007199254740993)],
+    ids=["python-int", "numpy-int64"],
+)
+def test_preserves_large_integral_run_ids_exactly(run_id) -> None:
+    expected_run = "9007199254740993"
+    manifest = _manifest(_exclusion(run=expected_run))
+    events = pd.DataFrame(
+        {"run_id": pd.Series([run_id], dtype=object)},
+    )
+
+    aligned = align_decomb_to_epochs(
+        manifest,
+        subject="0001",
+        task="thermalactive",
+        events=events,
+    )
+
+    assert aligned.recording_keys[0].run == expected_run
+
+
 def test_accepts_one_matching_prefix_on_explicit_entity_strings() -> None:
     manifest = _manifest(
         _exclusion(run="01", session="baseline2"),
