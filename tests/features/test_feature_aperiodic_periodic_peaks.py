@@ -237,6 +237,7 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
             condition_labels=None,
             train_mask=None,
             analysis_mode=None,
+            spectral_availability=None,
         ):
             del (
                 spatial_modes,

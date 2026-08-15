@@ -39,6 +39,9 @@ DEFAULT_PSD_FMAX_HZ = 80.0
 DEFAULT_PSD_FFT_MULTIPLIER = 2.0
 MIN_SAMPLES_FOR_PSD = 64
 
+# Normalized half-bandwidth psd_array_multitaper falls back to when bandwidth is None
+MNE_MULTITAPER_DEFAULT_HALF_NBW = 4.0
+
 
 def compute_frequency_weights(frequencies: np.ndarray) -> np.ndarray:
     """Compute trapezoidal integration weights for a frequency axis."""
@@ -72,6 +75,37 @@ def _check_availability_epochs(
         raise ValueError(
             f"spectral_availability covers {n_keys} epochs but the data has {n_epochs}."
         )
+
+
+def estimator_half_support(
+    psd_method: str,
+    sfreq: float,
+    *,
+    bandwidth: Optional[float] = None,
+    n_times: Optional[int] = None,
+    n_per_seg: Optional[int] = None,
+    window: str | float | tuple = "hamming",
+) -> float:
+    """Half-power spectral support of the PSD estimator that was actually used.
+
+    An estimate is only valid when this support clears the unavailable interval,
+    because Welch windows and multitapers both smooth across neighbouring bins.
+    Pass ``n_times`` instead of ``bandwidth`` when the multitaper call left MNE on
+    its default normalized half-bandwidth.
+    """
+    if str(psd_method).strip().lower() == "multitaper":
+        if bandwidth is None:
+            if n_times is None:
+                raise ValueError(
+                    "Multitaper spectral support requires the configured bandwidth "
+                    "or the segment length MNE derived its default from."
+                )
+            bandwidth = 2.0 * MNE_MULTITAPER_DEFAULT_HALF_NBW * float(sfreq) / int(n_times)
+        return multitaper_half_support(bandwidth)
+
+    if n_per_seg is None:
+        raise ValueError("Welch spectral support requires the segment length used.")
+    return welch_half_support(sfreq, n_per_seg, window)
 
 
 def _scatter_eligible(
@@ -587,11 +621,13 @@ def compute_psd_bandpower(
 
     valid = None
     if spectral_availability is not None:
-        if psd_method == "multitaper":
-            half_support = multitaper_half_support(bandwidth)
-        else:
-            # psd_array_welch is called without a window, so it uses its default.
-            half_support = welch_half_support(sfreq, n_per_seg, "hamming")
+        # psd_array_welch is called without a window, so it uses its default.
+        half_support = estimator_half_support(
+            psd_method,
+            sfreq,
+            bandwidth=bandwidth,
+            n_per_seg=n_per_seg,
+        )
         valid = spectral_availability.valid_frequency_mask(freqs, half_support)
 
     band_power: dict[str, np.ndarray] = {}

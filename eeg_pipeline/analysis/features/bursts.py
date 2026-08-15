@@ -667,6 +667,7 @@ def extract_burst_features(
         if band not in precomputed.band_data:
             continue
 
+        eligible_epochs = precomputed.band_data[band].eligible_epochs
         envelope = precomputed.band_data[band].envelope
         baseline_envelope = _resolve_burst_reference_envelope(
             envelope,
@@ -797,6 +798,11 @@ def extract_burst_features(
                 )
 
             for epoch_index in range(n_epochs):
+                # An ineligible epoch has no band-filtered signal, so counting its
+                # bursts would report notch attenuation as an absence of bursts.
+                if eligible_epochs is not None and not eligible_epochs[epoch_index]:
+                    continue
+
                 record = records[epoch_index]
 
                 if "channels" in spatial_modes:

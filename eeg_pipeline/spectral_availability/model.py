@@ -179,6 +179,12 @@ class EpochSpectralAvailability:
         object.__setattr__(self, "recording_keys", recording_keys)
         object.__setattr__(self, "exclusions_by_epoch", exclusions_by_epoch)
 
+    def for_epoch(self, index: int) -> EpochSpectralAvailability:
+        return EpochSpectralAvailability(
+            recording_keys=(self.recording_keys[index],),
+            exclusions_by_epoch=(self.exclusions_by_epoch[index],),
+        )
+
     def valid_frequency_mask(
         self,
         centre_frequencies: ArrayLike,

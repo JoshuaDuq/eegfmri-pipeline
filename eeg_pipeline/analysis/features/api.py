@@ -72,6 +72,7 @@ from eeg_pipeline.analysis.features.quality import (
 from eeg_pipeline.analysis.features.microstates import extract_microstate_features
 
 from eeg_pipeline.utils.analysis.tfr import (
+    apply_tfr_availability,
     compute_tfr_for_subject,
     get_tfr_config,
     compute_complex_tfr,
@@ -515,6 +516,11 @@ def _compute_tfr_for_features(
                 ctx.logger,
             )
         if tfr_complex is not None:
+            ctx.tfr_complex_availability = apply_tfr_availability(
+                tfr_complex,
+                ctx.spectral_availability,
+                config=ctx.config,
+            )
             ctx.tfr_complex = tfr_complex
             ctx.tfr_complex_transform = str(shared_transform)
             if (
@@ -587,6 +593,12 @@ def _compute_tfr_for_features(
 
         ctx.logger.info(f"Cropping TFR to range [{crop_min:.3f}, {crop_max:.3f}]")
         tfr = tfr.copy().crop(crop_min, crop_max)
+
+    ctx.tfr_availability = apply_tfr_availability(
+        tfr,
+        ctx.spectral_availability,
+        config=ctx.config,
+    )
 
     if ctx.config.get("feature_engineering.save_tfr_with_sidecar", False):
         # In multi-range extraction, the per-range TFR is cropped to the current window.

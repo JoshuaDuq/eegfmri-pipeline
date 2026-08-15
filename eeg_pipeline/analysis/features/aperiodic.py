@@ -13,6 +13,7 @@ These features separate oscillatory from aperiodic neural activity.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple, Any, NamedTuple
 import numpy as np
 import pandas as pd
@@ -32,7 +33,10 @@ from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_extractor_inputs
 from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
-from eeg_pipeline.utils.analysis.spectral import compute_frequency_weights
+from eeg_pipeline.utils.analysis.spectral import (
+    compute_frequency_weights,
+    estimator_half_support,
+)
 from eeg_pipeline.utils.config.loader import (
     get_condition_column_candidates,
     get_config_value,
@@ -651,6 +655,55 @@ def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
 
 
 # Parallel fitting driver
+@dataclass(frozen=True)
+class _EpochFitGrid:
+    """Frequency bins one epoch contributes to its aperiodic fit."""
+
+    index_map: Optional[np.ndarray]
+    log_freqs: Optional[np.ndarray]
+    reason: str = ""
+
+
+def _build_epoch_fit_grids(
+    log_freqs: np.ndarray,
+    n_epochs: int,
+    n_freqs: int,
+    line_noise_mask: Optional[np.ndarray],
+    epoch_valid_mask: Optional[np.ndarray],
+) -> List[_EpochFitGrid]:
+    """Resolve the fit grid each epoch retains under its own exclusions.
+
+    An aperiodic model is fitted over a connected range, so an epoch whose retained
+    bins are split by an interior gap is unavailable rather than fitted across the
+    hole. Trimming at either end leaves a shorter but still connected range.
+    """
+    if line_noise_mask is not None and line_noise_mask.shape[0] == n_freqs:
+        base_indices = np.flatnonzero(line_noise_mask)
+    else:
+        base_indices = np.arange(n_freqs, dtype=int)
+
+    if epoch_valid_mask is None:
+        shared = _EpochFitGrid(index_map=base_indices, log_freqs=log_freqs[base_indices])
+        return [shared] * n_epochs
+
+    grids: List[_EpochFitGrid] = []
+    for epoch_index in range(n_epochs):
+        kept = np.flatnonzero(epoch_valid_mask[epoch_index][base_indices])
+        if kept.size == 0:
+            grids.append(
+                _EpochFitGrid(None, None, "no frequency bin survives the unavailable intervals")
+            )
+            continue
+        if np.any(np.diff(kept) != 1):
+            grids.append(
+                _EpochFitGrid(None, None, "retained support is split by an unavailable interval")
+            )
+            continue
+        index_map = base_indices[kept]
+        grids.append(_EpochFitGrid(index_map, log_freqs[index_map]))
+    return grids
+
+
 def _fit_aperiodic_with_qc(
     log_freqs: np.ndarray,
     log_psd: np.ndarray,
@@ -659,6 +712,7 @@ def _fit_aperiodic_with_qc(
     *,
     n_jobs: int = 1,
     line_noise_mask: Optional[np.ndarray] = None,
+    epoch_valid_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Fit aperiodic model across all epochs and channels with quality control."""
     n_epochs, n_channels, n_freqs = log_psd.shape
@@ -680,33 +734,48 @@ def _fit_aperiodic_with_qc(
             periodic_peak_bandwidths[ep_idx, ch_idx] = np.array([], dtype=float)
             periodic_peak_heights[ep_idx, ch_idx] = np.array([], dtype=float)
 
-    tasks = [(ep_idx, ch_idx) for ep_idx in range(n_epochs) for ch_idx in range(n_channels)]
+    # Resolve the bins each epoch retains, then exclude line noise from fitting
+    fit_grids = _build_epoch_fit_grids(
+        log_freqs, n_epochs, n_freqs, line_noise_mask, epoch_valid_mask
+    )
+    tasks = [
+        (ep_idx, ch_idx)
+        for ep_idx in range(n_epochs)
+        if fit_grids[ep_idx].index_map is not None
+        for ch_idx in range(n_channels)
+    ]
 
-    # Apply line-noise mask to exclude those bins from fitting
-    if line_noise_mask is not None and line_noise_mask.shape[0] == n_freqs:
-        log_freqs_fit = log_freqs[line_noise_mask]
-        log_psd_fit = log_psd[:, :, line_noise_mask]
-        fit_index_map = np.flatnonzero(line_noise_mask)
-    else:
-        log_freqs_fit = log_freqs
-        log_psd_fit = log_psd
-        fit_index_map = np.arange(n_freqs, dtype=int)
+    def _fit_index_map(epoch_index: int) -> np.ndarray:
+        return fit_grids[epoch_index].index_map
 
     # Execute fitting (parallel or serial)
     if fit_params.model == "knee":
-        freqs_hz_fit = np.power(10.0, np.asarray(log_freqs_fit, dtype=float))
+        freqs_hz_grids = [
+            np.power(10.0, np.asarray(grid.log_freqs, dtype=float))
+            if grid.log_freqs is not None
+            else None
+            for grid in fit_grids
+        ]
 
         if n_jobs != 1:
             results = Parallel(n_jobs=n_jobs)(
                 delayed(_fit_single_epoch_channel_knee)(
-                    ep_idx, ch_idx, freqs_hz_fit, log_psd_fit[ep_idx, ch_idx, :], fit_params
+                    ep_idx,
+                    ch_idx,
+                    freqs_hz_grids[ep_idx],
+                    log_psd[ep_idx, ch_idx, _fit_index_map(ep_idx)],
+                    fit_params,
                 )
                 for ep_idx, ch_idx in tasks
             )
         else:
             results = [
                 _fit_single_epoch_channel_knee(
-                    ep_idx, ch_idx, freqs_hz_fit, log_psd_fit[ep_idx, ch_idx, :], fit_params
+                    ep_idx,
+                    ch_idx,
+                    freqs_hz_grids[ep_idx],
+                    log_psd[ep_idx, ch_idx, _fit_index_map(ep_idx)],
+                    fit_params,
                 )
                 for ep_idx, ch_idx in tasks
             ]
@@ -733,19 +802,31 @@ def _fit_aperiodic_with_qc(
                 res.peak_heights, dtype=float
             )
             if res.fit_indices.size > 0:
-                fit_masks[res.epoch_idx, res.channel_idx, fit_index_map[res.fit_indices]] = True
+                fit_masks[
+                    res.epoch_idx,
+                    res.channel_idx,
+                    _fit_index_map(res.epoch_idx)[res.fit_indices],
+                ] = True
     else:
         if n_jobs != 1:
             results = Parallel(n_jobs=n_jobs)(
                 delayed(_fit_single_epoch_channel)(
-                    ep_idx, ch_idx, log_freqs_fit, log_psd_fit[ep_idx, ch_idx, :], fit_params
+                    ep_idx,
+                    ch_idx,
+                    fit_grids[ep_idx].log_freqs,
+                    log_psd[ep_idx, ch_idx, _fit_index_map(ep_idx)],
+                    fit_params,
                 )
                 for ep_idx, ch_idx in tasks
             )
         else:
             results = [
                 _fit_single_epoch_channel(
-                    ep_idx, ch_idx, log_freqs_fit, log_psd_fit[ep_idx, ch_idx, :], fit_params
+                    ep_idx,
+                    ch_idx,
+                    fit_grids[ep_idx].log_freqs,
+                    log_psd[ep_idx, ch_idx, _fit_index_map(ep_idx)],
+                    fit_params,
                 )
                 for ep_idx, ch_idx in tasks
             ]
@@ -768,7 +849,11 @@ def _fit_aperiodic_with_qc(
                 res.peak_heights, dtype=float
             )
             if res.fit_indices.size > 0:
-                fit_masks[res.epoch_idx, res.channel_idx, fit_index_map[res.fit_indices]] = True
+                fit_masks[
+                    res.epoch_idx,
+                    res.channel_idx,
+                    _fit_index_map(res.epoch_idx)[res.fit_indices],
+                ] = True
 
     qc_dict = {
         "model": fit_params.model,
@@ -777,6 +862,7 @@ def _fit_aperiodic_with_qc(
         "periodic_peak_centers_hz": periodic_peak_centers,
         "periodic_peak_bandwidths_hz": periodic_peak_bandwidths,
         "periodic_peak_heights": periodic_peak_heights,
+        "availability_reasons": [grid.reason for grid in fit_grids],
     }
 
     return offsets, slopes, valid_bins, kept_bins, peak_rejected, fit_masks, qc_dict
@@ -899,8 +985,10 @@ def _compute_psd(
     subtract_evoked: bool = False,
     condition_labels: Optional[np.ndarray] = None,
     train_mask: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, float]:
     """Compute power spectral density with fallback handling.
+
+    Also returns the half-power spectral support of the estimator actually used.
 
     Parameters
     ----------
@@ -937,6 +1025,12 @@ def _compute_psd(
             bandwidth=psd_kwargs.get("bandwidth"),
             verbose=False,
         )
+        half_support = estimator_half_support(
+            "multitaper",
+            float(sfreq),
+            bandwidth=psd_kwargs.get("bandwidth"),
+            n_times=data.shape[-1],
+        )
     else:
         from mne.time_frequency import psd_array_welch
 
@@ -953,11 +1047,12 @@ def _compute_psd(
             n_overlap=n_overlap,
             verbose=False,
         )
+        half_support = estimator_half_support("welch", float(sfreq), n_per_seg=n_per_seg)
 
     psds = _validate_psd_data(psds)
     freqs = _validate_frequencies(freqs)
 
-    return psds, freqs
+    return psds, freqs, half_support
 
 
 def _parse_psd_config(config: Any) -> Tuple[str, Dict[str, Any], float, float]:
@@ -1026,12 +1121,14 @@ def _compute_alpha_peak_frequency(
             continue
 
         alpha_rel = np.maximum(relative_power[:, channel_idx, alpha_mask], 0.0)
-        total_power = np.sum(alpha_rel, axis=1)
+        # Unavailable bins arrive as NaN; the centre of gravity uses the bins that
+        # remain rather than collapsing the whole estimate.
+        total_power = np.nansum(alpha_rel, axis=1)
 
         with np.errstate(invalid="ignore", divide="ignore"):
             apf_matrix[:, channel_idx] = np.where(
                 total_power > 0,
-                np.sum(freqs[alpha_mask] * alpha_rel, axis=1) / total_power,
+                np.nansum(freqs[alpha_mask] * alpha_rel, axis=1) / total_power,
                 np.nan,
             )
 
@@ -1426,6 +1523,7 @@ def _extract_aperiodic_for_segment(
     condition_labels: Optional[np.ndarray] = None,
     train_mask: Optional[np.ndarray] = None,
     analysis_mode: Optional[str] = None,
+    spectral_availability: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Extract aperiodic and spectral features for a single segment.
 
@@ -1473,7 +1571,7 @@ def _extract_aperiodic_for_segment(
             )
 
     # Compute PSD (with optional evoked subtraction for induced spectra)
-    psds, freqs = _compute_psd(
+    psds, freqs, psd_half_support = _compute_psd(
         epochs,
         picks,
         start_t,
@@ -1544,9 +1642,28 @@ def _extract_aperiodic_for_segment(
             n_excluded = int(np.sum(~line_noise_mask))
             logger.debug("Aperiodic: excluding %d line-noise bins from fitting", n_excluded)
 
+    epoch_valid_mask = None
+    if spectral_availability is not None:
+        n_epochs_psd = int(psds.shape[0])
+        if len(spectral_availability.recording_keys) != n_epochs_psd:
+            raise ValueError(
+                "Aperiodic: spectral_availability covers "
+                f"{len(spectral_availability.recording_keys)} epochs but the segment "
+                f"has {n_epochs_psd}."
+            )
+        epoch_valid_mask = spectral_availability.valid_frequency_mask(freqs, psd_half_support)
+        psds = np.where(epoch_valid_mask[:, None, :], psds, np.nan)
+        log_psd = np.where(epoch_valid_mask[:, None, :], log_psd, np.nan)
+
     # Fit aperiodic model
     offsets, slopes, valid_bins, kept_bins, peak_rej, fit_masks, fit_qc = _fit_aperiodic_with_qc(
-        log_freqs, log_psd, fit_params, logger, n_jobs=n_jobs, line_noise_mask=line_noise_mask
+        log_freqs,
+        log_psd,
+        fit_params,
+        logger,
+        n_jobs=n_jobs,
+        line_noise_mask=line_noise_mask,
+        epoch_valid_mask=epoch_valid_mask,
     )
 
     # Compute residuals
@@ -1873,6 +1990,7 @@ def extract_aperiodic_features(
             condition_labels=condition_labels,
             train_mask=getattr(ctx, "train_mask", None),
             analysis_mode=getattr(ctx, "analysis_mode", None),
+            spectral_availability=getattr(ctx, "spectral_availability", None),
         )
         qc_payload["segments"][seg_name] = seg_data.get("__qc__")
         seg_data.pop("__qc__", None)

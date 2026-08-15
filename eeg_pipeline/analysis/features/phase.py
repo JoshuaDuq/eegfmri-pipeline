@@ -2001,7 +2001,29 @@ def extract_itpc_from_precomputed(
         if phases is None or phases.size == 0:
             continue
 
+        # Phase across a notched passband has no single interpretation, so
+        # ineligible epochs are dropped from the cross-trial estimate entirely.
+        eligible = band_data.eligible_epochs
+        n_eligible = n_epochs if eligible is None else int(np.sum(eligible))
+        if n_eligible < _MIN_EPOCHS_FOR_ITPC:
+            if logger is not None:
+                logger.warning(
+                    "ITPC: band '%s' retains %d eligible epochs (< %d); skipping.",
+                    band,
+                    n_eligible,
+                    _MIN_EPOCHS_FOR_ITPC,
+                )
+            continue
+
+        band_condition_labels = condition_labels
+        band_train_mask = train_mask
         complex_vectors = np.exp(1j * phases)  # (epochs, ch, time)
+        if eligible is not None:
+            complex_vectors = complex_vectors[eligible]
+            if band_condition_labels is not None:
+                band_condition_labels = np.asarray(band_condition_labels)[eligible]
+            if band_train_mask is not None:
+                band_train_mask = np.asarray(band_train_mask, dtype=bool)[eligible]
 
         baseline_itpc = None
         if baseline_mask is not None and np.any(baseline_mask):
@@ -2009,20 +2031,20 @@ def extract_itpc_from_precomputed(
             if itpc_method == "condition":
                 baseline_itpc = _compute_condition_itpc_precomputed(
                     baseline_complex,
-                    condition_labels,
-                    train_mask,
+                    band_condition_labels,
+                    band_train_mask,
                     condition_values,
                     min_trials_per_condition,
                     logger,
                     n_jobs=n_jobs,
                 )
             else:
-                use_mask = train_mask if itpc_method == "fold_global" else None
+                use_mask = band_train_mask if itpc_method == "fold_global" else None
                 base_map = _compute_itpc_map_precomputed(
                     baseline_complex, use_mask, n_jobs=n_jobs, logger=logger
                 )
                 base_ch = np.nanmean(base_map, axis=1)
-                baseline_itpc = _broadcast_per_trial(base_ch, n_epochs)
+                baseline_itpc = _broadcast_per_trial(base_ch, n_eligible)
 
         for seg_name, mask in masks.items():
             if mask is None or not np.any(mask):
@@ -2060,8 +2082,8 @@ def extract_itpc_from_precomputed(
             if itpc_method == "condition":
                 itpc_seg = _compute_condition_itpc_precomputed(
                     segment_complex,
-                    condition_labels,
-                    train_mask,
+                    band_condition_labels,
+                    band_train_mask,
                     condition_values,
                     min_trials_per_condition,
                     logger,
@@ -2069,16 +2091,23 @@ def extract_itpc_from_precomputed(
                 )
             else:
                 use_mask = (
-                    np.asarray(train_mask, dtype=bool) if itpc_method == "fold_global" else None
+                    np.asarray(band_train_mask, dtype=bool)
+                    if itpc_method == "fold_global"
+                    else None
                 )
                 itpc_map = _compute_itpc_map_precomputed(
                     segment_complex, use_mask, n_jobs=n_jobs, logger=logger
                 )
                 itpc_ch = np.nanmean(itpc_map, axis=1)
-                itpc_seg = _broadcast_per_trial(itpc_ch, n_epochs)
+                itpc_seg = _broadcast_per_trial(itpc_ch, n_eligible)
 
             if baseline_itpc is not None and seg_name != "baseline":
                 itpc_seg = itpc_seg - baseline_itpc
+
+            if eligible is not None:
+                itpc_full = np.full((n_epochs, itpc_seg.shape[1]), np.nan)
+                itpc_full[eligible] = itpc_seg
+                itpc_seg = itpc_full
 
             spatial_results = _aggregate_spatial_features(
                 itpc_seg, "itpc", seg_name, band, "val", ch_names, spatial_modes, roi_map
@@ -2207,12 +2236,15 @@ def extract_pac_from_precomputed(
     # Pre-calculate sqrt(power) for all bands to get amplitude
     amplitudes = {}
     phases = {}
+    band_eligibility = {}
     for band, bd in precomputed.band_data.items():
         if bd.power is not None:
             # Power is (nep, nch, ntimes)
             amplitudes[band] = np.sqrt(np.maximum(bd.power, 0))
         if bd.phase is not None:
             phases[band] = bd.phase
+        if bd.eligible_epochs is not None:
+            band_eligibility[band] = bd.eligible_epochs
 
     results = {}
 
@@ -2271,6 +2303,20 @@ def extract_pac_from_precomputed(
                     f"{', '.join(missing_precomputed)}."
                 )
 
+            # A pair needs both passbands intact; either notch makes the coupling
+            # estimate a measure of the filter rather than of the signal.
+            pair_eligible = None
+            for pair_band in (phase_band, amp_band):
+                band_mask = band_eligibility.get(pair_band)
+                if band_mask is None:
+                    continue
+                pair_eligible = band_mask if pair_eligible is None else (pair_eligible & band_mask)
+            if pair_eligible is not None and not np.any(pair_eligible):
+                raise ValueError(
+                    f"PAC (precomputed): no epoch retains both passbands for pair "
+                    f"{phase_band}->{amp_band}."
+                )
+
             phase_data = phases[phase_band][..., mask]
             amplitude_data = amplitudes[amp_band][..., mask]
 
@@ -2284,6 +2330,8 @@ def extract_pac_from_precomputed(
                 numerator = np.nanmean(amplitude_data * phase_unit_vectors, axis=-1)
 
             pac_val = np.abs(numerator / denominator)
+            if pair_eligible is not None:
+                pac_val[~pair_eligible] = np.nan
 
             pac_z = None
             if n_surrogates > 0 and n_times > _MIN_TIMES_FOR_SURROGATES:

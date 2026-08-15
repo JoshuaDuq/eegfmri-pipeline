@@ -65,7 +65,10 @@ from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 from eeg_pipeline.utils.analysis.channels import build_roi_map, pick_eeg_channels
 from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed, get_roi_definitions
-from eeg_pipeline.utils.analysis.spectral import compute_frequency_weights
+from eeg_pipeline.utils.analysis.spectral import (
+    compute_frequency_weights,
+    estimator_half_support,
+)
 from eeg_pipeline.utils.config.loader import get_frequency_bands, get_feature_constant
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
 from eeg_pipeline.types import PrecomputedData
@@ -1337,15 +1340,14 @@ def compute_peak_frequency(
     """
     from scipy.ndimage import uniform_filter1d
 
-    mask = (freqs >= fmin) & (freqs <= fmax)
+    # Unavailable bins arrive as NaN and are dropped outright, so neither the peak
+    # search nor the smoothing window can reach across them.
+    mask = (freqs >= fmin) & (freqs <= fmax) & np.isfinite(psd)
     if not np.any(mask):
         return np.nan, np.nan, np.nan, np.nan
 
     psd_band = psd[mask]
     freqs_band = freqs[mask]
-
-    if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
-        return np.nan, np.nan, np.nan, np.nan
 
     # Compute robust aperiodic fit for prominence metrics
     log_f = np.log10(np.maximum(freqs, 1e-6))
@@ -1640,6 +1642,7 @@ def extract_spectral_features(
     config = ctx.config
     logger = ctx.logger
     sfreq = epochs.info["sfreq"]
+    spectral_availability = getattr(ctx, "spectral_availability", None)
 
     spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
     psd_method = str(spec_cfg.get("psd_method", "multitaper")).strip().lower()
@@ -1765,6 +1768,11 @@ def extract_spectral_features(
                 normalization="full",
                 verbose=False,
             )
+            psd_half_support = estimator_half_support(
+                "multitaper",
+                float(sfreq),
+                n_times=int(seg_data.shape[2]),
+            )
         else:
             # Welch: use 50% overlap for variance reduction (NOT n_overlap=0)
             # n_overlap=0 inflates variance and makes peak/entropy features noisy
@@ -1781,11 +1789,26 @@ def extract_spectral_features(
                 n_overlap=n_overlap,
                 verbose=False,
             )
+            psd_half_support = estimator_half_support(
+                "welch",
+                float(sfreq),
+                n_per_seg=n_per_seg,
+            )
 
         freqs = np.asarray(freqs, dtype=float)
         psds = np.asarray(psds, dtype=float)
         if psds.ndim != 3:
             continue
+
+        if spectral_availability is not None:
+            if len(spectral_availability.recording_keys) != int(psds.shape[0]):
+                raise ValueError(
+                    "Spectral: spectral_availability covers "
+                    f"{len(spectral_availability.recording_keys)} epochs but the "
+                    f"segment has {int(psds.shape[0])}."
+                )
+            psd_valid = spectral_availability.valid_frequency_mask(freqs, psd_half_support)
+            psds = np.where(psd_valid[:, None, :], psds, np.nan)
 
         # Compute effective frequency resolution
         if len(freqs) > 1:

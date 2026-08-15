@@ -14,7 +14,7 @@ Computed on 'baseline' and 'active' windows.
 
 from __future__ import annotations
 
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any
 import numpy as np
 import pandas as pd
 import mne
@@ -25,6 +25,7 @@ from eeg_pipeline.analysis.features.rest import (
     valid_rest_analysis_segment_masks,
 )
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
+from eeg_pipeline.utils.analysis.spectral import estimator_half_support
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_STD
@@ -200,8 +201,12 @@ def _compute_psd(
     config: Dict[str, Any],
     *,
     logger: Any = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Compute power spectral density using specified method."""
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """Compute power spectral density using specified method.
+
+    Also returns the half-power spectral support of the estimator actually used,
+    which decides which bins an unavailable interval reaches.
+    """
     method = _get_psd_method(config)
     fmin, fmax = _get_frequency_range(config, sfreq)
     n_times = int(data.shape[1])
@@ -217,6 +222,7 @@ def _compute_psd(
             normalization="full",
             verbose=False,
         )
+        half_support = estimator_half_support("multitaper", float(sfreq), n_times=n_times)
     else:
         default_n_per_seg = min(int(float(sfreq) * 2.0), n_times)
         try:
@@ -266,6 +272,7 @@ def _compute_psd(
             n_overlap=n_overlap,
             verbose=False,
         )
+        half_support = estimator_half_support("welch", float(sfreq), n_per_seg=n_per_seg)
 
     freqs = np.asarray(freqs, dtype=float)
     psds = np.asarray(psds, dtype=float)
@@ -275,15 +282,20 @@ def _compute_psd(
         line_freqs, width, n_harmonics = _get_line_noise_parameters(config)
         freqs, psds = _exclude_line_noise_frequencies(freqs, psds, line_freqs, width, n_harmonics)
 
-    return psds, freqs
+    return psds, freqs, half_support
 
 
 def _compute_snr_from_psd(
     psds: np.ndarray,
     freqs: np.ndarray,
     config: Dict[str, Any],
+    valid_frequencies: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Compute SNR as ratio of signal band to noise band power."""
+    """Compute SNR as ratio of signal band to noise band power.
+
+    Both densities divide by the bandwidth their band actually retained, so an
+    unavailable interval narrows the integration instead of biasing the ratio.
+    """
     signal_band = config.get("snr_signal_band", DEFAULT_SNR_SIGNAL_BAND)
     noise_band = config.get("snr_noise_band", DEFAULT_SNR_NOISE_BAND)
 
@@ -297,6 +309,9 @@ def _compute_snr_from_psd(
 
     signal_mask = (freqs >= signal_low) & (freqs <= signal_high)
     noise_mask = (freqs >= noise_low) & (freqs <= noise_high)
+    if valid_frequencies is not None:
+        signal_mask = signal_mask & valid_frequencies
+        noise_mask = noise_mask & valid_frequencies
     df = np.gradient(freqs) if freqs.size > 1 else np.ones_like(freqs, dtype=float)
 
     signal_bandwidth = float(np.sum(df[signal_mask])) if np.any(signal_mask) else np.nan
@@ -333,6 +348,7 @@ def _compute_muscle_ratio_from_psd(
     psds: np.ndarray,
     freqs: np.ndarray,
     config: Dict[str, Any],
+    valid_frequencies: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Compute muscle artifact ratio as high-frequency power fraction."""
     muscle_band = config.get("muscle_band", DEFAULT_MUSCLE_BAND)
@@ -343,13 +359,17 @@ def _compute_muscle_ratio_from_psd(
         raise ValueError(f"Invalid muscle_band: {muscle_band!r}") from exc
 
     muscle_mask = (freqs >= muscle_low) & (freqs <= muscle_high)
+    total_mask = np.ones_like(muscle_mask)
+    if valid_frequencies is not None:
+        muscle_mask = muscle_mask & valid_frequencies
+        total_mask = total_mask & valid_frequencies
     df = np.gradient(freqs) if freqs.size > 1 else np.ones_like(freqs, dtype=float)
     muscle_power = (
         np.sum(psds[:, muscle_mask] * df[muscle_mask], axis=1)
         if np.any(muscle_mask)
         else np.full(psds.shape[0], np.nan)
     )
-    total_power = np.sum(psds * df[None, :], axis=1)
+    total_power = np.sum(psds[:, total_mask] * df[total_mask][None, :], axis=1)
 
     muscle_ratio = muscle_power / (total_power + EPSILON_STD)
     return muscle_ratio
@@ -374,11 +394,17 @@ def _compute_spectral_metrics(
     config: Dict[str, Any],
     *,
     logger: Any = None,
+    epoch_availability: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Compute spectral quality metrics from PSD."""
-    psds, freqs = _compute_psd(data, sfreq, config, logger=logger)
-    snr = _compute_snr_from_psd(psds, freqs, config)
-    muscle_ratio = _compute_muscle_ratio_from_psd(psds, freqs, config)
+    psds, freqs, half_support = _compute_psd(data, sfreq, config, logger=logger)
+
+    valid_frequencies = None
+    if epoch_availability is not None:
+        valid_frequencies = epoch_availability.valid_frequency_mask(freqs, half_support)[0]
+
+    snr = _compute_snr_from_psd(psds, freqs, config, valid_frequencies)
+    muscle_ratio = _compute_muscle_ratio_from_psd(psds, freqs, config, valid_frequencies)
     return {"snr": snr, "muscle": muscle_ratio}
 
 
@@ -388,6 +414,7 @@ def _compute_signal_metrics(
     config: Any = None,
     *,
     logger: Any = None,
+    epoch_availability: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Compute all quality metrics for signal data.
 
@@ -409,7 +436,13 @@ def _compute_signal_metrics(
         return metrics
 
     quality_config = _extract_quality_config(config)
-    spectral_metrics = _compute_spectral_metrics(data, sfreq, quality_config, logger=logger)
+    spectral_metrics = _compute_spectral_metrics(
+        data,
+        sfreq,
+        quality_config,
+        logger=logger,
+        epoch_availability=epoch_availability,
+    )
     metrics.update(spectral_metrics)
 
     return metrics
@@ -467,6 +500,12 @@ def extract_quality_features(
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     logger = getattr(ctx, "logger", None)
+    availability = getattr(ctx, "spectral_availability", None)
+    if availability is not None and len(availability.recording_keys) != n_epochs:
+        raise ValueError(
+            f"Quality: spectral_availability covers {len(availability.recording_keys)} "
+            f"epochs but the data has {n_epochs}."
+        )
 
     masks = _resolve_quality_segment_masks(
         epochs.times,
@@ -489,7 +528,15 @@ def extract_quality_features(
 
         for epoch_idx in range(n_epochs):
             epoch_data = segment_data[epoch_idx]
-            metrics = _compute_signal_metrics(epoch_data, sfreq, config, logger=logger)
+            metrics = _compute_signal_metrics(
+                epoch_data,
+                sfreq,
+                config,
+                logger=logger,
+                epoch_availability=(
+                    availability.for_epoch(epoch_idx) if availability is not None else None
+                ),
+            )
             _store_metric_values(results, metrics, segment, channel_names, epoch_idx, n_epochs)
 
     if not results:

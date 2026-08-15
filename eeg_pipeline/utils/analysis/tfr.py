@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import mne
@@ -19,6 +20,10 @@ from ..config.loader import (
     require_config_value,
 )
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.spectral_availability import (
+    EpochSpectralAvailability,
+    morlet_half_support,
+)
 from eeg_pipeline.utils.analysis.windowing import time_mask
 from eeg_pipeline.utils.analysis.stats import (
     validate_baseline_window_pre_stimulus,
@@ -219,6 +224,112 @@ def filter_freqs_for_signal_length(
     return freqs[valid_mask], n_cycles[valid_mask]
 
 
+###################################################################
+# Spectral Availability
+###################################################################
+
+_TFR_N_CYCLES_ATTR = "_eeg_pipeline_n_cycles"
+_TFR_FREQS_ATTR = "_eeg_pipeline_freqs"
+
+
+@dataclass(frozen=True)
+class TFRAvailability:
+    """Per-epoch validity of a Morlet TFR grid under recording-specific exclusions."""
+
+    valid_frequency_mask: np.ndarray  # (n_epochs, n_freqs)
+    half_support_hz: np.ndarray  # (n_freqs,)
+    eligible_epoch_counts: np.ndarray  # (n_freqs,)
+
+
+def store_tfr_geometry(
+    tfr: mne.time_frequency.BaseTFR,
+    freqs: np.ndarray,
+    n_cycles: np.ndarray,
+) -> None:
+    """Record the exact frequencies and cycle counts MNE used for this TFR.
+
+    ``filter_freqs_for_signal_length`` can drop frequencies, so the pair must travel
+    together for the Morlet support of each retained frequency to be recoverable.
+    """
+    frequencies = np.asarray(freqs, dtype=float)
+    cycles = np.broadcast_to(np.asarray(n_cycles, dtype=float), frequencies.shape).copy()
+    setattr(tfr, _TFR_FREQS_ATTR, frequencies)
+    setattr(tfr, _TFR_N_CYCLES_ATTR, cycles)
+
+
+def tfr_geometry(
+    tfr: mne.time_frequency.BaseTFR,
+    config: Optional[Any] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return the exact (freqs, n_cycles) used to compute a TFR.
+
+    MNE rebuilds TFR objects on ``copy``/``crop``/indexing and drops attributes we
+    attach, so the cycles are recomputed from the surviving frequencies when a config
+    is available. ``compute_adaptive_n_cycles`` is elementwise, which makes that
+    reconstruction exact for every frequency the TFR still carries.
+    """
+    freqs = np.asarray(getattr(tfr, _TFR_FREQS_ATTR, tfr.freqs), dtype=float)
+    cycles = getattr(tfr, _TFR_N_CYCLES_ATTR, None)
+
+    if cycles is None or len(np.atleast_1d(cycles)) != freqs.size:
+        freqs = np.asarray(tfr.freqs, dtype=float)
+        if config is None:
+            raise ValueError(
+                "This TFR carries no recorded n_cycles and no config was supplied to "
+                "recompute them; Morlet spectral support cannot be derived."
+            )
+        cycles = compute_adaptive_n_cycles(freqs, config=config)
+
+    return freqs, np.asarray(cycles, dtype=float)
+
+
+def apply_tfr_availability(
+    tfr: mne.time_frequency.BaseTFR,
+    spectral_availability: Optional[EpochSpectralAvailability],
+    config: Optional[Any] = None,
+) -> Optional[TFRAvailability]:
+    """Mask unavailable epoch/frequency cells in place and return the validity metadata.
+
+    Cells whose Morlet half-power support overlaps an unavailable interval become
+    ``NaN``. A frequency with no eligible epoch stays unavailable rather than being
+    filled, so downstream averages can report what actually contributed.
+    """
+    if spectral_availability is None:
+        return None
+
+    data = np.asarray(tfr.data)
+    if data.ndim != 4:
+        raise ValueError(
+            "Recording-specific spectral availability requires per-epoch TFR data with "
+            f"shape (epochs, channels, freqs, times); got {data.ndim}-dimensional data."
+        )
+
+    n_epochs = data.shape[0]
+    n_keys = len(spectral_availability.recording_keys)
+    if n_keys != n_epochs:
+        raise ValueError(
+            f"spectral_availability covers {n_keys} epochs but the TFR has {n_epochs}."
+        )
+
+    freqs, n_cycles = tfr_geometry(tfr, config=config)
+    if freqs.shape[0] != data.shape[2]:
+        raise ValueError(
+            f"Recorded TFR frequencies ({freqs.shape[0]}) do not match the TFR "
+            f"frequency axis ({data.shape[2]})."
+        )
+
+    half_support = morlet_half_support(freqs, n_cycles)
+    valid = spectral_availability.valid_frequency_mask(freqs, half_support)
+
+    tfr.data = np.where(valid[:, None, :, None], data, np.nan)
+
+    return TFRAvailability(
+        valid_frequency_mask=valid,
+        half_support_hz=half_support,
+        eligible_epoch_counts=valid.sum(axis=0),
+    )
+
+
 def compute_tfr_morlet(
     epochs: mne.Epochs,
     config,
@@ -297,6 +408,7 @@ def compute_tfr_morlet(
         else:
             raise
 
+    store_tfr_geometry(power, freqs, n_cycles)
     return power
 
 
@@ -412,7 +524,7 @@ def compute_complex_tfr(
     )
 
     try:
-        return epochs.compute_tfr(**compute_kwargs, n_jobs=workers)
+        complex_tfr = epochs.compute_tfr(**compute_kwargs, n_jobs=workers)
     except PermissionError as exc:
         if workers not in (None, 1):
             logger.warning(
@@ -420,8 +532,12 @@ def compute_complex_tfr(
                 str(workers),
                 str(exc),
             )
-            return epochs.compute_tfr(**compute_kwargs, n_jobs=1)
-        raise
+            complex_tfr = epochs.compute_tfr(**compute_kwargs, n_jobs=1)
+        else:
+            raise
+
+    store_tfr_geometry(complex_tfr, freqs, n_cycles)
+    return complex_tfr
 
 
 def _extract_baseline_power_features(
