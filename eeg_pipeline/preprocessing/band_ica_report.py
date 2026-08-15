@@ -120,6 +120,8 @@ class SourceDiagnostics:
     tfr_frequencies: np.ndarray | None
     tfr_times: np.ndarray | None
     tfr: np.ndarray | None
+    #: Epochs contributing to each TFR frequency; ``None`` unless exclusions are active.
+    tfr_eligible_counts: np.ndarray | None = None
 
     @property
     def has_tfr(self) -> bool:
@@ -365,12 +367,14 @@ def _source_diagnostics(
     epochs: mne.BaseEpochs,
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
+    epoch_availability: Any = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     sources = ica.get_sources(epochs)
     diagnostics = _source_diagnostics_from_sources(
         sources=sources,
         band=band,
         settings=settings,
+        epoch_availability=epoch_availability,
     )
     return (
         diagnostics.frequencies,
@@ -386,6 +390,7 @@ def _source_diagnostics_from_sources(
     sources: mne.BaseEpochs,
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
+    epoch_availability: Any = None,
 ) -> SourceDiagnostics:
     spectrum = sources.compute_psd(
         method="welch",
@@ -403,21 +408,23 @@ def _source_diagnostics_from_sources(
     power_db = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
 
     if settings.tfr_enabled:
-        tfr_frequencies, tfr_times, tfr = _fieldtrip_tfr(
+        tfr_frequencies, tfr_times, tfr, tfr_counts = _fieldtrip_tfr(
             data=sources.get_data(copy=False),
             sfreq=float(sources.info["sfreq"]),
             times=sources.times,
             band=band,
             settings=settings,
+            epoch_availability=epoch_availability,
         )
     else:
-        tfr_frequencies, tfr_times, tfr = None, None, None
+        tfr_frequencies, tfr_times, tfr, tfr_counts = None, None, None, None
     return SourceDiagnostics(
         frequencies=frequencies,
         power_db=power_db,
         tfr_frequencies=tfr_frequencies,
         tfr_times=tfr_times,
         tfr=tfr,
+        tfr_eligible_counts=tfr_counts,
     )
 
 
@@ -493,6 +500,104 @@ def _tfr_parameter_groups(
     return tuple(groups)
 
 
+def _subset_availability(epoch_availability: Any, mask: np.ndarray) -> Any:
+    """Restrict epoch-aligned availability to a condition group's epochs."""
+    if epoch_availability is None:
+        return None
+
+    from eeg_pipeline.spectral_availability import EpochSpectralAvailability
+
+    selected = np.flatnonzero(np.asarray(mask, dtype=bool))
+    return EpochSpectralAvailability(
+        recording_keys=tuple(epoch_availability.recording_keys[index] for index in selected),
+        exclusions_by_epoch=tuple(
+            epoch_availability.exclusions_by_epoch[index] for index in selected
+        ),
+    )
+
+
+def _recording_epoch_groups(epoch_availability: Any) -> tuple[tuple[Any, np.ndarray], ...]:
+    """Group epoch indices by recording, since one recording has one geometry."""
+    groups: dict[Any, list[int]] = {}
+    for index, key in enumerate(epoch_availability.recording_keys):
+        groups.setdefault(key, []).append(index)
+    return tuple((key, np.asarray(indices, dtype=int)) for key, indices in groups.items())
+
+
+def _multitaper_avg_power(
+    data: np.ndarray,
+    *,
+    sfreq: float,
+    frequencies: np.ndarray,
+    parameters: TfrBandParameters,
+    decim: int,
+) -> np.ndarray:
+    return mne.time_frequency.tfr_array_multitaper(
+        data,
+        sfreq=sfreq,
+        freqs=frequencies,
+        n_cycles=frequencies * parameters.window_seconds,
+        time_bandwidth=2.0 * parameters.window_seconds * parameters.smoothing_hz,
+        output="avg_power",
+        decim=decim,
+        n_jobs=1,
+        verbose="ERROR",
+    )
+
+
+def _available_avg_power(
+    data: np.ndarray,
+    *,
+    sfreq: float,
+    frequencies: np.ndarray,
+    parameters: TfrBandParameters,
+    decim: int,
+    epoch_availability: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Average each frequency over only the epochs whose recording still measured it.
+
+    Averaging per recording and recombining by epoch count is exactly the overall
+    mean restricted to eligible epochs, and it never materialises per-epoch power.
+    ``time_bandwidth = 2 * window * smoothing`` with ``n_cycles = f * window`` makes
+    the multitaper half-support exactly ``smoothing_hz`` at every frequency.
+    """
+    valid = epoch_availability.valid_frequency_mask(frequencies, parameters.smoothing_hz)
+
+    numerator: np.ndarray | None = None
+    weights = np.zeros(frequencies.size, dtype=float)
+    for _key, indices in _recording_epoch_groups(epoch_availability):
+        recording_valid = valid[indices[0]]
+        if not np.any(recording_valid):
+            continue
+        power = _multitaper_avg_power(
+            data[indices],
+            sfreq=sfreq,
+            frequencies=frequencies,
+            parameters=parameters,
+            decim=decim,
+        )
+        if numerator is None:
+            numerator = np.zeros_like(power)
+        count = float(indices.size)
+        numerator[:, recording_valid, :] += count * power[:, recording_valid, :]
+        weights[recording_valid] += count
+
+    if numerator is None:
+        reference = _multitaper_avg_power(
+            data[:1],
+            sfreq=sfreq,
+            frequencies=frequencies,
+            parameters=parameters,
+            decim=decim,
+        )
+        numerator = np.zeros_like(reference)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        averaged = numerator / weights[None, :, None]
+    averaged[:, weights <= 0, :] = np.nan
+    return averaged, weights
+
+
 def _fieldtrip_tfr(
     *,
     data: np.ndarray,
@@ -500,32 +605,52 @@ def _fieldtrip_tfr(
     times: np.ndarray,
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    epoch_availability: Any = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     decim = int(round(settings.time_step_s * sfreq))
     if decim < 1 or not np.isclose(decim / sfreq, settings.time_step_s):
         raise ValueError(
             f"TFR time step {settings.time_step_s:g} s is incompatible with {sfreq:g} Hz data."
         )
 
+    if epoch_availability is not None:
+        n_keys = len(epoch_availability.recording_keys)
+        if n_keys != int(data.shape[0]):
+            raise ValueError(
+                f"spectral_availability covers {n_keys} epochs but the TFR input has "
+                f"{int(data.shape[0])}."
+            )
+
     frequency_parts = []
     power_parts = []
+    weight_parts = []
     for parameters, frequencies in _tfr_parameter_groups(band, settings):
-        power = mne.time_frequency.tfr_array_multitaper(
-            data,
-            sfreq=sfreq,
-            freqs=frequencies,
-            n_cycles=frequencies * parameters.window_seconds,
-            time_bandwidth=2.0 * parameters.window_seconds * parameters.smoothing_hz,
-            output="avg_power",
-            decim=decim,
-            n_jobs=1,
-            verbose="ERROR",
-        )
+        if epoch_availability is None:
+            power = _multitaper_avg_power(
+                data,
+                sfreq=sfreq,
+                frequencies=frequencies,
+                parameters=parameters,
+                decim=decim,
+            )
+        else:
+            power, weights = _available_avg_power(
+                data,
+                sfreq=sfreq,
+                frequencies=frequencies,
+                parameters=parameters,
+                decim=decim,
+                epoch_availability=epoch_availability,
+            )
+            weight_parts.append(weights)
         frequency_parts.append(frequencies)
         power_parts.append(power)
 
     frequencies = np.concatenate(frequency_parts)
     power = np.concatenate(power_parts, axis=1)
+    eligible_counts = (
+        np.concatenate(weight_parts).astype(int) if epoch_availability is not None else None
+    )
     decimated_times = times[::decim][: power.shape[-1]]
 
     time_tolerance = settings.time_step_s / 100.0
@@ -544,7 +669,7 @@ def _fieldtrip_tfr(
     )
     if not np.any(time_mask):
         raise ValueError("No TFR samples fall inside the configured display time range.")
-    return frequencies, decimated_times[time_mask], power_db[..., time_mask]
+    return frequencies, decimated_times[time_mask], power_db[..., time_mask], eligible_counts
 
 
 def _tfr_configuration_title(
@@ -1250,23 +1375,26 @@ def _condition_tfr_results(
     times: np.ndarray,
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
+    epoch_availability: Any = None,
 ) -> tuple[ConditionTfrResult, ...]:
     results = []
     for comparison in settings.comparisons:
         group_a_mask, group_b_mask = _comparison_masks(metadata, comparison)
-        _, _, group_a_tfr = _fieldtrip_tfr(
+        _, _, group_a_tfr, _ = _fieldtrip_tfr(
             data=source_data[group_a_mask],
             sfreq=sfreq,
             times=times,
             band=band,
             settings=settings,
+            epoch_availability=_subset_availability(epoch_availability, group_a_mask),
         )
-        _, _, group_b_tfr = _fieldtrip_tfr(
+        _, _, group_b_tfr, _ = _fieldtrip_tfr(
             data=source_data[group_b_mask],
             sfreq=sfreq,
             times=times,
             band=band,
             settings=settings,
+            epoch_availability=_subset_availability(epoch_availability, group_b_mask),
         )
         results.append(
             ConditionTfrResult(
@@ -1287,6 +1415,7 @@ def _build_band_review_data(
     metadata: pd.DataFrame | None,
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
+    epoch_availability: Any = None,
 ) -> BandReviewData:
     band_epochs = _band_epochs(epochs, band)
     sources = ica.get_sources(band_epochs)
@@ -1294,6 +1423,7 @@ def _build_band_review_data(
         sources=sources,
         band=band,
         settings=settings,
+        epoch_availability=epoch_availability,
     )
     if metadata is None:
         comparison_results = ()
@@ -1308,6 +1438,7 @@ def _build_band_review_data(
             times=sources.times,
             band=band,
             settings=settings,
+            epoch_availability=epoch_availability,
         )
     return BandReviewData(
         band=band,
@@ -1663,6 +1794,7 @@ def _add_standard_component_review(
     has_fallback_runs: bool = False,
     filtered_raw_paths: Sequence[Path] | None = None,
     status_descriptions: Sequence[str] | None = None,
+    spectral_availability: Any = None,
 ) -> DecompositionSummary | None:
     """Add authoritative, component-centred evidence before MNE's ICA section.
 
@@ -1711,6 +1843,7 @@ def _add_standard_component_review(
             metadata=metadata,
             band=band,
             settings=settings,
+            epoch_availability=spectral_availability,
         )
         figures = _build_standard_component_dossiers(
             ica=ica,
@@ -1810,6 +1943,7 @@ def append_condition_tfr_report(
     report_path: Path,
     settings: BandIcaReportSettings,
     analysis_status: str,
+    spectral_availability: Any = None,
 ) -> None:
     """Replace authoritative component dossiers with condition-aware evidence."""
     if not settings.comparisons:
@@ -1836,6 +1970,7 @@ def append_condition_tfr_report(
     labels = _label_components(epochs=ica_fit_epochs, ica=standard_ica)
     report = open_subject_report(report_path)
     summary = _add_standard_component_review(
+        spectral_availability=spectral_availability,
         report=report,
         ica=standard_ica,
         epochs=retained_epochs,
@@ -1861,8 +1996,13 @@ def generate_band_ica_report(
     random_state: int,
     settings: BandIcaReportSettings,
     filtered_raw_paths: Sequence[Path] | None = None,
+    spectral_availability: Any = None,
 ) -> list[Path]:
-    """Fit exploratory band-specific ICAs and append diagnostics to an MNE report."""
+    """Fit exploratory band-specific ICAs and append diagnostics to an MNE report.
+
+    ``spectral_availability`` is the epoch-aligned unavailable-frequency contract. When
+    it is ``None`` every panel is computed exactly as before.
+    """
     apply_report_style()
     epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
     nyquist = float(epochs.info["sfreq"]) / 2.0
@@ -1894,6 +2034,7 @@ def generate_band_ica_report(
             status_descriptions = tuple(components["status_description"].fillna("").astype(str))
 
     summary = _add_standard_component_review(
+        spectral_availability=spectral_availability,
         report=report,
         ica=standard_ica,
         epochs=epochs,

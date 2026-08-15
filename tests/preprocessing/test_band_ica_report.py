@@ -666,8 +666,8 @@ def test_condition_tfr_results_use_configured_trials_from_standard_sources() -> 
     with patch(
         "eeg_pipeline.preprocessing.band_ica_report._fieldtrip_tfr",
         side_effect=[
-            (np.array([8.0, 10.0, 12.0]), np.arange(4), tfr),
-            (np.array([8.0, 10.0, 12.0]), np.arange(4), -tfr),
+            (np.array([8.0, 10.0, 12.0]), np.arange(4), tfr, None),
+            (np.array([8.0, 10.0, 12.0]), np.arange(4), -tfr, None),
         ],
     ) as fieldtrip_tfr:
         results = _condition_tfr_results(

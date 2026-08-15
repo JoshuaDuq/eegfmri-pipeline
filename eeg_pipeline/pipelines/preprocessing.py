@@ -291,6 +291,42 @@ class PreprocessingPipeline(PipelineBase):
 
         load_decomb_manifest(manifest_path)
 
+    def _report_spectral_availability(
+        self,
+        subject: str,
+        task: Optional[str],
+        clean_events_path: Optional[Path],
+    ) -> Any:
+        """Epoch-aligned exclusions for report panels, or None when Decomb is unused.
+
+        The epochs file carries no run identity, so the run comes from the clean-events
+        table the same way the feature pipeline resolves it.
+        """
+        manifest_path = self.config.get("paths.decomb_manifest", None)
+        if manifest_path is None or clean_events_path is None:
+            return None
+        if not Path(clean_events_path).is_file():
+            self.logger.warning(
+                "Spectral availability: no clean events at %s; report panels for sub-%s "
+                "cannot be aligned and are left unmasked.",
+                clean_events_path,
+                subject,
+            )
+            return None
+
+        import pandas as pd
+
+        from eeg_pipeline.spectral_availability.alignment import align_decomb_to_epochs
+        from eeg_pipeline.spectral_availability.decomb import load_decomb_manifest
+
+        events = pd.read_csv(clean_events_path, sep="\t")
+        return align_decomb_to_epochs(
+            load_decomb_manifest(manifest_path),
+            subject=str(subject),
+            task=str(task),
+            events=events,
+        )
+
     def process_subject(
         self,
         subject: str,
@@ -1224,6 +1260,11 @@ class PreprocessingPipeline(PipelineBase):
                         for path in filtered_paths
                         if path.name.startswith(f"{output_prefix}_task-")
                     ],
+                    spectral_availability=self._report_spectral_availability(
+                        subject,
+                        task,
+                        epochs_path.with_name(f"{output_prefix}_task-{task}_proc-clean_events.tsv"),
+                    ),
                 )
             self.logger.info(
                 "Added exploratory band-specific ICA diagnostics for sub-%s, task=%s",
