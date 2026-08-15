@@ -89,14 +89,10 @@ def welch_half_support(
         get_window(window, segment_length, fftbins=True),
         dtype=float,
     )
-    if window_values.shape != (segment_length,) or not np.all(
-        np.isfinite(window_values)
-    ):
+    if window_values.shape != (segment_length,) or not np.all(np.isfinite(window_values)):
         raise ValueError("window must produce one finite value per segment sample")
 
-    transform_length = 1 << (
-        segment_length * _WELCH_DTFT_OVERSAMPLING - 1
-    ).bit_length()
+    transform_length = 1 << (segment_length * _WELCH_DTFT_OVERSAMPLING - 1).bit_length()
     power = np.abs(np.fft.rfft(window_values, n=transform_length)) ** 2
     half_power = power[0] / 2.0
     if not np.isfinite(half_power) or half_power <= 0:

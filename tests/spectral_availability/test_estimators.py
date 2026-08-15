@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import eeg_pipeline.spectral_availability.estimators as estimator_support
 from eeg_pipeline.spectral_availability import (
     morlet_half_support,
     multitaper_half_support,
@@ -100,6 +101,36 @@ def test_welch_hann_half_support_is_sub_hertz_for_requested_geometry() -> None:
     assert 0.0 < support < 1.0
 
 
+@pytest.mark.parametrize(
+    ("window", "expected_half_width_bins"),
+    [
+        ("boxcar", 0.44294647),
+        ("hann", 0.72029100),
+    ],
+)
+def test_welch_half_support_matches_known_periodic_window_half_widths(
+    window: str,
+    expected_half_width_bins: float,
+) -> None:
+    sfreq = 1024.0
+    n_per_seg = 1024
+
+    support_hz = welch_half_support(sfreq, n_per_seg, window)
+    normalized_support = support_hz / (sfreq / n_per_seg)
+
+    assert normalized_support == pytest.approx(
+        expected_half_width_bins,
+        rel=5e-5,
+    )
+
+
+def test_welch_half_support_accepts_equivalent_kaiser_window_forms() -> None:
+    tuple_support = welch_half_support(500.0, 1000, ("kaiser", 8.0))
+    float_support = welch_half_support(500.0, 1000, 8.0)
+
+    assert float_support == pytest.approx(tuple_support, rel=0.0, abs=1e-12)
+
+
 @pytest.mark.parametrize("sfreq", [0.0, -500.0, np.nan, np.inf])
 def test_welch_half_support_rejects_invalid_sampling_frequency(sfreq: float) -> None:
     with pytest.raises(ValueError):
@@ -131,3 +162,35 @@ def test_welch_half_support_rejects_unsupported_windows() -> None:
             n_per_seg=1000,
             window="not-a-scipy-window",
         )
+
+
+def test_welch_half_support_rejects_finite_window_with_zero_dc_power(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        estimator_support,
+        "get_window",
+        lambda window, n_per_seg, *, fftbins: np.array([1.0, -1.0]),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^window has no finite positive zero-frequency power$",
+    ):
+        welch_half_support(500.0, 2, "ignored")
+
+
+def test_welch_half_support_rejects_window_without_half_power_crossing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        estimator_support,
+        "get_window",
+        lambda window, n_per_seg, *, fftbins: np.array([1.0, 0.0]),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^window has no measurable half-power main-lobe crossing$",
+    ):
+        welch_half_support(500.0, 2, "ignored")

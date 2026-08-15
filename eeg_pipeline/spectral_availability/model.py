@@ -61,9 +61,7 @@ def _half_support(
     if support.ndim == 0:
         support = np.full(frequency_count, support.item())
     elif support.ndim != 1 or support.shape != (frequency_count,):
-        raise ValueError(
-            "half_support_hz must be a scalar or match the frequency axis"
-        )
+        raise ValueError("half_support_hz must be a scalar or match the frequency axis")
     if not np.all(np.isfinite(support)) or np.any(support < 0):
         raise ValueError("half_support_hz must contain finite non-negative values")
     return support
@@ -152,13 +150,10 @@ class EpochSpectralAvailability:
             raise TypeError("recording_keys must contain RecordingKey values")
 
         exclusions_by_epoch = tuple(
-            merge_frequency_intervals(intervals)
-            for intervals in self.exclusions_by_epoch
+            merge_frequency_intervals(intervals) for intervals in self.exclusions_by_epoch
         )
         if len(recording_keys) != len(exclusions_by_epoch):
-            raise ValueError(
-                "recording_keys and exclusions_by_epoch must have the same length"
-            )
+            raise ValueError("recording_keys and exclusions_by_epoch must have the same length")
 
         object.__setattr__(self, "recording_keys", recording_keys)
         object.__setattr__(self, "exclusions_by_epoch", exclusions_by_epoch)
@@ -176,9 +171,7 @@ class EpochSpectralAvailability:
 
         for epoch_index, intervals in enumerate(self.exclusions_by_epoch):
             for interval in intervals:
-                overlaps = (support_highs >= interval.low_hz) & (
-                    support_lows <= interval.high_hz
-                )
+                overlaps = (support_highs >= interval.low_hz) & (support_lows <= interval.high_hz)
                 valid[epoch_index, overlaps] = False
         return valid
 

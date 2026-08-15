@@ -254,6 +254,22 @@ def test_retained_bandwidth_sums_valid_positive_weights_per_epoch() -> None:
     np.testing.assert_array_equal(retained, np.array([6.0, 7.0]))
 
 
+def test_retained_bandwidth_honors_nonzero_frequency_half_support() -> None:
+    key = RecordingKey(subject="0001", task="thermalactive", run="1")
+    availability = EpochSpectralAvailability(
+        recording_keys=(key,),
+        exclusions_by_epoch=((FrequencyInterval(59.0, 61.0),),),
+    )
+
+    retained = availability.retained_bandwidth(
+        frequencies=np.array([57.0, 58.0, 62.0, 63.0]),
+        weights=np.array([1.0, 2.0, 4.0, 8.0]),
+        half_support_hz=1.0,
+    )
+
+    np.testing.assert_array_equal(retained, np.array([9.0]))
+
+
 def test_retained_bandwidth_surfaces_an_epoch_with_zero_support() -> None:
     key = RecordingKey(subject="0001", task="thermalactive", run="1")
     availability = EpochSpectralAvailability(
