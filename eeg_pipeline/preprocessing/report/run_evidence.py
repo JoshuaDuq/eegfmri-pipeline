@@ -173,6 +173,7 @@ def _measure_gradient(
         welch_seconds=settings.comb_welch_seconds,
         line_frequency=settings.spectra_line_frequency,
         notch_half_width_hz=settings.notch_exclusion_half_width_hz,
+        unavailable_intervals=settings.unavailable_intervals_by_recording.get(recording_id),
     )
     if comb is not None:
         evidence.combs.append(comb)
@@ -234,6 +235,9 @@ def measure_runs(
                 gradient_fundamental_hz=None if timing is None else timing.fundamental_hz,
                 aperiodic_fit_range_hz=settings.aperiodic_fit_range_hz,
                 notch_half_width_hz=settings.notch_exclusion_half_width_hz,
+                unavailable_intervals=settings.unavailable_intervals_by_recording.get(
+                    recording_id
+                ),
             )
         )
         evidence.continuity.append(
@@ -363,6 +367,7 @@ def add_run_evidence_sections(
                 tuple(settings.spectra_marked_frequencies) + evidence.gradient_marks_hz
             ),
             notch_half_width_hz=settings.notch_exclusion_half_width_hz,
+            unavailable_intervals_by_recording=settings.unavailable_intervals_by_recording,
         )
     if evidence.has_scanner_evidence:
         add_scanner_residual_section(

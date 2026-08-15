@@ -19,7 +19,7 @@ those would invite tuning an estimator per subject.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from eeg_pipeline.preprocessing.report.analyzer_qc import (
@@ -253,6 +253,31 @@ def _optional_float(block: Mapping[str, Any], key: str) -> float | None:
     return None if value is None else float(value)
 
 
+def _unavailable_intervals(config: Any) -> Mapping[str, tuple[tuple[float, float], ...]]:
+    """Bands a line-removal manifest reports as unavailable, keyed by recording id.
+
+    Empty unless ``paths.decomb_manifest`` is configured, so a dataset that does not opt
+    in never imports the adapter and keeps the fixed harmonic grid it always had.
+    """
+    manifest_path = config.get("paths.decomb_manifest", None)
+    if manifest_path is None:
+        return {}
+
+    from eeg_pipeline.spectral_availability.decomb import load_decomb_manifest
+
+    intervals: dict[str, tuple[tuple[float, float], ...]] = {}
+    for exclusion in load_decomb_manifest(manifest_path).exclusions:
+        key = exclusion.key
+        entities = [f"sub-{key.subject}"]
+        if key.session is not None:
+            entities.append(f"ses-{key.session}")
+        entities.extend([f"task-{key.task}", f"run-{key.run}"])
+        intervals["_".join(entities)] = tuple(
+            (interval.low_hz, interval.high_hz) for interval in exclusion.intervals
+        )
+    return intervals
+
+
 def _inherited(explicit: float | None, preprocessing_value: Any) -> float | None:
     """Return the report's own setting when it has one, otherwise what it inherits."""
     if explicit is not None:
@@ -331,6 +356,13 @@ class ReportSettings:
     #: the pipeline applies: a wider filter, or a different line-removal method, leaves a
     #: different span of bins that are the filter rather than the data.
     notch_exclusion_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ
+    #: Bands a per-recording line-removal manifest reports as unavailable, keyed by
+    #: recording id. Empty unless a Decomb manifest is configured, in which case these
+    #: are the measured stopbands and replace the fixed harmonic grid, which describes
+    #: neither where that filter cut nor how wide it was.
+    unavailable_intervals_by_recording: Mapping[str, tuple[tuple[float, float], ...]] = field(
+        default_factory=dict
+    )
     #: Repetition times within this of each other are one sequence rather than two.
     repetition_time_tolerance_s: float = DEFAULT_REPETITION_TIME_TOLERANCE_S
     #: Electrode positions within this of each other are the same site on the head.
@@ -706,6 +738,7 @@ class ReportSettings:
                 settings.spectra_line_frequency, config.get("preprocessing.notch_freq")
             ),
             spectra_fmax=_inherited(settings.spectra_fmax, config.get("preprocessing.h_freq")),
+            unavailable_intervals_by_recording=_unavailable_intervals(config),
         )
 
 

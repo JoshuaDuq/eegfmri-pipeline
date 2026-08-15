@@ -15,6 +15,7 @@ being measured, which this module cannot see.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -49,20 +50,34 @@ def notch_windows(
     *,
     fmax: float,
     half_width: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    unavailable_intervals: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[tuple[float, float], ...]:
-    """Return the band around each line-noise harmonic the notch filter removed.
+    """Return the bands a filter removed, from every source that recorded one.
 
     Shared by every section that measures power at a frequency, so that they cannot
     disagree about which bins the filter owns.
+
+    A configured ``line_frequency`` contributes a harmonic grid padded by ``half_width``,
+    because the width of that fixed notch is not recorded anywhere. ``unavailable_intervals``
+    are measured bands that already span their stopband and FIR transitions, so they are
+    used as given; padding them would claim bins the filter never touched.
     """
-    if not line_frequency:
-        return ()
-    harmonics = np.arange(line_frequency, fmax + line_frequency, line_frequency)
-    return tuple(
-        (float(harmonic - half_width), float(harmonic + half_width))
-        for harmonic in harmonics
-        if harmonic - half_width < fmax
-    )
+    windows: list[tuple[float, float]] = []
+
+    if line_frequency:
+        harmonics = np.arange(line_frequency, fmax + line_frequency, line_frequency)
+        windows.extend(
+            (float(harmonic - half_width), float(harmonic + half_width))
+            for harmonic in harmonics
+            if harmonic - half_width < fmax
+        )
+
+    for low, high in unavailable_intervals or ():
+        if float(low) >= fmax:
+            continue
+        windows.append((float(low), min(float(high), float(fmax))))
+
+    return tuple(sorted(windows))
 
 
 def in_notch(frequencies: np.ndarray, windows: tuple[tuple[float, float], ...]) -> np.ndarray:

@@ -312,6 +312,7 @@ def compute_comb_residual(
     welch_seconds: float = COMB_WELCH_SECONDS,
     line_frequency: float | None = None,
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    unavailable_intervals: Sequence[tuple[float, float]] | None = None,
 ) -> CombResidual | None:
     """Measure the gradient comb against its background, before and after ICA.
 
@@ -354,6 +355,7 @@ def compute_comb_residual(
             line_frequency,
             fmax=float(harmonics[-1]),
             half_width=notch_half_width_hz,
+            unavailable_intervals=unavailable_intervals,
         ),
     )
     if notched.all():

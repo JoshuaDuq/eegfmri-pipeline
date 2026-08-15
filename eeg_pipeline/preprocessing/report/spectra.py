@@ -28,7 +28,7 @@ reviewer decides what the spectra mean.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import mne
@@ -177,6 +177,7 @@ def _set_power_limits(
     *,
     line_frequency: float | None,
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    unavailable_intervals: Sequence[tuple[float, float]] | None = None,
 ) -> None:
     """Bound the power axis by the spectrum rather than by the notch it contains.
 
@@ -193,6 +194,7 @@ def _set_power_limits(
         line_frequency,
         fmax=float(spectra.frequencies[-1]),
         half_width=notch_half_width_hz,
+        unavailable_intervals=unavailable_intervals,
     )
     keep = np.ones_like(spectra.frequencies, dtype=bool)
     for low, high in windows:
@@ -269,6 +271,7 @@ def compute_run_spectra(
     gradient_fundamental_hz: float | None = None,
     aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ,
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    unavailable_intervals: Sequence[tuple[float, float]] | None = None,
 ) -> RunSpectra:
     """Compute the across-channel sensor spectrum before and after ICA.
 
@@ -291,7 +294,12 @@ def compute_run_spectra(
     frequencies, before_channels = _channel_spectra_db(raw, fmin=fmin, fmax=upper)
     _, after_channels = _channel_spectra_db(cleaned, fmin=fmin, fmax=upper)
     excluded = tuple(
-        notch_windows(line_frequency, fmax=upper, half_width=notch_half_width_hz)
+        notch_windows(
+            line_frequency,
+            fmax=upper,
+            half_width=notch_half_width_hz,
+            unavailable_intervals=unavailable_intervals,
+        )
     ) + gradient_windows(gradient_fundamental_hz, frequencies=frequencies)
     return RunSpectra(
         recording_id=recording_id,
@@ -354,6 +362,7 @@ def plot_run_spectra(
     line_frequency: float | None = None,
     marked_frequencies: Sequence[float] = (),
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    unavailable_intervals: Sequence[tuple[float, float]] | None = None,
 ) -> plt.Figure:
     """Plot the before/after spectra, the across-channel spread, and their difference.
 
@@ -386,6 +395,7 @@ def plot_run_spectra(
         spectra,
         line_frequency=line_frequency,
         notch_half_width_hz=notch_half_width_hz,
+        unavailable_intervals=unavailable_intervals,
     )
     level_axis.legend(frameon=False, fontsize=8)
 
@@ -554,6 +564,7 @@ def add_spectra_section(
     marked_frequencies: Sequence[float] = (),
     section: str = "Sensor spectra before and after ICA",
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    unavailable_intervals_by_recording: Mapping[str, tuple[tuple[float, float], ...]] | None = None,
 ) -> None:
     """Append already-computed per-run spectra to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
@@ -572,6 +583,9 @@ def add_spectra_section(
             line_frequency=line_frequency,
             marked_frequencies=marked_frequencies,
             notch_half_width_hz=notch_half_width_hz,
+            unavailable_intervals=(unavailable_intervals_by_recording or {}).get(
+                run.recording_id
+            ),
         )
         for run in spectra
     ]
