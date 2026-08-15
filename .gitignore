@@ -20,10 +20,14 @@ sdist/
 var/
 wheels/
 *.egg-info/
+*.dist-info/
+pip-wheel-metadata/
 .installed.cfg
 *.egg
+.pytype/
+.pyre/
 
-### Environment ###
+### Environment & Package Managers ###
 .venv/
 .venv*/
 .venv311/
@@ -33,8 +37,12 @@ ENV/
 eeg_pipeline/.venv311/
 .env
 .env.*
+.conda/
+.condarc
+conda-bld/
+.pixi/
 
-### Testing and Cache ###
+### Testing, Benchmarking and Cache ###
 .pytest_cache/
 .matplotlib_cache/
 .matplotlib/
@@ -51,10 +59,25 @@ dmypy.json
 .ruff_cache/
 .tmp/
 pytest-cache-files-*/
+.benchmarks/
+.testmondata*
+.mutmut-cache/
+*.prof
+*.pstats
+.profile
 .ipynb_checkpoints/
 *-checkpoint.ipynb
 *.nbconvert.ipynb
 .python-version
+
+### HPC, SLURM & Cluster Runs ###
+slurm-*.out
+slurm-*.err
+slurm-*.log
+*.sbatch.log
+core
+core.[0-9]*
+.nfs*
 
 ### Go (TUI) ###
 .gocache/
@@ -67,6 +90,14 @@ eeg_pipeline/cli/tui/.cache/
 eeg_pipeline/cli/tui/.gomodcache/
 eeg_pipeline/cli/tui/.gopath/
 bin/
+
+### Frontend & Node ###
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.next/
 
 ### AI / Agent tooling (local, not shared) ###
 .AGENTS.md
@@ -84,16 +115,23 @@ skills-lock.json
 .windsurf/
 .cline/
 .roo/
+.tabnine/
+.sourcery/
 
 # Track all Sphinx documentation source files; ignore build output only
 docs/_build/
 docs/plans/
+_site/
 
 ### IDEs & OS ###
 .vscode/
 .idea/
 *.swp
 *.swo
+*.swn
+*.swm
+Session.vim
+.netrwhist
 *~
 .DS_Store
 ._*
@@ -103,11 +141,17 @@ docs/plans/
 .LSOverride/
 Thumbs.db
 ehthumbs.db
+ehthumbs_vista.db
 Desktop.ini
+.directory
 *.code-workspace
+*.sublime-project
+*.sublime-workspace
 *.bak
 *.orig
 *.rej
+*.tmp
+*.temp
 
 ### Local/Temporary Files ###
 *.log
@@ -117,6 +161,13 @@ outputs/
 tmp/
 scratch/
 .private_repo/
+
+### Experiment & ML Tracking ###
+wandb/
+.wandb/
+mlruns/
+.mlflow/
+events.out.tfevents.*
 
 ### Local workflow state ###
 .superpowers/
@@ -150,6 +201,16 @@ local_workflows/alliance_canada/*
 .RData
 .Ruserdata
 .Rproj.user/
+
+### Neuroimaging Caches & BIDS Workdirs ###
+.templateflow/
+templateflow/
+mne_data/
+fmriprep_work/
+.fmriprep_work/
+bids_work/
+.bids-validator/
+.datalad/
 
 ### Data ###
 # Ignore all data by default
@@ -187,6 +248,7 @@ eeg_pipeline/data/derivatives/**
 
 # Specifically ignore common data formats if they escape the data folders
 *.fif
+*.fif.gz
 *.set
 *.fdt
 *.nii
@@ -202,10 +264,34 @@ eeg_pipeline/data/derivatives/**
 *.vhdr
 *.vmrk
 *.eeg
+*.mff
+*.raw
+*.lay
+*.dat
+*.besa
+*.avr
 *.gii
 *.gii.gz
+*.cifti
+*.gifti
 *.mgz
 *.mgh
+*.mgh.gz
+*.curv
+*.sulc
+*.area
+*.white
+*.pial
+*.sphere
+*.inflated
+*.annot
+*.trk
+*.tck
+*.minc
+*.mnc
+*.ncf
+*.rec
+*.par
 *.bval
 *.bvec
 *.cnt
@@ -231,5 +317,19 @@ eeg_pipeline/data/derivatives/**
 *.xz
 fmriprep_preprocessed_fmri.tar
 
-### Secrets ###
+### Secrets & Credentials ###
 eeg_pipeline/licenses/license_*.txt
+*.key
+*.pem
+*.crt
+*.cer
+*.pfx
+*.p12
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+.netrc
+.pypirc
+*.token
+local_env.sh
