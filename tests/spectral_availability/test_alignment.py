@@ -114,10 +114,47 @@ def test_accepts_one_matching_prefix_on_explicit_entity_strings() -> None:
         RecordingKey(
             subject="0001",
             task="thermalactive",
-            run="01",
+            run="1",
             session="baseline2",
         ),
     )
+
+
+def test_zero_padded_manifest_run_aligns_with_numeric_event_run() -> None:
+    manifest = _manifest(_exclusion(run="01"))
+
+    aligned = align_decomb_to_epochs(
+        manifest,
+        subject="0001",
+        task="thermalactive",
+        events=pd.DataFrame({"run_id": [1]}),
+    )
+
+    assert aligned.recording_keys[0].run == "1"
+
+
+def test_accepts_plus_in_explicit_label_entities() -> None:
+    manifest = _manifest(
+        _exclusion(
+            subject="family+control",
+            task="thermal+active",
+            session="base+2",
+        )
+    )
+
+    aligned = align_decomb_to_epochs(
+        manifest,
+        subject="sub-family+control",
+        task="task-thermal+active",
+        events=pd.DataFrame(
+            {
+                "run_id": [1],
+                "session_id": ["ses-base+2"],
+            }
+        ),
+    )
+
+    assert aligned.recording_keys == (manifest.exclusions[0].key,)
 
 
 @pytest.mark.parametrize(
@@ -156,7 +193,10 @@ def test_requires_a_dataframe_and_run_id_column() -> None:
         )
 
 
-@pytest.mark.parametrize("session_values", [None, [None], [""], ["baseline3"]])
+@pytest.mark.parametrize(
+    "session_values",
+    [None, [None], [pd.NA], [pd.NaT], [np.nan], [""], ["baseline3"]],
+)
 def test_session_recordings_require_exact_usable_session_ids(
     session_values,
 ) -> None:
@@ -171,6 +211,46 @@ def test_session_recordings_require_exact_usable_session_ids(
             subject="0001",
             task="thermalactive",
             events=pd.DataFrame(data),
+        )
+
+
+@pytest.mark.parametrize(
+    "missing_session",
+    [None, pd.NA, pd.NaT, np.nan, ""],
+)
+def test_no_session_manifest_accepts_missing_session_scalars(missing_session) -> None:
+    manifest = _manifest(_exclusion())
+
+    aligned = align_decomb_to_epochs(
+        manifest,
+        subject="0001",
+        task="thermalactive",
+        events=pd.DataFrame(
+            {
+                "run_id": [1],
+                "session_id": [missing_session],
+            }
+        ),
+    )
+
+    assert aligned.recording_keys == (manifest.exclusions[0].key,)
+
+
+def test_rejects_non_scalar_session_values_clearly() -> None:
+    manifest = _manifest(_exclusion())
+    events = pd.DataFrame(
+        {
+            "run_id": [1],
+            "session_id": pd.Series([["baseline2"]], dtype=object),
+        }
+    )
+
+    with pytest.raises(TypeError, match=r"row 0.*session_id.*scalar"):
+        align_decomb_to_epochs(
+            manifest,
+            subject="0001",
+            task="thermalactive",
+            events=events,
         )
 
 

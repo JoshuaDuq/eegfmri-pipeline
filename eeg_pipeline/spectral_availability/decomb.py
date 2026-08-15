@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import re
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -16,22 +20,23 @@ from eeg_pipeline.spectral_availability.model import (
 )
 
 
-_REQUIRED_COLUMNS = frozenset(
-    {
-        "recording",
-        "unavailable_low_hz",
-        "unavailable_high_hz",
-        "outcome",
-        "removal_round",
-    }
+_REQUIRED_COLUMN_NAMES = (
+    "recording",
+    "unavailable_low_hz",
+    "unavailable_high_hz",
+    "outcome",
+    "removal_round",
 )
+_REQUIRED_COLUMNS = frozenset(_REQUIRED_COLUMN_NAMES)
+_CHUNK_SIZE = 10_000
 _RECORDING_PATTERN = re.compile(
-    r"sub-(?P<subject>[A-Za-z0-9]+)"
-    r"(?:_ses-(?P<session>[A-Za-z0-9]+))?"
-    r"_task-(?P<task>[A-Za-z0-9]+)"
-    r"_run-(?P<run>[A-Za-z0-9]+)_eeg"
+    r"sub-(?P<subject>[A-Za-z0-9+]+)"
+    r"(?:_ses-(?P<session>[A-Za-z0-9+]+))?"
+    r"_task-(?P<task>[A-Za-z0-9+]+)"
+    r"_run-(?P<run>[0-9]+)_eeg"
 )
 _NUMBER_PATTERN = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _TERMINAL_OUTCOME = "no_line_detected"
 _FINITE_OUTCOMES = frozenset(
     {
@@ -46,6 +51,27 @@ class DecombManifest:
     path: Path
     sha256: str
     exclusions: tuple[RecordingExclusions, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sha256, str):
+            raise TypeError("sha256 must be a string")
+        if _SHA256_PATTERN.fullmatch(self.sha256) is None:
+            raise ValueError("sha256 must be a 64-character lowercase hexadecimal string")
+
+        exclusions = tuple(self.exclusions)
+        if any(not isinstance(exclusion, RecordingExclusions) for exclusion in exclusions):
+            raise TypeError("exclusions must contain RecordingExclusions values")
+
+        object.__setattr__(self, "path", Path(self.path))
+        object.__setattr__(self, "exclusions", exclusions)
+
+
+class _ManifestRow(NamedTuple):
+    recording: str
+    unavailable_low_hz: str
+    unavailable_high_hz: str
+    outcome: str
+    removal_round: str
 
 
 def _require_file(path: Path, name: str) -> None:
@@ -113,18 +139,66 @@ def _missing_columns_error(columns: set[str] | frozenset[str]) -> ValueError:
     return ValueError("Decomb manifest is missing required columns: " + ", ".join(sorted(columns)))
 
 
-def _read_rows(path: Path) -> list[dict[str, str]]:
+def _parse_header(header_bytes: bytes) -> tuple[str, ...]:
+    if not header_bytes:
+        raise _missing_columns_error(_REQUIRED_COLUMNS)
+
     try:
-        frame = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
+        header = header_bytes.removesuffix(b"\n").removesuffix(b"\r").decode("utf-8")
+        columns = tuple(next(csv.reader([header], delimiter="\t", strict=True)))
+    except (UnicodeDecodeError, csv.Error) as error:
+        raise ValueError("Decomb manifest has an invalid UTF-8 TSV header") from error
+
+    if any(column == "" for column in columns):
+        raise ValueError("Decomb manifest has a blank header name")
+
+    counts = Counter(columns)
+    duplicates = sorted(column for column, count in counts.items() if count > 1)
+    if duplicates:
+        raise ValueError("Decomb manifest has duplicate header names: " + ", ".join(duplicates))
+
+    missing_columns = _REQUIRED_COLUMNS - set(columns)
+    if missing_columns:
+        raise _missing_columns_error(missing_columns)
+    return columns
+
+
+def _validate_raw_structure(manifest_bytes: bytes) -> None:
+    stream = io.BytesIO(manifest_bytes)
+    _parse_header(stream.readline())
+
+    has_data_row = False
+    for row_number, raw_line in enumerate(stream, start=2):
+        has_data_row = True
+        row = raw_line.removesuffix(b"\n").removesuffix(b"\r")
+        if not row or all(field == b"" for field in row.split(b"\t")):
+            raise ValueError(f"row {row_number} is an empty Decomb manifest data row")
+
+    if not has_data_row:
+        raise ValueError("Decomb manifest must contain at least one data row")
+
+
+def _read_rows(manifest_bytes: bytes):
+    _validate_raw_structure(manifest_bytes)
+    try:
+        chunks = pd.read_csv(
+            io.BytesIO(manifest_bytes),
+            sep="\t",
+            dtype=str,
+            keep_default_na=False,
+            skip_blank_lines=False,
+            usecols=_REQUIRED_COLUMN_NAMES,
+            chunksize=_CHUNK_SIZE,
+        )
     except pd.errors.EmptyDataError as error:
         raise _missing_columns_error(_REQUIRED_COLUMNS) from error
 
-    missing_columns = _REQUIRED_COLUMNS - set(frame.columns)
-    if missing_columns:
-        raise _missing_columns_error(missing_columns)
-    if frame.empty:
-        raise ValueError("Decomb manifest must contain at least one data row")
-    return frame.to_dict(orient="records")
+    row_number = 2
+    for chunk in chunks:
+        positions = tuple(chunk.columns.get_loc(name) for name in _REQUIRED_COLUMN_NAMES)
+        for values in chunk.itertuples(index=False, name=None):
+            yield row_number, _ManifestRow(*(values[position] for position in positions))
+            row_number += 1
 
 
 def load_decomb_manifest(path: str | Path) -> DecombManifest:
@@ -136,15 +210,14 @@ def load_decomb_manifest(path: str | Path) -> DecombManifest:
     _validate_provenance(description_path)
 
     manifest_bytes = manifest_path.read_bytes()
-    rows = _read_rows(manifest_path)
     recording_order: list[str] = []
     keys: dict[str, RecordingKey] = {}
     recording_by_key: dict[RecordingKey, str] = {}
     intervals: dict[str, list[FrequencyInterval]] = {}
     terminal_counts: dict[str, int] = {}
 
-    for row_number, row in enumerate(rows, start=2):
-        recording = row["recording"]
+    for row_number, row in _read_rows(manifest_bytes):
+        recording = row.recording
         key = _recording_key(recording, row_number)
         previous_recording = recording_by_key.get(key)
         if previous_recording is not None and previous_recording != recording:
@@ -159,9 +232,9 @@ def load_decomb_manifest(path: str | Path) -> DecombManifest:
             intervals[recording] = []
             terminal_counts[recording] = 0
 
-        low_text = row["unavailable_low_hz"]
-        high_text = row["unavailable_high_hz"]
-        outcome = row["outcome"]
+        low_text = row.unavailable_low_hz
+        high_text = row.unavailable_high_hz
+        outcome = row.outcome
         low_is_blank = low_text == ""
         high_is_blank = high_text == ""
         context = f"row {row_number} recording {recording!r}"

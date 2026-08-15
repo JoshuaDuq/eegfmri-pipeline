@@ -38,6 +38,42 @@ def test_recording_key_accepts_canonical_bids_values_and_is_frozen() -> None:
         key.run = "2"  # type: ignore[misc]
 
 
+def test_recording_key_accepts_plus_in_bids_labels() -> None:
+    key = RecordingKey(
+        subject="family+control",
+        task="thermal+active",
+        run="1",
+        session="baseline+2",
+    )
+
+    assert key.subject == "family+control"
+    assert key.task == "thermal+active"
+    assert key.session == "baseline+2"
+
+
+@pytest.mark.parametrize(
+    ("run", "expected"),
+    [
+        ("01", "1"),
+        ("000", "0"),
+        ("0009007199254740993", "9007199254740993"),
+    ],
+)
+def test_recording_key_canonicalizes_bids_run_indices(
+    run: str,
+    expected: str,
+) -> None:
+    key = RecordingKey(subject="0001", task="thermalactive", run=run)
+
+    assert key.run == expected
+
+
+@pytest.mark.parametrize("run", ["alpha", "1+2", "+1", "-1", "1.0", "١"])
+def test_recording_key_rejects_non_index_runs(run: str) -> None:
+    with pytest.raises(ValueError, match="run"):
+        RecordingKey(subject="0001", task="thermalactive", run=run)
+
+
 @pytest.mark.parametrize("field", ["subject", "task", "run", "session"])
 @pytest.mark.parametrize("value", ["", " ", "run-1", "run_1", "1.0"])
 def test_recording_key_rejects_noncanonical_bids_values(field: str, value: str) -> None:

@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -208,6 +211,39 @@ def test_null_decomb_manifest_does_not_call_adapter(tmp_path, monkeypatch) -> No
 
     assert "paths.decomb_manifest" not in _by_key(report)
     assert _by_key(report)["paths.bids_root"].status == "absent"
+
+
+def test_null_decomb_preflight_keeps_adapter_and_pandas_unimported(tmp_path) -> None:
+    command = """
+import sys
+from pathlib import Path
+
+from eeg_pipeline.utils.data.preflight import run_preflight
+
+
+class Config:
+    def __init__(self, root):
+        self.values = {
+            "paths.bids_root": str(root / "missing-bids"),
+            "paths.deriv_root": str(root / "derivatives"),
+            "paths.decomb_manifest": None,
+        }
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
+report = run_preflight(Config(Path(sys.argv[1])))
+assert report.observations[0].key == "paths.bids_root"
+assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
+assert "pandas" not in sys.modules
+"""
+
+    subprocess.run(
+        [sys.executable, "-c", command, str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[2],
+        check=True,
+    )
 
 
 def test_a_derivatives_directory_that_does_not_exist_yet_is_reported_as_creatable(

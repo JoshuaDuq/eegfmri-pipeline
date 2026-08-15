@@ -1,5 +1,6 @@
 import importlib
 import json
+import subprocess
 import sys
 import tempfile
 import types
@@ -1239,6 +1240,32 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
                 loader.assert_not_called()
                 execute.assert_called_once()
+
+    def test_null_decomb_validation_keeps_adapter_unimported_in_fresh_process(self):
+        command = """
+import sys
+
+from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+
+class Config:
+    def get(self, key, default=None):
+        if key == "paths.decomb_manifest":
+            return None
+        return default
+
+
+pipeline = object.__new__(PreprocessingPipeline)
+pipeline.config = Config()
+pipeline._validate_decomb_manifest()
+assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
+"""
+
+        subprocess.run(
+            [sys.executable, "-c", command],
+            cwd=Path(__file__).resolve().parents[2],
+            check=True,
+        )
 
     def test_preprocessing_init_and_ica_helpers(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline

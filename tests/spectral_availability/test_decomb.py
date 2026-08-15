@@ -8,8 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from eeg_pipeline.spectral_availability.decomb import load_decomb_manifest
-from eeg_pipeline.spectral_availability.model import RecordingKey
+import eeg_pipeline.spectral_availability.decomb as decomb_adapter
+from eeg_pipeline.spectral_availability.decomb import (
+    DecombManifest,
+    load_decomb_manifest,
+)
+from eeg_pipeline.spectral_availability.model import (
+    FrequencyInterval,
+    RecordingExclusions,
+    RecordingKey,
+)
 
 
 REQUIRED_COLUMNS = (
@@ -127,6 +135,111 @@ def test_loads_realistic_manifest_and_merges_all_interval_evidence(tmp_path) -> 
     ] == [(39.5, 40.5)]
 
 
+def test_checksum_and_exclusions_use_one_immutable_byte_snapshot(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, original_bytes = _write_manifest(
+        tmp_path,
+        [_finite_row(low="59", high="61"), _terminal_row()],
+    )
+    _, replacement_bytes = _write_manifest(
+        tmp_path,
+        [_finite_row(low="70", high="71"), _terminal_row()],
+    )
+    manifest_path.write_bytes(original_bytes)
+    original_read_bytes = Path.read_bytes
+
+    def read_then_replace(path):
+        snapshot = original_read_bytes(path)
+        if path == manifest_path:
+            manifest_path.write_bytes(replacement_bytes)
+        return snapshot
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_replace)
+
+    manifest = load_decomb_manifest(manifest_path)
+
+    assert manifest.sha256 == hashlib.sha256(original_bytes).hexdigest()
+    assert manifest.exclusions[0].intervals == (FrequencyInterval(59.0, 61.0),)
+
+
+def test_manifest_coerces_path_and_exclusions_to_immutable_values() -> None:
+    exclusion = RecordingExclusions(
+        key=RecordingKey(subject="0000", task="thermalactive", run="1"),
+        intervals=(),
+    )
+
+    manifest = DecombManifest(
+        path="manifest.tsv",
+        sha256="0" * 64,
+        exclusions=[exclusion],
+    )
+
+    assert manifest.path == Path("manifest.tsv")
+    assert manifest.exclusions == (exclusion,)
+
+
+@pytest.mark.parametrize(
+    "sha256",
+    ["0" * 63, "0" * 65, "A" * 64, "g" * 64],
+)
+def test_manifest_rejects_invalid_sha256_text(sha256) -> None:
+    with pytest.raises(ValueError, match="sha256"):
+        DecombManifest(path="manifest.tsv", sha256=sha256, exclusions=())
+
+
+def test_manifest_rejects_non_string_sha256() -> None:
+    with pytest.raises(TypeError, match="sha256"):
+        DecombManifest(path="manifest.tsv", sha256=None, exclusions=())
+
+
+def test_manifest_rejects_non_recording_exclusions() -> None:
+    with pytest.raises(TypeError, match="RecordingExclusions"):
+        DecombManifest(
+            path="manifest.tsv",
+            sha256="0" * 64,
+            exclusions=(object(),),
+        )
+
+
+def test_accepts_plus_in_recording_label_entities(tmp_path) -> None:
+    _write_dataset_description(tmp_path)
+    recording = "sub-family+control_ses-base+2_task-thermal+active_run-01_eeg"
+    manifest_path, _ = _write_manifest(
+        tmp_path,
+        [_finite_row(recording), _terminal_row(recording)],
+    )
+
+    manifest = load_decomb_manifest(manifest_path)
+
+    assert manifest.exclusions[0].key == RecordingKey(
+        subject="family+control",
+        session="base+2",
+        task="thermal+active",
+        run="1",
+    )
+
+
+def test_rejects_recordings_that_conflict_after_run_canonicalization(tmp_path) -> None:
+    _write_dataset_description(tmp_path)
+    run_one = "sub-0000_task-thermalactive_run-1_eeg"
+    padded_run_one = "sub-0000_task-thermalactive_run-01_eeg"
+    manifest_path, _ = _write_manifest(
+        tmp_path,
+        [
+            _finite_row(run_one),
+            _terminal_row(run_one),
+            _finite_row(padded_run_one),
+            _terminal_row(padded_run_one),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="same BIDS identity"):
+        load_decomb_manifest(manifest_path)
+
+
 def test_manifest_and_dataset_description_must_be_files(tmp_path) -> None:
     with pytest.raises(FileNotFoundError, match="manifest.*file"):
         load_decomb_manifest(tmp_path / "missing.tsv")
@@ -198,12 +311,94 @@ def test_header_only_manifest_requires_a_data_row(tmp_path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("header", "error_match"),
+    [
+        ((*REQUIRED_COLUMNS, "recording"), r"duplicate.*recording"),
+        ((*REQUIRED_COLUMNS, "evidence", "evidence"), r"duplicate.*evidence"),
+        ((*REQUIRED_COLUMNS, ""), "blank header"),
+    ],
+)
+def test_rejects_duplicate_or_blank_raw_header_names(
+    tmp_path,
+    header,
+    error_match,
+) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path = tmp_path / "line_notch_manifest.tsv"
+    manifest_path.write_text("\t".join(header) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error_match):
+        load_decomb_manifest(manifest_path)
+
+
+@pytest.mark.parametrize("empty_row", ["", "\t\t\t\t"])
+def test_rejects_interior_empty_data_rows(tmp_path, empty_row) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, manifest_bytes = _write_manifest(
+        tmp_path,
+        [_finite_row(), _terminal_row()],
+    )
+    lines = manifest_bytes.decode().splitlines()
+    manifest_path.write_text(
+        "\n".join([lines[0], lines[1], empty_row, lines[2]]) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"row 3.*empty"):
+        load_decomb_manifest(manifest_path)
+
+
+def test_pandas_reads_only_required_columns_in_bounded_chunks(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, _ = _write_manifest(
+        tmp_path,
+        [_finite_row(), _terminal_row()],
+        extra_columns=("channel", "evidence"),
+    )
+    read_csv = decomb_adapter.pd.read_csv
+    observed_kwargs = {}
+
+    def spy_read_csv(*args, **kwargs):
+        observed_kwargs.update(kwargs)
+        return read_csv(*args, **kwargs)
+
+    monkeypatch.setattr(decomb_adapter.pd, "read_csv", spy_read_csv)
+
+    load_decomb_manifest(manifest_path)
+
+    assert set(observed_kwargs["usecols"]) == set(REQUIRED_COLUMNS)
+    assert observed_kwargs["skip_blank_lines"] is False
+    assert observed_kwargs["chunksize"] == 10_000
+
+
+def test_global_row_numbers_are_preserved_across_chunks(tmp_path, monkeypatch) -> None:
+    _write_dataset_description(tmp_path)
+    manifest_path, _ = _write_manifest(
+        tmp_path,
+        [
+            _finite_row(),
+            _finite_row(recording="not-a-recording"),
+            _terminal_row(),
+        ],
+    )
+    monkeypatch.setattr(decomb_adapter, "_CHUNK_SIZE", 1)
+
+    with pytest.raises(ValueError, match=r"row 3 recording"):
+        load_decomb_manifest(manifest_path)
+
+
+@pytest.mark.parametrize(
     "recording",
     [
         "sub-0000_task-thermalactive_acq-test_run-1_eeg",
         "sub-0000_task-thermalactive_run-1",
         "sub-0000_run-1_task-thermalactive_eeg",
         "sub-0000_ses-base-line_task-thermalactive_run-1_eeg",
+        "sub-0000_task-thermalactive_run-alpha_eeg",
+        "sub-0000_task-thermalactive_run-١_eeg",
     ],
 )
 def test_rejects_unrepresentable_or_malformed_recording_identity(

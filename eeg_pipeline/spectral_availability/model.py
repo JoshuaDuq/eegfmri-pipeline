@@ -9,16 +9,24 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 
-_BIDS_ENTITY_PATTERN = re.compile(r"[A-Za-z0-9]+")
+_BIDS_LABEL_PATTERN = re.compile(r"[A-Za-z0-9+]+")
+_BIDS_RUN_PATTERN = re.compile(r"[0-9]+")
 
 
-def _validate_bids_entity(name: str, value: str | None) -> None:
-    if value is None and name == "session":
-        return
+def canonicalize_bids_label(name: str, value: object) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
-    if _BIDS_ENTITY_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"{name} must be a non-empty canonical BIDS entity value")
+    if _BIDS_LABEL_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{name} must be a non-empty canonical BIDS label")
+    return value
+
+
+def canonicalize_bids_run(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("run must be a string")
+    if _BIDS_RUN_PATTERN.fullmatch(value) is None:
+        raise ValueError("run must be a nonnegative integer BIDS index")
+    return str(int(value))
 
 
 def _finite_float(name: str, value: Real) -> float:
@@ -83,10 +91,23 @@ class RecordingKey:
     session: str | None = None
 
     def __post_init__(self) -> None:
-        _validate_bids_entity("subject", self.subject)
-        _validate_bids_entity("task", self.task)
-        _validate_bids_entity("run", self.run)
-        _validate_bids_entity("session", self.session)
+        object.__setattr__(
+            self,
+            "subject",
+            canonicalize_bids_label("subject", self.subject),
+        )
+        object.__setattr__(
+            self,
+            "task",
+            canonicalize_bids_label("task", self.task),
+        )
+        object.__setattr__(self, "run", canonicalize_bids_run(self.run))
+        if self.session is not None:
+            object.__setattr__(
+                self,
+                "session",
+                canonicalize_bids_label("session", self.session),
+            )
 
 
 @dataclass(frozen=True)

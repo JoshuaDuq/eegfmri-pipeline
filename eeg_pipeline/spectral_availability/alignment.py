@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from numbers import Integral, Real
 
 import numpy as np
@@ -11,36 +10,39 @@ from eeg_pipeline.spectral_availability.model import (
     EpochSpectralAvailability,
     RecordingExclusions,
     RecordingKey,
+    canonicalize_bids_label,
+    canonicalize_bids_run,
 )
 
 
-_BIDS_ENTITY_PATTERN = re.compile(r"[A-Za-z0-9]+")
+def _strip_entity_prefix(value: object, prefix: str) -> object:
+    entity_prefix = f"{prefix}-"
+    if isinstance(value, str) and value.startswith(entity_prefix):
+        return value[len(entity_prefix) :]
+    return value
 
 
-def _canonical_string_entity(value: object, entity: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{entity} must be an explicit string")
-    prefix = f"{entity}-"
-    canonical = value[len(prefix) :] if value.startswith(prefix) else value
-    if _BIDS_ENTITY_PATTERN.fullmatch(canonical) is None:
-        raise ValueError(f"{entity} must be a canonical BIDS entity value")
-    return canonical
+def _canonical_label(value: object, *, name: str, prefix: str) -> str:
+    return canonicalize_bids_label(
+        name,
+        _strip_entity_prefix(value, prefix),
+    )
 
 
 def _canonical_run(value: object) -> str:
     if isinstance(value, str):
-        return _canonical_string_entity(value, "run")
+        return canonicalize_bids_run(_strip_entity_prefix(value, "run"))
     if isinstance(value, (bool, np.bool_)):
         raise TypeError("run_id must be an explicit string or finite integer-valued number")
     if isinstance(value, Integral):
-        return _canonical_string_entity(str(value), "run")
+        return canonicalize_bids_run(str(value))
     if not isinstance(value, Real):
         raise TypeError("run_id must be an explicit string or finite integer-valued number")
 
     numeric = float(value)
     if not np.isfinite(numeric) or not numeric.is_integer():
         raise ValueError("run_id numeric values must be finite and integer-valued")
-    return _canonical_string_entity(str(int(numeric)), "run")
+    return canonicalize_bids_run(str(int(numeric)))
 
 
 def _event_run(value: object, row_number: int) -> str:
@@ -53,18 +55,18 @@ def _event_run(value: object, row_number: int) -> str:
 
 def _event_session(value: object, row_number: int) -> str:
     try:
-        return _canonical_string_entity(value, "ses")
+        return _canonical_label(value, name="session", prefix="ses")
     except (TypeError, ValueError) as error:
         message = f"event row {row_number} session_id: {error}"
         raise type(error)(message) from error
 
 
-def _is_missing_session(value: object) -> bool:
-    if value is None or value is pd.NA or value == "":
-        return True
-    if isinstance(value, Real) and not isinstance(value, (bool, np.bool_)):
-        return bool(np.isnan(float(value)))
-    return False
+def _is_missing_session(value: object, row_number: int) -> bool:
+    if not pd.api.types.is_scalar(value):
+        raise TypeError(f"event row {row_number} session_id must be a scalar value")
+    if isinstance(value, str):
+        return value == ""
+    return bool(pd.isna(value))
 
 
 def _unique_exclusions(
@@ -101,8 +103,8 @@ def align_decomb_to_epochs(
     if not isinstance(events, pd.DataFrame):
         raise TypeError("events must be a pandas DataFrame")
 
-    canonical_subject = _canonical_string_entity(subject, "sub")
-    canonical_task = _canonical_string_entity(task, "task")
+    canonical_subject = _canonical_label(subject, name="subject", prefix="sub")
+    canonical_task = _canonical_label(task, name="task", prefix="task")
     run_position = _column_position(events, "run_id")
     session_positions = [
         index for index, candidate in enumerate(events.columns) if candidate == "session_id"
@@ -131,14 +133,14 @@ def align_decomb_to_epochs(
         session = None
         if uses_sessions:
             session_value = values[session_position]
-            if _is_missing_session(session_value):
+            if _is_missing_session(session_value, row_number):
                 raise ValueError(
                     f"event row {row_number} session_id must identify a manifest session"
                 )
             session = _event_session(session_value, row_number)
         elif session_position is not None:
             session_value = values[session_position]
-            if not _is_missing_session(session_value):
+            if not _is_missing_session(session_value, row_number):
                 raise ValueError(
                     f"event row {row_number} session_id does not match no-session "
                     "manifest recordings"
