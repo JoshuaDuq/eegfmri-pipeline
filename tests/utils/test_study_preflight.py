@@ -14,7 +14,10 @@ because whether that is wrong depends on the study and the pipeline does not kno
 
 from __future__ import annotations
 
+import hashlib
 import json
+
+import pytest
 
 from eeg_pipeline.utils.data.preflight import Observation, run_preflight
 
@@ -79,6 +82,29 @@ def _by_key(report) -> dict[str, Observation]:
     return {observation.key: observation for observation in report.observations}
 
 
+def _decomb_manifest(tmp_path):
+    decomb_root = tmp_path / "decomb"
+    decomb_root.mkdir()
+    (decomb_root / "dataset_description.json").write_text(
+        json.dumps(
+            {
+                "Name": "Decomb derivative",
+                "GeneratedBy": [{"Name": "MNE-BIDS"}, {"Name": "decomb"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_bytes = (
+        "recording\tunavailable_low_hz\tunavailable_high_hz\toutcome\t"
+        "removal_round\n"
+        "sub-0001_task-oddball_run-01_eeg\t59\t61\tline_detected\t1\n"
+        "sub-0001_task-oddball_run-01_eeg\t\t\tno_line_detected\t\n"
+    ).encode()
+    manifest_path = decomb_root / "line_notch_manifest.tsv"
+    manifest_path.write_bytes(manifest_bytes)
+    return manifest_path, hashlib.sha256(manifest_bytes).hexdigest()
+
+
 ###################################################################
 # Roots
 ###################################################################
@@ -91,6 +117,97 @@ def test_a_missing_bids_root_is_reported_and_stops_the_inventory(tmp_path) -> No
 
     assert _by_key(report)["paths.bids_root"].status == "absent"
     assert "inventory" not in _by_key(report)
+
+
+def test_valid_decomb_manifest_is_checked_before_a_missing_bids_root(tmp_path) -> None:
+    manifest_path, checksum = _decomb_manifest(tmp_path)
+
+    report = run_preflight(
+        _config(
+            tmp_path,
+            **{
+                "paths.decomb_manifest": str(manifest_path),
+                "preprocessing.notch_freq": None,
+            },
+        )
+    )
+
+    observation = _by_key(report)["paths.decomb_manifest"]
+    assert observation.status == "ok"
+    assert checksum in observation.message
+    assert "1 recording" in observation.message
+    assert _by_key(report)["paths.bids_root"].status == "absent"
+
+
+def test_missing_decomb_manifest_surfaces_before_a_missing_bids_root(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError, match="Decomb manifest"):
+        run_preflight(
+            _config(
+                tmp_path,
+                **{
+                    "paths.decomb_manifest": str(tmp_path / "missing.tsv"),
+                    "preprocessing.notch_freq": None,
+                },
+            )
+        )
+
+
+def test_invalid_decomb_provenance_surfaces_from_preflight(tmp_path) -> None:
+    manifest_path, _ = _decomb_manifest(tmp_path)
+    description_path = manifest_path.with_name("dataset_description.json")
+    description_path.write_text(
+        json.dumps({"Name": "Derivative", "GeneratedBy": [{"Name": "MNE-BIDS"}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="GeneratedBy"):
+        run_preflight(
+            _config(
+                tmp_path,
+                **{
+                    "paths.decomb_manifest": str(manifest_path),
+                    "preprocessing.notch_freq": None,
+                },
+            )
+        )
+
+
+def test_invalid_decomb_tsv_surfaces_from_preflight(tmp_path) -> None:
+    manifest_path, _ = _decomb_manifest(tmp_path)
+    manifest_path.write_text("recording\toutcome\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unavailable_low_hz"):
+        run_preflight(
+            _config(
+                tmp_path,
+                **{
+                    "paths.decomb_manifest": str(manifest_path),
+                    "preprocessing.notch_freq": None,
+                },
+            )
+        )
+
+
+def test_null_decomb_manifest_does_not_call_adapter(tmp_path, monkeypatch) -> None:
+    def fail_if_called(_path):
+        raise AssertionError("Decomb adapter must remain inactive")
+
+    monkeypatch.setattr(
+        "eeg_pipeline.spectral_availability.decomb.load_decomb_manifest",
+        fail_if_called,
+    )
+
+    report = run_preflight(
+        _config(
+            tmp_path,
+            **{
+                "paths.decomb_manifest": None,
+            },
+        )
+    )
+
+    assert "paths.decomb_manifest" not in _by_key(report)
+    assert _by_key(report)["paths.bids_root"].status == "absent"
 
 
 def test_a_derivatives_directory_that_does_not_exist_yet_is_reported_as_creatable(

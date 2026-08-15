@@ -282,6 +282,15 @@ class PreprocessingPipeline(PipelineBase):
             return bool(override)
         return bool(self.config.get("preprocessing.task_is_rest", False))
 
+    def _validate_decomb_manifest(self) -> None:
+        manifest_path = self.config.get("paths.decomb_manifest", None)
+        if manifest_path is None:
+            return
+
+        from eeg_pipeline.spectral_availability.decomb import load_decomb_manifest
+
+        load_decomb_manifest(manifest_path)
+
     def process_subject(
         self,
         subject: str,
@@ -304,6 +313,7 @@ class PreprocessingPipeline(PipelineBase):
         )
         self._refresh_processing_roots_if_initialized(task_is_rest)
         self._check_config_coherence()
+        self._validate_decomb_manifest()
 
         progress.subject_start(f"sub-{subject}")
 
@@ -357,6 +367,7 @@ class PreprocessingPipeline(PipelineBase):
         )
         self._refresh_processing_roots_if_initialized(task_is_rest)
         self._check_config_coherence()
+        self._validate_decomb_manifest()
         run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
@@ -1635,8 +1646,7 @@ class PreprocessingPipeline(PipelineBase):
             )
             if clean_path is None or not clean_path.is_file():
                 raise FileNotFoundError(
-                    f"Clean epochs not found; cannot log AutoReject for sub-{subject}, "
-                    f"task-{task}"
+                    f"Clean epochs not found; cannot log AutoReject for sub-{subject}, task-{task}"
                 )
             fit_path = pre_rejection_epochs_path(clean_path)
             if not fit_path.is_file():

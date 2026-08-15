@@ -22,6 +22,12 @@ def test_pac_default_uses_surrogate_null_model() -> None:
     assert pac_config["n_surrogates"] >= 200
 
 
+def test_decomb_manifest_is_disabled_by_default() -> None:
+    config = _load_yaml("eeg_pipeline/utils/config/eeg_config.yaml")
+
+    assert config["paths"]["decomb_manifest"] is None
+
+
 def test_fmri_config_does_not_duplicate_source_constraint_defaults() -> None:
     config = _load_yaml("fmri_pipeline/utils/config/fmri_config.yaml")
 

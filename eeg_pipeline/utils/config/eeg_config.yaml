@@ -42,6 +42,9 @@ paths:
   # preprocessing runs carried the flag and the rest did not. Producing the cleaned copy is
   # `eeg-pipeline line-comb apply`, whose own config pins the raw root it reads.
   bids_root: "../../../data/bids_output/eeg_linecleaned"  # BIDS-formatted EEG data directory
+  # Null preserves ordinary datasets. A configured Decomb manifest activates spectral
+  # exclusions and requires preprocessing.notch_freq: null.
+  decomb_manifest: null
   bids_rest_root: null  # Optional resting-state EEG BIDS directory used when task_is_rest is enabled
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory

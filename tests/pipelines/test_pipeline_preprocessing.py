@@ -118,9 +118,7 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
             is_eeg_fmri=lambda config: bool(
                 _get_config_value(config, "preprocessing.eeg_fmri", None)
                 if _get_config_value(config, "preprocessing.eeg_fmri", None) is not None
-                else _get_config_value(
-                    config, "preprocessing.brainvision_analyzer.enabled", False
-                )
+                else _get_config_value(config, "preprocessing.brainvision_analyzer.enabled", False)
             ),
         ),
         # These tests build minimal configs to exercise one branch each, so a whole-config
@@ -1110,6 +1108,138 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
 
 
 class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
+    def _make_direct_entry_pipeline(self, manifest_path):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.name = "preprocessing"
+        p.config = DotConfig(
+            {
+                "paths": {"decomb_manifest": manifest_path},
+                "project": {"task": "task"},
+                "preprocessing": {"notch_freq": None},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
+        p.logger = Mock()
+        p.deriv_root = Path(tempfile.mkdtemp())
+        return p
+
+    def _process_subject_entry(self, pipeline):
+        return pipeline.process_subject(
+            "0001",
+            task="task",
+            mode="epochs",
+            progress=_NoopProgress(),
+        )
+
+    def _run_batch_entry(self, pipeline):
+        return pipeline.run_batch(
+            subjects=["0001"],
+            task="task",
+            mode="epochs",
+            progress=_NoopProgress(),
+        )
+
+    def test_configured_decomb_manifest_is_validated_by_direct_entry_points(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        entry_points = (self._process_subject_entry, self._run_batch_entry)
+        for entry_point in entry_points:
+            with self.subTest(entry_point=entry_point.__name__):
+                loader = Mock(return_value=object())
+                adapter = _make_module(
+                    "eeg_pipeline.spectral_availability.decomb",
+                    load_decomb_manifest=loader,
+                )
+                pipeline = self._make_direct_entry_pipeline("/tmp/manifest.tsv")
+                with (
+                    patch.dict(
+                        sys.modules,
+                        {"eeg_pipeline.spectral_availability.decomb": adapter},
+                    ),
+                    patch.object(
+                        PreprocessingPipeline,
+                        "_get_steps_for_run",
+                        return_value=[],
+                    ),
+                    patch.object(
+                        PreprocessingPipeline,
+                        "_execute_steps",
+                        return_value={},
+                    ) as execute,
+                ):
+                    entry_point(pipeline)
+
+                loader.assert_called_once_with("/tmp/manifest.tsv")
+                execute.assert_called_once()
+
+    def test_invalid_decomb_manifest_surfaces_before_direct_execution(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        entry_points = (self._process_subject_entry, self._run_batch_entry)
+        for entry_point in entry_points:
+            with self.subTest(entry_point=entry_point.__name__):
+                loader = Mock(side_effect=ValueError("invalid Decomb manifest"))
+                adapter = _make_module(
+                    "eeg_pipeline.spectral_availability.decomb",
+                    load_decomb_manifest=loader,
+                )
+                pipeline = self._make_direct_entry_pipeline("/tmp/manifest.tsv")
+                with (
+                    patch.dict(
+                        sys.modules,
+                        {"eeg_pipeline.spectral_availability.decomb": adapter},
+                    ),
+                    patch.object(
+                        PreprocessingPipeline,
+                        "_get_steps_for_run",
+                        return_value=[],
+                    ),
+                    patch.object(
+                        PreprocessingPipeline,
+                        "_execute_steps",
+                        return_value={},
+                    ) as execute,
+                    self.assertRaisesRegex(ValueError, "invalid Decomb manifest"),
+                ):
+                    entry_point(pipeline)
+
+                execute.assert_not_called()
+
+    def test_null_decomb_manifest_preserves_direct_entry_paths(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        entry_points = (self._process_subject_entry, self._run_batch_entry)
+        for entry_point in entry_points:
+            with self.subTest(entry_point=entry_point.__name__):
+                loader = Mock(side_effect=AssertionError("adapter must remain inactive"))
+                adapter = _make_module(
+                    "eeg_pipeline.spectral_availability.decomb",
+                    load_decomb_manifest=loader,
+                )
+                pipeline = self._make_direct_entry_pipeline(None)
+                with (
+                    patch.dict(
+                        sys.modules,
+                        {"eeg_pipeline.spectral_availability.decomb": adapter},
+                    ),
+                    patch.object(
+                        PreprocessingPipeline,
+                        "_get_steps_for_run",
+                        return_value=[],
+                    ),
+                    patch.object(
+                        PreprocessingPipeline,
+                        "_execute_steps",
+                        return_value={},
+                    ) as execute,
+                ):
+                    entry_point(pipeline)
+
+                loader.assert_not_called()
+                execute.assert_called_once()
+
     def test_preprocessing_init_and_ica_helpers(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 

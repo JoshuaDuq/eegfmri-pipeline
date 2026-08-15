@@ -251,7 +251,7 @@ def _check_ecg_settings(config: Any, warnings: List[ConfigIssue]) -> None:
         ),
         (
             "preprocessing.clean_events_qc.ecg_coupling.enabled",
-            "it correlates EEG against the recorded ECG lead, so the metric will be " "skipped.",
+            "it correlates EEG against the recorded ECG lead, so the metric will be skipped.",
         ),
     )
     for key, explanation in ecg_dependent:
@@ -263,6 +263,19 @@ def _check_ecg_settings(config: Any, warnings: List[ConfigIssue]) -> None:
                     "Name the recorded ECG channel, or set this false.",
                 )
             )
+
+
+def _check_decomb_notch(config: Any, errors: List[ConfigIssue]) -> None:
+    manifest_path = get_config_value(config, "paths.decomb_manifest", None)
+    notch_frequency = get_config_value(config, "preprocessing.notch_freq", None)
+    if manifest_path is not None and notch_frequency is not None:
+        errors.append(
+            ConfigIssue(
+                "preprocessing.notch_freq",
+                "must be null when paths.decomb_manifest is configured because the "
+                "manifest is the authoritative unavailable-frequency geometry.",
+            )
+        )
 
 
 def check_config_coherence(config: Any) -> CoherenceReport:
@@ -282,6 +295,7 @@ def check_config_coherence(config: Any) -> CoherenceReport:
 
     # Unconditional: the ECG stages need a lead whether or not there was a scanner.
     _check_ecg_settings(config, warnings)
+    _check_decomb_notch(config, errors)
 
     return CoherenceReport(errors=tuple(errors), warnings=tuple(warnings))
 

@@ -31,6 +31,35 @@ def test_the_shipped_config_is_coherent() -> None:
     assert report.errors == (), [str(i) for i in report.errors]
 
 
+def test_decomb_manifest_with_downstream_notch_is_rejected() -> None:
+    config = _config(
+        paths__decomb_manifest="/data/line_notch_manifest.tsv",
+        preprocessing__notch_freq=60,
+    )
+
+    report = check_config_coherence(config)
+
+    assert "preprocessing.notch_freq" in _keys(report.errors)
+
+
+def test_decomb_manifest_without_downstream_notch_is_coherent() -> None:
+    config = _config(
+        paths__decomb_manifest="/data/line_notch_manifest.tsv",
+        preprocessing__notch_freq=None,
+    )
+
+    assert check_config_coherence(config).errors == ()
+
+
+def test_null_decomb_manifest_preserves_notch_behavior() -> None:
+    config = _config(
+        paths__decomb_manifest=None,
+        preprocessing__notch_freq=60,
+    )
+
+    assert check_config_coherence(config).errors == ()
+
+
 def test_every_rest_incompatibility_is_reported_in_one_pass() -> None:
     """The behaviour this whole module exists for: three fixes named at once rather than
     discovered across three runs."""

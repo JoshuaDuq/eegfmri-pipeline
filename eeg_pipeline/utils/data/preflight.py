@@ -602,8 +602,7 @@ def _observe_event_columns(
                     Observation(
                         key,
                         STATUS_OK,
-                        f"resolved to column {alias!r}, complete in "
-                        f"{_plural(len(rows), 'row')}.",
+                        f"resolved to column {alias!r}, complete in {_plural(len(rows), 'row')}.",
                     )
                 )
 
@@ -620,9 +619,31 @@ def _is_rest(config: Any) -> bool:
     return bool(config.get("preprocessing.task_is_rest", False))
 
 
+def _observe_decomb_manifest(
+    config: Any,
+    observations: List[Observation],
+) -> None:
+    manifest_path = config.get("paths.decomb_manifest", None)
+    if manifest_path is None:
+        return
+
+    from eeg_pipeline.spectral_availability.decomb import load_decomb_manifest
+
+    manifest = load_decomb_manifest(manifest_path)
+    observations.append(
+        Observation(
+            "paths.decomb_manifest",
+            STATUS_OK,
+            f"validated {_plural(len(manifest.exclusions), 'recording exclusion set')}; "
+            f"SHA-256 {manifest.sha256}.",
+        )
+    )
+
+
 def run_preflight(config: Any) -> PreflightReport:
     """Inspect the configured dataset and report what was found, without writing."""
     observations: List[Observation] = []
+    _observe_decomb_manifest(config, observations)
 
     bids_root = _observe_roots(config, observations)
     if bids_root is None:
