@@ -22,10 +22,12 @@ def _benchmark(
     passed=True,
     n=3,
     seam_observed=None,
-    sinusoid_p=None,
+    residual_p=None,
+    focal_residual_p=None,
 ):
     observed = [0.5] * n if seam_observed is None else list(seam_observed)
-    probabilities = [0.9] * n if sinusoid_p is None else list(sinusoid_p)
+    residual = [0.9] * n if residual_p is None else list(residual_p)
+    focal = [0.9] * n if focal_residual_p is None else list(focal_residual_p)
     pd.DataFrame(
         [
             {
@@ -37,7 +39,9 @@ def _benchmark(
                 "max_boundary_discontinuity_ratio": observed[i],
                 "boundary_discontinuity_max_v": observed[i],
                 "boundary_control_maxima_v": ";".join(["1"] * 40),
-                "study_residual_sinusoid_p": probabilities[i],
+                "residual_null_p": residual[i],
+                "focal_residual_null_p": focal[i],
+                "nonline_change_null_p": 0.9,
             }
             for i in range(n)
         ]
@@ -45,22 +49,45 @@ def _benchmark(
     return path
 
 
-def test_apply_does_not_consult_the_post_selection_sinusoid_criterion(tmp_path):
-    """That criterion tests its own detector's subtraction, so it cannot block apply.
+def test_apply_refuses_when_the_cohort_residual_criterion_fails(tmp_path):
+    """The residual question is exact against each run's own controls, and gated there.
 
-    Residual targets are selected by the F test on each exact epoch and the criterion
-    repeats that test on the same epochs afterwards. A recording carrying a significant
-    residual by that measure is reported, not refused; the PSD matched-control gate is
-    the acceptance test, and it scores a statistic the detector does not optimise.
+    It is absent from the per-run gate because about one recording in twenty exceeds by
+    construction, so an all-runs rule would reject a faultless cohort. Every row can carry
+    ``gate_passed`` true and the cohort still be inadmissible.
     """
     settings = rlc.RemovalSettings()
     path = _benchmark(
         tmp_path / "benchmark.tsv",
         rlc.settings_fingerprint(settings),
-        sinusoid_p=[1e-9, 0.9, 0.9],
+        residual_p=[1e-9, 0.9, 0.9],
     )
 
-    rlc.require_passing_benchmark(path, settings)
+    with pytest.raises(RuntimeError, match="whole-run residual criterion failed"):
+        rlc.require_passing_benchmark(path, settings)
+
+
+def test_apply_refuses_when_the_focal_residual_criterion_fails(tmp_path):
+    settings = rlc.RemovalSettings()
+    path = _benchmark(
+        tmp_path / "benchmark.tsv",
+        rlc.settings_fingerprint(settings),
+        focal_residual_p=[1e-9, 0.9, 0.9],
+    )
+
+    with pytest.raises(RuntimeError, match="focal residual criterion failed"):
+        rlc.require_passing_benchmark(path, settings)
+
+
+def test_apply_refuses_a_benchmark_without_the_residual_probabilities(tmp_path):
+    """An older benchmark cannot answer the question, so it cannot certify the cohort."""
+    settings = rlc.RemovalSettings()
+    path = _benchmark(tmp_path / "benchmark.tsv", rlc.settings_fingerprint(settings))
+    frame = pd.read_csv(path, sep="\t").drop(columns=["residual_null_p"])
+    frame.to_csv(path, sep="\t", index=False)
+
+    with pytest.raises(RuntimeError, match="carries no residual_null_p"):
+        rlc.require_passing_benchmark(path, settings)
 
 
 def test_apply_refuses_when_the_cohort_seam_criterion_fails(tmp_path):

@@ -131,7 +131,20 @@ def test_a_narrow_target_is_retained_when_its_support_crosses_the_model_edge():
     assert any(abs(target - 27.63) < 1e-9 for target in window.narrow_targets_hz)
 
 
-def test_exact_support_includes_half_bin_localization_uncertainty():
+def _covers(window, frequency_hz):
+    return any(
+        abs(frequency_hz - target) <= width / 2.0
+        for target, width in zip(window.targets_hz, window.notch_widths_hz)
+    )
+
+
+def test_offset_support_is_covered_where_it_was_observed_and_not_mirrored():
+    """Support beside a target costs its own width, not twice its offset.
+
+    A notch is symmetric about its target, so widening the target to reach a peak 0.1 Hz
+    below it would also empty 0.1 Hz above it, where the spectrum was flat. The peak is
+    covered by a notch centred on the peak instead, with the localization margin included.
+    """
     freqs = np.arange(20.0, 30.0, 0.05)
     prominence = np.zeros(freqs.size)
     peak = int(np.argmin(np.abs(freqs - 24.9)))
@@ -151,7 +164,44 @@ def test_exact_support_includes_half_bin_localization_uncertainty():
         localization_margin_hz=0.025,
     )
 
-    assert expanded.notch_widths_hz[0] == pytest.approx(0.25)
+    assert _covers(expanded, 24.9)
+    # The localization margin is carried on each side of the observed support.
+    assert _covers(expanded, 24.9 - 0.02)
+    assert _covers(expanded, 24.9 + 0.02)
+    # Every notch stays positive even where the support is one bin wide.
+    assert all(width > 0.0 for width in expanded.notch_widths_hz)
+    # The mirror image of the peak, which the old symmetric widening also removed.
+    assert not _covers(expanded, 25.1)
+    # The validated target keeps its own width.
+    assert expanded.notch_widths_hz[0] == pytest.approx(0.1)
+
+
+def test_single_bin_support_still_asks_for_a_positive_notch():
+    """The production caller passes no localization margin, so the bin span is the floor.
+
+    A peak confined to one bin has ``left == right``, and a notch of the support's bare
+    extent would be zero wide -- which AdaptiveWindowRemovalPlan rejects, so the whole
+    recording's plan raises rather than the width being quietly wrong.
+    """
+    freqs = np.arange(20.0, 30.0, 0.05)
+    prominence = np.zeros(freqs.size)
+    prominence[int(np.argmin(np.abs(freqs - 24.9)))] = 15.0
+    window = rlc.AdaptiveWindowRemovalPlan(
+        bounds=(0, 200),
+        estimate=_estimate(1.2, 1e-4),
+        targets_hz=(25.0,),
+        notch_widths_hz=(0.1,),
+        narrow_targets_hz=(),
+    )
+
+    expanded = rlc._expand_window_to_observed_support(
+        window,
+        ((freqs, prominence, prominence),),
+        rlc.RemovalSettings(),
+    )
+
+    assert all(width > 0.0 for width in expanded.notch_widths_hz)
+    assert _covers(expanded, 24.9)
 
 
 def _nearest(window, frequency):

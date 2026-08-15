@@ -89,6 +89,16 @@ class AutorejectLog:
     consensus: float
 
 
+def scored_channel_picks(epochs: mne.BaseEpochs) -> np.ndarray:
+    """Return the channel indices AutoReject scores, in AutoReject's own order.
+
+    AutoReject evaluates the data channels that are not marked bad. A channel bad for
+    the whole recording is interpolated wholesale elsewhere, so it has no per-trial
+    verdict to record.
+    """
+    return mne.pick_types(epochs.info, eeg=True, exclude="bads")
+
+
 def compute_autoreject_log(
     epochs: mne.BaseEpochs,
     settings: AutorejectLogSettings,
@@ -96,13 +106,16 @@ def compute_autoreject_log(
     """Fit AutoReject on pre-rejection epochs and return its verdict."""
     import autoreject
 
-    picks = mne.pick_types(epochs.info, eeg=True, exclude=[])
+    # The pipeline calls AutoReject with no ``picks``, and AutoReject's own default drops
+    # ``info['bads']``. Passing explicit indices here would not: ``_picks_to_idx`` leaves
+    # an integer array alone, so a channel bad for the whole recording would be scored,
+    # inflating the per-epoch bad counts that the consensus cross-validation reads.
+    picks = scored_channel_picks(epochs)
     if len(picks) == 0:
         raise ValueError("Cannot fit AutoReject: the epochs hold no EEG channels.")
 
     ar = autoreject.AutoReject(
         n_interpolate=np.array(settings.n_interpolate),
-        picks=picks,
         random_state=settings.random_state,
         n_jobs=settings.n_jobs,
         verbose=False,
@@ -207,8 +220,7 @@ def verify_log_describes_clean_epochs(
         )
 
     clean_names = tuple(
-        clean_epochs.ch_names[index]
-        for index in mne.pick_types(clean_epochs.info, eeg=True, exclude=[])
+        clean_epochs.ch_names[index] for index in scored_channel_picks(clean_epochs)
     )
     if clean_names != log.ch_names:
         raise ValueError(
@@ -227,18 +239,27 @@ def autoreject_log_path_for_epochs(epochs_path: Path) -> Path:
     raise ValueError(f"Not an MNE epochs filename, cannot derive a log path: {name}")
 
 
-def pre_rejection_epochs_path(clean_epochs_path: Path) -> Path:
+def pre_rejection_epochs_path(
+    clean_epochs_path: Path,
+    spatial_filter: str | None = None,
+) -> Path:
     """Return the epochs file AutoReject was fitted on, given the cleaned output.
 
-    ``_09_ptp_reject`` reads the epochs ``_07_make_epochs`` wrote and writes a
-    ``proc-clean`` copy beside it, so the fit input is the same name without the
-    processing entity.
+    ``_09_ptp_reject`` reads ``processing=spatial_filter`` and writes a ``proc-clean``
+    copy beside it, so the fit input carries whichever spatial filter ran before it --
+    ``proc-ica`` for ICA, ``proc-ssp`` for SSP. Only when no spatial filter is configured
+    does it read the epochs ``_07_make_epochs`` wrote, which carry no processing entity.
+
+    Passing the wrong one is not a naming detail: the pre-ICA epochs still hold the
+    artifacts ICA removed, so a fit on them rejects a different set of trials than the
+    one that produced the derivative.
     """
     clean_epochs_path = Path(clean_epochs_path)
     name = clean_epochs_path.name
+    fit_entity = f"_proc-{spatial_filter}" if spatial_filter else ""
     for suffix in ("_proc-cleaned_epo.fif", "_proc-clean_epo.fif", "_clean_epo.fif"):
         if name.endswith(suffix):
-            return clean_epochs_path.with_name(f"{name[: -len(suffix)]}_epo.fif")
+            return clean_epochs_path.with_name(f"{name[: -len(suffix)]}{fit_entity}_epo.fif")
     raise ValueError(f"Not a cleaned MNE epochs filename: {name}")
 
 
@@ -265,6 +286,7 @@ __all__ = [
     "kept_epoch_counts",
     "pre_rejection_epochs_path",
     "read_autoreject_log",
+    "scored_channel_picks",
     "verify_log_describes_clean_epochs",
     "write_autoreject_log",
 ]

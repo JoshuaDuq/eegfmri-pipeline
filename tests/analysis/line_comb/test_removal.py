@@ -67,28 +67,6 @@ def test_benjamini_hochberg_makes_no_discovery_under_the_null():
     assert lr.benjamini_hochberg_discoveries(p_values, false_discovery_rate=0.05) == 0
 
 
-def test_run_residual_sinusoid_p_value_corrects_for_the_family_searched():
-    """One uncorrected 0.01 among 200 tests is not evidence of a surviving line."""
-    p_values = np.full(200, 0.5)
-    p_values[7] = 0.01
-
-    assert lr.run_residual_sinusoid_p_value(p_values) == pytest.approx(1.0)
-    assert lr.run_residual_sinusoid_p_value([0.01, 0.5]) == pytest.approx(0.02)
-
-
-def test_residual_sinusoid_verdict_decides_over_runs_not_inside_them():
-    """A nominal-rate detection in a few runs is not a cohort defect.
-
-    Demanding zero significant residuals inside every run rejects a clean cohort at the
-    test's own error rate. The cohort decision is made across runs instead, the same way
-    the seam criterion is.
-    """
-    clean_cohort = [0.04, 0.045, 0.048, *np.linspace(0.2, 0.99, 87)]
-    real_defect = [1e-9, 1e-8, 1e-7, *np.linspace(0.2, 0.99, 87)]
-
-    assert lr.residual_sinusoid_verdict(clean_cohort)["passed"]
-    assert not lr.residual_sinusoid_verdict(real_defect)["passed"]
-
 
 def test_in_band_probe_frequencies_come_from_the_fitted_targets():
     """Positions are read off the plan, so the measurement transfers to another site."""
@@ -122,6 +100,33 @@ def test_in_band_probe_survival_measures_what_is_left_at_the_target():
 
     assert survival["min_in_band_probe_survival"] == pytest.approx(0.25)
     assert survival["median_in_band_probe_survival"] == pytest.approx(0.625)
+
+
+def test_measured_band_attenuation_counts_what_the_transform_did():
+    """Nominal notch widths are what was asked for; this is what a probe actually lost."""
+    freqs = np.arange(28.0, 95.0, 0.5)
+    before = np.zeros((1, freqs.size))
+    after = np.zeros((1, freqs.size))
+    after[0, :10] = -5.0  # ten bins deeply attenuated
+    after[0, 10:20] = -2.0  # ten bins mildly attenuated
+
+    attenuation = lr.measured_band_attenuation(freqs, before, after)
+
+    assert attenuation["measured_band_attenuated_1db"] == pytest.approx(20 / freqs.size)
+    assert attenuation["measured_band_attenuated_3db"] == pytest.approx(10 / freqs.size)
+
+
+def test_measured_band_attenuation_ignores_gain_outside_the_band():
+    freqs = np.arange(10.0, 120.0, 0.5)
+    before = np.zeros((1, freqs.size))
+    after = np.zeros((1, freqs.size))
+    after[0, freqs < 28.0] = -20.0
+    after[0, freqs > 95.0] = -20.0
+
+    attenuation = lr.measured_band_attenuation(freqs, before, after)
+
+    assert attenuation["measured_band_attenuated_1db"] == 0.0
+    assert attenuation["measured_band_attenuated_3db"] == 0.0
 
 
 def test_residual_detection_carries_no_acceptance_tolerance():
@@ -510,13 +515,34 @@ class TestMetrics:
         target = 54.0
         near = np.abs(freqs - target) <= 0.2
         after[:, near] = 1e-6  # the line is gone; that must not count as a loss
-        change = lr.nonline_change_db(freqs, before, after, [target])
+        change = lr.nonline_change_db(freqs, before, after, [target], [0.4])
         assert np.max(np.abs(change)) < 1e-9
+
+    def test_nonline_change_sees_a_loss_just_outside_the_removed_span(self):
+        """The bins beside a removal are the ones this is watching.
+
+        Callers used to pass a scalar guard set to the largest width in the plan and apply
+        it to every target, so the excluded span was more than twice what spectrum_fit
+        reaches. The second arm here is that old behaviour: the same shoulder becomes
+        invisible, which is why the criterion could not fail on 90 recordings.
+        """
+        freqs = np.arange(0, 100, 1 / 21.6)
+        before = np.ones((3, freqs.size))
+        after = before.copy()
+        target = 54.0
+        shoulder = (np.abs(freqs - target) > 0.25) & (np.abs(freqs - target) <= 0.9)
+        after[:, shoulder] = 0.5
+
+        seen = lr.nonline_change_db(freqs, before, after, [target], [0.4])
+        masked_away = lr.nonline_change_db(freqs, before, after, [target], [1.8])
+
+        assert np.max(np.abs(seen)) > 0.01
+        assert np.max(np.abs(masked_away)) < 1e-12
 
     def test_nonline_change_sees_a_broadband_loss(self):
         freqs = np.arange(0, 100, 1 / 21.6)
         before = np.ones((3, freqs.size))
-        change = lr.nonline_change_db(freqs, before, before * 0.5, [54.0])
+        change = lr.nonline_change_db(freqs, before, before * 0.5, [54.0], [0.4])
         assert np.allclose(change, -3.0103, atol=1e-3)
 
     def test_a_probe_matching_its_reference_scores_one(self):
@@ -590,13 +616,6 @@ class TestRemovedBandFraction:
         fraction = lr.removed_band_fraction(self._grid(), targets, targets / 200.0)
         assert fraction > 0.2
 
-    def test_the_chosen_width_stays_inside_the_gate(self):
-        targets = np.array([1.2 * k for k in range(24, 80) if not 59.5 <= 1.2 * k <= 60.5])
-        widths = lr.notch_widths_for(targets, ratio=450.0, minimum_hz=0.05)
-        fraction = lr.removed_band_fraction(self._grid(), targets, widths)
-        assert fraction <= lr.PreservationGate().max_band_fraction_removed
-        assert fraction > 0.10  # and it really is wider than one bin per line
-
 
 class TestNotchWidthsFor:
     def test_wider_settings_touch_more_of_the_band(self):
@@ -649,7 +668,9 @@ class TestPreservationGate:
             "burst_correlation": 0.999,
             "removed_band_fraction": 0.06,
             "base_removed_band_fraction": 0.06,
-            "base_band_fraction_bin_size": 1.0 / 1810.0,
+            "measured_band_attenuated_1db": 0.12,
+            "measured_band_bin_size": 1.0 / 1810.0,
+        "base_band_fraction_bin_size": 1.0 / 1810.0,
             "band_fraction_bin_size": 1.0 / 1810.0,
         }
         base.update(overrides)
@@ -660,18 +681,36 @@ class TestPreservationGate:
         assert gate.passed(self._metrics())
         assert all(gate.evaluate(self._metrics()).values())
 
-    def test_leftover_lines_fail(self):
+    def test_leftover_lines_are_not_a_per_run_criterion(self):
+        """The residual question is exact against its own controls, so it is decided
+        over the recordings by residual_randomization_verdict rather than here."""
         gate = lr.PreservationGate()
-        verdict = gate.evaluate(self._metrics(residual_excess_db=6.0))
-        assert not verdict["lines_suppressed"]
 
-    def test_a_removed_probe_fails(self):
-        gate = lr.PreservationGate()
-        assert not gate.evaluate(self._metrics(max_probe_deviation_db=1.2))["sinusoids_preserved"]
+        assert "lines_suppressed" not in gate.evaluate(self._metrics())
+        assert not lr.residual_randomization_verdict([1 / 41])["passed"]
 
-    def test_broadband_damage_fails(self):
-        gate = lr.PreservationGate()
-        assert not gate.evaluate(self._metrics(max_nonline_change_db=0.9))["spectrum_preserved"]
+    def test_preservation_is_counted_against_a_control_not_a_constant(self):
+        """Both questions moved to a matched control, so neither is a per-run criterion."""
+        criteria = lr.PreservationGate().evaluate(self._metrics())
+
+        assert "sinusoids_preserved" not in criteria
+        assert "spectrum_preserved" not in criteria
+
+    def test_a_transform_that_disturbs_more_than_its_control_is_a_discovery(self):
+        import numpy as np
+
+        control = np.abs(np.random.default_rng(0).normal(size=63))
+
+        assert lr.paired_excess_p_value(control, control) == 1.0
+        assert lr.paired_excess_p_value(control + 1.0, control) < 1e-15
+
+    def test_the_probe_check_reports_rather_than_decides(self):
+        """Four tones on one channel cannot reach 0.05 by any test; 2^-4 = 0.0625."""
+        import numpy as np
+
+        four = np.array([0.1, 0.2, 0.3, 0.4])
+
+        assert lr.paired_excess_p_value(four + 1.0, four) > 0.05
 
     def test_a_flattened_transient_fails(self):
         gate = lr.PreservationGate()
@@ -680,16 +719,6 @@ class TestPreservationGate:
     def test_an_inflated_transient_also_fails(self):
         gate = lr.PreservationGate()
         assert not gate.evaluate(self._metrics(intrinsic_energy_ratio=1.20))["transient_preserved"]
-
-    def test_emptying_the_band_fails_even_when_every_line_is_gone(self):
-        # The failure mode that hid behind a guard band: lines suppressed, probes intact,
-        # untouched bins unchanged -- because a quarter of the band was simply gone.
-        gate = lr.PreservationGate()
-        verdict = gate.evaluate(self._metrics(removed_band_fraction=0.27))
-        assert verdict["lines_suppressed"]
-        assert verdict["spectrum_preserved"]
-        assert not verdict["band_mostly_untouched"]
-        assert not gate.passed(self._metrics(removed_band_fraction=0.27))
 
     def test_a_distorted_transient_fails_even_at_the_right_energy(self):
         gate = lr.PreservationGate()
@@ -773,7 +802,7 @@ class TestEndToEndOnSyntheticData:
             "max_boundary_discontinuity_ratio": 1.0,
             **lr.probe_preservation(freqs, psd_before, psd_after, probe),
             "max_nonline_change_db": float(
-                np.max(np.abs(lr.nonline_change_db(freqs, psd_before, psd_after, targets)))
+                np.max(np.abs(lr.nonline_change_db(freqs, psd_before, psd_after, targets, widths)))
             ),
             "study_max_probe_deviation_db": 0.01,
             "study_max_nonline_change_db": 0.001,
@@ -789,7 +818,9 @@ class TestEndToEndOnSyntheticData:
             "base_removed_band_fraction": lr.removed_band_fraction(
                 freqs, targets, widths, band_hz=(28.0, 48.0)
             ),
-            "base_band_fraction_bin_size": 1.0
+            "measured_band_attenuated_1db": 0.12,
+            "measured_band_bin_size": 1.0 / 1810.0,
+        "base_band_fraction_bin_size": 1.0
             / np.count_nonzero((freqs >= 28.0) & (freqs <= 48.0)),
             "band_fraction_bin_size": 1.0 / np.count_nonzero((freqs >= 28.0) & (freqs <= 48.0)),
         }

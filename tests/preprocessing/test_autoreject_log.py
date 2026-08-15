@@ -102,6 +102,19 @@ def test_a_log_whose_channels_differ_from_the_clean_epochs_is_an_error() -> None
         verify_log_describes_clean_epochs(log, clean)
 
 
+def test_a_log_verifies_against_clean_epochs_that_still_carry_the_bad_channels() -> None:
+    """AutoReject never evaluates a channel marked bad, but it stays in the derivative.
+
+    The log covers the channels AutoReject scored; the clean epochs hold those plus the
+    bads, so the check has to compare against the same channel set the fit used.
+    """
+    log = _log()
+    clean = _epochs(2, ["C3", "Cz", "C4", "Pz", "Oz"])
+    clean.info["bads"] = ["Oz"]
+
+    verify_log_describes_clean_epochs(log, clean)
+
+
 def test_settings_come_from_the_same_config_keys_the_pipeline_passes_autoreject() -> None:
     settings = AutorejectLogSettings.from_config(_Config(_settings_config()))
 
@@ -132,6 +145,33 @@ def test_pre_rejection_epochs_are_the_input_autoreject_was_fitted_on() -> None:
     assert pre_rejection_epochs_path(clean).name == "sub-0001_task-thermalactive_epo.fif"
 
 
+def test_pre_rejection_epochs_carry_the_spatial_filter_the_pipeline_applied() -> None:
+    """``_09_ptp_reject`` reads ``processing=spatial_filter``, not the raw epochs.
+
+    Refitting on the pre-ICA epochs measures artifacts ICA already removed, so the log
+    describes a different rejection than the one that produced the clean derivative.
+    """
+    clean = Path("/deriv/sub-0001_task-thermalactive_proc-clean_epo.fif")
+
+    assert (
+        pre_rejection_epochs_path(clean, spatial_filter="ica").name
+        == "sub-0001_task-thermalactive_proc-ica_epo.fif"
+    )
+    assert (
+        pre_rejection_epochs_path(clean, spatial_filter="ssp").name
+        == "sub-0001_task-thermalactive_proc-ssp_epo.fif"
+    )
+
+
+def test_pre_rejection_epochs_are_the_raw_epochs_when_no_spatial_filter_runs() -> None:
+    clean = Path("/deriv/sub-0001_task-thermalactive_proc-clean_epo.fif")
+
+    assert (
+        pre_rejection_epochs_path(clean, spatial_filter=None).name
+        == "sub-0001_task-thermalactive_epo.fif"
+    )
+
+
 def _settings_config() -> dict:
     return {
         "epochs.autoreject_n_interpolate": [4, 8, 16],
@@ -151,6 +191,23 @@ def test_computed_log_has_one_verdict_per_channel_per_epoch() -> None:
     assert log.bad_epochs.shape == (12,)
     assert log.ch_names == ("C3", "Cz", "C4", "Pz")
     assert set(np.unique(log.labels)) <= {0, 1, 2}
+
+
+def test_computed_log_scores_the_channels_autoreject_itself_would_score() -> None:
+    """The pipeline calls AutoReject with no ``picks``, which excludes ``info['bads']``.
+
+    Fitting the reconstruction on the bad channel as well changes the cross-validated
+    consensus and so the set of epochs dropped, and the log then describes a rejection
+    the derivative never underwent.
+    """
+    epochs = _epochs(12, ["C3", "Cz", "C4", "Pz"])
+    epochs.info["bads"] = ["Pz"]
+    settings = AutorejectLogSettings(n_interpolate=(1,), random_state=42, n_jobs=1)
+
+    log = compute_autoreject_log(epochs, settings)
+
+    assert log.ch_names == ("C3", "Cz", "C4")
+    assert log.labels.shape == (12, 3)
 
 
 def test_log_path_sits_beside_the_clean_epochs_it_annotates() -> None:

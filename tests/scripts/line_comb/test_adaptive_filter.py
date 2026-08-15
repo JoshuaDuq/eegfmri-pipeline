@@ -37,7 +37,7 @@ def test_adaptive_windows_cover_the_run_and_anchor_the_tail():
 
 
 def test_adaptive_windows_reject_a_run_shorter_than_one_window():
-    with pytest.raises(ValueError, match="shorter"):
+    with pytest.raises(ValueError, match="fewer than"):
         rlc.adaptive_window_bounds(n_times=399, window_samples=400, hop_samples=200)
 
 
@@ -140,7 +140,7 @@ def test_adaptive_cleaning_filters_each_window_plan_and_preserves_non_eeg(monkey
 
     monkeypatch.setattr(rlc, "clean_raw", fake_clean)
 
-    cleaned = rlc.clean_adaptive_raw(raw.copy(), plan, rlc.RemovalSettings())
+    cleaned = rlc.clean_continuous_raw(raw.copy(), plan, rlc.RemovalSettings())
 
     expected_eeg = rlc.overlap_add_segments(
         (np.ones((1, 100)), np.full((1, 100), 3.0)),

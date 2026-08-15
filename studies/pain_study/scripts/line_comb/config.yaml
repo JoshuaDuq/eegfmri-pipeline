@@ -28,6 +28,10 @@ paths:
   # core config at this directory to make the rest of the pipeline read the cleaned data.
   output_root: "<bids_root>_linecleaned"
 
+  # Written by `eeg-pipeline line-comb notch`, which reads output_root above. That stage is
+  # optional and runs last; point paths.bids_root here instead if the notch is in use.
+  notched_root: "<bids_root>_linecleaned_notched"
+
   # Final cleaned epochs, which decide which lines reach the analyses.
   preprocessed_eeg: "<deriv_root>/preprocessed/eeg"
 
@@ -35,7 +39,38 @@ paths:
   diagnosis_dir: "outputs/scanner_harmonic_diagnosis"
   removal_dir: "outputs/line_comb_removal"
 
+dataset:
+  # BIDS task label to process. Recordings are found at sub-*/[ses-*/]eeg/ with or without
+  # a run- entity, so a single continuous acquisition per participant -- a resting or
+  # baseline recording -- is a valid dataset. No events of any kind are required.
+  task: "thermalactive"
+
 line_comb_removal:
+  # Length of each adaptive estimation window. 54 s here is 60 TRs of 0.9 s, chosen so the
+  # window is commensurate with this site's volume repetition; elsewhere it is simply the
+  # window length. It sets the frequency resolution the fit works at (18.5 mHz) and the
+  # shortest recording that can be processed at all.
+  estimation_window_s: 54.0
+
+  # Band handed to a downstream wide notch instead of being taken here. Set [49.5, 50.5]
+  # where mains is 50 Hz. Only consulted when exclude_mains is true.
+  mains_notch_hz: [59.5, 60.5]
+
+  # Optional ceiling on the share of 28-95 Hz a broadband signal may lose, checked by
+  # `apply`. Null means the cost is measured and reported but nothing is refused on it.
+  #
+  # There is no default number here on purpose. The cost is already fixed by the evidence:
+  # it is the notch width times the number of targets, the width ratio was set by the
+  # documented sweep below to the narrowest value that still pushes every line under its
+  # local background, and a target only exists once the replication rules admit it. Nothing
+  # is left for a ceiling to constrain, so any number shipped here could only have been
+  # chosen after seeing the answer -- which is what the retired 0.18 was, set because the
+  # cohort had reached 0.170.
+  #
+  # A study that wants a stated budget declares it here. That is then its own scientific
+  # decision, recorded in the derivative's provenance alongside what the cost actually was.
+  max_band_cost: null
+
   nominal_fundamental_hz: 1.2      # search seed only; each run is measured
   harmonic_range: [24, 79]         # harmonics used to FIT the fundamental (well-determined ones)
 
@@ -95,16 +130,20 @@ line_comb_removal:
   min_runs_per_block_line: 2
   min_independent_windows_per_line: 3
 
-  # The continuous detector remains primary, but the benchmark must also guarantee the
-  # exact samples entering Studies 1-3. Evidence found in one interval is routed to
-  # overlapping continuous windows, while its exact 20 s transform accepts isolated and
-  # adjacent targets only from that same interval. The exact result replaces the continuous
-  # result on every analysis sample; only its correction taper extends outside the interval
-  # to prevent a step discontinuity. The event count is part of the protocol and a mismatch
-  # is an error.
-  study_event_name: "Trig_therm/T  1"
-  study_epoch_s: [-5.0, 15.0]
-  expected_study_events_per_run: 11
+  # Exact-epoch scoping used to live here (study_event_name, study_epoch_s,
+  # expected_study_events_per_run) and is gone. The transform is continuous everywhere, so
+  # the epochs stopped being a transform scope; as evidence they were measured to be
+  # strictly weaker than the windows that already cover the same samples -- a 20 s epoch
+  # spectrum resolves 50 mHz against the 54 s window's 18.5 mHz, and 37 mHz is the
+  # separation this code uses to call two peaks distinct sources, so an epoch cannot
+  # resolve anything a window cannot. On sub-0008 the epochs authorised no distinct source:
+  # every difference they made was a position shift of 2-26 mHz, all inside the notch that
+  # gets applied anyway, plus one duplicate target per run. Their four gate criteria held
+  # back 2 recordings of 90, all via study_no_focal_residual.
+  #
+  # Removing them is also what lets this workflow run on a recording with no events at all,
+  # such as a resting or baseline acquisition.
+
   # Refinement window for a detected nominal. It sits on the summit already, so it needs
   # only enough room to refine sub-bin -- and it must stay narrow, because estimate_comb
   # refuses a nominal within its search window of a comb position, on the grounds that a
@@ -150,6 +189,9 @@ line_comb_removal:
 
   # Mains is left to MNE-BIDS-Pipeline's FIR notch, not taken here.
   #
+  # The same is true of 57 Hz, for the same reason, but that one is taken by
+  # `line-comb notch` rather than downstream -- see notch_bands at the bottom of this file.
+  #
   # Taking it here was tried and measured. The comb is mains-synchronous, so 60 Hz is comb
   # harmonic 50 and turning this flag off makes it a target -- but the comb fit forces
   # harmonics onto an exact grid n*f0, and the physical mains line does not sit on it: the
@@ -165,3 +207,36 @@ line_comb_removal:
   # preprocessing.notch_freq MUST be 60 while this is true, or 60 Hz survives.
   # tests/scripts/line_comb/test_config_pairing.py fails if the two ever disagree.
   exclude_mains: true
+
+# Bands taken by `eeg-pipeline line-comb notch`, the optional last stage. Read as edges,
+# because edges are what a spectrum shows and what a diagnosis measures.
+#
+# The removal above reads this list too, and excludes every band in it -- the same division
+# of labour `exclude_mains` makes with the downstream FIR notch. It is not an optimisation.
+# Subtracting sinusoids inside a cluster promotes the neighbouring peak, the survivor fails
+# the residual criterion, `apply` refuses, and `notch` reads what `apply` wrote -- so the
+# two stages deadlock. Measured on sub-0008 before the exclusion: 5 of 6 recordings failed
+# at p=0.0244, the floor with 40 controls, each with its worst residual in 57.15-57.4 Hz.
+# tests/scripts/line_comb/test_notch_band_exclusion.py fails if the coupling is broken.
+#
+# Use this only for contamination that is a *cluster*, where subtracting sinusoids cannot
+# work. A resolvable line belongs in the removal above, which costs a few hundredths of a
+# hertz; a band here costs its whole width whether or not signal was in it.
+#
+# 56.8-57.7 Hz qualifies on measurement, not assumption. At 2 mHz resolution it carries
+# 75-118 distinct peaks above 3 dB (sub-0008, sub-0011, 2026-08-07), non-stationary between
+# 54 s windows -- about six times the peak density of mains, which this pipeline already
+# concedes to a wide notch. Across 18 recordings it holds a median 10.9% of all 28-95 Hz
+# power, up to 24.7%, in 1.34% of the band's width, and 92.6% of that stands above the
+# shoulders either side, so it is artifact rather than spectrum. The burden varies ten-fold
+# between participants (sub-0008 20-25%, sub-0000 2-3%), which is the systematic
+# between-participant offset the line comb exists to remove.
+#
+# What it costs: 0.9 Hz is 1.8% of gamma [30.1, 80.0]. The transitions make the real
+# footprint wider than the span requested; notch_manifest.tsv reports the measured change
+# in every analysed band rather than the requested width, for exactly that reason.
+#
+# The 90-run benchmark that motivated this: 24 of its 26 failures had their worst residual
+# in 57.1-57.4 Hz, and pass rate tracked the 57 Hz burden by participant.
+notch_bands:
+  - [56.8, 57.7]

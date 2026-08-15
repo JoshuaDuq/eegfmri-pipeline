@@ -19,7 +19,10 @@ from studies.pain_study.cli import line_comb as line_comb_cli
 WORKFLOW_COMMANDS = {
     "line-comb": (
         command_registry.line_comb_command,
-        ("diagnose", "plot", "benchmark", "apply", "verify", "report"),
+        # `notch` runs after `report` because it is the optional last stage: it reads what
+        # `apply` wrote and takes out bands no sinusoid subtraction can reach. `psd` draws
+        # the before-and-after spectra and needs only `apply` to have run.
+        ("diagnose", "plot", "benchmark", "apply", "verify", "report", "notch", "psd"),
     ),
     "cardiac-gaps": (
         command_registry.cardiac_gaps_command,

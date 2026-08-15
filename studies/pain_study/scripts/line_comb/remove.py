@@ -20,6 +20,7 @@ import argparse
 import re
 import shutil
 import time
+import zlib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Sequence
@@ -90,7 +91,12 @@ def adaptive_window_bounds(
     if not 0 < hop_samples < window_samples:
         raise ValueError("hop_samples must lie between zero and window_samples.")
     if n_times < window_samples:
-        raise ValueError("The recording is shorter than one adaptive estimation window.")
+        raise ValueError(
+            f"The recording holds {n_times} samples, fewer than the "
+            f"{window_samples} of one adaptive estimation window. Lower "
+            "`line_comb_removal.estimation_window_s`, at the cost of coarser frequency "
+            "resolution, or use a longer recording."
+        )
 
     tail_start = n_times - window_samples
     starts = list(range(0, tail_start + 1, hop_samples))
@@ -160,6 +166,36 @@ def overlap_add_segments(
 class RemovalSettings:
     """Everything the removal needs, resolved from configuration."""
 
+    task: str = TASK
+    """BIDS task label to process. Only this study's own default is study-specific."""
+    estimation_window_s: float = float(hd.TR_SECONDS) * ESTIMATION_TR_COUNT
+    """Length of each adaptive estimation window, in seconds.
+
+    54 s here, which at this site is 60 TRs of 0.9 s -- chosen so the window is
+    commensurate with the volume repetition and its 18.5 mHz bins land cleanly relative to
+    the scanner's own periodicity. That reasoning is specific to a simultaneous EEG-fMRI
+    acquisition; anywhere else it is simply the window length, and what matters is that it
+    resolves the lines being removed and that the recording holds at least one of them.
+    """
+    max_band_cost: float | None = None
+    """Optional ceiling on the share of 28-95 Hz a broadband signal may lose.
+
+    ``None`` by default, and deliberately so: the cost is already determined by the
+    evidence -- the notch width times the number of targets, with the width ratio fixed by
+    a documented sweep and each target admitted by the replication rules -- so a shipped
+    number could only be one chosen after seeing the answer. The retired default was 0.18,
+    set because the cohort had reached 0.170.
+
+    A study that wants a stated budget declares it here. That declaration is its own
+    scientific decision, is recorded in the derivative's provenance, and ``apply`` refuses
+    against it. What the cost actually was is measured and reported either way.
+    """
+    mains_notch_hz: tuple[float, float] = lr.MAINS_NOTCH_HZ
+    """Band left to a downstream wide notch rather than taken here.
+
+    59.5-60.5 Hz for a 60 Hz region. Set 49.5-50.5 where mains is 50 Hz. Only consulted
+    when ``exclude_mains`` is true.
+    """
     nominal_fundamental_hz: float = lr.NOMINAL_FUNDAMENTAL_HZ
     harmonic_range: tuple[int, int] = lr.COMB_HARMONIC_RANGE
     removal_harmonic_range: tuple[int, int] = lr.REMOVAL_HARMONIC_RANGE
@@ -203,9 +239,6 @@ class RemovalSettings:
     min_runs_per_block_line: int = 2
     min_independent_windows_per_line: int = 3
     """Non-overlapping windows needed to support a recording-specific line."""
-    study_event_name: str = "Trig_therm/T  1"
-    study_epoch_s: tuple[float, float] = (-5.0, 15.0)
-    expected_study_events_per_run: int = 11
     exclude_mains: bool = True
     """Leave 59.5-60.5 Hz to the pipeline's own notch.
 
@@ -215,8 +248,47 @@ class RemovalSettings:
     ``preprocessing.notch_freq`` has to be null when this is False, and
     tests/scripts/line_comb/test_config_pairing.py fails if the two ever disagree.
     """
+    excluded_bands_hz: tuple[tuple[float, float], ...] = ()
+    """Bands ``line-comb notch`` takes wholesale, read from the config's ``notch_bands``.
+
+    Same division of labour as ``exclude_mains``, for the same reason and against a
+    different stage. A band is declared there precisely when the contamination is a
+    *cluster* -- 75-118 distinct non-stationary peaks in the 0.9 Hz of 56.8-57.7 Hz here --
+    and subtracting sinusoids from a cluster cannot clear it: the summit aimed at goes and
+    its neighbour becomes the new summit.
+
+    Leaving those bands targeted deadlocked the workflow rather than merely wasting effort.
+    The surviving peak fails the residual criterion, which refuses ``apply``; the notch
+    stage that removes the band outright reads what ``apply`` wrote, so it could never run.
+    Measured on sub-0008, every recording failed at p=0.0244 -- the floor with 40 controls
+    -- each with its worst residual in 57.15-57.35 Hz, while sub-0000 at a tenth of the
+    57 Hz burden passed at p=1.0.
+    """
+
+    @property
+    def protected_bands_hz(self) -> tuple[tuple[float, float], ...]:
+        """Every band some other stage owns, so this pass must leave all of it alone."""
+        bands = list(self.excluded_bands_hz)
+        if self.exclude_mains:
+            bands.append(tuple(self.mains_notch_hz))
+        return tuple(sorted(bands))
 
     def __post_init__(self) -> None:
+        if not self.task.strip():
+            raise ValueError("task must name a BIDS task label.")
+        if not np.isfinite(self.estimation_window_s) or self.estimation_window_s <= 0.0:
+            raise ValueError("estimation_window_s must be finite and positive.")
+        if self.max_band_cost is not None and not 0.0 < self.max_band_cost <= 1.0:
+            raise ValueError("max_band_cost must be a share of the band, or null for none.")
+        low_hz, high_hz = self.mains_notch_hz
+        if not np.all(np.isfinite((low_hz, high_hz))) or not 0.0 < low_hz < high_hz:
+            raise ValueError("mains_notch_hz must be an increasing positive band.")
+        for band in self.excluded_bands_hz:
+            low, high = band
+            if not np.all(np.isfinite((low, high))) or not 0.0 < low < high:
+                raise ValueError(
+                    f"excluded_bands_hz must hold increasing positive bands; got {band}."
+                )
         if not np.isfinite(self.uncertainty_confidence_z) or self.uncertainty_confidence_z <= 0:
             raise ValueError("uncertainty_confidence_z must be finite and positive.")
         if self.detection_candidate_prominence_db > self.detection_min_prominence_db:
@@ -240,15 +312,6 @@ class RemovalSettings:
             )
         if self.filter_jobs < 1:
             raise ValueError("filter_jobs must be positive.")
-        if not self.study_event_name.strip():
-            raise ValueError("study_event_name must not be empty.")
-        study_start_s, study_stop_s = self.study_epoch_s
-        if not np.all(np.isfinite((study_start_s, study_stop_s))):
-            raise ValueError("study_epoch_s must contain finite values.")
-        if study_start_s >= study_stop_s:
-            raise ValueError("study_epoch_s must have increasing bounds.")
-        if self.expected_study_events_per_run < 1:
-            raise ValueError("expected_study_events_per_run must be positive.")
 
     @classmethod
     def from_config(cls, config) -> "RemovalSettings":
@@ -266,9 +329,43 @@ class RemovalSettings:
                 "Static isolated-line targeting is not supported; remove retired setting(s): "
                 f"{sorted(retired)}."
             )
+        # A config naming these describes a transform and a set of criteria that no longer
+        # exist. Silently ignoring them would leave the author believing the epochs were
+        # still being scored.
+        epoch_settings = {
+            "study_event_name",
+            "study_epoch_s",
+            "expected_study_events_per_run",
+        } & set(block)
+        if epoch_settings:
+            raise ValueError(
+                "Exact-epoch scoping was removed: the transform is continuous everywhere, "
+                "and a 20 s epoch spectrum resolves 50 mHz against the 54 s window's "
+                "18.5 mHz, so it authorised no source the windows did not already carry. "
+                f"Remove setting(s): {sorted(epoch_settings)}."
+            )
         harmonic_range = block.get("harmonic_range", list(defaults.harmonic_range))
         removal_range = block.get("removal_harmonic_range", list(defaults.removal_harmonic_range))
+        dataset = config.get("dataset") or {}
+        mains = block.get("mains_notch_hz", defaults.mains_notch_hz)
+        # Top-level, not inside `line_comb_removal`: the bands belong to the notch stage,
+        # and this pass reads them only to stay out of them.
+        notch_bands = config.get("notch_bands") or ()
+        for band in notch_bands:
+            if not isinstance(band, Sequence) or isinstance(band, str) or len(band) != 2:
+                raise ValueError(
+                    f"notch_bands must hold [low, high] edge pairs; got {band!r}. The "
+                    "removal reads them to stay out of the bands `line-comb notch` takes."
+                )
         return cls(
+            task=str(dataset.get("task", defaults.task)),
+            estimation_window_s=float(
+                block.get("estimation_window_s", defaults.estimation_window_s)
+            ),
+            mains_notch_hz=(float(mains[0]), float(mains[1])),
+            max_band_cost=(
+                None if block.get("max_band_cost") is None else float(block["max_band_cost"])
+            ),
             nominal_fundamental_hz=float(
                 block.get("nominal_fundamental_hz", defaults.nominal_fundamental_hz)
             ),
@@ -313,20 +410,11 @@ class RemovalSettings:
                     defaults.min_independent_windows_per_line,
                 )
             ),
-            study_event_name=str(block.get("study_event_name", defaults.study_event_name)),
-            study_epoch_s=tuple(
-                float(value) for value in block.get("study_epoch_s", defaults.study_epoch_s)
-            ),
-            expected_study_events_per_run=int(
-                block.get(
-                    "expected_study_events_per_run",
-                    defaults.expected_study_events_per_run,
-                )
-            ),
             detection_search_hz=float(
                 block.get("detection_search_hz", defaults.detection_search_hz)
             ),
             exclude_mains=bool(block.get("exclude_mains", defaults.exclude_mains)),
+            excluded_bands_hz=tuple((float(low), float(high)) for low, high in notch_bands),
         )
 
 
@@ -355,31 +443,6 @@ class AdaptiveWindowRemovalPlan:
         if any(width <= 0.0 for width in self.notch_widths_hz):
             raise ValueError("Adaptive-window notch widths must be positive.")
         _validate_residual_targets(self, "Adaptive-window")
-
-
-@dataclass(frozen=True)
-class StudyWindowRemovalPlan:
-    """Exact analysis interval and the targets evidenced within that interval."""
-
-    bounds: tuple[int, int]
-    targets_hz: tuple[float, ...]
-    notch_widths_hz: tuple[float, ...]
-    aggregate_residual_targets_hz: tuple[float, ...] = ()
-    aggregate_residual_widths_hz: tuple[float, ...] = ()
-    channel_residual_targets_hz: tuple[tuple[float, ...], ...] = ()
-    channel_residual_widths_hz: tuple[tuple[float, ...], ...] = ()
-
-    def __post_init__(self) -> None:
-        start, stop = self.bounds
-        if not 0 <= start < stop:
-            raise ValueError("Study-window bounds must be positive and stop-exclusive.")
-        if not self.targets_hz or len(self.targets_hz) != len(self.notch_widths_hz):
-            raise ValueError("A study window requires matching non-empty targets and widths.")
-        if not all(np.isfinite(value) for value in (*self.targets_hz, *self.notch_widths_hz)):
-            raise ValueError("Study-window targets and widths must be finite.")
-        if any(width <= 0.0 for width in self.notch_widths_hz):
-            raise ValueError("Study-window notch widths must be positive.")
-        _validate_residual_targets(self, "Study-window")
 
 
 def _validate_residual_targets(window, label: str) -> None:
@@ -416,7 +479,6 @@ class RunRemovalPlan:
 
     model: lr.AdaptiveCombModel
     windows: tuple[AdaptiveWindowRemovalPlan, ...]
-    study_windows: tuple[StudyWindowRemovalPlan, ...] = ()
 
     @property
     def all_targets_hz(self) -> tuple[float, ...]:
@@ -447,27 +509,6 @@ class RunRemovalPlan:
             sorted({target for window in self.windows for target in window.narrow_targets_hz})
         )
 
-    @property
-    def all_study_targets_hz(self) -> tuple[float, ...]:
-        """Every frequency removed from at least one exact analysis interval."""
-        return tuple(
-            sorted(
-                {
-                    *(target for window in self.study_windows for target in window.targets_hz),
-                    *(
-                        target
-                        for window in self.study_windows
-                        for target in window.aggregate_residual_targets_hz
-                    ),
-                    *(
-                        target
-                        for window in self.study_windows
-                        for channel in window.channel_residual_targets_hz
-                        for target in channel
-                    ),
-                }
-            )
-        )
 
 
 @dataclass(frozen=True)
@@ -477,14 +518,10 @@ class SessionRunSpectra:
     whole: tuple[np.ndarray, np.ndarray, np.ndarray]
     windows: tuple[tuple[np.ndarray, np.ndarray, np.ndarray], ...]
     bounds: tuple[tuple[int, int], ...]
-    study_windows: tuple[tuple[np.ndarray, np.ndarray, np.ndarray], ...]
-    study_bounds: tuple[tuple[int, int], ...]
 
     def __post_init__(self) -> None:
         if not self.windows or len(self.windows) != len(self.bounds):
             raise ValueError("SessionRunSpectra requires one bound per non-empty window list.")
-        if len(self.study_windows) != len(self.study_bounds):
-            raise ValueError("SessionRunSpectra requires one bound per study window.")
 
 
 @dataclass(frozen=True)
@@ -495,22 +532,16 @@ class RunIsolatedLinePlan:
     window_hz: tuple[tuple[float, ...], ...]
     narrow_window_hz: tuple[tuple[float, ...], ...]
     source_count: int
-    study_hz: tuple[tuple[float, ...], ...] = ()
-    narrow_study_hz: tuple[tuple[float, ...], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.window_hz:
             raise ValueError("An isolated-line plan requires at least one adaptive window.")
         if len(self.window_hz) != len(self.narrow_window_hz):
             raise ValueError("Every adaptive window requires one narrow-target list.")
-        if len(self.study_hz) != len(self.narrow_study_hz):
-            raise ValueError("Every study window requires one narrow-target list.")
         values = (
             *self.whole_hz,
             *(value for window in self.window_hz for value in window),
             *(value for window in self.narrow_window_hz for value in window),
-            *(value for window in self.study_hz for value in window),
-            *(value for window in self.narrow_study_hz for value in window),
         )
         if not all(np.isfinite(value) for value in values):
             raise ValueError("Isolated-line plan frequencies must be finite.")
@@ -526,8 +557,6 @@ class RunIsolatedLinePlan:
                     *self.whole_hz,
                     *(value for row in self.window_hz for value in row),
                     *(value for row in self.narrow_window_hz for value in row),
-                    *(value for row in self.study_hz for value in row),
-                    *(value for row in self.narrow_study_hz for value in row),
                 }
             )
         )
@@ -546,39 +575,6 @@ def read_bids_raw(vhdr: Path):
     )
 
 
-def study_epoch_bounds(raw, settings: RemovalSettings) -> tuple[tuple[int, int], ...]:
-    """Stop-exclusive sample intervals used by the thermal-pain analyses."""
-    descriptions = np.asarray(raw.annotations.description, dtype=str)
-    onsets_s = np.asarray(raw.annotations.onset, dtype=float)[
-        descriptions == settings.study_event_name
-    ]
-    expected = settings.expected_study_events_per_run
-    if onsets_s.size != expected:
-        raise ValueError(
-            f"Expected {expected} {settings.study_event_name!r} events, got {onsets_s.size}."
-        )
-
-    start_offset_s, stop_offset_s = settings.study_epoch_s
-    bounds = []
-    for onset_s in onsets_s:
-        start, stop = raw.time_as_index(
-            (onset_s + start_offset_s, onset_s + stop_offset_s),
-            use_rounding=True,
-        )
-        start = int(start)
-        stop = int(stop)
-        if not 0 <= start < stop <= raw.n_times:
-            raise ValueError(
-                f"Study epoch {onset_s:g} s + {settings.study_epoch_s} lies outside the recording."
-            )
-        bounds.append((start, stop))
-
-    lengths = {stop - start for start, stop in bounds}
-    if len(lengths) != 1:
-        raise ValueError("Study epochs do not have one fixed sample length.")
-    return tuple(bounds)
-
-
 def _window_removal_plan(
     bounds: tuple[int, int],
     estimate: lr.CombEstimate,
@@ -593,7 +589,7 @@ def _window_removal_plan(
         harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
-        excluded_hz=(lr.MAINS_NOTCH_HZ,) if settings.exclude_mains else (),
+        excluded_hz=settings.protected_bands_hz,
     )
     model_widths = lr.uncertainty_aware_notch_widths(
         estimate,
@@ -616,6 +612,10 @@ def _window_removal_plan(
     }
     retained_narrow_targets = []
     for target, width in zip(narrow_array, narrow_widths):
+        # Narrow targets arrive beside the comb model rather than through it, so
+        # `removal_frequencies` never saw them and the band exclusion has to be repeated.
+        if any(low <= float(target) <= high for low, high in settings.protected_bands_hz):
+            continue
         covered_by_model = any(
             abs(float(target) - float(model_target)) + float(width) / 2.0
             <= float(model_width) / 2.0
@@ -711,6 +711,7 @@ def write_derivative_description(
     source_root: Path,
     settings: RemovalSettings,
     source_version: str,
+    band_cost: dict[str, float] | None = None,
 ) -> Path:
     """Declare the cleaned root a derivative and record what produced it.
 
@@ -749,15 +750,16 @@ def write_derivative_description(
             "Description": (
                 "Projection onto sinusoids at the measured comb and isolated-line "
                 "frequencies, estimated in overlapping windows and reconstructed by "
-                "normalized squared-sine overlap-add. Exact configured study intervals "
-                "are anchored by their own transform with transitions outside the exact "
-                "samples. Matched aggregate and channel-local residual searches plus a "
-                "Thomson-F detector authorize sliding sub-bin sinusoid regression only "
-                "inside established artifact regions. Sidecars are byte-identical to the source; only the "
-                ".eeg binaries differ."
+                "normalized squared-sine overlap-add. A Thomson-F detector authorizes "
+                "sliding sub-bin sinusoid regression only inside established artifact "
+                "regions, per channel. Sidecars are byte-identical to the source; only "
+                "the .eeg binaries differ."
             ),
             "Parameters": {
                 "settings_fingerprint": settings_fingerprint(settings),
+                # What the removal actually cost, so the delivered data carries it rather
+                # than the reader having to find the benchmark that produced it.
+                **({"band_cost": band_cost} if band_cost else {}),
                 **{
                     k: (list(v) if isinstance(v, tuple) else v) for k, v in asdict(settings).items()
                 },
@@ -786,15 +788,25 @@ def mirror_sidecars(source_root: Path, output_root: Path) -> int:
     return copied
 
 
-def _block_psd(raw):
+def estimation_window_samples(sampling_frequency_hz: float, settings: RemovalSettings) -> int:
+    """Samples in one adaptive estimation window, rounded to a whole sample."""
+    samples = int(round(settings.estimation_window_s * float(sampling_frequency_hz)))
+    if samples < 2:
+        raise ValueError(
+            f"estimation_window_s={settings.estimation_window_s:g} s is under two samples "
+            f"at {sampling_frequency_hz:g} Hz."
+        )
+    return samples
+
+
+def _block_psd(raw, settings: RemovalSettings):
     """EEG channel-by-window spectra on the adaptive estimator's grid."""
     import mne
 
     picks = mne.pick_types(raw.info, eeg=True, exclude=())
     sfreq = float(raw.info["sfreq"])
-    tr_samples = int(round(hd.TR_SECONDS * sfreq))
-    window_samples = tr_samples * ESTIMATION_TR_COUNT
-    hop_samples = tr_samples * (ESTIMATION_TR_COUNT // 2)
+    window_samples = estimation_window_samples(sfreq, settings)
+    hop_samples = window_samples // 2
     data = raw.get_data(picks=picks)
     bounds = adaptive_window_bounds(
         n_times=data.shape[-1],
@@ -806,9 +818,9 @@ def _block_psd(raw):
     return freqs, psd, bounds
 
 
-def run_spectra(raw):
+def run_spectra(raw, settings: RemovalSettings):
     """Whole-run and equal-duration block spectra on the same frequency grid."""
-    freqs, psd, bounds = _block_psd(raw)
+    freqs, psd, bounds = _block_psd(raw, settings)
     half_width = int(round(BACKGROUND_HALF_WIDTH_HZ / float(freqs[1])))
     whole_db = hd.to_db(np.median(psd.mean(axis=1), axis=0))
     whole = (freqs, whole_db, hd.prominence_db(whole_db, half_width_bins=half_width))
@@ -819,48 +831,15 @@ def run_spectra(raw):
     return whole, tuple(per_block), bounds
 
 
-def study_window_spectra(
-    raw,
-    settings: RemovalSettings,
-) -> tuple[
-    tuple[tuple[np.ndarray, np.ndarray, np.ndarray], ...],
-    tuple[tuple[int, int], ...],
-]:
-    """Channel-median spectra for every exact thermal-analysis interval."""
-    import mne
-
-    picks = mne.pick_types(raw.info, eeg=True, exclude=())
-    if len(picks) == 0:
-        raise ValueError("Study-window spectra require at least one EEG channel.")
-    bounds = study_epoch_bounds(raw, settings)
-    data = raw.get_data(picks=picks)
-    sfreq = float(raw.info["sfreq"])
-    spectra = []
-    for start, stop in bounds:
-        freqs, psd = hd.hann_periodogram(data[:, start:stop], sfreq)
-        half_width = int(round(BACKGROUND_HALF_WIDTH_HZ / float(freqs[1])))
-        spectrum_db = hd.to_db(np.median(psd, axis=0))
-        prominence = hd.prominence_db(spectrum_db, half_width_bins=half_width)
-        spectra.append((freqs, spectrum_db, prominence))
-    return tuple(spectra), bounds
-
-
 def session_run_spectra(raw, settings: RemovalSettings) -> SessionRunSpectra:
     """All raw-data evidence scopes used to plan one continuous recording."""
-    whole, windows, bounds = run_spectra(raw)
-    study_windows, study_bounds = study_window_spectra(raw, settings)
-    return SessionRunSpectra(
-        whole=whole,
-        windows=windows,
-        bounds=bounds,
-        study_windows=study_windows,
-        study_bounds=study_bounds,
-    )
+    whole, windows, bounds = run_spectra(raw, settings)
+    return SessionRunSpectra(whole=whole, windows=windows, bounds=bounds)
 
 
-def run_spectrum(raw) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def run_spectrum(raw, settings: RemovalSettings) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Channel-median whole-run spectrum on a TR-commensurate grid."""
-    whole, _, _ = run_spectra(raw)
+    whole, _, _ = run_spectra(raw, settings)
     return whole
 
 
@@ -873,8 +852,8 @@ def spatiotemporal_line_metrics(
     """Focal residual excess relative to the unchanged pre-clean background."""
     import mne
 
-    freqs, before_psd, before_bounds = _block_psd(raw_before)
-    after_freqs, after_psd, after_bounds = _block_psd(raw_after)
+    freqs, before_psd, before_bounds = _block_psd(raw_before, settings)
+    after_freqs, after_psd, after_bounds = _block_psd(raw_after, settings)
     plan_bounds = tuple(window.bounds for window in plan.windows)
     if before_bounds != plan_bounds or after_bounds != plan_bounds:
         raise ValueError("The adaptive plan window geometry does not match the recording.")
@@ -895,9 +874,11 @@ def spatiotemporal_line_metrics(
     return metrics
 
 
-def adaptive_spectrum_db(raw) -> tuple[np.ndarray, np.ndarray, tuple[tuple[int, int], ...]]:
+def adaptive_spectrum_db(
+    raw, settings: RemovalSettings
+) -> tuple[np.ndarray, np.ndarray, tuple[tuple[int, int], ...]]:
     """Channel-median spectra for every adaptive estimation window."""
-    freqs, psd, bounds = _block_psd(raw)
+    freqs, psd, bounds = _block_psd(raw, settings)
     values = []
     for window_psd in np.moveaxis(psd, 1, 0):
         values.append(hd.to_db(np.median(window_psd, axis=0)))
@@ -925,8 +906,8 @@ def adaptive_suppression_metrics(
     raw_before, raw_after, plan: RunRemovalPlan, settings: RemovalSettings
 ) -> dict[str, float]:
     """Aggregate residual evidence over the model-supported target positions."""
-    freqs, before_db, before_bounds = adaptive_spectrum_db(raw_before)
-    after_freqs, after_db, after_bounds = adaptive_spectrum_db(raw_after)
+    freqs, before_db, before_bounds = adaptive_spectrum_db(raw_before, settings)
+    after_freqs, after_db, after_bounds = adaptive_spectrum_db(raw_after, settings)
     plan_bounds = tuple(window.bounds for window in plan.windows)
     if before_bounds != plan_bounds or after_bounds != plan_bounds:
         raise ValueError("Adaptive spectra and fitted plan use different window geometry.")
@@ -945,180 +926,6 @@ def adaptive_suppression_metrics(
         search_hz=lr.RESIDUAL_SEARCH_HZ,
     )
     return metrics
-
-
-def _study_psd(raw, settings: RemovalSettings):
-    """EEG channel-by-study-window spectra on the exact analysis intervals."""
-    import mne
-
-    picks = mne.pick_types(raw.info, eeg=True, exclude=())
-    if len(picks) == 0:
-        raise ValueError("Study-window metrics require at least one EEG channel.")
-    bounds = study_epoch_bounds(raw, settings)
-    data = raw.get_data(picks=picks)
-    epochs = np.stack([data[:, start:stop] for start, stop in bounds], axis=1)
-    freqs, psd = hd.hann_periodogram(epochs, float(raw.info["sfreq"]))
-    return freqs, psd, bounds
-
-
-def _study_targets(
-    plan: RunRemovalPlan,
-    study_bounds: tuple[tuple[int, int], ...],
-) -> tuple[tuple[tuple[float, ...], tuple[float, ...]], ...]:
-    """Return the immutable exact transforms benchmarked for the study intervals."""
-    plan_bounds = tuple(window.bounds for window in plan.study_windows)
-    if plan_bounds != study_bounds:
-        raise ValueError("The fitted study plan does not match the exact analysis intervals.")
-    return tuple((window.targets_hz, window.notch_widths_hz) for window in plan.study_windows)
-
-
-def study_line_metrics(
-    raw_before,
-    raw_after,
-    plan: RunRemovalPlan,
-    settings: RemovalSettings,
-) -> dict[str, float]:
-    """Residual line evidence restricted to the samples used by the studies."""
-    import mne
-
-    freqs, before_psd, before_bounds = _study_psd(raw_before, settings)
-    after_freqs, after_psd, after_bounds = _study_psd(raw_after, settings)
-    if before_bounds != after_bounds or not np.array_equal(freqs, after_freqs):
-        raise ValueError("Before and after study spectra use different samples or grids.")
-
-    half_width = int(round(BACKGROUND_HALF_WIDTH_HZ / float(freqs[1])))
-    before_db = hd.to_db(np.median(before_psd, axis=0))
-    after_db = hd.to_db(np.median(after_psd, axis=0))
-    before_prominence = _reference_prominence(
-        before_db,
-        before_db,
-        half_width_bins=half_width,
-    )
-    after_prominence = _reference_prominence(
-        before_db,
-        after_db,
-        half_width_bins=half_width,
-    )
-    target_plans = _study_targets(plan, before_bounds)
-    targets = tuple(item[0] for item in target_plans)
-    widths = tuple(item[1] for item in target_plans)
-    aggregate = lr.adaptive_line_suppression(
-        freqs,
-        before_prominence,
-        after_prominence,
-        targets,
-        widths,
-        search_hz=lr.RESIDUAL_SEARCH_HZ,
-    )
-    focal = lr.adaptive_spatiotemporal_suppression(
-        freqs,
-        hd.to_db(before_psd),
-        hd.to_db(after_psd),
-        targets,
-        widths,
-        background_half_width_hz=BACKGROUND_HALF_WIDTH_HZ,
-        search_hz=lr.RESIDUAL_SEARCH_HZ,
-    )
-    picks = mne.pick_types(raw_before.info, eeg=True, exclude=())
-    channel_index = int(focal["worst_focal_channel_index"])
-    focal["worst_focal_channel_name"] = raw_before.ch_names[int(picks[channel_index])]
-    return {
-        **{f"study_{name}": value for name, value in aggregate.items()},
-        **{f"study_{name}": value for name, value in focal.items()},
-    }
-
-
-def study_residual_f_test_metrics(
-    raw_after,
-    plan: RunRemovalPlan,
-    settings: RemovalSettings,
-) -> dict[str, int | float | str]:
-    """Test what survived inside the exact authorised artifact regions.
-
-    Reports both the individual detections, which name the frequency and channel to look
-    at, and one probability for the whole family this recording searched. The cohort
-    decision is made from that probability by ``lr.residual_sinusoid_verdict``, never by
-    requiring zero detections inside a single recording -- see that function for why.
-    """
-    import mne
-
-    picks = mne.pick_types(raw_after.info, eeg=True, exclude=())
-    if len(picks) == 0:
-        raise ValueError("Study residual testing requires at least one EEG channel.")
-    channel_names = tuple(raw_after.ch_names[int(pick)] for pick in picks)
-    sampling_frequency_hz = float(raw_after.info["sfreq"])
-    details = []
-    family = []
-    for window_index, window in enumerate(plan.study_windows):
-        start, stop = window.bounds
-        if stop > raw_after.n_times:
-            raise ValueError("A study residual-test window lies outside the recording.")
-        frequencies, statistic, threshold, p_values = lr.thomson_f_statistics(
-            raw_after.get_data(picks=picks, start=start, stop=stop),
-            sampling_frequency_hz=sampling_frequency_hz,
-            bandwidth_hz=settings.mt_bandwidth,
-        )
-        candidates = lr.focal_residual_line_candidates(
-            frequencies,
-            statistic,
-            threshold=threshold,
-            targets_hz=window.targets_hz,
-            widths_hz=window.notch_widths_hz,
-            responsibility_hz=lr.RESIDUAL_SEARCH_HZ,
-        )
-        details.extend(
-            f"{window_index}:{channel_names[channel_index]}:{frequency_hz:.6f}"
-            for channel_index, channel_candidates in enumerate(candidates)
-            for frequency_hz in channel_candidates
-        )
-        authorised = lr.authorised_residual_bins(
-            frequencies,
-            window.targets_hz,
-            window.notch_widths_hz,
-            lr.RESIDUAL_SEARCH_HZ,
-        )
-        family.append(np.asarray(p_values)[:, authorised].ravel())
-    searched = np.concatenate(family) if family else np.ones(1)
-    return {
-        "study_significant_focal_residual_count": len(details),
-        "study_significant_focal_residual_hz": ";".join(details),
-        "study_residual_sinusoid_family_size": int(searched.size),
-        "study_residual_sinusoid_p": lr.run_residual_sinusoid_p_value(searched),
-    }
-
-
-def study_refinement_metrics(
-    plan: RunRemovalPlan,
-    eeg_names: Sequence[str],
-) -> dict[str, int | str]:
-    """Summarise exact-epoch residual refinements with epoch/channel provenance."""
-    channel_names = tuple(str(name) for name in eeg_names)
-    aggregate_details = []
-    focal_details = []
-    focal_channel_windows = 0
-    for window_index, window in enumerate(plan.study_windows):
-        if window.channel_residual_targets_hz and len(window.channel_residual_targets_hz) != len(
-            channel_names
-        ):
-            raise ValueError("The study residual plan does not match the EEG channel names.")
-        aggregate_details.extend(
-            f"{window_index}:{frequency_hz:.6f}"
-            for frequency_hz in window.aggregate_residual_targets_hz
-        )
-        for channel_index, targets in enumerate(window.channel_residual_targets_hz):
-            focal_channel_windows += bool(targets)
-            focal_details.extend(
-                f"{window_index}:{channel_names[channel_index]}:{frequency_hz:.6f}"
-                for frequency_hz in targets
-            )
-    return {
-        "n_study_common_targets": sum(len(window.targets_hz) for window in plan.study_windows),
-        "n_study_aggregate_refinement_targets": len(aggregate_details),
-        "n_study_focal_refinement_targets": len(focal_details),
-        "n_study_focal_refinement_channel_windows": focal_channel_windows,
-        "study_aggregate_refinement_hz": ";".join(aggregate_details),
-        "study_focal_refinement_hz": ";".join(focal_details),
-    }
 
 
 def continuous_refinement_metrics(
@@ -1162,55 +969,29 @@ def _epoch_mean_psd(raw, bounds: Sequence[tuple[int, int]], picks):
     return freqs, psd.mean(axis=1)
 
 
-def study_signal_metrics(
-    probe_before,
-    probe_after,
-    data_before,
-    data_after,
-    *,
-    bounds: Sequence[tuple[int, int]],
-    targets: Sequence[float],
-    guard_hz: float,
-) -> dict[str, float]:
-    """Injected-tone and non-line preservation inside the study intervals."""
-    import mne
+def plan_target_spans(
+    windows: Sequence[AdaptiveWindowRemovalPlan],
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Each distinct target and the widest span any window removed around it.
 
-    if not bounds:
-        raise ValueError("Study signal metrics require at least one epoch.")
-    probe_freqs, probe_psd_before = _epoch_mean_psd(probe_before, bounds, [0])
-    after_probe_freqs, probe_psd_after = _epoch_mean_psd(probe_after, bounds, [0])
-    data_picks = mne.pick_types(data_before.info, eeg=True, exclude=())
-    after_data_picks = mne.pick_types(data_after.info, eeg=True, exclude=())
-    data_freqs, data_psd_before = _epoch_mean_psd(data_before, bounds, data_picks)
-    after_data_freqs, data_psd_after = _epoch_mean_psd(
-        data_after,
-        bounds,
-        after_data_picks,
-    )
-    if not (
-        np.array_equal(probe_freqs, after_probe_freqs)
-        and np.array_equal(probe_freqs, data_freqs)
-        and np.array_equal(probe_freqs, after_data_freqs)
-    ):
-        raise ValueError("Study signal spectra use different frequency grids.")
-    probe_metrics = lr.probe_preservation(
-        probe_freqs,
-        probe_psd_before,
-        probe_psd_after,
-        lr.Probe(),
-    )
-    nonline_change = lr.nonline_change_db(
-        data_freqs,
-        data_psd_before,
-        data_psd_after,
-        targets,
-        guard_hz=guard_hz,
-    )
-    return {
-        "study_max_probe_deviation_db": probe_metrics["max_probe_deviation_db"],
-        "study_min_probe_ratio": probe_metrics["min_probe_ratio"],
-        "study_max_nonline_change_db": float(np.max(np.abs(nonline_change))),
-    }
+    ``RunRemovalPlan.all_targets_hz`` deduplicates across windows while the widths are
+    per-window, so the two cannot be zipped. Taking the maximum width per frequency gives
+    the span the transform could have reached at that frequency anywhere in the run, which
+    is what a measurement excluding the removals has to exclude.
+    """
+    spans: dict[float, float] = {}
+    for window in windows:
+        groups = (
+            (window.targets_hz, window.notch_widths_hz),
+            (window.aggregate_residual_targets_hz, window.aggregate_residual_widths_hz),
+            *zip(window.channel_residual_targets_hz, window.channel_residual_widths_hz),
+        )
+        for targets, widths in groups:
+            for target, width in zip(targets, widths):
+                key = float(target)
+                spans[key] = max(spans.get(key, 0.0), float(width))
+    ordered = tuple(sorted(spans))
+    return ordered, tuple(spans[target] for target in ordered)
 
 
 def spectrum_fit_nominal_resolution_hz(filter_length: str) -> float:
@@ -1263,7 +1044,15 @@ def adaptive_band_metrics(
     plan: RunRemovalPlan,
     settings: RemovalSettings,
 ) -> dict[str, float]:
-    """Worst channel-level spectral cost across continuous and exact transforms."""
+    """Worst channel-level spectral cost of the transform that is actually applied.
+
+    Only the continuous overlap-add is measured, because only it is applied. The exact
+    study-window transform this used to include as well has been removed from both
+    ``benchmark_run`` and ``apply_run``; its targets survive on the plan as the scopes the
+    residual *measurements* are scored in, and charging the opportunity-cost ceiling for
+    spectrum no filter ever touches made the gated number describe something other than
+    the delivered data.
+    """
     window_samples = {stop - start for start, stop in (window.bounds for window in plan.windows)}
     if len(window_samples) != 1:
         raise ValueError("Adaptive removal windows must have one fixed sample length.")
@@ -1306,54 +1095,13 @@ def adaptive_band_metrics(
             ),
         )
     )
-    study_measurements = []
-    for window in plan.study_windows:
-        study_grids = spectrum_fit_frequency_grids(
-            sampling_frequency_hz=sampling_frequency_hz,
-            filter_length=settings.filter_length,
-            window_samples=window.bounds[1] - window.bounds[0],
-        )
-        common_targets = (
-            *window.targets_hz,
-            *window.aggregate_residual_targets_hz,
-        )
-        common_widths = (
-            *window.notch_widths_hz,
-            *window.aggregate_residual_widths_hz,
-        )
-        channel_targets = window.channel_residual_targets_hz or ((),)
-        channel_widths = window.channel_residual_widths_hz or ((),)
-        for freqs in study_grids:
-            band_bin_count = int(np.count_nonzero((freqs >= 28.0) & (freqs <= 95.0)))
-            for focal_targets, focal_widths in zip(channel_targets, channel_widths):
-                fraction = lr.removed_band_fraction(
-                    freqs,
-                    (*common_targets, *focal_targets),
-                    (*common_widths, *focal_widths),
-                )
-                study_measurements.append((fraction, 1.0 / band_bin_count))
-    study_fraction, study_bin_size = (
-        max(study_measurements, key=lambda item: (item[0], item[1]))
-        if study_measurements
-        else (0.0, 0.0)
-    )
-    total_fraction, total_bin_size = max(
-        ((expanded_fraction, expanded_bin_size), (study_fraction, study_bin_size)),
-        key=lambda item: (item[0], item[1]),
-    )
     return {
         "base_removed_band_fraction": base_fraction,
         "base_band_fraction_bin_size": base_bin_size,
         "width_expansion_band_fraction": expanded_fraction - base_fraction,
         "continuous_removed_band_fraction": expanded_fraction,
-        "study_max_channel_removed_band_fraction": study_fraction,
-        "study_mean_channel_removed_band_fraction": (
-            float(np.mean([fraction for fraction, _ in study_measurements]))
-            if study_measurements
-            else 0.0
-        ),
-        "removed_band_fraction": total_fraction,
-        "band_fraction_bin_size": total_bin_size,
+        "removed_band_fraction": expanded_fraction,
+        "band_fraction_bin_size": expanded_bin_size,
     }
 
 
@@ -1476,18 +1224,43 @@ def _clean_channel_residuals(
                 [],
             ).append(channel_index)
 
+    # Locate each sinusoid once, over the whole window that evidenced it, and hold that
+    # frequency fixed while amplitude and phase are re-fitted in every sub-window.
+    #
+    # Refining inside each sub-window instead made the subtraction unaccountable. The
+    # search spans +/-width/2, up to about 125 mHz, while a 13.5 s sub-window resolves
+    # 74 mHz -- so the search covers barely more than one independent frequency and its
+    # argmax is a maximum over noise. Where the line was present that changed little;
+    # where it was absent in that sub-window it selected the largest local fluctuation and
+    # subtracted it, which is the mechanism _residual_line_candidates documents and
+    # rejects for the across-channel route, applied across time instead. Taking the
+    # maximum before subtracting also removed more than the two degrees of freedom the
+    # regression is charged for.
+    #
+    # Nothing is lost, because the search could not have been tracking drift: the measured
+    # f0 wander is 934 uHz across a whole run, so within one 54 s window a harmonic moves
+    # about 2.6 mHz at k=48 and 4.6 mHz at k=83 -- one to two orders below the sub-window
+    # resolution. Amplitude modulation, which is real and does vary sub-window to
+    # sub-window, is still followed by the per-sub-window regression.
+    whole_window_times = np.arange(values.shape[1], dtype=float) / sampling_frequency_hz
+    refined_by_channel = {
+        channel_index: _refine_regression_frequencies(
+            values[channel_index],
+            whole_window_times,
+            targets,
+            widths,
+        )
+        for (targets, widths), channel_indices in channel_groups.items()
+        for channel_index in channel_indices
+    }
+
     segments = []
     for start, stop in bounds:
         segment = values[:, start:stop].copy()
         times = np.arange(start, stop, dtype=float) / sampling_frequency_hz
         for (targets, widths), channel_indices in channel_groups.items():
             for channel_index in channel_indices:
-                refined_targets = _refine_regression_frequencies(
-                    segment[channel_index],
-                    times,
-                    targets,
-                    widths,
-                )
+                refined_targets = refined_by_channel[channel_index]
                 angular_phase = 2.0 * np.pi * times[:, np.newaxis] * np.asarray(refined_targets)
                 sinusoid_basis = np.column_stack((np.sin(angular_phase), np.cos(angular_phase)))
                 design = np.column_stack((np.ones(times.size), sinusoid_basis))
@@ -1570,99 +1343,10 @@ def clean_continuous_raw(
     return output
 
 
-def _anchor_study_raw(
-    raw,
-    continuous,
-    plan: RunRemovalPlan,
-    settings: RemovalSettings,
-    *,
-    eeg_plan_indices: Sequence[int] | None = None,
-):
-    """Anchor exact study transforms into a completed continuous reconstruction."""
-    import mne
-
-    picks = mne.pick_types(raw.info, eeg=True, exclude=())
-    if len(picks) == 0:
-        raise ValueError("Exact study anchoring requires at least one EEG channel.")
-    if raw.ch_names != continuous.ch_names or raw.n_times != continuous.n_times:
-        raise ValueError("Continuous and original recordings must have identical geometry.")
-    planned_channel_counts = {
-        len(window.channel_residual_targets_hz)
-        for window in plan.study_windows
-        if window.channel_residual_targets_hz
-    }
-    if len(planned_channel_counts) > 1:
-        raise ValueError("Study residual plans disagree about the EEG channel count.")
-    planned_channel_count = next(iter(planned_channel_counts), 0)
-    if eeg_plan_indices is None:
-        if planned_channel_count not in (0, len(picks)):
-            raise ValueError("The study residual plan does not match the EEG channel count.")
-        channel_plan_indices = tuple(range(len(picks)))
-    else:
-        channel_plan_indices = tuple(int(index) for index in eeg_plan_indices)
-        if len(channel_plan_indices) != len(picks):
-            raise ValueError("eeg_plan_indices must map every filtered EEG channel.")
-        if planned_channel_count and any(
-            not 0 <= index < planned_channel_count for index in channel_plan_indices
-        ):
-            raise ValueError("eeg_plan_indices contains an out-of-range plan channel.")
-    picked_info = mne.pick_info(raw.info, picks, copy=True)
-    original_data = raw.get_data(picks=picks)
-    output = continuous.copy()
-    output_data = output.get_data(picks=picks)
-    transition_margins = _study_transition_margins(plan.study_windows, raw.n_times)
-    for study_window, (left_margin, right_margin) in zip(
-        plan.study_windows,
-        transition_margins,
-    ):
-        start, stop = study_window.bounds
-        original = original_data[:, start:stop]
-        cleaned = _clean_study_segment(
-            original,
-            picked_info,
-            study_window,
-            settings,
-            channel_plan_indices=channel_plan_indices,
-        )
-        _anchor_exact_transform(
-            output_data,
-            original_data,
-            cleaned,
-            bounds=study_window.bounds,
-            left_margin=left_margin,
-            right_margin=right_margin,
-        )
-    output._data[picks] = output_data
-    return output
-
-
-def clean_adaptive_raw(
-    raw,
-    plan: RunRemovalPlan,
-    settings: RemovalSettings,
-    *,
-    eeg_plan_indices: Sequence[int] | None = None,
-):
-    """Apply the continuous transform, then anchor every exact study interval."""
-    continuous = clean_continuous_raw(
-        raw,
-        plan,
-        settings,
-        eeg_plan_indices=eeg_plan_indices,
-    )
-    return _anchor_study_raw(
-        raw,
-        continuous,
-        plan,
-        settings,
-        eeg_plan_indices=eeg_plan_indices,
-    )
-
-
 def _clean_planned_segment(
     data: np.ndarray,
     picked_info,
-    window: AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan,
+    window: AdaptiveWindowRemovalPlan,
     settings: RemovalSettings,
     *,
     channel_plan_indices: Sequence[int] | None = None,
@@ -1718,91 +1402,6 @@ def _clean_planned_segment(
     targets = tuple(plan[0] for plan in channel_plans)
     widths = tuple(plan[1] for plan in channel_plans)
     return _clean_channel_residuals(cleaned, picked_info, targets, widths, settings)
-
-
-def _clean_study_segment(
-    data: np.ndarray,
-    picked_info,
-    window: StudyWindowRemovalPlan,
-    settings: RemovalSettings,
-    *,
-    channel_plan_indices: Sequence[int] | None = None,
-) -> np.ndarray:
-    """Apply the exact study transform through the shared segment cleaner."""
-    return _clean_planned_segment(
-        data,
-        picked_info,
-        window,
-        settings,
-        channel_plan_indices=channel_plan_indices,
-    )
-
-
-def _study_transition_margins(
-    windows: Sequence[StudyWindowRemovalPlan],
-    n_times: int,
-) -> tuple[tuple[int, int], ...]:
-    """Allocate non-overlapping tapers outside exact intervals from their geometry."""
-    if n_times < 1:
-        raise ValueError("n_times must be positive.")
-    margins = []
-    for index, window in enumerate(windows):
-        start, stop = window.bounds
-        if stop > n_times:
-            raise ValueError("An exact study transform lies outside the recording.")
-        if index and start < windows[index - 1].bounds[1]:
-            raise ValueError("Exact study transforms must not overlap.")
-        interval_samples = stop - start
-        previous_stop = windows[index - 1].bounds[1] if index else 0
-        next_start = windows[index + 1].bounds[0] if index + 1 < len(windows) else n_times
-        left_share = start - previous_stop
-        right_share = next_start - stop
-        if index:
-            left_share //= 2
-        if index + 1 < len(windows):
-            right_share //= 2
-        margins.append(
-            (
-                min(interval_samples, left_share),
-                min(interval_samples, right_share),
-            )
-        )
-    return tuple(margins)
-
-
-def _anchor_exact_transform(
-    continuous_data: np.ndarray,
-    original_data: np.ndarray,
-    exact_cleaned: np.ndarray,
-    *,
-    bounds: tuple[int, int],
-    left_margin: int,
-    right_margin: int,
-) -> None:
-    """Keep the exact interval unchanged and taper its periodic correction outside."""
-    start, stop = bounds
-    correction = original_data[:, start:stop] - np.asarray(exact_cleaned)
-    if correction.shape != (original_data.shape[0], stop - start):
-        raise ValueError("The exact correction does not match its study interval.")
-    if left_margin < 0 or right_margin < 0:
-        raise ValueError("Exact-transform transition margins must be non-negative.")
-    if left_margin:
-        left_slice = slice(start - left_margin, start)
-        periodic_indices = np.arange(-left_margin, 0) % correction.shape[1]
-        exact_candidate = original_data[:, left_slice] - correction[:, periodic_indices]
-        weights = np.sin(np.linspace(0.0, np.pi / 2.0, left_margin + 1)[:-1]) ** 2
-        continuous_data[:, left_slice] = (
-            continuous_data[:, left_slice] * (1.0 - weights) + exact_candidate * weights
-        )
-    continuous_data[:, start:stop] = exact_cleaned
-    if right_margin:
-        right_slice = slice(stop, stop + right_margin)
-        periodic_indices = np.arange(right_margin) % correction.shape[1]
-        exact_candidate = original_data[:, right_slice] - correction[:, periodic_indices]
-        weights = np.cos(np.linspace(0.0, np.pi / 2.0, right_margin + 1)[1:]) ** 2
-        continuous_data[:, right_slice] = (
-            continuous_data[:, right_slice] * (1.0 - weights) + exact_candidate * weights
-        )
 
 
 def _source_digest() -> str:
@@ -2069,6 +1668,36 @@ def require_passing_benchmark(
             f"scale (count p={seam['count_p_value']:.4f}, maximum p="
             f"{seam['max_p_value']:.4f}), worst ratio {seam['max_ratio']:.2f}."
         )
+    if settings.max_band_cost is not None:
+        if "measured_band_attenuated_1db" not in frame.columns:
+            raise RuntimeError(
+                f"Refusing to apply: {path} carries no measured band cost, so the declared "
+                f"budget of {settings.max_band_cost:.3f} cannot be checked. Re-run the benchmark."
+            )
+        worst = float(frame["measured_band_attenuated_1db"].max())
+        if worst > settings.max_band_cost:
+            raise RuntimeError(
+                f"Refusing to apply: a broadband signal loses {worst:.3f} of 28-95 Hz on the "
+                f"worst recording, above the {settings.max_band_cost:.3f} this study declared "
+                "in `line_comb_removal.max_band_cost`."
+            )
+    for scope, column in (
+        ("whole-run residual", "residual_null_p"),
+        ("focal residual", "focal_residual_null_p"),
+    ):
+        if column not in frame.columns:
+            raise RuntimeError(
+                f"Refusing to apply: {path} carries no {column}, so the {scope} "
+                "criterion cannot be evaluated. Re-run the benchmark."
+            )
+        verdict = lr.residual_randomization_verdict(frame[column].to_numpy())
+        if not verdict["passed"]:
+            raise RuntimeError(
+                f"Refusing to apply: the cohort {scope} criterion failed -- "
+                f"{int(verdict['n_discoveries'])} of {int(verdict['n_runs'])} recordings "
+                f"exceed what their own matched controls reach "
+                f"(smallest p={verdict['min_run_p_value']:.3g})."
+            )
     # The residual-sinusoid probabilities are deliberately NOT consulted here. Residual
     # targets are selected by Thomson's F test on each exact epoch, and this criterion
     # repeats that same test on the same epochs after removing exactly what it found. The
@@ -2096,14 +1725,27 @@ def _boundary_metrics(
 
 
 def _plan_transition_boundaries(plan: RunRemovalPlan, n_times: int) -> tuple[int, ...]:
-    """Every point where the fitted correction can change its temporal scope."""
-    boundaries = {window.bounds[0] for window in plan.windows[1:]}
-    boundaries.update(
-        boundary
-        for window in plan.study_windows
-        for boundary in window.bounds
-        if 0 < boundary < n_times
-    )
+    """Every interior sample where the set of contributing windows changes.
+
+    A seam can only occur where one estimate starts or stops contributing, so the
+    boundaries are the adaptive windows' own starts and stops. Both are included: with a
+    half-window hop most stops coincide with a later start, but the tail window is placed
+    to end exactly at ``n_times`` and so contributes a stop that no start repeats.
+
+    ``plan.study_windows`` are deliberately *not* included. They were boundaries while an
+    exact per-epoch transform was spliced into the continuous reconstruction; that
+    transform no longer exists, and the correction is now a single overlap-add that passes
+    through an epoch edge without changing scope. Feeding those ~22 points per run back in
+    would bias this test toward passing, because ``boundary_discontinuity_evidence``
+    matches its controls to the *count* of boundaries: the observed maximum would come
+    from the real seams alone while each control maximum was taken over twice as many
+    shifted indices.
+    """
+    boundaries = {
+        boundary for window in plan.windows for boundary in window.bounds if 0 < boundary < n_times
+    }
+    if not boundaries:
+        raise ValueError("The plan has no interior adaptive boundary to test for seams.")
     return tuple(sorted(boundaries))
 
 
@@ -2165,7 +1807,7 @@ def _comb_detection_support(
         harmonic_range=settings.removal_harmonic_range,
         low_hz=settings.low_hz,
         high_hz=settings.high_hz,
-        excluded_hz=(lr.MAINS_NOTCH_HZ,) if settings.exclude_mains else (),
+        excluded_hz=settings.protected_bands_hz,
     )
     widths = lr.uncertainty_aware_notch_widths(
         estimate,
@@ -2284,8 +1926,7 @@ def build_run_plan_from_spectra(
         isolated_lines.window_hz,
         settings,
     )
-    plan = _expand_widths_to_observed_line_support(plan, spectra, settings)
-    return _attach_study_window_plans(plan, spectra, isolated_lines, settings)
+    return _expand_widths_to_observed_line_support(plan, spectra, settings)
 
 
 def _ensure_routed_isolated_targets(
@@ -2332,17 +1973,7 @@ def _expand_widths_to_observed_line_support(
     """Cover narrow line support observed around each independently valid target."""
     expanded_windows = []
     for window_index, window in enumerate(plan.windows):
-        evidence = (
-            spectra.windows[window_index],
-            *(
-                study_spectrum
-                for study_spectrum, study_bounds in zip(
-                    spectra.study_windows,
-                    spectra.study_bounds,
-                )
-                if _intervals_overlap(window.bounds, study_bounds)
-            ),
-        )
+        evidence = (spectra.windows[window_index],)
         expanded_windows.append(_expand_window_to_observed_support(window, evidence, settings))
     return replace(plan, windows=tuple(expanded_windows))
 
@@ -2354,14 +1985,32 @@ def _expand_window_to_observed_support(
     *,
     localization_margin_hz: float = 0.0,
 ) -> AdaptiveWindowRemovalPlan:
-    """Expand validated targets only to strong narrow support in the same time scope."""
+    """Cover strong narrow support beside a validated target, where it was observed.
+
+    A notch is symmetric about its target, so stretching the target's own width out to an
+    asymmetric peak also empties the mirror image of that peak, on the side where nothing
+    was ever seen. Support running from ``target + 0.025`` to ``target + 0.275`` used to
+    set a width of 0.55 Hz -- about half the comb spacing -- to cover 0.25 Hz of evidence,
+    and half of what it removed was chosen by arithmetic rather than observed.
+
+    The support gets its own notch instead, centred on the interval that was measured, so
+    the cost is the width of the evidence. Where the support does sit symmetrically the two
+    formulations agree, and where the existing notch already covers it nothing is added.
+    """
     if not np.isfinite(localization_margin_hz) or localization_margin_hz < 0.0:
         raise ValueError("localization_margin_hz must be finite and non-negative.")
     targets = np.asarray(window.targets_hz, dtype=float)
     widths = np.asarray(window.notch_widths_hz, dtype=float).copy()
+    covers: list[tuple[float, float]] = []
     for freqs, _, prominence in evidence:
         frequency_array = np.asarray(freqs, dtype=float)
         prominence_array = np.asarray(prominence, dtype=float)
+        if frequency_array.size < 2:
+            raise ValueError("Support evidence needs a frequency grid of at least two bins.")
+        # Support is read off a discrete grid, so a peak confined to one bin still occupies
+        # that bin's full span. Adding one resolution step states exactly the width of the
+        # bins observed, and keeps a single-bin support from asking for a zero-width notch.
+        resolution_hz = float(frequency_array[1] - frequency_array[0])
         summits = np.zeros(prominence_array.shape, dtype=bool)
         summits[1:-1] = (
             np.isfinite(prominence_array[1:-1])
@@ -2387,80 +2036,35 @@ def _expand_window_to_observed_support(
                 prominence_array,
                 int(index),
             )
-            required_width_hz = (
-                2.0
-                * max(
-                    abs(left_hz - target_hz),
-                    abs(right_hz - target_hz),
+            reach_hz = float(widths[target_index]) / 2.0
+            if abs(left_hz - target_hz) <= reach_hz and abs(right_hz - target_hz) <= reach_hz:
+                continue
+            covers.append(
+                (
+                    (left_hz + right_hz) / 2.0,
+                    (right_hz - left_hz) + resolution_hz + 2.0 * localization_margin_hz,
                 )
-                + 2.0 * localization_margin_hz
             )
-            widths[target_index] = max(widths[target_index], required_width_hz)
-    return replace(window, notch_widths_hz=tuple(widths))
 
-
-def _attach_study_window_plans(
-    plan: RunRemovalPlan,
-    spectra: SessionRunSpectra,
-    isolated_lines: RunIsolatedLinePlan,
-    settings: RemovalSettings,
-) -> RunRemovalPlan:
-    """Encode exact transforms using only comb identity and same-epoch line evidence."""
-    if not (
-        len(spectra.study_windows)
-        == len(spectra.study_bounds)
-        == len(isolated_lines.study_hz)
-        == len(isolated_lines.narrow_study_hz)
-    ):
-        raise ValueError("Every exact study spectrum requires one isolated-line plan.")
-    estimates = tuple(window.estimate for window in plan.windows)
-    study_windows = []
-    for spectrum, bounds, isolated_hz, narrow_hz in zip(
-        spectra.study_windows,
-        spectra.study_bounds,
-        isolated_lines.study_hz,
-        isolated_lines.narrow_study_hz,
-    ):
-        estimate = _best_overlapping_comb_estimate(bounds, spectra.bounds, estimates)
-        exact_estimate = replace(
-            estimate,
-            isolated_hz=tuple(isolated_hz),
-            isolated_prominence_db=(float("nan"),) * len(isolated_hz),
-        )
-        frequency_grid = np.asarray(spectrum[0], dtype=float)
-        resolution_hz = float(frequency_grid[1] - frequency_grid[0])
-        window = _window_removal_plan(
-            bounds,
-            exact_estimate,
-            narrow_hz,
-            settings,
-            spectrum_resolution_hz=resolution_hz,
-        )
-        window = _expand_window_to_observed_support(
-            window,
-            (spectrum,),
-            settings,
-            localization_margin_hz=resolution_hz / 2.0,
-        )
-        study_windows.append(
-            StudyWindowRemovalPlan(
-                bounds=window.bounds,
-                targets_hz=window.targets_hz,
-                notch_widths_hz=window.notch_widths_hz,
-            )
-        )
-    return replace(plan, study_windows=tuple(study_windows))
+    if not covers:
+        return window
+    cover_targets, cover_widths = _merge_residual_support(tuple(covers))
+    return replace(
+        window,
+        targets_hz=(*window.targets_hz, *cover_targets),
+        notch_widths_hz=(*tuple(widths), *cover_widths),
+    )
 
 
 def _refine_window_residual_plan(
     original: np.ndarray,
     picked_info,
-    window: AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan,
+    window: AdaptiveWindowRemovalPlan,
     settings: RemovalSettings,
     clean_segment,
     *,
     cleaned_data: np.ndarray | None = None,
-) -> AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan:
+) -> AdaptiveWindowRemovalPlan:
     """Encode the sinusoids that survived one window's first pass.
 
     What licenses a subtraction here is ``lr.ResidualDetection`` -- Thomson's F test on
@@ -2517,7 +2121,7 @@ def _residual_line_candidates(
     states: Sequence[np.ndarray],
     *,
     sampling_frequency_hz: float,
-    window: AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan,
+    window: AdaptiveWindowRemovalPlan,
     settings: RemovalSettings,
 ) -> tuple[tuple[float, ...], tuple[tuple[float, ...], ...]]:
     """Sinusoids evidenced in one window's data, per channel.
@@ -2586,11 +2190,11 @@ def _already_searched(
 
 
 def _encode_residual_targets(
-    window: AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan,
+    window: AdaptiveWindowRemovalPlan,
     aggregate_targets: Sequence[float],
     focal_targets: Sequence[Sequence[float]],
     width_hz: float,
-) -> AdaptiveWindowRemovalPlan | StudyWindowRemovalPlan:
+) -> AdaptiveWindowRemovalPlan:
     """Attach one window's residual searches, each the same measured width."""
     aggregate = tuple(sorted(aggregate_targets))
     focal = tuple(tuple(sorted(values)) for values in focal_targets)
@@ -2727,31 +2331,20 @@ def _refine_continuous_residual_plans(
     return _route_continuous_residual_support(replace(plan, windows=tuple(refined)))
 
 
-def _refine_study_residual_plans(
-    raw,
-    plan: RunRemovalPlan,
-    settings: RemovalSettings,
-) -> RunRemovalPlan:
-    """Resolve residuals independently inside every exact study interval."""
-    import mne
+def isolated_line_summary(recording: str, plan: RunIsolatedLinePlan) -> str:
+    """One recording's isolated-line evidence, with both of its counts named.
 
-    picks = mne.pick_types(raw.info, eeg=True, exclude=())
-    if len(picks) == 0:
-        raise ValueError("Study residual refinement requires at least one EEG channel.")
-    picked_info = mne.pick_info(raw.info, picks, copy=True)
-    refined = []
-    for window in plan.study_windows:
-        start, stop = window.bounds
-        refined.append(
-            _refine_window_residual_plan(
-                raw.get_data(picks=picks, start=start, stop=stop),
-                picked_info,
-                window,
-                settings,
-                _clean_study_segment,
-            )
-        )
-    return replace(plan, study_windows=tuple(refined))
+    A source is a cluster of nominals inside the spectral resolution, so the two numbers
+    legitimately differ -- 27.9815 and 28.0000 are one source observed twice. Printing the
+    source count beside the nominal list without saying which was which read as an
+    arithmetic error in output that gets quoted in a methods section.
+    """
+    nominals = plan.all_hz
+    listed = ", ".join(f"{frequency:.4f}" for frequency in nominals) or "none"
+    return (
+        f"  {recording}: {plan.source_count} artifact source(s) as "
+        f"{len(nominals)} nominal(s) at {listed}"
+    )
 
 
 def build_run_plans(runs: list[Path], settings: RemovalSettings) -> dict[str, RunRemovalPlan]:
@@ -2775,19 +2368,11 @@ def build_run_plans(runs: list[Path], settings: RemovalSettings) -> dict[str, Ru
         )
         for vhdr, isolated_lines in zip(subject_runs, isolated_line_plans):
             run_evidence = spectra[vhdr]
-            frequencies = (
-                ", ".join(f"{frequency:.4f}" for frequency in isolated_lines.all_hz) or "none"
-            )
-            print(
-                f"  {vhdr.stem}: {isolated_lines.source_count} supported artifact source(s) "
-                f"at {frequencies}",
-                flush=True,
-            )
+            print(isolated_line_summary(vhdr.stem, isolated_lines), flush=True)
             try:
                 plan = build_run_plan_from_spectra(run_evidence, settings, isolated_lines)
                 raw = read_bids_raw(vhdr)
                 plan = _refine_continuous_residual_plans(raw, plan, settings)
-                plan = _refine_study_residual_plans(raw, plan, settings)
             except ValueError as error:
                 raise ValueError(f"{vhdr.stem}: {error}") from error
             plans[vhdr.stem] = plan
@@ -2798,6 +2383,96 @@ def build_run_plans(runs: list[Path], settings: RemovalSettings) -> dict[str, Ru
                 flush=True,
             )
     return plans
+
+
+def _preservation_against_control(
+    freqs,
+    *,
+    probe,
+    probe_before,
+    probe_after,
+    probe_control,
+    data_before,
+    data_after,
+    data_control,
+    targets,
+    widths,
+    control_targets,
+    control_widths,
+) -> dict[str, float]:
+    """Compare what the transform left alone with what a displaced one leaves alone.
+
+    Both quantities should be zero and are not quite: the removal is local, but not
+    perfectly, so a little of it reaches frequencies it never targeted. How little is
+    "little enough" was a constant -- 0.5 dB on the probes and 0.2 dB across the band --
+    with no derivation behind either, and margins of 3452x and 8x that made the first a
+    formality and the second nearly one.
+
+    Neither is replaced by a criterion, because neither admits a valid null. The control
+    here is the whole transform displaced by a quarter of the comb spacing, and it is
+    matched in size, width and window geometry -- but not in what it removes. Its targets
+    land between harmonics where there is no line, so it subtracts almost nothing and
+    therefore leaks almost nothing, while leakage from the real transform scales with the
+    line power it took out. Counted against it the real transform "fails" at p=2e-16 on
+    every recording, which says only that it removed something.
+
+    No offset repairs that: a control that removes comparable power away from the lines
+    cannot exist, because the power is only at the lines. So the control is reported beside
+    the observation and nothing is decided from either. What the pair does show is the
+    scale of the leakage -- both sit near 0.01 dB, four orders below the 0.2 dB that used
+    to be the criterion.
+    """
+    observed_probe = np.abs(lr.probe_deviations_db(freqs, probe_before, probe_after, probe))
+    control_probe = np.abs(lr.probe_deviations_db(freqs, probe_before, probe_control, probe))
+    observed_nonline = np.abs(
+        lr.nonline_change_db(freqs, data_before, data_after, targets, widths)
+    )
+    control_nonline = np.abs(
+        lr.nonline_change_db(freqs, data_before, data_control, control_targets, control_widths)
+    )
+    return {
+        # Four tones on one channel is four observations, and no test on four values can
+        # reach 0.05 -- the best a sign test could return is 2^-4 = 0.0625. Reporting the
+        # observation beside its control says what there is to say; inventing a criterion
+        # that cannot fire is the defect this work removed, not a fix for it.
+        "max_probe_deviation_db": float(np.max(observed_probe)),
+        "control_probe_deviation_db": float(np.max(control_probe)),
+        "max_nonline_change_db": float(np.max(observed_nonline)),
+        "control_nonline_change_db": float(np.max(control_nonline)),
+        "nonline_change_null_p": lr.paired_excess_p_value(observed_nonline, control_nonline),
+    }
+
+
+def matched_control_plan(plan: RunRemovalPlan, settings: RemovalSettings) -> RunRemovalPlan:
+    """The same transform displaced to where no line is, as a null for the preservation checks.
+
+    Same windows, same number of targets, same widths -- only the positions move, by a
+    quarter of the comb spacing. That offset is not a free choice: harmonics sit at
+    ``k * f0`` and the probe tones at ``(k + 0.5) * f0``, so the quarter point is the unique
+    displacement equidistant from both, and a control target therefore lands where neither
+    an artifact nor an injected signal is.
+
+    What this buys is a threshold-free preservation check. A transform that leaves the
+    probes and the untouched spectrum alone should do so no more and no less than an
+    identical transform aimed somewhere harmless; asking whether it did needs a control of
+    the same size, not a number in decibels chosen by hand.
+    """
+    offset_hz = settings.nominal_fundamental_hz / 4.0
+    displaced = tuple(
+        replace(
+            window,
+            targets_hz=tuple(target + offset_hz for target in window.targets_hz),
+            aggregate_residual_targets_hz=tuple(
+                target + offset_hz for target in window.aggregate_residual_targets_hz
+            ),
+            channel_residual_targets_hz=tuple(
+                tuple(target + offset_hz for target in channel)
+                for channel in window.channel_residual_targets_hz
+            ),
+        )
+        for window in plan.windows
+    )
+    return replace(plan, windows=displaced)
 
 
 def benchmark_run(
@@ -2820,15 +2495,11 @@ def benchmark_run(
         }
     )
     targets = plan.all_targets_hz
-    widths = np.concatenate([np.asarray(window.notch_widths_hz) for window in plan.windows])
-    study_targets = plan.all_study_targets_hz
-    study_widths = np.concatenate(
-        [np.asarray(window.notch_widths_hz) for window in plan.study_windows]
-    )
+    span_targets, span_widths = plan_target_spans(plan.windows)
     probe = lr.Probe()
     lr.check_probe_clearance(
         probe,
-        tuple(sorted({*targets, *study_targets})),
+        targets,
     )
 
     picks = mne.pick_types(raw.info, eeg=True, exclude=())
@@ -2855,7 +2526,7 @@ def benchmark_run(
     # The one probe placed where the removal does act. Reported, never gated: signal at an
     # artifact frequency is not separable from the artifact, so a loss here is the method's
     # cost rather than a defect. Positions are read off this recording's own plan.
-    in_band_hz = lr.in_band_probe_frequencies(tuple(sorted({*targets, *study_targets})))
+    in_band_hz = lr.in_band_probe_frequencies(targets)
     in_band_probe = mne.io.RawArray(
         lr.sinusoid_waveform(times, in_band_hz, probe.sinusoid_amplitude_v)[None, :],
         mne.create_info(
@@ -2866,39 +2537,80 @@ def benchmark_run(
         verbose="ERROR",
     )
 
-    cleaned_continuous = clean_continuous_raw(raw.copy(), plan, settings)
-    cleaned_bare = _anchor_study_raw(
-        raw,
-        cleaned_continuous,
-        plan,
-        settings,
+    # Broadband probe: what the transform costs a signal occupying the whole band, as
+    # opposed to removed_band_fraction, which counts the widths the plan asked for. Four
+    # channels, all carrying the first EEG channel's plan, so the figure covers that
+    # channel's common and channel-local targets; focal targets on other channels are
+    # counted separately and are NOT visible here.
+    #
+    # Seeded from a CRC of the recording name, not ``hash``: PYTHONHASHSEED salts str
+    # hashing per process, so ``hash`` gave a different probe on every invocation and
+    # measured_band_attenuation moved between benchmarks of identical data under identical
+    # settings -- a difference neither settings_fingerprint nor _source_digest can see.
+    broadband_channels = 4
+    broadband_probe = mne.io.RawArray(
+        np.random.default_rng(zlib.crc32(vhdr.stem.encode("utf-8"))).normal(
+            scale=probe.sinusoid_amplitude_v,
+            size=(broadband_channels, times.size),
+        ),
+        mne.create_info(
+            [f"broadband_probe_{index}" for index in range(broadband_channels)],
+            sfreq=float(raw.info["sfreq"]),
+            ch_types=["eeg"] * broadband_channels,
+        ),
+        verbose="ERROR",
     )
-    cleaned_background_probe = clean_adaptive_raw(
+
+    cleaned_continuous = clean_continuous_raw(raw.copy(), plan, settings)
+    cleaned_bare = cleaned_continuous
+    # The same transform aimed where no line is. Everything the preservation checks compare
+    # against comes from here rather than from a decibel constant.
+    control_plan = matched_control_plan(plan, settings)
+    cleaned_control = clean_continuous_raw(raw.copy(), control_plan, settings)
+    cleaned_probe_control = clean_continuous_raw(
+        probe_only.copy(),
+        control_plan,
+        settings,
+        eeg_plan_indices=(0,),
+    )
+    cleaned_background_probe = clean_continuous_raw(
         background_probe,
         plan,
         settings,
         eeg_plan_indices=(0,),
     )
-    cleaned_probe = clean_adaptive_raw(
+    cleaned_probe = clean_continuous_raw(
         probe_only,
         plan,
         settings,
         eeg_plan_indices=(0,),
     )
-    cleaned_in_band_probe = clean_adaptive_raw(
+    cleaned_in_band_probe = clean_continuous_raw(
         in_band_probe,
         plan,
         settings,
         eeg_plan_indices=(0,),
     )
+    cleaned_broadband_probe = clean_continuous_raw(
+        broadband_probe,
+        plan,
+        settings,
+        eeg_plan_indices=(0,) * broadband_channels,
+    )
 
-    freqs, _, _ = run_spectrum(cleaned_bare)
-    _, probe_psd_before = _psd(probe_only, [0])
-    _, probe_psd_after = _psd(cleaned_probe, [0])
-    in_band_freqs, in_band_psd_before = _psd(in_band_probe, [0])
-    _, in_band_psd_after = _psd(cleaned_in_band_probe, [0])
-    _, data_psd_before = _psd(raw, picks)
-    _, data_psd_after = _psd(cleaned_bare, picks)
+    freqs, _, _ = run_spectrum(cleaned_bare, settings)
+    _, probe_psd_before = _psd(probe_only, [0], settings)
+    _, probe_psd_after = _psd(cleaned_probe, [0], settings)
+    in_band_freqs, in_band_psd_before = _psd(in_band_probe, [0], settings)
+    _, in_band_psd_after = _psd(cleaned_in_band_probe, [0], settings)
+    broadband_picks = list(range(broadband_channels))
+    broadband_freqs, broadband_psd_before = _psd(broadband_probe, broadband_picks, settings)
+    _, broadband_psd_after = _psd(cleaned_broadband_probe, broadband_picks, settings)
+    _, data_psd_before = _psd(raw, picks, settings)
+    _, data_psd_after = _psd(cleaned_bare, picks, settings)
+    _, data_psd_control = _psd(cleaned_control, picks, settings)
+    _, probe_psd_control = _psd(cleaned_probe_control, [0], settings)
+    control_targets, control_widths = plan_target_spans(control_plan.windows)
 
     recovered = lr.recover_probe(
         cleaned_background_probe.get_data(),
@@ -2908,37 +2620,28 @@ def benchmark_run(
     metrics = {
         **adaptive_suppression_metrics(raw, cleaned_continuous, plan, settings),
         **spatiotemporal_line_metrics(raw, cleaned_continuous, plan, settings),
-        **study_line_metrics(raw, cleaned_bare, plan, settings),
-        **study_residual_f_test_metrics(cleaned_bare, plan, settings),
         **continuous_refinement_metrics(plan, eeg_names),
-        **study_refinement_metrics(plan, eeg_names),
         **_boundary_metrics(
             raw.get_data(picks=picks),
             cleaned_bare.get_data(picks=picks),
             boundaries,
         ),
-        **lr.probe_preservation(freqs, probe_psd_before, probe_psd_after, probe),
-        "max_nonline_change_db": float(
-            np.max(
-                np.abs(
-                    lr.nonline_change_db(
-                        freqs,
-                        data_psd_before,
-                        data_psd_after,
-                        targets,
-                        guard_hz=float(np.max(widths)),
-                    )
-                )
-            )
-        ),
-        **study_signal_metrics(
-            probe_only,
-            cleaned_probe,
-            raw,
-            cleaned_bare,
-            bounds=study_epoch_bounds(raw, settings),
-            targets=study_targets,
-            guard_hz=float(np.max(study_widths)),
+        "min_probe_ratio": lr.probe_preservation(
+            freqs, probe_psd_before, probe_psd_after, probe
+        )["min_probe_ratio"],
+        **_preservation_against_control(
+            freqs,
+            probe=probe,
+            probe_before=probe_psd_before,
+            probe_after=probe_psd_after,
+            probe_control=probe_psd_control,
+            data_before=data_psd_before,
+            data_after=data_psd_after,
+            data_control=data_psd_control,
+            targets=span_targets,
+            widths=span_widths,
+            control_targets=control_targets,
+            control_widths=control_widths,
         ),
         **adaptive_band_metrics(
             sampling_frequency_hz=float(raw.info["sfreq"]),
@@ -2953,6 +2656,11 @@ def benchmark_run(
             in_band_hz,
         ),
         "in_band_probe_hz": ";".join(f"{frequency:.4f}" for frequency in in_band_hz),
+        **lr.measured_band_attenuation(
+            broadband_freqs,
+            hd.to_db(broadband_psd_before),
+            hd.to_db(broadband_psd_after),
+        ),
     }
     verdict = lr.PreservationGate().evaluate(metrics)
     return {
@@ -2978,9 +2686,9 @@ def benchmark_run(
     }
 
 
-def _psd(raw, picks):
+def _psd(raw, picks, settings: RemovalSettings):
     sfreq = float(raw.info["sfreq"])
-    block = int(round(hd.TR_SECONDS * sfreq)) * ESTIMATION_TR_COUNT
+    block = estimation_window_samples(sfreq, settings)
     data = raw.get_data(picks=picks)
     n_blocks = data.shape[-1] // block
     blocks = data[..., : n_blocks * block].reshape(data.shape[0], n_blocks, block)
@@ -3032,18 +2740,6 @@ def _line_observations(
                     window_scaffolds,
                 )
             ),
-            *(
-                (
-                    spectrum,
-                    bounds,
-                    _best_overlapping_comb_estimate(
-                        bounds,
-                        run.bounds,
-                        window_scaffolds,
-                    ),
-                )
-                for spectrum, bounds in zip(run.study_windows, run.study_bounds)
-            ),
         )
         for (freqs, spectrum_db, prominence), bounds, scaffold in sources:
             frequency_array = np.asarray(freqs, dtype=float)
@@ -3059,6 +2755,7 @@ def _line_observations(
                 low_hz=settings.detection_low_hz,
                 high_hz=settings.detection_high_hz,
                 comb_clearance_hz=lr.RESIDUAL_SEARCH_HZ,
+                excluded_bands_hz=settings.protected_bands_hz,
             )
             for position in positions:
                 index = int(np.argmin(np.abs(frequency_array - position)))
@@ -3143,81 +2840,118 @@ def _best_overlapping_comb_estimate(
     return estimate
 
 
+def _comb_adjacent_observations(
+    spectra: Sequence[SessionRunSpectra],
+    settings: RemovalSettings,
+) -> tuple[_LineObservation, ...]:
+    """Comb-adjacent summits from every block and epoch spectrum, tagged by recording.
+
+    The mirror of :func:`_line_observations`, which collects the summits that clear the
+    comb by ``RESIDUAL_SEARCH_HZ``. These are the ones that do not: close enough to a
+    validated harmonic to be part of the same source, far enough out that the harmonic's
+    own notch never reaches them. Between the two, every narrow summit in the band is
+    observed exactly once.
+    """
+    observations = []
+    for run_index, run in enumerate(spectra):
+        window_estimates = tuple(
+            _detection_scaffold(*spectrum, settings) for spectrum in run.windows
+        )
+        sources = (
+            *(
+                (spectrum, bounds, estimate)
+                for spectrum, bounds, estimate in zip(
+                    run.windows,
+                    run.bounds,
+                    window_estimates,
+                )
+            ),
+        )
+        for (freqs, spectrum_db, prominence), bounds, estimate in sources:
+            frequency_array = np.asarray(freqs, dtype=float)
+            prominence_array = np.asarray(prominence, dtype=float)
+            positions = detect_comb_adjacent_lines(
+                freqs,
+                spectrum_db,
+                prominence,
+                estimate=estimate,
+                settings=settings,
+            )
+            for position_hz in positions:
+                index = int(np.argmin(np.abs(frequency_array - position_hz)))
+                observations.append(
+                    _LineObservation(
+                        run_index=run_index,
+                        position_hz=position_hz,
+                        prominence_db=float(prominence_array[index]),
+                        bounds=bounds,
+                    )
+                )
+    return tuple(observations)
+
+
+def _comb_adjacent_support(
+    spectra: Sequence[SessionRunSpectra],
+    settings: RemovalSettings,
+) -> tuple[tuple[tuple[float, tuple[tuple[int, int], ...]], ...], ...]:
+    """Comb-adjacent positions that clear the replication rules, with each run's support.
+
+    Adjacency to a validated harmonic narrows *where* a false positive can land; it does
+    not supply replication, and these summits are read off the 54 s block and 20 s epoch
+    spectra that config.yaml singles out as making "many more comparisons than a whole-run
+    scan", where "replication alone is insufficient" and ordinary blocks threw recurrent
+    10-13 dB maxima around 39-45 Hz. This path used to apply neither rule and was also
+    fitted one recording at a time, so a single 10 dB block summit became a target in every
+    overlapping window while a line replicated across three recordings earned no credit for
+    it. Both follow from the same omission: it never asked the session.
+
+    So the clusters are formed over the whole session and admitted by the routes an
+    isolated line already has to pass -- cross-run block replication first, then the
+    single-recording route. No floor here that is not already configured for those.
+    """
+    clusters = _cluster_line_observations(_comb_adjacent_observations(spectra, settings))
+    per_run: list[list[tuple[float, tuple[tuple[int, int], ...]]]] = [[] for _ in spectra]
+    for cluster in clusters:
+        # No _clears_every_comb_grid test: sitting beside the grid is what defines this
+        # set, and detect_comb_adjacent_lines has already refused anything a harmonic's
+        # own notch covers.
+        supported = _block_line_support(cluster, settings)
+        if not supported:
+            supported = tuple(
+                observation
+                for run_index in range(len(spectra))
+                for observation in _single_run_block_support(cluster, run_index, settings)
+            )
+        if not supported:
+            continue
+        position_hz = _run_balanced_position(supported)
+        for run_index in range(len(spectra)):
+            support_bounds = tuple(
+                observation.bounds
+                for observation in supported
+                if observation.run_index == run_index and observation.bounds is not None
+            )
+            if support_bounds:
+                per_run[run_index].append((position_hz, support_bounds))
+    return tuple(tuple(item) for item in per_run)
+
+
 def _comb_adjacent_window_targets(
     run: SessionRunSpectra,
-    settings: RemovalSettings,
-) -> tuple[
-    tuple[tuple[float, ...], ...],
-    tuple[tuple[float, ...], ...],
-    tuple[float, ...],
-]:
-    """Narrow targets and distinct sources supported within one recording."""
-    window_estimates = tuple(_detection_scaffold(*spectrum, settings) for spectrum in run.windows)
-    sources = (
-        *(
-            (spectrum, bounds, estimate)
-            for spectrum, bounds, estimate in zip(
-                run.windows,
-                run.bounds,
-                window_estimates,
-            )
-        ),
-        *(
-            (
-                spectrum,
-                bounds,
-                _best_overlapping_comb_estimate(bounds, run.bounds, window_estimates),
-            )
-            for spectrum, bounds in zip(run.study_windows, run.study_bounds)
-        ),
-    )
-    observations = []
-    for (freqs, spectrum_db, prominence), bounds, estimate in sources:
-        frequency_array = np.asarray(freqs, dtype=float)
-        prominence_array = np.asarray(prominence, dtype=float)
-        positions = detect_comb_adjacent_lines(
-            freqs,
-            spectrum_db,
-            prominence,
-            estimate=estimate,
-            settings=settings,
-        )
-        for position_hz in positions:
-            index = int(np.argmin(np.abs(frequency_array - position_hz)))
-            observations.append(
-                _LineObservation(
-                    run_index=0,
-                    position_hz=position_hz,
-                    prominence_db=float(prominence_array[index]),
-                    bounds=bounds,
-                )
-            )
-
-    clusters = _cluster_line_observations(observations)
+    support: Sequence[tuple[float, tuple[tuple[int, int], ...]]],
+) -> tuple[tuple[tuple[float, ...], ...], tuple[float, ...]]:
+    """Route each supported comb-adjacent position to the windows that evidenced it."""
     window_targets: list[list[float]] = [[] for _ in run.windows]
-    study_targets: list[list[float]] = [[] for _ in run.study_windows]
     positions = []
-    for cluster in clusters:
-        position_hz = float(
-            np.median([observation.position_hz for observation in cluster.observations])
-        )
+    for position_hz, support_bounds in support:
         positions.append(position_hz)
-        support_bounds = tuple(
-            observation.bounds
-            for observation in cluster.observations
-            if observation.bounds is not None
-        )
         for index, filter_bounds in enumerate(run.bounds):
             if any(
                 _intervals_overlap(filter_bounds, source_bounds) for source_bounds in support_bounds
             ):
                 window_targets[index].append(position_hz)
-        for index, study_bounds in enumerate(run.study_bounds):
-            if any(source_bounds == study_bounds for source_bounds in support_bounds):
-                study_targets[index].append(position_hz)
     return (
         tuple(tuple(sorted(set(targets))) for targets in window_targets),
-        tuple(tuple(sorted(set(targets))) for targets in study_targets),
         tuple(sorted(positions)),
     )
 
@@ -3375,26 +3109,27 @@ def automatic_line_plans(
     and one occurrence reaches 15 dB prominence. Those targets stay confined to the exact
     windows that detected them; absence in another run can therefore never authorize a
     notch there.
-    """
-    if len(spectra) < settings.min_runs_per_line:
-        raise ValueError(
-            "Session isolated-line detection requires at least "
-            f"{settings.min_runs_per_line} runs, got {len(spectra)}."
-        )
 
+    Fewer recordings than ``min_runs_per_line`` is not an error. Cross-recording
+    replication is simply unavailable, so only the single-recording route can fire -- and
+    that route is the stricter of the two, wanting 15 dB and three non-overlapping windows
+    where the cross-recording route wants 10 dB in three recordings. A session of one
+    continuous acquisition, which is the usual shape of resting or baseline data, is
+    therefore planned under a higher bar rather than refused.
+    """
     observations, fundamentals = _line_observations(spectra, settings)
     clusters = _cluster_line_observations(observations)
     session_positions = _session_supported_positions(clusters, fundamentals, settings)
+    comb_adjacent_support = _comb_adjacent_support(spectra, settings)
 
     plans = []
     for run_index, run_spectra in enumerate(spectra):
-        narrow_window_hz, narrow_study_hz, narrow_positions = _comb_adjacent_window_targets(
+        narrow_window_hz, narrow_positions = _comb_adjacent_window_targets(
             run_spectra,
-            settings,
+            comb_adjacent_support[run_index],
         )
         whole_hz = []
         window_hz = [[] for _ in run_spectra.windows]
-        study_hz = [[] for _ in run_spectra.study_windows]
         routed_session_positions = []
         for cluster_index, position_hz in session_positions.items():
             cluster = clusters[cluster_index]
@@ -3417,9 +3152,6 @@ def automatic_line_plans(
                     for source_bounds in support_bounds
                 ):
                     window_hz[index].append(position_hz)
-            for index, study_bounds in enumerate(run_spectra.study_bounds):
-                if any(source_bounds == study_bounds for source_bounds in support_bounds):
-                    study_hz[index].append(position_hz)
         local_support = {
             cluster_index: support
             for cluster_index, cluster in enumerate(clusters)
@@ -3453,9 +3185,6 @@ def automatic_line_plans(
                     for source_bounds in support_bounds
                 ):
                     window_hz[index].append(position_hz)
-            for index, study_bounds in enumerate(run_spectra.study_bounds):
-                if any(source_bounds == study_bounds for source_bounds in support_bounds):
-                    study_hz[index].append(position_hz)
 
         plans.append(
             RunIsolatedLinePlan(
@@ -3463,8 +3192,6 @@ def automatic_line_plans(
                 window_hz=tuple(tuple(sorted(set(values))) for values in window_hz),
                 narrow_window_hz=narrow_window_hz,
                 source_count=source_count,
-                study_hz=tuple(tuple(sorted(set(values))) for values in study_hz),
-                narrow_study_hz=narrow_study_hz,
             )
         )
     return tuple(plans)
@@ -3483,8 +3210,7 @@ def apply_run(
     mne.set_log_level("ERROR")
     raw = read_bids_raw(vhdr)
     estimate = plan.model.whole_estimate
-    continuous = clean_continuous_raw(raw.copy(), plan, settings)
-    cleaned = _anchor_study_raw(raw, continuous, plan, settings)
+    cleaned = clean_continuous_raw(raw.copy(), plan, settings)
 
     destination = output_root / vhdr.relative_to(bids_root).with_suffix(".eeg")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -3503,7 +3229,7 @@ def apply_run(
             f"above the {tolerance:.3e} V float32 round-trip tolerance."
         )
 
-    suppression = adaptive_suppression_metrics(raw, continuous, plan, settings)
+    suppression = adaptive_suppression_metrics(raw, cleaned, plan, settings)
     picks = mne.pick_types(raw.info, eeg=True, exclude=())
     eeg_names = tuple(raw.ch_names[int(pick)] for pick in picks)
     boundaries = _plan_transition_boundaries(plan, raw.n_times)
@@ -3538,11 +3264,8 @@ def apply_run(
         "adjacent_hz": ";".join(f"{frequency:.4f}" for frequency in plan.all_narrow_targets_hz),
         "n_adjacent_sources": len(plan.all_narrow_targets_hz),
         **suppression,
-        **spatiotemporal_line_metrics(raw, continuous, plan, settings),
-        **study_line_metrics(raw, cleaned, plan, settings),
-        **study_residual_f_test_metrics(cleaned, plan, settings),
+        **spatiotemporal_line_metrics(raw, cleaned, plan, settings),
         **continuous_refinement_metrics(plan, eeg_names),
-        **study_refinement_metrics(plan, eeg_names),
         **_boundary_metrics(
             raw.get_data(picks=picks),
             cleaned.get_data(picks=picks),
@@ -3589,7 +3312,7 @@ def verify_cohort(bids_root: Path, cleaned_root: Path, settings: RemovalSettings
         original = read_bids_raw(vhdr)
         cleaned = read_bids_raw(cleaned_root / vhdr.relative_to(bids_root))
         for label, raw in (("original", original), ("cleaned", cleaned)):
-            freqs, spectrum_db, _ = run_spectrum(raw)
+            freqs, spectrum_db, _ = run_spectrum(raw, settings)
             spectra[label].setdefault(subject, []).append(10 ** (spectrum_db / 10.0))
         targeted["original"].append(
             spatiotemporal_line_metrics(original, original, plans[vhdr.stem], settings)
@@ -3630,10 +3353,7 @@ def verify_cohort(bids_root: Path, cleaned_root: Path, settings: RemovalSettings
     for label, rows in targeted.items():
         maximum = max(row["max_channel_block_residual_prominence_db"] for row in rows)
         maximum_excess = max(row["focal_residual_excess_db"] for row in rows)
-        count = sum(
-            row["focal_residual_excess_db"] > lr.PreservationGate().max_focal_residual_excess_db
-            for row in rows
-        )
+        count = focal_residual_discoveries(rows)
         selected = frame.stage == label
         frame.loc[selected, "max_channel_block_target_db"] = maximum
         frame.loc[selected, "max_focal_residual_excess_db"] = maximum_excess
@@ -3645,14 +3365,60 @@ def verify_cohort(bids_root: Path, cleaned_root: Path, settings: RemovalSettings
     return frame, grids
 
 
-def discover_runs(bids_root: Path, subjects: list[str] | None) -> list[Path]:
-    paths = sorted(bids_root.glob(f"sub-*/eeg/sub-*_task-{TASK}_run-*_eeg.vhdr"))
+def focal_residual_discoveries(rows: Sequence[dict]) -> int:
+    """Recordings whose focal residual exceeds what their own matched controls reach.
+
+    The same calibrated verdict ``benchmark`` prints and ``apply`` refuses on, rather than
+    a second rule of verification's own. This used to read a 1.0 dB cushion on
+    ``PreservationGate``; the rewrite that replaced the decibel thresholds with matched
+    controls deleted the attribute and left the call, so ``verify`` raised on every
+    dataset -- unnoticed, because it only ever runs after an ``apply`` that was refusing.
+
+    A missing ``focal_residual_null_p`` raises rather than counting as clean: an absent
+    measurement reported as a pass is the one direction a verification must not fail in.
+    """
+    return int(
+        lr.residual_randomization_verdict([row["focal_residual_null_p"] for row in rows])[
+            "n_discoveries"
+        ]
+    )
+
+
+def discover_runs(
+    bids_root: Path,
+    subjects: list[str] | None,
+    task: str = TASK,
+) -> list[Path]:
+    """Every recording of ``task`` under a BIDS root, with or without run and session.
+
+    The ``run-`` entity is optional because BIDS omits it when a task was acquired once,
+    which is the normal shape of a resting or baseline acquisition. Sessions are searched
+    too, so ``sub-*/ses-*/eeg/`` datasets are found without a second call.
+    """
+    # ``_*eeg.vhdr`` rather than ``_*_eeg.vhdr``: with no run entity the name ends
+    # ``_task-<task>_eeg.vhdr``, with nothing at all between the task and the suffix.
+    patterns = (
+        f"sub-*/eeg/sub-*_task-{task}_*eeg.vhdr",
+        f"sub-*/ses-*/eeg/sub-*_task-{task}_*eeg.vhdr",
+    )
+    paths = sorted({path for pattern in patterns for path in bids_root.glob(pattern)})
     if subjects:
         wanted = set(subjects)
-        paths = [p for p in paths if p.parent.parent.name in wanted]
+        paths = [path for path in paths if _subject_of(path) in wanted]
     if not paths:
-        raise FileNotFoundError(f"No task runs found under {bids_root}")
+        raise FileNotFoundError(
+            f"No recordings of task {task!r} found under {bids_root}. Set "
+            "`dataset.task` in the workflow config to the BIDS task label to process."
+        )
     return paths
+
+
+def _subject_of(path: Path) -> str:
+    """The ``sub-*`` directory owning a recording, whether or not a session sits between."""
+    for parent in path.parents:
+        if parent.name.startswith("sub-"):
+            return parent.name
+    raise ValueError(f"{path} does not lie under a BIDS subject directory.")
 
 
 def _write_tsv_atomic(frame: pd.DataFrame, path: Path) -> None:
@@ -3708,7 +3474,7 @@ def run(args: argparse.Namespace) -> None:
         settings = replace(settings, **overrides)
     print(f"settings: {settings}")
 
-    runs = discover_runs(args.bids_root, subjects=None)
+    runs = discover_runs(args.bids_root, subjects=None, task=settings.task)
     args.report_dir.mkdir(parents=True, exist_ok=True)
 
     if args.stage == "verify":
@@ -3780,12 +3546,29 @@ def run(args: argparse.Namespace) -> None:
             f"(count p={seam['count_p_value']:.4f}, maximum p="
             f"{seam['max_p_value']:.4f}), worst ratio {seam['max_ratio']:.2f}"
         )
-        sinusoids = lr.residual_sinusoid_verdict(frame["study_residual_sinusoid_p"].to_numpy())
+        for label, column in (
+            ("residual (cohort criterion)", "residual_null_p"),
+            ("focal residual (cohort)", "focal_residual_null_p"),
+        ):
+            verdict = lr.residual_randomization_verdict(frame[column].to_numpy())
+            print(
+                f"  {label:32s} "
+                f"{'PASS' if verdict['passed'] else 'FAIL'}: "
+                f"{int(verdict['n_discoveries'])} of {int(verdict['n_runs'])} recordings "
+                f"(smallest p={verdict['min_run_p_value']:.3g})"
+            )
         print(
-            f"  {'sinusoids (cohort criterion)':32s} "
-            f"{'PASS' if sinusoids['passed'] else 'FAIL'}: "
-            f"{int(sinusoids['n_discoveries'])} of {int(sinusoids['n_runs'])} recordings "
-            f"(smallest run p={sinusoids['min_run_p_value']:.3g})"
+            f"  {'preservation (measurement)':32s} "
+            f"probes {frame['max_probe_deviation_db'].max():.2g} dB against a control's "
+            f"{frame['control_probe_deviation_db'].max():.2g}; "
+            f"off-target band {frame['max_nonline_change_db'].max():.3f} dB against "
+            f"{frame['control_nonline_change_db'].max():.3f}"
+        )
+        print(
+            f"  {'band cost (measurement)':32s} "
+            f"median {frame['measured_band_attenuated_1db'].median():.3f}, "
+            f"worst {frame['measured_band_attenuated_1db'].max():.3f} of 28-95 Hz lost by a "
+            f"broadband probe"
         )
         print(
             f"  {'in-band probe survival':32s} "
@@ -3849,6 +3632,16 @@ def run(args: argparse.Namespace) -> None:
         args.bids_root,
         settings,
         dataset_digest(input_digests, args.bids_root),
+        band_cost={
+            "measured_band_attenuated_1db_median": float(
+                frame["measured_band_attenuated_1db"].median()
+            ),
+            "measured_band_attenuated_1db_worst": float(
+                frame["measured_band_attenuated_1db"].max()
+            ),
+        }
+        if "measured_band_attenuated_1db" in frame
+        else None,
     )
     import os
 

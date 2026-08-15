@@ -10,7 +10,6 @@ import pytest
 from eeg_pipeline.utils.config.loader import load_config
 from studies.pain_study.analysis.line_comb import removal as lr
 from studies.pain_study.scripts.line_comb import remove as rlc
-from studies.pain_study.scripts.workflow_config import load_workflow_config
 
 
 @pytest.fixture
@@ -61,120 +60,6 @@ def test_read_bids_raw_applies_auxiliary_channel_types(bids_brainvision_run):
     assert eeg_names == ["Fp1", "Cz"]
 
 
-def test_study_epoch_bounds_match_the_exact_analysis_interval(bids_brainvision_run):
-    raw = rlc.read_bids_raw(bids_brainvision_run)
-
-    bounds = rlc.study_epoch_bounds(raw, rlc.RemovalSettings())
-
-    assert len(bounds) == 11
-    assert bounds[0] == (1500, 3500)
-    assert {stop - start for start, stop in bounds} == {2000}
-
-
-def test_study_line_metrics_use_only_eeg_and_the_exact_event_windows():
-    import mne
-
-    settings = rlc.RemovalSettings()
-    sfreq = 100.0
-    n_times = int(360 * sfreq)
-    times = np.arange(n_times) / sfreq
-    inside_study = np.zeros(n_times, dtype=bool)
-    for onset in np.arange(20.0, 350.0, 30.0):
-        inside_study |= (times >= onset - 5.0) & (times < onset + 15.0)
-    line = np.sin(2 * np.pi * 27.7 * times) * inside_study
-    before_data = np.vstack((line, line, 100.0 * line)) * 1e-6
-    after_data = np.vstack((np.zeros_like(line), np.zeros_like(line), 100.0 * line)) * 1e-6
-    info = mne.create_info(["Cz", "Pz", "ECG"], sfreq, ["eeg", "eeg", "ecg"])
-    before = mne.io.RawArray(before_data, info, verbose="ERROR")
-    after = mne.io.RawArray(after_data, info, verbose="ERROR")
-    annotations = mne.Annotations(
-        onset=np.arange(20.0, 350.0, 30.0),
-        duration=0.001,
-        description=[settings.study_event_name] * settings.expected_study_events_per_run,
-    )
-    before.set_annotations(annotations)
-    after.set_annotations(annotations)
-    estimate = _estimate_for_study_test()
-    plan = rlc.RunRemovalPlan(
-        model=None,
-        windows=(
-            rlc.AdaptiveWindowRemovalPlan(
-                bounds=(0, n_times),
-                estimate=estimate,
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.06,),
-                narrow_targets_hz=(),
-            ),
-        ),
-        study_windows=tuple(
-            rlc.StudyWindowRemovalPlan(
-                bounds=bounds,
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.06,),
-            )
-            for bounds in rlc.study_epoch_bounds(before, settings)
-        ),
-    )
-
-    metrics = rlc.study_line_metrics(before, after, plan, settings)
-
-    assert metrics["study_residual_excess_db"] <= 0.0
-    assert metrics["study_focal_residual_excess_db"] <= 0.0
-
-
-def test_study_samples_use_their_exact_transform_with_transitions_outside(monkeypatch):
-    import mne
-
-    sfreq = 10.0
-    raw = mne.io.RawArray(
-        np.zeros((1, 200)),
-        mne.create_info(["Cz"], sfreq, "eeg"),
-        verbose="ERROR",
-    )
-    estimate = _estimate_for_study_test()
-    continuous_windows = (
-        rlc.AdaptiveWindowRemovalPlan(
-            bounds=(0, 150),
-            estimate=estimate,
-            targets_hz=(27.6,),
-            notch_widths_hz=(0.1,),
-            narrow_targets_hz=(),
-        ),
-        rlc.AdaptiveWindowRemovalPlan(
-            bounds=(50, 200),
-            estimate=estimate,
-            targets_hz=(27.6,),
-            notch_widths_hz=(0.1,),
-            narrow_targets_hz=(),
-        ),
-    )
-    study_window = rlc.StudyWindowRemovalPlan(
-        bounds=(80, 120),
-        targets_hz=(27.6,),
-        notch_widths_hz=(0.1,),
-    )
-    plan = rlc.RunRemovalPlan(
-        model=None,
-        windows=continuous_windows,
-        study_windows=(study_window,),
-    )
-
-    def fake_clean(segment, *args, **kwargs):
-        cleaned = segment.copy()
-        cleaned._data += 3.0 if segment.n_times == 40 else 1.0
-        return cleaned
-
-    monkeypatch.setattr(rlc, "clean_raw", fake_clean)
-
-    cleaned = rlc.clean_adaptive_raw(raw, plan, rlc.RemovalSettings())
-
-    values = cleaned.get_data()[0]
-    assert values[0] == pytest.approx(1.0)
-    assert np.all(np.diff(values[:81]) >= 0.0)
-    assert np.allclose(cleaned.get_data()[:, 80:120], 3.0)
-    assert np.all(np.diff(values[119:]) <= 0.0)
-    assert values[-1] == pytest.approx(1.0)
-    assert np.max(np.abs(np.diff(values))) < 0.1
 
 
 def test_channel_local_projector_removes_only_planned_sinusoids():
@@ -209,58 +94,46 @@ def test_channel_local_projector_removes_only_planned_sinusoids():
     assert amplitude(actual[1], 20.0) == pytest.approx(amplitude(data[1], 20.0), rel=0.01)
 
 
-def test_study_refinement_encodes_an_unmasked_focal_line(monkeypatch):
+def test_residual_regression_uses_one_frequency_for_every_sub_window():
+    """A sub-window without the line must not have its largest fluctuation subtracted.
+
+    The regression runs in sub-windows shorter than the window that evidenced the target,
+    so re-searching inside each one selects a maximum over noise rather than tracking
+    anything: the search band is barely wider than one sub-window frequency bin, and the
+    real drift is orders of magnitude below it. The frequency is therefore fixed by the
+    whole window and only amplitude and phase follow the sub-windows.
+    """
     import mne
 
-    raw = mne.io.RawArray(
-        np.zeros((4, 200)),
-        mne.create_info(["Cz", "Pz", "Fz", "Oz"], 100.0, "eeg"),
-        verbose="ERROR",
+    sampling_frequency_hz = 100.0
+    n_times = 2_000
+    times = np.arange(n_times) / sampling_frequency_hz
+    rng = np.random.default_rng(7)
+    data = rng.normal(scale=0.05, size=(1, n_times))
+    half = n_times // 2
+    data[0, :half] += np.sin(2.0 * np.pi * 20.0 * times[:half])
+    info = mne.create_info(["Cz"], sampling_frequency_hz, "eeg")
+    settings = rlc.RemovalSettings(filter_length="5s", mt_bandwidth=1.2, filter_jobs=1)
+
+    # A competing narrowband component in the half where the target line is absent, inside
+    # the search band and far enough from the target for the regression sub-window to
+    # resolve the two. A per-sub-window search would lock onto it and subtract it.
+    data[0, half:] += 0.6 * np.sin(2.0 * np.pi * 20.8 * times[half:])
+
+    cleaned = rlc._clean_channel_residuals(data, info, ((20.0,),), ((2.0,),), settings)
+
+    def amplitude(values, frequency_hz, sample_times):
+        basis = np.exp(-2j * np.pi * frequency_hz * sample_times)
+        return 2.0 * abs(np.vdot(basis, values)) / values.size
+
+    # The evidenced line goes.
+    assert amplitude(cleaned[0][:half], 20.0, times[:half]) < 0.05 * amplitude(
+        data[0][:half], 20.0, times[:half]
     )
-    estimate = _estimate_for_study_test()
-    plan = rlc.RunRemovalPlan(
-        model=None,
-        windows=(
-            rlc.AdaptiveWindowRemovalPlan(
-                bounds=(0, 200),
-                estimate=estimate,
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
-                narrow_targets_hz=(),
-            ),
-        ),
-        study_windows=(
-            rlc.StudyWindowRemovalPlan(
-                bounds=(80, 120),
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
-            ),
-        ),
+    # The competing component, which nothing authorised, stays.
+    assert amplitude(cleaned[0][half:], 20.8, times[half:]) == pytest.approx(
+        amplitude(data[0][half:], 20.8, times[half:]), rel=0.05
     )
-    calls = 0
-
-    def fake_statistics(data, **kwargs):
-        nonlocal calls
-        calls += 1
-        freqs = np.arange(0.0, 50.1, 0.1)
-        statistic = np.zeros((4, freqs.size))
-        if calls == 1:
-            statistic[0, np.argmin(np.abs(freqs - 27.7))] = 20.0
-        return freqs, statistic, 10.0, np.where(statistic > 10.0, 1e-9, 0.5)
-
-    monkeypatch.setattr(rlc.lr, "thomson_f_statistics", fake_statistics)
-    monkeypatch.setattr(
-        rlc,
-        "_clean_study_segment",
-        lambda data, *args, **kwargs: np.asarray(data),
-    )
-
-    refined = rlc._refine_study_residual_plans(raw, plan, rlc.RemovalSettings())
-
-    assert calls == 1
-    assert refined.study_windows[0].channel_residual_targets_hz[0] == pytest.approx((27.7,))
-    assert refined.study_windows[0].channel_residual_targets_hz[1:] == ((), (), ())
-    assert refined.study_windows[0].aggregate_residual_targets_hz == ()
 
 
 def test_continuous_refinement_encodes_an_unmasked_focal_line(monkeypatch):
@@ -326,10 +199,12 @@ def test_planned_segment_cleaning_leaves_the_callers_array_untouched():
     data += 3e-6 * np.sin(2.0 * np.pi * 57.25 * times)
     pristine = data.copy()
     info = mne.create_info(["Cz", "Pz"], sampling_frequency_hz, "eeg")
-    window = rlc.StudyWindowRemovalPlan(
+    window = rlc.AdaptiveWindowRemovalPlan(
         bounds=(0, times.size),
+        estimate=_estimate_for_study_test(),
         targets_hz=(57.25,),
         notch_widths_hz=(0.06,),
+        narrow_targets_hz=(),
     )
 
     cleaned = rlc._clean_planned_segment(data, info, window, rlc.RemovalSettings())
@@ -350,13 +225,6 @@ def _single_window_plan(n_times: int) -> rlc.RunRemovalPlan:
                 targets_hz=(27.6,),
                 notch_widths_hz=(0.1,),
                 narrow_targets_hz=(),
-            ),
-        ),
-        study_windows=(
-            rlc.StudyWindowRemovalPlan(
-                bounds=(0, n_times),
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
             ),
         ),
     )
@@ -389,14 +257,11 @@ def test_residual_planning_never_consults_the_preservation_gate(monkeypatch):
     plan = _single_window_plan(200)
     monkeypatch.setattr(rlc.lr, "thomson_f_statistics", _flat_f_statistics)
     monkeypatch.setattr(rlc.lr, "PreservationGate", ForbiddenGate)
-    monkeypatch.setattr(rlc, "_clean_study_segment", lambda data, *a, **k: np.asarray(data))
     monkeypatch.setattr(rlc, "_clean_planned_segment", lambda data, *a, **k: np.asarray(data))
     monkeypatch.setattr(rlc, "clean_continuous_raw", lambda raw, *a, **k: raw)
 
-    study = rlc._refine_study_residual_plans(raw, plan, rlc.RemovalSettings())
     continuous = rlc._refine_continuous_residual_plans(raw, plan, rlc.RemovalSettings())
 
-    assert study.study_windows[0].channel_residual_targets_hz == ((), ())
     assert continuous.windows[0].channel_residual_targets_hz == ((), ())
 
 
@@ -424,12 +289,14 @@ def test_residual_planning_leaves_power_without_a_significant_sinusoid(monkeypat
     )
     plan = _single_window_plan(n_times)
     monkeypatch.setattr(rlc.lr, "thomson_f_statistics", _flat_f_statistics)
-    monkeypatch.setattr(rlc, "_clean_study_segment", lambda data, *a, **k: np.asarray(data) + bump)
+    monkeypatch.setattr(
+        rlc, "_clean_planned_segment", lambda data, *a, **k: np.asarray(data) + bump
+    )
 
-    refined = rlc._refine_study_residual_plans(raw, plan, rlc.RemovalSettings())
+    refined = rlc._refine_continuous_residual_plans(raw, plan, rlc.RemovalSettings())
 
-    assert refined.study_windows[0].aggregate_residual_targets_hz == ()
-    assert refined.study_windows[0].channel_residual_targets_hz == ((), ())
+    assert refined.windows[0].aggregate_residual_targets_hz == ()
+    assert refined.windows[0].channel_residual_targets_hz == ((), ())
 
 
 def test_residual_removal_never_reaches_a_channel_without_evidence(monkeypatch):
@@ -455,12 +322,12 @@ def test_residual_removal_never_reaches_a_channel_without_evidence(monkeypatch):
         return freqs, statistic, 10.0, np.where(statistic > 10.0, 1e-9, 0.5)
 
     monkeypatch.setattr(rlc.lr, "thomson_f_statistics", shared_statistics)
-    monkeypatch.setattr(rlc, "_clean_study_segment", lambda data, *a, **k: np.asarray(data))
+    monkeypatch.setattr(rlc, "_clean_planned_segment", lambda data, *a, **k: np.asarray(data))
 
-    refined = rlc._refine_study_residual_plans(raw, plan, rlc.RemovalSettings())
+    refined = rlc._refine_continuous_residual_plans(raw, plan, rlc.RemovalSettings())
 
-    assert refined.study_windows[0].aggregate_residual_targets_hz == ()
-    channels = refined.study_windows[0].channel_residual_targets_hz
+    assert refined.windows[0].aggregate_residual_targets_hz == ()
+    channels = refined.windows[0].channel_residual_targets_hz
     assert len(channels) == 2
     assert all(values == pytest.approx((27.7,)) for values in channels)
 
@@ -503,140 +370,9 @@ def test_continuous_residual_support_reaches_every_overlapping_synthesis_window(
     assert routed.windows[2].channel_residual_targets_hz[0] == ()
 
 
-def test_study_residual_f_test_reports_a_remaining_authorised_line(monkeypatch):
-    import mne
-
-    raw = mne.io.RawArray(
-        np.zeros((4, 200)),
-        mne.create_info(["Cz", "Pz", "Fz", "Oz"], 100.0, "eeg"),
-        verbose="ERROR",
-    )
-    estimate = _estimate_for_study_test()
-    plan = rlc.RunRemovalPlan(
-        model=None,
-        windows=(
-            rlc.AdaptiveWindowRemovalPlan(
-                bounds=(0, 200),
-                estimate=estimate,
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
-                narrow_targets_hz=(),
-            ),
-        ),
-        study_windows=(
-            rlc.StudyWindowRemovalPlan(
-                bounds=(80, 120),
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
-            ),
-        ),
-    )
-
-    def fake_statistics(data, **kwargs):
-        freqs = np.arange(0.0, 50.1, 0.1)
-        statistic = np.zeros((2, freqs.size))
-        statistic[1, np.argmin(np.abs(freqs - 27.7))] = 20.0
-        return freqs, statistic, 10.0, np.where(statistic > 10.0, 1e-9, 0.5)
-
-    monkeypatch.setattr(rlc.lr, "thomson_f_statistics", fake_statistics)
-
-    metrics = rlc.study_residual_f_test_metrics(raw, plan, rlc.RemovalSettings())
-
-    assert metrics["study_significant_focal_residual_count"] == 1
-    assert metrics["study_significant_focal_residual_hz"] == "0:Pz:27.700000"
 
 
-def test_study_refinement_metrics_preserve_epoch_channel_provenance():
-    estimate = _estimate_for_study_test()
-    plan = rlc.RunRemovalPlan(
-        model=None,
-        windows=(
-            rlc.AdaptiveWindowRemovalPlan(
-                bounds=(0, 200),
-                estimate=estimate,
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
-                narrow_targets_hz=(),
-            ),
-        ),
-        study_windows=(
-            rlc.StudyWindowRemovalPlan(
-                bounds=(80, 120),
-                targets_hz=(27.6,),
-                notch_widths_hz=(0.1,),
-                aggregate_residual_targets_hz=(27.7,),
-                aggregate_residual_widths_hz=(0.1,),
-                channel_residual_targets_hz=((), (27.8,)),
-                channel_residual_widths_hz=((), (0.1,)),
-            ),
-        ),
-    )
 
-    metrics = rlc.study_refinement_metrics(plan, ("Cz", "Pz"))
-
-    assert metrics["n_study_common_targets"] == 1
-    assert metrics["n_study_aggregate_refinement_targets"] == 1
-    assert metrics["n_study_focal_refinement_targets"] == 1
-    assert metrics["n_study_focal_refinement_channel_windows"] == 1
-    assert metrics["study_aggregate_refinement_hz"] == "0:27.700000"
-    assert metrics["study_focal_refinement_hz"] == "0:Pz:27.800000"
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    (
-        {
-            "aggregate_residual_targets_hz": (np.nan,),
-            "aggregate_residual_widths_hz": (0.1,),
-        },
-        {
-            "aggregate_residual_targets_hz": (27.7,),
-            "aggregate_residual_widths_hz": (0.0,),
-        },
-        {
-            "channel_residual_targets_hz": ((27.7,),),
-            "channel_residual_widths_hz": ((np.inf,),),
-        },
-    ),
-)
-def test_study_window_rejects_invalid_residual_targets_and_widths(kwargs):
-    with pytest.raises(ValueError, match="residual targets and widths"):
-        rlc.StudyWindowRemovalPlan(
-            bounds=(80, 120),
-            targets_hz=(27.6,),
-            notch_widths_hz=(0.1,),
-            **kwargs,
-        )
-
-
-def test_study_signal_metrics_measure_only_the_supplied_epoch_bounds():
-    import mne
-
-    sfreq = 100.0
-    n_times = 4000
-    times = np.arange(n_times) / sfreq
-    probe = np.sin(2 * np.pi * 17.35 * times)[None, :]
-    rng = np.random.default_rng(2)
-    data = rng.normal(scale=1e-6, size=(2, n_times))
-    probe_info = mne.create_info(["probe"], sfreq, "eeg")
-    data_info = mne.create_info(["Cz", "Pz"], sfreq, "eeg")
-    probe_before = mne.io.RawArray(probe, probe_info, verbose="ERROR")
-    probe_after = mne.io.RawArray(0.5 * probe, probe_info, verbose="ERROR")
-    data_before = mne.io.RawArray(data, data_info, verbose="ERROR")
-    data_after = mne.io.RawArray(data.copy(), data_info, verbose="ERROR")
-
-    metrics = rlc.study_signal_metrics(
-        probe_before,
-        probe_after,
-        data_before,
-        data_after,
-        bounds=((500, 2500),),
-        targets=(27.6,),
-        guard_hz=0.2,
-    )
-
-    assert metrics["study_max_probe_deviation_db"] == pytest.approx(6.0206, abs=0.01)
-    assert metrics["study_max_nonline_change_db"] == pytest.approx(0.0, abs=1e-12)
 
 
 def _estimate_for_study_test():
@@ -681,12 +417,6 @@ def brainvision_run(tmp_path):
 
 
 class TestRemovalSettings:
-    def test_workflow_config_declares_the_exact_study_interval(self):
-        settings = rlc.RemovalSettings.from_config(load_workflow_config(rlc.WORKFLOW, None))
-
-        assert settings.study_event_name == "Trig_therm/T  1"
-        assert settings.study_epoch_s == (-5.0, 15.0)
-        assert settings.expected_study_events_per_run == 11
 
     def test_reads_the_packaged_config(self):
         settings = rlc.RemovalSettings.from_config(load_config())
@@ -726,20 +456,6 @@ class TestRemovalSettings:
         assert settings.removal_harmonic_range[0] == 22  # 26.40 Hz
         assert settings.removal_harmonic_range[0] > 11  # 13.23 Hz stays
 
-    def test_the_configured_width_keeps_the_band_inside_the_gate(self):
-        settings = rlc.RemovalSettings.from_config(load_config())
-        low, high = settings.removal_harmonic_range
-        targets = [
-            settings.nominal_fundamental_hz * k
-            for k in range(low, high + 1)
-            if not 59.5 <= settings.nominal_fundamental_hz * k <= 60.5
-        ]
-        widths = lr.notch_widths_for(
-            targets, ratio=settings.notch_width_ratio, minimum_hz=settings.notch_width_min_hz
-        )
-        fraction = lr.removed_band_fraction(np.arange(0, 120, 0.05), targets, widths)
-        assert fraction <= lr.PreservationGate().max_band_fraction_removed
-
     def test_the_comb_window_cannot_reach_the_next_harmonic(self):
         settings = rlc.RemovalSettings.from_config(load_config())
         assert settings.search_hz < settings.nominal_fundamental_hz / 2
@@ -753,8 +469,16 @@ class TestRemovalSettings:
 
     def test_config_values_override_the_defaults(self):
         class Fake:
+            """Answers per key, as a real config does. Returning one block for every key
+            happened to work only while `from_config` read a single block."""
+
             def get(self, key, default=None):
-                return {"harmonic_range": [10, 20], "mt_bandwidth": 0.9, "filter_length": "8s"}
+                block = {
+                    "harmonic_range": [10, 20],
+                    "mt_bandwidth": 0.9,
+                    "filter_length": "8s",
+                }
+                return block if key == "line_comb_removal" else default
 
         settings = rlc.RemovalSettings.from_config(Fake())
         assert settings.harmonic_range == (10, 20)
@@ -777,12 +501,6 @@ class TestRemovalSettings:
             rlc.RemovalSettings(uncertainty_confidence_z=0.0)
         with pytest.raises(ValueError, match="filter_jobs"):
             rlc.RemovalSettings(filter_jobs=0)
-
-    def test_invalid_study_window_contract_fails_fast(self):
-        with pytest.raises(ValueError, match="increasing bounds"):
-            rlc.RemovalSettings(study_epoch_s=(15.0, -5.0))
-        with pytest.raises(ValueError, match="expected_study_events_per_run"):
-            rlc.RemovalSettings(expected_study_events_per_run=0)
 
 
 class TestChannelScaling:
@@ -911,7 +629,7 @@ class TestDiscoverRuns:
         assert rlc.discover_runs(tmp_path, None) == [real]
 
     def test_raises_when_nothing_matches(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="No task runs"):
+        with pytest.raises(FileNotFoundError, match="No recordings of task"):
             rlc.discover_runs(tmp_path, None)
 
 
@@ -925,7 +643,7 @@ class TestRunSpectrum:
         rng = np.random.default_rng(1)
         info = mne.create_info(["Fp1", "Cz", "Oz"], sfreq, "eeg")
         raw = mne.io.RawArray(rng.normal(scale=1e-5, size=(3, n_times)), info)
-        freqs, spectrum_db, prominence = rlc.run_spectrum(raw)
+        freqs, spectrum_db, prominence = rlc.run_spectrum(raw, rlc.RemovalSettings())
         assert freqs[1] == pytest.approx(1.0 / (0.9 * rlc.ESTIMATION_TR_COUNT))
         assert spectrum_db.shape == freqs.shape == prominence.shape
         # a comb line lands on a bin centre
@@ -939,7 +657,7 @@ class TestRunSpectrum:
         info = mne.create_info(["Cz"], sfreq, "eeg")
         raw = mne.io.RawArray(np.zeros((1, 2 * window_samples + 137)), info, verbose="ERROR")
 
-        _, windows, bounds = rlc.run_spectra(raw)
+        _, windows, bounds = rlc.run_spectra(raw, rlc.RemovalSettings())
 
         assert len(windows) == len(bounds)
         assert bounds[0] == (0, window_samples)
@@ -952,8 +670,23 @@ class TestRunSpectrum:
         mne.set_log_level("ERROR")
         info = mne.create_info(["Fp1"], 1000.0, "eeg")
         raw = mne.io.RawArray(np.zeros((1, 1000)), info)
-        with pytest.raises(ValueError, match="shorter than one adaptive estimation window"):
-            rlc.run_spectrum(raw)
+        # The message has to name the setting to change, because on a short recording
+        # this is the first thing a new user hits.
+        with pytest.raises(ValueError, match="estimation_window_s"):
+            rlc.run_spectrum(raw, rlc.RemovalSettings())
+
+    def test_a_shorter_window_admits_a_shorter_recording(self):
+        """The window is a setting, not a property of the site's volume repetition."""
+        import mne
+
+        mne.set_log_level("ERROR")
+        info = mne.create_info(["Fp1"], 1000.0, "eeg")
+        raw = mne.io.RawArray(np.zeros((1, 4_000)), info)
+
+        freqs, spectrum_db, _ = rlc.run_spectrum(raw, rlc.RemovalSettings(estimation_window_s=1.0))
+
+        assert freqs[1] - freqs[0] == pytest.approx(1.0)
+        assert spectrum_db.size == freqs.size
 
 
 def test_removal_settings_reads_the_mains_exclusion_flag():
@@ -1022,38 +755,38 @@ def test_a_broad_comb_adjacent_peak_is_not_called_an_electrical_line():
     assert _adjacent_lines((freqs, spectrum_db, prominence)) == ()
 
 
-def _session_run(whole, windows=(), *, study_windows=(), study_bounds=()):
+def _session_run(whole, windows=()):
     window_spectra = tuple(windows) or (whole,)
     bounds = tuple((index * 100, (index + 1) * 100) for index in range(len(window_spectra)))
     return rlc.SessionRunSpectra(
         whole=whole,
         windows=window_spectra,
         bounds=bounds,
-        study_windows=tuple(study_windows),
-        study_bounds=tuple(study_bounds),
     )
 
 
-def test_a_study_epoch_line_is_routed_to_every_overlapping_filter_window():
+
+def test_an_unreplicated_comb_adjacent_summit_authorises_nothing():
+    """One epoch's summit is not evidence of a source, however close to a harmonic.
+
+    Adjacency to a validated harmonic constrains where a false positive can land; it does
+    not replicate one. This is the 54 s/20 s scan config.yaml warns about, where ordinary
+    blocks threw recurrent 10-13 dB maxima, so the comb-adjacent path carries the same
+    floors as any other block detection.
+    """
     settings = rlc.RemovalSettings()
     empty = _synthetic_spectrum()
-    adjacent = _synthetic_spectrum(peaks=[(27.72, 14.0)])
+    adjacent = _synthetic_spectrum(peaks=[(27.72, 16.0)])
+    # One window out of three carries the summit: strong, but replicated nowhere.
     run = rlc.SessionRunSpectra(
         whole=empty,
-        windows=(empty, empty, empty),
-        bounds=((0, 100), (50, 150), (100, 200)),
-        study_windows=(adjacent,),
-        study_bounds=((75, 125),),
+        windows=(adjacent, empty, empty),
+        bounds=((0, 100), (100, 200), (200, 300)),
     )
 
     plans = rlc.automatic_line_plans([run, _session_run(empty), _session_run(empty)], settings)
 
-    assert all(
-        any(abs(value - 27.72) < 0.003 for value in targets)
-        for targets in plans[0].narrow_window_hz
-    )
-    assert any(abs(value - 27.72) < 0.003 for value in plans[0].narrow_study_hz[0])
-    assert not any(targets for plan in plans[1:] for targets in plan.narrow_window_hz)
+    assert not any(targets for plan in plans for targets in plan.narrow_window_hz)
 
 
 def test_a_routed_target_expands_to_the_observed_adjacent_line_support():
@@ -1061,12 +794,13 @@ def test_a_routed_target_expands_to_the_observed_adjacent_line_support():
     empty = _synthetic_spectrum()
     first_line = _synthetic_spectrum(peaks=[(81.72, 16.0)])
     second_line = _synthetic_spectrum(peaks=[(81.84, 16.0)])
+    # 81.72 appears in three non-overlapping windows, which is what authorises it as a
+    # target at all; 81.84 is present only in window 1 and is never a target -- the
+    # widening reads that window's own spectrum.
     run = rlc.SessionRunSpectra(
         whole=empty,
-        windows=(first_line, second_line, empty),
-        bounds=((0, 100), (50, 150), (100, 200)),
-        study_windows=(),
-        study_bounds=(),
+        windows=(first_line, second_line, first_line, empty, first_line, empty),
+        bounds=((0, 100), (50, 150), (100, 200), (150, 250), (200, 300), (250, 350)),
     )
 
     isolated_plans = rlc.automatic_line_plans(
@@ -1074,30 +808,30 @@ def test_a_routed_target_expands_to_the_observed_adjacent_line_support():
         settings,
     )
     plan = rlc.build_run_plan_from_spectra(run, settings, isolated_plans[0])
-    target_widths = [
-        (target, width)
-        for target, width in zip(
-            plan.windows[1].targets_hz,
-            plan.windows[1].notch_widths_hz,
-        )
-        if abs(target - 81.72) < 0.003
-    ]
+    window = plan.windows[1]
 
-    assert len(target_widths) == 1
-    target, width = target_widths[0]
-    assert target + width / 2.0 >= 81.84
+    def covers(frequency_hz):
+        return any(
+            abs(frequency_hz - target) <= width / 2.0
+            for target, width in zip(window.targets_hz, window.notch_widths_hz)
+        )
+
+    # The observed support is covered, by a notch centred on the support itself rather
+    # than by stretching the validated target symmetrically across it.
+    assert covers(81.84)
+    assert min(abs(target - 81.84) for target in window.targets_hz) < 0.02
 
 
 def test_an_overlapping_neighbor_cannot_widen_a_locally_absent_target():
     settings = rlc.RemovalSettings()
     empty = _synthetic_spectrum()
     first_line = _synthetic_spectrum(peaks=[(81.72, 16.0)])
+    # Window 1 is empty and sits between two windows that see the line, so it receives the
+    # routed target but has no local support to widen it.
     run = rlc.SessionRunSpectra(
         whole=empty,
-        windows=(first_line, empty, empty),
-        bounds=((0, 100), (50, 150), (100, 200)),
-        study_windows=(),
-        study_bounds=(),
+        windows=(first_line, empty, first_line, empty, first_line, empty),
+        bounds=((0, 100), (50, 150), (100, 200), (150, 250), (200, 300), (250, 350)),
     )
     isolated_plans = rlc.automatic_line_plans(
         [run, _session_run(empty), _session_run(empty)],
@@ -1121,83 +855,6 @@ def test_an_overlapping_neighbor_cannot_widen_a_locally_absent_target():
         max(81.72 / settings.notch_width_ratio, settings.notch_width_min_hz)
     )
 
-
-def test_a_study_epoch_uses_its_validated_continuous_comb_scaffold():
-    settings = rlc.RemovalSettings()
-    continuous = _synthetic_spectrum()
-    short_study = _synthetic_spectrum(
-        peaks=[(27.72, 14.0)],
-        harmonics=(24, 42),
-    )
-    run = rlc.SessionRunSpectra(
-        whole=continuous,
-        windows=(continuous, continuous, continuous),
-        bounds=((0, 100), (50, 150), (100, 200)),
-        study_windows=(short_study,),
-        study_bounds=((75, 125),),
-    )
-
-    plans = rlc.automatic_line_plans(
-        [run, _session_run(continuous), _session_run(continuous)],
-        settings,
-    )
-
-    assert all(
-        any(abs(value - 27.72) < 0.003 for value in targets)
-        for targets in plans[0].narrow_window_hz
-    )
-
-
-def test_a_study_epoch_can_supply_session_replicated_isolated_line_evidence():
-    settings = rlc.RemovalSettings()
-    continuous = _synthetic_spectrum()
-    study_line = _synthetic_spectrum(peaks=[(63.0, 18.0)])
-    runs = [
-        _session_run(
-            continuous,
-            windows=(continuous, continuous),
-            study_windows=(study_line,),
-            study_bounds=((25, 75),),
-        )
-        for _ in range(3)
-    ]
-
-    plans = rlc.automatic_line_plans(runs, settings)
-
-    assert all(
-        any(abs(value - 63.0) < 0.003 for targets in plan.window_hz for value in targets)
-        for plan in plans
-    )
-    assert all(any(abs(value - 63.0) < 0.003 for value in plan.study_hz[0]) for plan in plans)
-
-    fitted = rlc.build_run_plan_from_spectra(runs[0], settings, plans[0])
-    assert any(
-        abs(value - 63.0) < 0.003 for window in fitted.windows for value in window.targets_hz
-    )
-    assert any(abs(value - 63.0) < 0.003 for value in fitted.study_windows[0].targets_hz)
-
-
-def test_neighboring_evidence_cannot_authorise_an_exact_study_notch():
-    settings = rlc.RemovalSettings()
-    empty = _synthetic_spectrum()
-    line = _synthetic_spectrum(peaks=[(63.0, 18.0)])
-    runs = [
-        _session_run(
-            line,
-            windows=(line, line),
-            study_windows=(empty,),
-            study_bounds=((25, 75),),
-        )
-        for _ in range(3)
-    ]
-
-    isolated_plans = rlc.automatic_line_plans(runs, settings)
-
-    assert all(
-        not any(abs(value - 63.0) < 0.003 for value in plan.study_hz[0]) for plan in isolated_plans
-    )
-    fitted = rlc.build_run_plan_from_spectra(runs[0], settings, isolated_plans[0])
-    assert not any(abs(value - 63.0) < 0.003 for value in fitted.study_windows[0].targets_hz)
 
 
 def test_whole_run_evidence_cannot_authorise_a_time_local_notch():
@@ -1483,8 +1140,6 @@ def test_overlapping_blocks_in_one_run_cannot_authorise_a_line():
         whole=empty,
         windows=(line, line, line),
         bounds=((0, 100), (50, 150), (75, 175)),
-        study_windows=(),
-        study_bounds=(),
     )
 
     kept = rlc.session_nominals(
@@ -1529,8 +1184,6 @@ def test_overlapping_blocks_do_not_create_a_run_specific_target():
         whole=empty,
         windows=(line, line, line),
         bounds=((0, 100), (50, 150), (75, 175)),
-        study_windows=(),
-        study_bounds=(),
     )
 
     plans = rlc.automatic_line_plans(

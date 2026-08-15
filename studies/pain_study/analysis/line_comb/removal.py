@@ -217,6 +217,83 @@ def thomson_f_p_values(statistic: np.ndarray, *, n_tapers: int) -> np.ndarray:
     return np.asarray(f_distribution.sf(values, 2, 2 * n_tapers - 2), dtype=float)
 
 
+def null_exceedance_p_value(observed: float, null_maxima: Sequence[float]) -> float:
+    """Exact one-sided probability that a matched control search reaches the observation.
+
+    The controls are the same search -- same width, same count of bins -- run where no
+    target is, so under the null the observation is exchangeable with them. Counting itself
+    among the candidates is what makes this exact rather than optimistic; with ``n``
+    controls the smallest attainable value is ``1/(n+1)``.
+
+    This replaces asking whether the observation clears the controls' 95th percentile by
+    some margin in decibels. The margin had no error rate attached, and the quantile it was
+    added to already had one.
+    """
+    values = np.asarray(null_maxima, dtype=float)
+    if values.ndim != 1 or values.size == 0:
+        raise ValueError("null_maxima must be a non-empty vector.")
+    if not np.all(np.isfinite(values)) or not np.isfinite(observed):
+        raise ValueError("The observation and its controls must be finite.")
+    return float((1 + np.count_nonzero(values >= observed)) / (1 + values.size))
+
+
+def paired_excess_p_value(observed: Sequence[float], control: Sequence[float]) -> float:
+    """Exact sign test that the observation exceeds its control, pair by pair.
+
+    Each channel supplies one pair: what the real transform disturbed at frequencies it
+    never targeted, and what a control transform of the same size disturbed at frequencies
+    *it* never targeted. Under the null the two are exchangeable within a pair, so the count
+    of channels where the real one is larger is Binomial(n, 1/2) and the tail is exact.
+
+    Pairing by channel is what makes this cheap: one control transform, not a distribution
+    of them, because every channel is its own comparison.
+    """
+    from scipy.stats import binomtest
+
+    left = np.abs(np.asarray(observed, dtype=float))
+    right = np.abs(np.asarray(control, dtype=float))
+    if left.shape != right.shape or left.ndim != 1 or left.size == 0:
+        raise ValueError("observed and control must be matching non-empty vectors.")
+    if not (np.all(np.isfinite(left)) and np.all(np.isfinite(right))):
+        raise ValueError("observed and control must be finite.")
+    decided = int(np.count_nonzero(left != right))
+    if decided == 0:
+        return 1.0
+    exceeding = int(np.count_nonzero(left > right))
+    return float(binomtest(exceeding, decided, 0.5, alternative="greater").pvalue)
+
+
+def residual_randomization_verdict(
+    p_values: Sequence[float],
+    *,
+    false_discovery_rate: float = 0.05,
+) -> dict[str, float | bool]:
+    """Decide the residual question over the recordings, not inside each one.
+
+    Each recording's p-value is exact against its own controls, so under the null they are
+    uniform and about one recording in twenty exceeds any fixed cut by construction.
+    Requiring ninety of ninety to pass would therefore reject a faultless cohort roughly
+    ninety-nine times in a hundred -- the same arithmetic that already moved the seam
+    criterion out of the per-run gate.
+
+    Benjamini-Hochberg over the recordings controls the false discovery rate instead. With
+    a single recording it reduces to rejecting when ``p <= false_discovery_rate``, so a
+    lone continuous acquisition is decided by its own exact test rather than by a cohort
+    statistic it cannot supply.
+    """
+    values = np.asarray(p_values, dtype=float)
+    discoveries = benjamini_hochberg_discoveries(
+        values,
+        false_discovery_rate=false_discovery_rate,
+    )
+    return {
+        "n_runs": float(values.size),
+        "n_discoveries": float(discoveries),
+        "min_run_p_value": float(np.min(values)),
+        "passed": discoveries == 0,
+    }
+
+
 def benjamini_hochberg_discoveries(
     p_values: Sequence[float],
     *,
@@ -233,51 +310,6 @@ def benjamini_hochberg_discoveries(
     ranks = np.arange(1, values.size + 1)
     below = np.flatnonzero(values <= false_discovery_rate * ranks / values.size)
     return int(below[-1] + 1) if below.size else 0
-
-
-def run_residual_sinusoid_p_value(p_values: Sequence[float]) -> float:
-    """One recording's evidence that any sinusoid survived, over everything it searched.
-
-    The smallest probability in the family, corrected for the size of that family. One
-    number per recording, because the cohort decision has to be made across recordings
-    rather than inside them -- see ``residual_sinusoid_verdict``.
-    """
-    values = np.asarray(p_values, dtype=float)
-    if values.ndim != 1 or values.size == 0:
-        raise ValueError("p_values must be a non-empty vector.")
-    if not np.all(np.isfinite(values)) or np.any(values < 0.0) or np.any(values > 1.0):
-        raise ValueError("p_values must be finite probabilities.")
-    return float(min(1.0, float(np.min(values)) * values.size))
-
-
-def residual_sinusoid_verdict(
-    run_p_values: Sequence[float],
-    *,
-    false_discovery_rate: float = 0.05,
-) -> dict[str, float | bool]:
-    """Cohort decision on surviving sinusoids, made over recordings rather than inside them.
-
-    Deliberately not a per-run gate, for the same reason the seam criterion is not one.
-    Requiring zero significant residuals within every recording rejects a clean cohort at
-    the test's own error rate: a 5% family-wise rate over ninety recordings puts the
-    expected number of false failures near four or five, which is what was measured before
-    this replaced it. Each recording contributes one corrected probability instead, and
-    Benjamini-Hochberg over those decides whether any recording is genuinely unclean.
-    """
-    values = np.asarray(run_p_values, dtype=float)
-    if values.ndim != 1 or values.size == 0:
-        raise ValueError("At least one recording's residual probability is required.")
-    discoveries = benjamini_hochberg_discoveries(
-        values,
-        false_discovery_rate=false_discovery_rate,
-    )
-    return {
-        "n_runs": float(values.size),
-        "n_discoveries": float(discoveries),
-        "min_run_p_value": float(np.min(values)),
-        "false_discovery_rate": float(false_discovery_rate),
-        "passed": discoveries == 0,
-    }
 
 
 @dataclass(frozen=True)
@@ -459,22 +491,8 @@ class PreservationGate:
     everything else alone.
     """
 
-    max_residual_excess_db: float = 1.0
-    """How far the worst residual may stand above a blind control of the same search.
-
-    Replaces a fixed bound on the residual itself. Searching a window around every target
-    to catch a displaced line means taking the maximum of roughly a thousand bins, whose
-    noise floor is several dB before any line survives. Control windows of the same width,
-    placed where no target is, measure that floor on the same data, so what is gated is the
-    excess over it -- a criterion that means the same thing at any search width or noise
-    level.
-    """
-    max_focal_residual_excess_db: float = 1.0
-    """Worst channel-window residual above its matched multiple-search control."""
     max_boundary_discontinuity_ratio: float = 1.0
     """Largest seam jump relative to the 95th percentile of matched maximum jumps."""
-    max_probe_deviation_db: float = 0.5
-    max_nonline_change_db: float = 0.2
     max_burst_energy_deviation: float = 0.05
     min_burst_correlation: float = 0.99
     max_intrinsic_energy_ratio: float = 1.05
@@ -502,53 +520,44 @@ class PreservationGate:
     floor sits at twice that expected loss: enough headroom for a transient that lands
     less favourably, and still failing anything that loses a sixth of its energy.
     """
-    max_band_fraction_removed: float = 0.18
-    """Total opportunity-cost ceiling after every evidenced expansion.
-
-    The adaptive model fits 17 or more overlapping windows. A two-standard-error interval
-    covers each fitted target's position uncertainty, while the independent residual gate
-    catches any line that nevertheless falls outside it. Isolated targets start at their
-    physical line width and expand only with observed support or residual evidence. The earlier 90 continuous plans
-    reached 17.017% of the analysis band. The 18% ceiling is applied only to the total
-    transform: a separate cap on the base-width component had no scientific meaning, while
-    this total still rejects MNE's 25% default and catches a pathological removal that
-    empties a large fraction of the band. Exact-window and channel-local transforms are now
-    included directly in each benchmark measurement.
-    """
-
-    @staticmethod
-    def _within_band_budget(value: float, limit: float, bin_size: float) -> bool:
-        """Compare a discrete Fourier-bin count with a continuous fraction limit."""
-        if not np.all(np.isfinite((value, limit, bin_size))) or bin_size <= 0.0:
-            raise ValueError("Band fractions, limits, and bin sizes must be finite and positive.")
-        return value <= limit + bin_size / 2.0
-
     def evaluate(self, metrics: dict[str, float]) -> dict[str, bool]:
+        """The per-run criteria, which are the derived bounds and the invariants.
+
+        The two residual questions are absent by construction, not by omission. Both are
+        measured as an excess over a matched control search, so both already carry an
+        exact p-value against their own null, and both fail about one recording in twenty
+        under the null -- an all-runs rule on either rejects a faultless cohort. They are
+        decided by ``residual_randomization_verdict`` over the recordings instead, exactly
+        as the seam criterion is, and ``require_passing_benchmark`` consults it.
+
+        What remains derives from the instrument -- the transient bounds -- or is an
+        invariant a linear operator cannot violate.
+
+        The two preservation questions are absent for the same reason as the residual ones.
+        Both asked whether the transform disturbed spectrum it never targeted, and both
+        answered against a decibel constant with no derivation: 0.5 dB on the probes, where
+        the worst of ninety recordings read 1.4e-4, and 0.2 dB across the band against a
+        worst of 0.025. Each is now counted against a control transform of the same size
+        aimed where no line is, which gives the question a null instead of a number, and is
+        decided over the recordings by ``residual_randomization_verdict``.
+
+        There is deliberately no ceiling on how much spectrum the removal costs. There is
+        nothing left for one to constrain: the cost is the notch width times the number of
+        targets, the width ratio was fixed by a documented sweep to the narrowest setting
+        that still pushes every line below its local background, and a target only exists
+        once the replication rules admit it. A ceiling on top of that could only be a number
+        chosen after seeing the answer -- the retired one was 0.18, set because the cohort
+        had reached 0.170. What the cost actually was is measured by a broadband probe,
+        reported per recording, and recorded in the derivative's provenance, so it can be
+        weighed against the artifact removed rather than silently certified.
+        """
         return {
-            # The maximum against a blind control, not the median against a constant.
-            # Gating the median let half a run's targets stand above the threshold -- the
-            # 90-run manifest passed every gate carrying nineteen residuals over 1 dB and a
-            # worst of +13.90 dB -- while a constant bound cannot survive widening the
-            # search to where a displaced line actually sits.
-            "lines_suppressed": metrics["residual_excess_db"] <= self.max_residual_excess_db,
-            "no_focal_residual": metrics["focal_residual_excess_db"]
-            <= self.max_focal_residual_excess_db,
-            "study_lines_suppressed": metrics["study_residual_excess_db"]
-            <= self.max_residual_excess_db,
-            "study_no_focal_residual": metrics["study_focal_residual_excess_db"]
-            <= self.max_focal_residual_excess_db,
             # The seam criterion is deliberately absent from the per-run gate. It compares
             # against the second largest of 40 matched controls, so under the null it fails
             # 2/41 of runs by construction and an all-90-must-pass rule rejects a perfect
             # cohort about 99% of the time. It is decided over the cohort instead, by
             # seam_randomization_verdict. max_boundary_discontinuity_ratio is still measured and
             # reported per run, and still feeds that decision.
-            "sinusoids_preserved": metrics["max_probe_deviation_db"] <= self.max_probe_deviation_db,
-            "spectrum_preserved": metrics["max_nonline_change_db"] <= self.max_nonline_change_db,
-            "study_sinusoids_preserved": metrics["study_max_probe_deviation_db"]
-            <= self.max_probe_deviation_db,
-            "study_spectrum_preserved": metrics["study_max_nonline_change_db"]
-            <= self.max_nonline_change_db,
             "transient_preserved": (
                 self.min_intrinsic_energy_ratio
                 <= metrics["intrinsic_energy_ratio"]
@@ -558,11 +567,6 @@ class PreservationGate:
             # length that makes the removal state-dependent, say -- but on a linear
             # operator it is an invariant, not a test. test_removal_gates.py pins why.
             "transient_undistorted": metrics["burst_correlation"] >= self.min_burst_correlation,
-            "band_mostly_untouched": self._within_band_budget(
-                metrics["removed_band_fraction"],
-                self.max_band_fraction_removed,
-                metrics["band_fraction_bin_size"],
-            ),
         }
 
     def passed(self, metrics: dict[str, float]) -> bool:
@@ -988,6 +992,7 @@ def detect_isolated_lines(
     probe_hz: Sequence[float] | None = None,  # nothing protected unless asked
     max_line_width_hz: float = LINE_WIDTH_CEILING_HZ,
     claim_hz: float = _LINE_CLAIM_HZ,
+    excluded_bands_hz: Iterable[tuple[float, float]] = (),
 ) -> tuple[float, ...]:
     """Find this run's isolated lines in its own spectrum, without a cohort list.
 
@@ -1005,6 +1010,10 @@ def detect_isolated_lines(
     * peaks within ``probe_clearance_hz`` of a benchmark probe tone are left alone;
     * peaks broader than ``max_line_width_hz``, measured 3 dB down, are left alone, which
       is what keeps a tall alpha or beta rhythm from being removed as an artifact;
+    * peaks inside an ``excluded_bands_hz`` band are left alone, because another stage
+      takes that band whole. Offering one here is worse than useless: the band is declared
+      only where the contamination is a cluster, so subtracting the summit promotes its
+      neighbour and leaves a residual that refuses the very apply the notch depends on.
     Returns the accepted positions in ascending order.
     """
     frequency_array = np.asarray(freqs, dtype=float)
@@ -1062,6 +1071,10 @@ def detect_isolated_lines(
             np.abs(frequency_array[:, None] - protected[None, :]).min(axis=1) <= probe_clearance_hz
         )
         candidate &= ~near_probe
+    for start, stop in excluded_bands_hz:
+        if not np.isfinite((start, stop)).all() or start >= stop:
+            raise ValueError(f"excluded_bands_hz must hold increasing bands; got {(start, stop)}.")
+        candidate &= ~((frequency_array >= start) & (frequency_array <= stop))
 
     indices = np.flatnonzero(candidate)
     if indices.size == 0:
@@ -1424,6 +1437,7 @@ def _summarize_suppression(values: np.ndarray, null_maxima: np.ndarray) -> dict[
         "max_residual_prominence_db": max_residual,
         "null_max_95_db": null_max_95,
         "residual_excess_db": max_residual - null_max_95,
+        "residual_null_p": null_exceedance_p_value(max_residual, null_maxima),
         "median_suppression_db": float(np.median(values[:, 0] - values[:, 1])),
     }
 
@@ -1562,6 +1576,7 @@ def adaptive_spatiotemporal_suppression(
         "p99_channel_block_residual_prominence_db": float(np.quantile(target_values, 0.99)),
         "focal_null_max_95_db": null_max_95,
         "focal_residual_excess_db": maximum - null_max_95,
+        "focal_residual_null_p": null_exceedance_p_value(maximum, null_maxima),
         "worst_focal_window": float(worst_window),
         "worst_focal_channel_index": float(worst_channel),
         "worst_focal_target_hz": worst_target,
@@ -1706,13 +1721,13 @@ def _nearest_matched_null_index(
     return None
 
 
-def probe_preservation(
+def probe_deviations_db(
     freqs: Sequence[float],
     psd_before: np.ndarray,
     psd_after: np.ndarray,
     probe: Probe,
-) -> dict[str, float]:
-    """Worst channel-by-frequency power change at the injected sinusoids."""
+) -> np.ndarray:
+    """Every channel-by-tone power change at the injected sinusoids, in decibels."""
     frequency_array = np.asarray(freqs, dtype=float)
     before = np.atleast_2d(np.asarray(psd_before, dtype=float))
     after = np.atleast_2d(np.asarray(psd_after, dtype=float))
@@ -1723,6 +1738,17 @@ def probe_preservation(
         index = int(np.argmin(np.abs(frequency_array - frequency)))
         ratios = after[:, index] / before[:, index]
         deviations.extend(10.0 * np.log10(np.maximum(ratios, np.finfo(float).tiny)))
+    return np.asarray(deviations, dtype=float)
+
+
+def probe_preservation(
+    freqs: Sequence[float],
+    psd_before: np.ndarray,
+    psd_after: np.ndarray,
+    probe: Probe,
+) -> dict[str, float]:
+    """Worst channel-by-frequency power change at the injected sinusoids."""
+    deviations = probe_deviations_db(freqs, psd_before, psd_after, probe)
     return {
         "max_probe_deviation_db": float(np.max(np.abs(deviations))),
         "min_probe_ratio": float(np.min(10 ** (np.asarray(deviations) / 10.0))),
@@ -1742,6 +1768,43 @@ def sinusoid_waveform(
     for frequency in frequencies_hz:
         signal += amplitude_v * np.sin(2 * np.pi * frequency * time_array + frequency)
     return signal
+
+
+def measured_band_attenuation(
+    freqs: Sequence[float],
+    psd_before: np.ndarray,
+    psd_after: np.ndarray,
+    *,
+    band_hz: tuple[float, float] = (28.0, 95.0),
+) -> dict[str, float]:
+    """Share of the analysis band a broadband probe actually loses to the removal.
+
+    ``removed_band_fraction`` counts the widths the plan asked for, which is bookkeeping:
+    it cannot see a hole the plan did not predict, and it charges for coverage the
+    transform may not have used. This measures the operator instead -- an independent
+    broadband signal through the identical transform -- so what is reported is what a
+    signal occupying the band would actually have lost.
+
+    Reported, never gated. How much spectrum a removal may cost is a scientific judgement
+    about the artifacts at a given site, not something a threshold here can settle.
+    """
+    frequency_array = np.asarray(freqs, dtype=float)
+    before = np.atleast_2d(np.asarray(psd_before, dtype=float))
+    after = np.atleast_2d(np.asarray(psd_after, dtype=float))
+    if before.shape != after.shape or before.shape[-1] != frequency_array.size:
+        raise ValueError("Probe PSD arrays must match each other and the frequency grid.")
+    band = (frequency_array >= band_hz[0]) & (frequency_array <= band_hz[1])
+    if not np.any(band):
+        raise ValueError("The analysis band contains no frequency bins.")
+    loss_db = np.mean(before[:, band] - after[:, band], axis=0)
+    band_bin_count = int(np.count_nonzero(band))
+    return {
+        "measured_band_attenuated_1db": float(np.mean(loss_db > 1.0)),
+        "measured_band_attenuated_3db": float(np.mean(loss_db > 3.0)),
+        # A share of bins can only land on multiples of this, so a budget expressed as a
+        # continuous fraction needs the same half-bin allowance the planned figure had.
+        "measured_band_bin_size": 1.0 / band_bin_count,
+    }
 
 
 def in_band_probe_frequencies(
@@ -1856,17 +1919,40 @@ def nonline_change_db(
     psd_before: np.ndarray,
     psd_after: np.ndarray,
     targets: Sequence[float],
+    notch_widths_hz: Sequence[float] | float,
     *,
-    guard_hz: float = 0.4,
     band_hz: tuple[float, float] = (28.0, 95.0),
 ) -> np.ndarray:
-    """Per-channel change in mean power across the band, ignoring the removed lines."""
+    """Per-channel change in mean power across the band, ignoring only the removed bins.
+
+    The excluded span is exactly the one :func:`removed_band_fraction` counts as touched --
+    ``+/- width/2`` around each target -- extended by half a frequency bin so that every
+    bin *overlapping* the removed span is excluded and no bin outside it is.
+
+    It used to take a scalar guard, and callers passed the largest width in the whole plan,
+    applied to every target. Since ``spectrum_fit`` only reaches ``width/2``, that excluded
+    each removal by more than a factor of two and excluded its neighbours by far more,
+    which left the criterion unable to fail: across 90 recordings the worst change measured
+    1.6e-6 dB against a 0.2 dB threshold, five orders of margin, because every bin the
+    transform could reach had been masked out of the average. What survives outside a
+    removal is exactly what this is supposed to be watching.
+    """
     frequency_array = np.asarray(freqs, dtype=float)
     before = np.asarray(psd_before, dtype=float)
     after = np.asarray(psd_after, dtype=float)
+    target_array = np.asarray(targets, dtype=float)
+    widths = np.broadcast_to(np.asarray(notch_widths_hz, dtype=float), target_array.shape)
+    if target_array.ndim != 1:
+        raise ValueError("targets must be a one-dimensional sequence.")
+    if np.any(widths <= 0.0) or not np.all(np.isfinite(widths)):
+        raise ValueError("notch widths must be finite and positive.")
+    if frequency_array.size < 2:
+        raise ValueError("The frequency grid must contain at least two bins.")
+
+    half_bin_hz = float(frequency_array[1] - frequency_array[0]) / 2.0
     mask = (frequency_array >= band_hz[0]) & (frequency_array <= band_hz[1])
-    for frequency in targets:
-        mask &= np.abs(frequency_array - frequency) > guard_hz
+    for frequency, width in zip(target_array, widths):
+        mask &= np.abs(frequency_array - frequency) > width / 2.0 + half_bin_hz
     if not np.any(mask):
         raise ValueError("No frequency bin remains outside the removed lines.")
     return 10.0 * np.log10(after[..., mask].mean(axis=-1) / before[..., mask].mean(axis=-1))

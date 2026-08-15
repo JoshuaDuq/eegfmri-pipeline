@@ -39,7 +39,10 @@ def setup_cardiac_gaps(subparsers: argparse._SubParsersAction) -> argparse.Argum
         help="Restrict to these subjects (default: every paired recording found)",
     )
     parser.add_argument(
-        "--config",
+        # Not --config: the top-level CLI strips that out of argv before argparse runs, so
+        # a subcommand declaring it advertises an option it can never be given.
+        "--workflow-config",
+        dest="config",
         type=str,
         default=None,
         help="Workflow YAML (default: studies/pain_study/scripts/cardiac_gaps/config.yaml)",

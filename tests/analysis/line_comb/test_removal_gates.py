@@ -38,66 +38,58 @@ def _metrics(**overrides):
         "intrinsic_energy_ratio": 0.95,
         "removed_band_fraction": 0.12,
         "base_removed_band_fraction": 0.12,
+        "measured_band_attenuated_1db": 0.12,
         "base_band_fraction_bin_size": 1.0 / 1810.0,
         "band_fraction_bin_size": 1.0 / 1810.0,
+        "measured_band_bin_size": 1.0 / 1810.0,
     }
     base.update(overrides)
     return base
 
 
-def test_a_run_with_a_line_still_standing_does_not_pass():
-    """The 90-run manifest had a worst residual of +13.90 dB while every gate passed."""
-    gate = lr.PreservationGate()
-    metrics = _metrics(median_residual_prominence_db=-5.0, residual_excess_db=13.9)
-    assert not gate.evaluate(metrics)[
-        "lines_suppressed"
-    ], "a line 13.9 dB above background survived and the gate called it suppressed"
+def test_a_line_its_own_controls_never_reach_is_a_discovery():
+    """The 90-run manifest had a worst residual of +13.90 dB while every gate passed.
+
+    That gate compared the excess against a decibel cushion. The decision is now the exact
+    probability that a matched control search reaches the observation, so a line standing
+    where the controls never go is a discovery whatever its size in decibels.
+    """
+    controls = np.linspace(-8.0, -3.0, 40)
+
+    p_value = lr.null_exceedance_p_value(13.9, controls)
+
+    assert p_value == pytest.approx(1 / 41)
+    assert not lr.residual_randomization_verdict([p_value])["passed"]
 
 
-def test_the_median_alone_cannot_carry_the_line_gate():
-    """Half the targets above threshold is not 'lines suppressed'."""
-    gate = lr.PreservationGate()
-    assert not gate.passed(_metrics(residual_excess_db=3.47))
+def test_a_residual_inside_its_control_spread_is_not_a_discovery():
+    controls = np.linspace(-8.0, 4.0, 40)
+
+    p_value = lr.null_exceedance_p_value(-1.0, controls)
+
+    assert p_value > 0.05
+    assert lr.residual_randomization_verdict([p_value])["passed"]
+
+
+def test_one_recording_is_decided_by_its_own_exact_test():
+    """Benjamini-Hochberg over a single recording reduces to p <= alpha.
+
+    A lone continuous acquisition has no cohort to borrow strength from, and must still be
+    decidable.
+    """
+    assert not lr.residual_randomization_verdict([0.02])["passed"]
+    assert lr.residual_randomization_verdict([0.20])["passed"]
+
+
+def test_the_cohort_tolerates_the_null_rate_it_creates():
+    """About one recording in twenty exceeds by construction; that is not a failure."""
+    null_like = np.linspace(0.05, 0.95, 90)
+
+    assert lr.residual_randomization_verdict(null_like)["passed"]
 
 
 def test_a_clean_run_still_passes():
     assert lr.PreservationGate().passed(_metrics(residual_excess_db=-2.0))
-
-
-@pytest.mark.parametrize(
-    ("metric", "verdict"),
-    (
-        ("study_residual_excess_db", "study_lines_suppressed"),
-        ("study_focal_residual_excess_db", "study_no_focal_residual"),
-        ("study_max_probe_deviation_db", "study_sinusoids_preserved"),
-        ("study_max_nonline_change_db", "study_spectrum_preserved"),
-    ),
-)
-def test_each_study_window_endpoint_can_fail_independently(metric, verdict):
-    limits = {
-        "study_residual_excess_db": 1.01,
-        "study_focal_residual_excess_db": 1.01,
-        "study_max_probe_deviation_db": 0.51,
-        "study_max_nonline_change_db": 0.21,
-    }
-
-    decisions = lr.PreservationGate().evaluate(
-        _metrics(residual_excess_db=-2.0, **{metric: limits[metric]})
-    )
-
-    assert not decisions[verdict]
-    assert sum(not passed for passed in decisions.values()) == 1
-
-
-def test_nominal_rate_f_detections_are_descriptive_not_an_all_runs_gate():
-    decisions = lr.PreservationGate().evaluate(
-        _metrics(
-            residual_excess_db=-2.0,
-            study_significant_focal_residual_count=1,
-        )
-    )
-
-    assert all(decisions.values())
 
 
 def test_the_transient_gate_reads_the_measurement_that_can_fail():
@@ -216,17 +208,6 @@ def test_a_real_survivor_still_beats_the_control():
     assert result["residual_excess_db"] > 15.0
 
 
-def test_one_channel_block_residual_above_its_matched_control_fails_the_gate():
-    gate = lr.PreservationGate()
-
-    assert not gate.passed(
-        _metrics(
-            residual_excess_db=-2.0,
-            focal_residual_excess_db=12.0,
-        )
-    )
-
-
 def test_large_focal_maximum_below_its_matched_control_passes() -> None:
     gate = lr.PreservationGate()
 
@@ -338,45 +319,6 @@ def test_boundary_discontinuity_is_measured_on_the_filter_correction():
     ratio = lr.boundary_discontinuity_ratio(original, cleaned, boundaries=[500])
 
     assert ratio > 10.0
-
-
-def test_only_total_spectral_cost_is_a_preservation_criterion():
-    gate = lr.PreservationGate()
-
-    assert gate.passed(
-        _metrics(
-            residual_excess_db=-1.0,
-            base_removed_band_fraction=0.50,
-            removed_band_fraction=0.17,
-        )
-    )
-    assert not gate.passed(
-        _metrics(
-            residual_excess_db=-1.0,
-            base_removed_band_fraction=0.14,
-            removed_band_fraction=0.19,
-        )
-    )
-
-
-def test_total_band_budget_rounds_to_the_nearest_measurable_fourier_bin():
-    gate = lr.PreservationGate()
-    bin_size = 1.0 / 1810.0
-
-    assert gate.evaluate(
-        _metrics(
-            residual_excess_db=-1.0,
-            removed_band_fraction=326.0 / 1810.0,
-            band_fraction_bin_size=bin_size,
-        )
-    )["band_mostly_untouched"]
-    assert not gate.evaluate(
-        _metrics(
-            residual_excess_db=-1.0,
-            removed_band_fraction=327.0 / 1810.0,
-            band_fraction_bin_size=bin_size,
-        )
-    )["band_mostly_untouched"]
 
 
 def test_matched_null_uses_repeated_complete_target_sized_searches():

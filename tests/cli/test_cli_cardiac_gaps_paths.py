@@ -43,7 +43,8 @@ def test_path_options_reach_the_workflow_as_paths(monkeypatch: pytest.MonkeyPatc
             "/tmp/report.tsv",
             "--output-root",
             "/tmp/corrected",
-            "--config",
+            # Not --config: the top-level CLI consumes that one before argparse sees it.
+            "--workflow-config",
             "/tmp/config.yaml",
             "--uncorrected-root",
             "/tmp/step1",
