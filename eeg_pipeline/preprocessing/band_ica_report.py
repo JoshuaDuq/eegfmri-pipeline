@@ -16,6 +16,7 @@ import pandas as pd
 
 from eeg_pipeline.preprocessing.ica_exclusions import read_ica_with_reviewed_exclusions
 from eeg_pipeline.preprocessing.report.build_record import save_subject_report
+from eeg_pipeline.preprocessing.report.filtering import NOTCH_EXCLUSION_HALF_WIDTH_HZ
 from eeg_pipeline.preprocessing.report.organize import (
     drop_superseded_mne_ica_panels,
     open_subject_report,
@@ -215,6 +216,18 @@ class BandIcaReportSettings:
     comparisons: tuple[ConditionComparison, ...] = ()
     run_iclabel: bool = False
     tfr_enabled: bool = True
+    #: Frequencies a notch filter was applied at, and how wide to treat each as being.
+    #:
+    #: Shaded on the source spectrum so the trough it leaves is marked as the filter
+    #: rather than drawn as data. The sensor-spectra section has always excluded these
+    #: bands from its fit and marked them; this panel sat beside it drawing an unlabelled
+    #: 32 dB hole. Empty when no notch was applied, which is the whole of the default.
+    #:
+    #: Not read from this config block: the notch belongs to ``preprocessing``, and the
+    #: half-width to ``report.thresholds``. The pipeline injects both, so the two panels
+    #: cannot end up marking different bands.
+    notch_frequencies: tuple[float, ...] = ()
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ
     #: Bands the authoritative per-component review draws a dossier over.
     #:
     #: One by default. Every extra band redraws the same decomposition: identical
@@ -520,7 +533,7 @@ def _source_diagnostics_from_sources(
     else:
         tfr_frequencies, tfr_times, tfr, tfr_counts = None, None, None, None
 
-    activity, activity_times, variance = _epoch_activity(sources)
+    activity, activity_times, variance = _epoch_activity(sources, settings=settings)
     return SourceDiagnostics(
         frequencies=frequencies,
         power_db=power_db,
@@ -545,19 +558,35 @@ _ACTIVITY_DISPLAY_COLUMNS = 300
 
 def _epoch_activity(
     sources: mne.BaseEpochs,
+    *,
+    settings: BandIcaReportSettings,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per-epoch component activation for display, and each epoch's variance.
 
+    Cut to the same window the time-frequency panels are drawn over. These sit directly
+    above and below those panels on one slide, and this pipeline epochs well outside the
+    displayed interval to give the tapers room -- so drawn over the whole epoch the two
+    rows carried different time axes, and a reviewer lining a burst up against the map
+    above it was reading a two-second offset.
+
     Variance is computed at the full sampling rate, before decimation: it is a
     measurement rather than a picture, and decimating first would report the variance of
-    a subsampled signal.
+    a subsampled signal. It is computed after the window is applied, so it describes the
+    interval the panel beside it draws.
     """
-    data = sources.get_data(copy=False)
+    times = np.asarray(sources.times, dtype=float)
+    inside = (times >= settings.time_min_s) & (times <= settings.time_max_s)
+    if not inside.any():
+        # A paradigm whose epochs fall outside the configured display window. Drawing the
+        # whole epoch is better than drawing nothing, and with no time-frequency panel to
+        # sit beside there is no second axis for it to disagree with.
+        inside = np.ones_like(times, dtype=bool)
+    data = sources.get_data(copy=False)[:, :, inside]
     # (epochs, components, times) as MNE returns it, to (components, epochs, times).
     activity = np.swapaxes(data, 0, 1)
     variance = activity.var(axis=2)
     step = max(1, activity.shape[2] // _ACTIVITY_DISPLAY_COLUMNS)
-    return activity[:, :, ::step], sources.times[::step], variance
+    return activity[:, :, ::step], times[inside][::step], variance
 
 
 #: Display frequencies per DPSS smoothing half-width.
@@ -1100,6 +1129,8 @@ def _plot_source_spectrum(
     component: int,
     band: BandIcaDefinition,
     title: str,
+    notch_frequencies: Sequence[float] = (),
+    notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
 ) -> None:
     """Plot one component's spectrum against the distribution across all components.
 
@@ -1140,6 +1171,26 @@ def _plot_source_spectrum(
         fontsize=6.5,
         color=PRIMARY_COLOR,
     )
+    # Shaded before the axis is finalised so the band sits behind the traces. A notch
+    # leaves a trough tens of decibels deep, and unmarked it is the filter drawn as
+    # though it were the component's own spectrum.
+    labelled = False
+    for frequency in notch_frequencies:
+        low = max(float(frequency) - notch_half_width_hz, band.fmin)
+        high = min(float(frequency) + notch_half_width_hz, band.fmax)
+        if high <= low:
+            continue
+        axis.axvspan(
+            low,
+            high,
+            color=GUIDE_COLOR,
+            alpha=0.18,
+            linewidth=0,
+            zorder=0,
+            label=None if labelled else "Notched (filter, not data)",
+        )
+        labelled = True
+
     axis.set(title=title, xlabel="Frequency (Hz)", ylabel="Power (dB)")
     _scale_frequency_axis(axis, low=band.fmin, high=band.fmax, vertical=False)
     axis.set_xlim(band.fmin, band.fmax)
@@ -1332,7 +1383,12 @@ def _plot_dossier_summary(
         power_db=review.diagnostics.power_db,
         component=component,
         band=review.band,
-        title="Band-limited source spectrum",
+        # Not "band-limited". The review draws one band spanning the analysis range, so
+        # nothing is limited and the word promised a restriction that is not there. It
+        # was accurate when this panel appeared once per narrow band.
+        title="Source spectrum against all components",
+        notch_frequencies=settings.notch_frequencies,
+        notch_half_width_hz=settings.notch_half_width_hz,
     )
     if not review.diagnostics.has_tfr:
         return
@@ -1387,6 +1443,10 @@ def _plot_dossier_activity(
     axes[1].axvline(0.0, color="black", linestyle="--", linewidth=0.75)
     axes[1].axhline(0.0, color="0.7", linewidth=0.6)
     axes[1].set(title="Mean across epochs", xlabel="Time (s)", ylabel="Activation (a.u.)")
+    # Matched to the meshes either side of it. A line plot is given margins and an image
+    # is not, so left to itself this panel sat a few per cent wider than the maps it is
+    # read against -- which is the alignment the shared window was for.
+    axes[1].set_xlim(float(times[0]), float(times[-1]))
 
     axes[2].plot(epochs, variance, color=PRIMARY_COLOR, linewidth=1.0, marker="o", markersize=2.0)
     # The median is the reference the panel is read against: a component carried by a few
@@ -1408,6 +1468,29 @@ def _plot_dossier_activity(
     axes[2].set(title="Variance per epoch", xlabel="Epoch", ylabel="Variance (a.u.²)")
     if variance.size and float(np.min(variance)) > 0.0:
         axes[2].set_yscale("log")
+        # Bounded three decades below the median, and the count of what falls past that
+        # stated rather than the axis quietly swallowing it.
+        #
+        # An epoch where the component is absent altogether reads thirteen decades down --
+        # on sub-0001 four epochs of fifty-seven did, the component having been
+        # interpolated away by epoch repair -- and an axis stretched to reach them
+        # compresses every epoch that is merely large into the top decade, which is the
+        # comparison this panel exists to make.
+        floor = median / 1000.0 if median > 0.0 else None
+        if floor is not None and float(np.min(variance)) < floor:
+            axes[2].set_ylim(bottom=floor)
+            below = int(np.count_nonzero(variance < floor))
+            axes[2].annotate(
+                f"{below} epoch{'s' if below != 1 else ''} below the axis",
+                xy=(0.0, 0.0),
+                xycoords="axes fraction",
+                xytext=(3, 3),
+                textcoords="offset points",
+                ha="left",
+                va="bottom",
+                fontsize=6,
+                color=FLAG_COLOR,
+            )
 
 
 def _comparison_titles(result: ConditionTfrResult) -> tuple[str, str, str]:
@@ -1757,27 +1840,45 @@ def _review_context_html(
     *,
     times: np.ndarray | None = None,
 ) -> str:
+    activation = (
+        "<p>The middle row is where the component was active rather than what it looks "
+        "like. <em>Activation by epoch</em> draws every epoch as a row, <em>Mean across "
+        "epochs</em> the average of them, and <em>Variance per epoch</em> each epoch's "
+        "own contribution against the median of the others. Read it before accepting a "
+        "label: a component the classifier calls brain but that lives in four epochs is "
+        "an electrode that moved, and a component called an artifact that is present "
+        "throughout is a decision worth reopening. Nothing else on this slide can "
+        "distinguish those.</p>"
+    )
     if not settings.tfr_enabled:
         return (
             f"<p><strong>{html.escape(analysis_status)}</strong>. Each slide keeps one "
-            "standard ICA component's topography and band-limited Welch spectrum "
-            "together.</p>"
-            "<p>Event-locked time-frequency power is disabled. Continuous and "
+            "standard ICA component's topography, spectrum against the rest of the "
+            "decomposition, and per-epoch activation together.</p>"
+            + activation
+            + "<p>Event-locked time-frequency power is disabled. Continuous and "
             "resting-state recordings are segmented into fixed-length epochs with no "
             "event and no pre-stimulus interval, so a baseline-relative TFR would have "
-            "no baseline to be relative to. The spectrum and the topography are the "
-            "interpretable component evidence here.</p>"
+            "no baseline to be relative to.</p>"
         )
     return (
         f"<p><strong>{html.escape(analysis_status)}</strong>. Each slide keeps one "
-        "standard ICA component's topography, band-limited spectrum, grand-average TFR, "
-        "and configured condition comparisons together.</p>"
-        f"<p>{html.escape(_tfr_configuration_title(band, settings, times=times))}. "
+        "standard ICA component's topography, its spectrum against the rest of the "
+        "decomposition, its per-epoch activation, the grand-average TFR and the "
+        "configured condition comparisons together.</p>"
+        + activation
+        + f"<p>{html.escape(_tfr_configuration_title(band, settings, times=times))}. "
         "The grand average "
         "and every condition share one symmetric color scale, held fixed across all "
         "components, so a panel that looks stronger than its neighbour is stronger. Each "
         "difference uses its own symmetric zero-centred scale, because a difference of "
-        "two baseline-relative maps routinely spans a wider range than either map.</p>"
+        "two baseline-relative maps routinely spans a wider range than either map. Every "
+        "panel on the slide is drawn over the same interval, so a burst in the activation "
+        "row sits under the same instant in the maps beneath it.</p>"
+        "<p>A shaded band on the spectrum marks a frequency a notch filter removed. The "
+        "trough inside it is the filter and not the component; the time-frequency panels "
+        "are unaffected, because the notch attenuates the baseline and the response "
+        "equally and the ratio divides it out.</p>"
     )
 
 
@@ -1786,11 +1887,11 @@ def _review_guide_html(
     analysis_status: str,
 ) -> str:
     return (
-        "<p><strong>Authoritative manual-review components.</strong> Component numbers in "
-        "these sections all refer to the same standard broadband ICA model used for "
-        "artifact removal.</p>"
-        "<p>The independently fitted band-specific ICAs remain exploratory: their component "
-        "numbers do not correspond numerically across bands or to the standard ICA.</p>"
+        "<p><strong>Authoritative manual-review components.</strong> Every component "
+        "number here refers to the standard broadband ICA model used for artifact "
+        "removal.</p>"
+        "<p>The separately fitted band-specific ICAs remain exploratory, and their "
+        "component numbers correspond neither to each other nor to this decomposition.</p>"
         "<p>The stacked bar under each topography is the full ICLabel class distribution, "
         "not only the winning class. A bar split between two classes marks a component "
         "whose classification is uncertain and that deserves a decision on the evidence "

@@ -422,7 +422,7 @@ def test_review_guide_makes_empty_comparison_configuration_explicit() -> None:
     )
 
     assert "No condition comparisons configured" in guide
-    assert "do not correspond numerically" in guide
+    assert "correspond neither to each other nor to this decomposition" in guide
 
 
 def test_component_diagnostics_use_only_requested_frequency_range() -> None:
@@ -643,7 +643,7 @@ def test_standard_component_dossier_keeps_all_evidence_on_one_slide() -> None:
     first_titles = [axis.get_title() for axis in figures[0].axes]
     assert first_titles[:3] == [
         "ICA000 topomap",
-        "Band-limited source spectrum",
+        "Source spectrum against all components",
         "Grand average",
     ]
     assert any("Painful" in title and "n=12" in title for title in first_titles)
@@ -1836,7 +1836,7 @@ def test_epoch_variance_is_measured_before_the_display_decimation() -> None:
         data, mne.create_info(["I0", "I1"], 100.0, "misc"), verbose="ERROR"
     )
 
-    activity, times, variance = _epoch_activity(sources)
+    activity, times, variance = _epoch_activity(sources, settings=BandIcaReportSettings())
 
     assert activity.shape[:2] == (2, 3)
     assert activity.shape[2] <= _ACTIVITY_DISPLAY_COLUMNS + 1
@@ -1897,3 +1897,154 @@ def test_the_configuration_title_still_renders_without_epoch_times() -> None:
 
     assert realized_baseline_window(None, settings) is None
     assert "baseline -5–-1.5 s" in _tfr_configuration_title(settings.review_bands[0], settings)
+
+
+def test_the_activation_row_is_drawn_over_the_same_window_as_the_maps() -> None:
+    """They sit above and below each other on one slide.
+
+    This pipeline epochs from -7 to +15 s to give the tapers room while the maps are
+    displayed over -5 to +14.4, so drawn over the whole epoch the activation row carried a
+    different time axis and a reviewer lining a burst up against the map beneath it was
+    reading a two-second offset.
+    """
+    import mne
+
+    from eeg_pipeline.preprocessing.band_ica_report import _epoch_activity
+
+    settings = BandIcaReportSettings()
+    sfreq = 100.0
+    times = np.arange(-7.0, 15.0, 1 / sfreq)
+    sources = mne.EpochsArray(
+        np.random.default_rng(0).normal(0, 1, (4, 2, times.size)),
+        mne.create_info(["I0", "I1"], sfreq, "misc"),
+        tmin=-7.0,
+        verbose="ERROR",
+    )
+
+    _, activity_times, _ = _epoch_activity(sources, settings=settings)
+
+    assert activity_times.min() >= settings.time_min_s
+    assert activity_times.max() <= settings.time_max_s
+    # The epoch really did extend past the window, so the crop did something.
+    assert sources.times.min() < settings.time_min_s
+
+
+def test_the_activation_row_survives_epochs_outside_the_display_window() -> None:
+    """A paradigm whose epochs fall outside it gets the whole epoch rather than nothing."""
+    import mne
+
+    from eeg_pipeline.preprocessing.band_ica_report import _epoch_activity
+
+    settings = BandIcaReportSettings()
+    sfreq = 100.0
+    sources = mne.EpochsArray(
+        np.random.default_rng(0).normal(0, 1, (4, 2, 200)),
+        mne.create_info(["I0", "I1"], sfreq, "misc"),
+        tmin=60.0,
+        verbose="ERROR",
+    )
+
+    activity, activity_times, variance = _epoch_activity(sources, settings=settings)
+
+    assert activity.shape[1] == 4
+    assert activity_times.size and variance.shape == (2, 4)
+
+
+def test_the_source_spectrum_marks_a_notched_band_as_filter() -> None:
+    """A notch leaves a trough tens of decibels deep. Unmarked it is the filter drawn as
+    though it were the component's own spectrum, in the one panel beside a section that
+    has always masked its own notch."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        BandIcaDefinition,
+        _plot_source_spectrum,
+    )
+
+    figure, axis = plt.subplots()
+    _plot_source_spectrum(
+        axis,
+        frequencies=np.linspace(1.0, 100.0, 60),
+        power_db=np.random.default_rng(0).normal(-20, 2, (3, 60)),
+        component=0,
+        band=BandIcaDefinition("b", "Broadband 1–100 Hz", 1.0, 100.0),
+        title="Source spectrum against all components",
+        notch_frequencies=(60.0,),
+        notch_half_width_hz=2.0,
+    )
+
+    labels = [text.get_text() for text in axis.get_legend().get_texts()]
+    assert any("Notched" in label for label in labels)
+    plt.close(figure)
+
+
+def test_the_source_spectrum_shades_nothing_when_no_notch_was_applied() -> None:
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        BandIcaDefinition,
+        _plot_source_spectrum,
+    )
+
+    figure, axis = plt.subplots()
+    _plot_source_spectrum(
+        axis,
+        frequencies=np.linspace(1.0, 100.0, 60),
+        power_db=np.random.default_rng(0).normal(-20, 2, (3, 60)),
+        component=0,
+        band=BandIcaDefinition("b", "Broadband 1–100 Hz", 1.0, 100.0),
+        title="Source spectrum against all components",
+    )
+
+    labels = [text.get_text() for text in axis.get_legend().get_texts()]
+    assert not any("Notched" in label for label in labels)
+    plt.close(figure)
+
+
+def test_the_review_context_describes_the_activation_row() -> None:
+    """The panels that let a reviewer audit the classifier were on the slide with nothing
+    saying what they were for."""
+    from eeg_pipeline.preprocessing.band_ica_report import _review_context_html
+
+    settings = BandIcaReportSettings()
+    context = _review_context_html(settings.review_bands[0], settings, "Finalized")
+
+    for phrase in ("Activation by epoch", "Variance per epoch", "same interval"):
+        assert phrase in context
+    assert "band-limited" not in context.lower()
+
+
+def test_the_variance_panel_is_bounded_and_says_what_it_pushed_off() -> None:
+    """An epoch where the component is absent reads many decades down -- on sub-0001 four
+    of fifty-seven did -- and an axis stretched to reach them compresses every epoch that
+    is merely large into the top decade, which is the comparison the panel exists for."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        BandIcaDefinition,
+        BandReviewData,
+        _plot_dossier_activity,
+    )
+
+    rng = np.random.default_rng(0)
+    variance = np.abs(rng.normal(1.0, 0.2, (1, 20)))
+    variance[0, 3] = 1e-15
+    variance[0, 9] = 3e-15
+    diagnostics = _dossier_diagnostics(components=1, epochs=20, times=30)
+    diagnostics = type(diagnostics)(
+        **{**vars(diagnostics), "epoch_variance": variance}
+    )
+    review = BandReviewData(
+        band=BandIcaDefinition("b", "Broadband 1–100 Hz", 1.0, 100.0),
+        diagnostics=diagnostics,
+    )
+
+    figure, axes = plt.subplots(1, 3)
+    _plot_dossier_activity(figure=figure, axes=axes, review=review, component=0)
+
+    axis = axes[2]
+    assert axis.get_yscale() == "log"
+    # The two absent epochs do not set the bottom of the axis.
+    assert axis.get_ylim()[0] > 1e-10
+    assert any("below the axis" in text.get_text() for text in axis.texts)
+    plt.close(figure)

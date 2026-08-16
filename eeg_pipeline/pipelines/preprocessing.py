@@ -1273,13 +1273,10 @@ class PreprocessingPipeline(PipelineBase):
     ) -> None:
         """Append exploratory frequency-specific ICA diagnostics to subject reports."""
         from eeg_pipeline.preprocessing.band_ica_report import (
-            BandIcaReportSettings,
             generate_band_ica_report,
         )
 
-        settings = BandIcaReportSettings.from_mapping(
-            self.config.get("ica.band_specific_report", {})
-        )
+        settings = self._band_ica_settings()
         random_state = int(self.config.get("project.random_state", 42))
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
@@ -1346,14 +1343,11 @@ class PreprocessingPipeline(PipelineBase):
     ) -> None:
         """Append pre-review comparisons from all pre-ICA task epochs."""
         from eeg_pipeline.preprocessing.band_ica_report import (
-            BandIcaReportSettings,
             append_condition_tfr_report,
         )
         from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
 
-        settings = BandIcaReportSettings.from_mapping(
-            self.config.get("ica.band_specific_report", {})
-        )
+        settings = self._band_ica_settings()
         conditions = self._resolve_epoch_conditions(task)
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
@@ -2281,13 +2275,10 @@ class PreprocessingPipeline(PipelineBase):
     ) -> None:
         """Append clean-trial metadata comparisons to band-specific ICA reports."""
         from eeg_pipeline.preprocessing.band_ica_report import (
-            BandIcaReportSettings,
             append_condition_tfr_report,
         )
 
-        settings = BandIcaReportSettings.from_mapping(
-            self.config.get("ica.band_specific_report", {})
-        )
+        settings = self._band_ica_settings()
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
             clean_epochs_paths = sorted(
@@ -2335,6 +2326,36 @@ class PreprocessingPipeline(PipelineBase):
                     settings=settings,
                     analysis_status="Finalized — retained epochs",
                 )
+
+    def _band_ica_settings(self):
+        """Band-ICA report settings, with the notch the pipeline actually applied.
+
+        The notch lives under ``preprocessing`` and the width to treat it as having under
+        ``report.thresholds``, so neither reaches ``BandIcaReportSettings.from_mapping``,
+        which sees one config block. Injected here, in the one place the settings are
+        built, so the component spectrum and the sensor spectra cannot end up marking
+        different bands as filtered.
+        """
+        from dataclasses import replace
+
+        from eeg_pipeline.preprocessing.band_ica_report import BandIcaReportSettings
+
+        settings = BandIcaReportSettings.from_mapping(
+            self.config.get("ica.band_specific_report", {})
+        )
+        notch = self.config.get("preprocessing.notch_freq", None)
+        if notch is None:
+            return settings
+        frequencies = tuple(float(value) for value in (notch if isinstance(notch, (list, tuple)) else [notch]))
+        half_width = self.config.get(
+            "report.thresholds.notch_exclusion_half_width_hz",
+            settings.notch_half_width_hz,
+        )
+        return replace(
+            settings,
+            notch_frequencies=frequencies,
+            notch_half_width_hz=float(half_width),
+        )
 
     def _resolve_epoch_conditions(self, task: Optional[str] = None) -> list[str] | None:
         conditions = self.config.get("epochs.conditions")
