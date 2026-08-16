@@ -106,6 +106,21 @@ def _preservation_measurements(*, reliability, alpha) -> dict:
         measurements["split_half_window_end_s"] = float(window_end)
     if alpha is not None:
         measurements["alpha_prominence_db"] = float(alpha.prominence_db)
+        # The bar that prominence had to clear, and whether it did.
+        #
+        # The prominence is the largest excess over the fitted background anywhere in the
+        # band, so it is positive on a spectrum with no rhythm at all: the maximum of many
+        # noisy residuals sits above zero by construction. What separates a rhythm from
+        # that is whether it beat the level the same search would reach by chance, which
+        # ``is_resolvable`` already tests and the cohort already respects -- but the
+        # landing panel headlined the raw prominence alone. On this cohort 6 of 15
+        # participants have a peak that does not clear its bar, and one of them reads
+        # 16.0 dB against a 10.2 dB background scatter, which is a reassuring number in
+        # the one section whose job is to notice that the data cannot reassure anybody.
+        measurements["alpha_peak_resolvable"] = bool(alpha.is_resolvable())
+        bar_db = alpha.resolvable_bar_db
+        if bar_db is not None:
+            measurements["alpha_resolvable_bar_db"] = float(bar_db)
     return measurements
 
 

@@ -392,6 +392,21 @@ class PosteriorAlpha:
         )
         return self.prominence_db > threshold * self.background_residual_db
 
+    @property
+    def resolvable_bar_db(self) -> float | None:
+        """Prominence, in dB, that this band's own noise reaches by chance.
+
+        The level :meth:`is_resolvable` compares against, exposed so that a summary can
+        print the comparison rather than the verdict alone. ``None`` where the band is too
+        narrow to apply the extreme-value argument or the background has no scatter to
+        scale it, which are the two cases the test handles separately.
+        """
+        if not self.n_search_bins or self.background_residual_db <= 0.0:
+            return None
+        return float(
+            resolvable_prominence_threshold(self.n_search_bins) * self.background_residual_db
+        )
+
 
 #: Separation below which two local maxima are one peak with a notch in it.
 #:

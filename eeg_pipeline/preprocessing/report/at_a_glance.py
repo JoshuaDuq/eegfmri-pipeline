@@ -60,6 +60,17 @@ def _milliseconds(value: Any) -> str:
     return f"{float(value):.0f}"
 
 
+def _yes_no(value: Any) -> str:
+    """Render a flag as a word, so it cannot be misread as a measurement.
+
+    A bool is an ``int`` in Python, so without this it would reach the table as "1" and
+    sit in a column of measurements looking like one.
+    """
+    if not isinstance(value, bool):
+        raise TypeError("A yes/no headline needs a boolean.")
+    return "yes" if value else "no"
+
+
 @dataclass(frozen=True)
 class Headline:
     """One measurement worth meeting before the document is scrolled."""
@@ -139,8 +150,26 @@ HEADLINES: tuple[Headline, ...] = (
         _decimal,
         "Signal preservation",
     ),
+    # The prominence, then the level it had to beat, then whether it did.
+    #
+    # The prominence is the largest excess over the fitted background anywhere in the
+    # band, and the largest of many noisy residuals is above zero whether or not a rhythm
+    # is there. Alone it reads as evidence of a surviving rhythm on a recording that has
+    # none, which is the one direction this section must not fail in.
     Headline(
         "alpha_prominence_db", "Posterior alpha prominence (dB)", _decimal, "Signal preservation"
+    ),
+    Headline(
+        "alpha_resolvable_bar_db",
+        "…level chance alone reaches (dB)",
+        _decimal,
+        "Signal preservation",
+    ),
+    Headline(
+        "alpha_peak_resolvable",
+        "…peak clears it",
+        _yes_no,
+        "Signal preservation",
     ),
 )
 
@@ -175,9 +204,16 @@ def _is_reportable(value: Any) -> bool:
     resolve — an empty band, a division by a zero count. Printed, "nan" sits in the table
     looking like a value that was measured, so it is dropped and the row disappears with
     it, which is the same thing the panel does for a stage that never ran.
+
+    Booleans are reportable, but only through a formatter that spells them: a bool is an
+    ``int`` in Python, so one rendered by a numeric formatter would print as "1" beside
+    the measurements. :func:`_yes_no` is that formatter and raises on anything else, so a
+    flag given a numeric formatter by mistake fails rather than lies.
     """
-    if value is None or isinstance(value, bool):
+    if value is None:
         return False
+    if isinstance(value, bool):
+        return True
     if isinstance(value, float):
         return math.isfinite(value)
     return isinstance(value, (int, str))

@@ -210,3 +210,44 @@ def test_the_beat_marker_share_is_never_headlined_without_its_lag() -> None:
     assert "0.5%" in rendered
     assert "+303" in rendered
     assert "19" in rendered
+
+
+def test_the_alpha_prominence_is_never_headlined_without_the_bar_it_had_to_clear() -> None:
+    """The prominence is the largest excess over the fitted background anywhere in the
+    band, and the largest of many noisy residuals is above zero whether or not a rhythm is
+    there. On this cohort 6 of 15 participants have a peak that does not clear its bar, one
+    of them reading 16.0 dB against a 10.2 dB background scatter -- a reassuring number in
+    the section whose job is to notice when the data cannot reassure anyone."""
+    from eeg_pipeline.preprocessing.report.at_a_glance import HEADLINES, at_a_glance_html
+
+    keys = [headline.key for headline in HEADLINES]
+    prominence = keys.index("alpha_prominence_db")
+    assert keys[prominence + 1] == "alpha_resolvable_bar_db"
+    assert keys[prominence + 2] == "alpha_peak_resolvable"
+
+    rendered = at_a_glance_html(
+        _record(
+            _stage(
+                "epochs",
+                "2026-08-16T00:00:00+00:00",
+                alpha_prominence_db=16.0,
+                alpha_resolvable_bar_db=24.5,
+                alpha_peak_resolvable=False,
+            )
+        )
+    )
+
+    assert "16.00" in rendered
+    assert "24.50" in rendered
+    # Spelled, not printed as the integer a bool secretly is.
+    assert "no" in rendered
+    assert ">1<" not in rendered
+
+
+def test_a_flag_given_a_numeric_formatter_fails_rather_than_printing_one() -> None:
+    from eeg_pipeline.preprocessing.report.at_a_glance import _yes_no
+
+    assert _yes_no(True) == "yes"
+    assert _yes_no(False) == "no"
+    with pytest.raises(TypeError):
+        _yes_no(1.0)

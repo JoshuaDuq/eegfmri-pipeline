@@ -1550,7 +1550,13 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
                 n_trials=80,
                 response_window_s=(0.1, 0.6),
             ),
-            alpha=SimpleNamespace(prominence_db=6.4),
+            alpha=SimpleNamespace(
+                prominence_db=6.4,
+                # The prominence is a max over the band and is positive on noise,
+                # so what it cleared travels with it.
+                is_resolvable=lambda: True,
+                resolvable_bar_db=3.35,
+            ),
         )
 
         assert measurements == {
@@ -1560,6 +1566,11 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
             "split_half_r": 0.71,
             "split_half_r_corrected": 0.83,
             "alpha_prominence_db": 6.4,
+            # The bar that prominence had to clear, and whether it did. The prominence is
+            # the largest excess over the fitted background anywhere in the band, so it is
+            # positive on a spectrum carrying no rhythm at all.
+            "alpha_peak_resolvable": True,
+            "alpha_resolvable_bar_db": 3.35,
             # Reliability grows with test length, so the trial count and the window it was
             # measured over travel with the correlation: a cohort cannot compare two
             # participants' reliabilities without stepping both to a common length.
@@ -1574,10 +1585,22 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
 
         measurements = _preservation_measurements(
             reliability=None,
-            alpha=SimpleNamespace(prominence_db=6.4),
+            alpha=SimpleNamespace(
+                prominence_db=6.4,
+                # The prominence is a max over the band and is positive on noise,
+                # so what it cleared travels with it.
+                is_resolvable=lambda: True,
+                resolvable_bar_db=3.35,
+            ),
         )
 
-        assert measurements == {"alpha_prominence_db": 6.4}
+        # The rhythm and what it had to clear; nothing about an evoked response, which
+        # rest cannot supply.
+        assert measurements == {
+            "alpha_prominence_db": 6.4,
+            "alpha_peak_resolvable": True,
+            "alpha_resolvable_bar_db": 3.35,
+        }
         assert _preservation_measurements(reliability=None, alpha=None) == {}
 
     def test_the_review_stage_records_its_headline_numbers_for_the_landing_panel(self):
