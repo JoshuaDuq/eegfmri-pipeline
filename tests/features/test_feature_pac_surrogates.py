@@ -12,7 +12,7 @@ from eeg_pipeline.analysis.features.phase import (
     _rng_from_seed,
     _resolve_pac_surrogate_context,
 )
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestPacSurrogates(unittest.TestCase):

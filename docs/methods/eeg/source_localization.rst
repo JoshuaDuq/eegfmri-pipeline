@@ -187,7 +187,7 @@ Manual Docker Workflow
    .. code-block:: bash
 
       docker build --platform linux/amd64 -t freesurfer-mne:7.4.1 \
-        -f eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne .
+        -f docker/Dockerfile.freesurfer-mne .
 
    **Step 2 — Run FreeSurfer recon-all (1–3 hours)**
 

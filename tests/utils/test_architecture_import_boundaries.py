@@ -35,6 +35,21 @@ RULES: tuple[Rule, ...] = (
         forbidden_prefix="eeg_pipeline.cli",
         description="pipelines must not depend on cli",
     ),
+    Rule(
+        source_prefix="fmri_pipeline.analysis",
+        forbidden_prefix="fmri_pipeline.cli",
+        description="fmri analysis must not depend on cli",
+    ),
+    Rule(
+        source_prefix="fmri_pipeline.utils",
+        forbidden_prefix="fmri_pipeline.cli",
+        description="fmri utils must not depend on cli",
+    ),
+    Rule(
+        source_prefix="fmri_pipeline.pipelines",
+        forbidden_prefix="fmri_pipeline.cli",
+        description="fmri pipelines must not depend on cli",
+    ),
 )
 
 

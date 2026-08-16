@@ -881,7 +881,7 @@ def test_the_vif_panel_shows_the_spread_across_runs() -> None:
     plt.close(figure)
 
 
-def test_the_vif_panel_names_its_worst_regressor() -> None:
+def test_the_vif_across_runs_panel_names_its_worst_regressor() -> None:
     figure = design.variance_inflation_across_runs_figure(_run_frames())
     text = " ".join(artist.get_text() for artist in figure.texts)
     assert "largest median VIF:" in text

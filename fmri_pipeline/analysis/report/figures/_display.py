@@ -14,7 +14,7 @@ T1w decides how much of each panel is brain.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Optional
 
 import numpy as np
 

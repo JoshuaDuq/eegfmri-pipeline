@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 @dataclass(frozen=True)

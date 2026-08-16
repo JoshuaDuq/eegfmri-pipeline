@@ -14,7 +14,7 @@ from eeg_pipeline.analysis.features.aperiodic import (
 )
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.types import PrecomputedData, TimeWindows
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestAperiodicPeriodicPeaks(unittest.TestCase):

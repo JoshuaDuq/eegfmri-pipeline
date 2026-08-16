@@ -9,7 +9,7 @@ import pandas as pd
 from eeg_pipeline.analysis.features.complexity import extract_complexity_from_precomputed
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.types import BandData, PrecomputedData, TimeWindows
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestComplexityEntropyFeatures(unittest.TestCase):

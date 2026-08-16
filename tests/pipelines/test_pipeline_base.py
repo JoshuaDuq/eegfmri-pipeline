@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 
-from tests.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
+from tests.utils.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
 
 _DummyProgress = DummyProgress
 _NoopBatchProgress = NoopBatchProgress

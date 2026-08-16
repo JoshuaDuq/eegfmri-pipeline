@@ -5,21 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
-import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 
-from fmri_pipeline.analysis.report.figures._display import figure_of, label_colorbar
 from fmri_pipeline.analysis.report.style import (
-    GUIDE_COLOR,
-    MAGNITUDE_CMAP,
-    OKABE_ITO,
     RADIOLOGICAL,
-    annotate_provenance,
-    clipped_fraction,
-    orientation_label,
-    plot_context,
-    robust_upper_limit,
 )
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pytest
 
@@ -122,9 +124,7 @@ def test_a_varying_voxel_count_is_reported_as_a_range() -> None:
 # --- the report section reads what the analysis run wrote -------------------
 
 
-def _tsv(directory, rows: str) -> "Path":
-    from pathlib import Path
-
+def _tsv(directory, rows: str) -> Path:
     path = Path(directory) / "signature_expression.tsv"
     path.parent.mkdir(parents=True, exist_ok=True)
     header = "signature\tdot\tcosine\tpearson_r\tn_voxels\tweight_path\n"

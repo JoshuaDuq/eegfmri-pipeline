@@ -9,7 +9,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import (
+    DotConfig,
+    make_mock_fitted_model,
+    make_mock_run_meta,
+)
 
 
 class TestFmriPipelineStrictFailures(unittest.TestCase):
@@ -43,11 +47,14 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
             def normalized(self):
                 return self
 
+        flm = make_mock_fitted_model(runs=1)
+        run_meta = make_mock_run_meta(runs=1)
+
         fake_builder = types.SimpleNamespace(
             build_contrast_from_runs_detailed=lambda **kwargs: (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                run_meta,
+                SimpleNamespace(flm=flm, mask_img="img"),
                 "def",
                 None,
             ),
@@ -97,11 +104,14 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
             resample_to_freesurfer: bool = False
             fmriprep_space: str = "T1w"
 
+        flm = make_mock_fitted_model(runs=1)
+        run_meta = make_mock_run_meta(runs=1)
+
         fake_builder = types.SimpleNamespace(
             build_contrast_from_runs_detailed=lambda **kwargs: (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                run_meta,
+                SimpleNamespace(flm=flm, mask_img="img"),
                 "def",
                 None,
             ),

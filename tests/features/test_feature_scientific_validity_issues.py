@@ -29,7 +29,7 @@ from eeg_pipeline.analysis.features.spectral import (
     compute_spectral_edge,
     compute_spectral_entropy,
 )
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestScientificValidityIssues(unittest.TestCase):

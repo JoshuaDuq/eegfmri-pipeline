@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from tests.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
+from tests.utils.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
 
 _DummyProgress = DummyProgress
 _NoopBatchProgress = NoopBatchProgress

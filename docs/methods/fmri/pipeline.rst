@@ -548,7 +548,7 @@ and MNE-Python.
 default (``allow_identity_trans = false``).
 
 Docker image: ``freesurfer-mne:7.4.1``.
-Dockerfile: ``eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne``.
+Dockerfile: ``docker/Dockerfile.freesurfer-mne``.
 
 Multivariate Signature Readouts
 ---------------------------------

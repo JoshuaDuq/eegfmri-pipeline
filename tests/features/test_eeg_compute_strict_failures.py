@@ -69,7 +69,7 @@ from eeg_pipeline.utils.analysis.tfr import (
     get_tfr_decim,
     restrict_epochs_to_roi,
 )
-from tests.pipelines_test_utils import DotConfig, NoopProgress
+from tests.utils.pipelines_test_utils import DotConfig, NoopProgress
 
 
 def test_precomputed_psd_requires_baseline_for_event_related_compute(monkeypatch) -> None:

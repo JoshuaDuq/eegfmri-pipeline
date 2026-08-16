@@ -14,7 +14,7 @@ from eeg_pipeline.utils.data.columns import (
     resolve_predictor_column,
 )
 from eeg_pipeline.utils.data.epochs import _find_missing_event_columns
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestEventColumnValidation(unittest.TestCase):

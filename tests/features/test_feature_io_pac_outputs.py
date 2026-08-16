@@ -15,7 +15,7 @@ from eeg_pipeline.cli.commands.base_feature_availability import (
     detect_feature_availability,
 )
 from eeg_pipeline.utils.data.feature_io import save_all_features
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestFeatureIoPacOutputs(unittest.TestCase):

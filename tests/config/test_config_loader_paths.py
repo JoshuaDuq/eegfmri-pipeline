@@ -23,10 +23,13 @@ def test_default_config_paths_resolve_to_repo_data(monkeypatch) -> None:
     monkeypatch.setenv("EEG_PIPELINE_TUI_OVERRIDES", str(missing_overrides))
 
     cfg = loader.load_config(apply_thread_limits=False)
+    project_root = loader.get_project_root()
+    expected_deriv = (project_root / "data" / "derivatives").resolve().as_posix()
+    expected_bids = (project_root / "data" / "bids_output" / "eeg_linecleaned").resolve().as_posix()
 
-    assert "/data/derivatives" in str(cfg.get("paths.deriv_root"))
+    assert str(cfg.get("paths.deriv_root")) == expected_deriv
     assert "/eeg_pipeline/data/derivatives" not in str(cfg.get("paths.deriv_root"))
-    assert "/data/bids_output/eeg" in str(cfg.get("paths.bids_root"))
+    assert str(cfg.get("paths.bids_root")) == expected_bids
     assert "/eeg_pipeline/data/bids_output/eeg" not in str(cfg.get("paths.bids_root"))
 
 

@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fmri_pipeline.analysis.report.figures.design import ONSET_FRACTION, onset_rows
+from fmri_pipeline.analysis.report.figures.design import onset_rows
 from fmri_pipeline.analysis.report.style import (
     GUIDE_COLOR,
     OKABE_ITO,

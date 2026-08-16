@@ -164,7 +164,7 @@ Docker Image (FreeSurfer + MNE) *(optional)*
 
    docker build --platform linux/amd64 \
      -t freesurfer-mne:7.4.1 \
-     -f eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne .
+     -f docker/Dockerfile.freesurfer-mne .
 
 Environment Variables
 ---------------------

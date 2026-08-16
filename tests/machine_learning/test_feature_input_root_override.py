@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 def _config(deriv_root: Path) -> DotConfig:

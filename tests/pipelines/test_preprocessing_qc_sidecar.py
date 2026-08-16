@@ -28,7 +28,7 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
 from eeg_pipeline.preprocessing.report.settings import ReportSettings
 from eeg_pipeline.preprocessing.report.spectra import RunSpectra, StageSpectrum
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 RUN = "sub-0014_task-thermalactive_run-1"
 FREQUENCIES = np.asarray([1.0, 2.0, 3.0])

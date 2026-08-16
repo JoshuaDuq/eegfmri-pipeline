@@ -88,9 +88,9 @@ def _contrast_vector_for_design(
         try:
             values = np.asarray(contrast_def, dtype=float).ravel()
         except (TypeError, ValueError):
-            return None, columns
+            return None, []
         return (
-            (list(map(float, values)), columns) if values.size == len(columns) else (None, columns)
+            (list(map(float, values)), columns) if values.size == len(columns) else (None, [])
         )
 
     try:
@@ -104,7 +104,7 @@ def _contrast_vector_for_design(
             contrast_def,
             exc,
         )
-        return None, columns
+        return None, []
     return [float(v) for v in np.asarray(vector).ravel()], columns
 
 

@@ -13,7 +13,7 @@ from eeg_pipeline.infra.paths import (
     load_events_df,
     resolve_deriv_root,
 )
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 def test_resolve_deriv_root_accepts_direct_config_and_constants(tmp_path: Path) -> None:

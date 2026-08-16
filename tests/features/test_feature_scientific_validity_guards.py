@@ -63,7 +63,7 @@ from eeg_pipeline.context.features import FeatureContext
 from eeg_pipeline.analysis.features.bursts import extract_burst_features
 from eeg_pipeline.types import BandData, PrecomputedData, PrecomputedQC, TimeWindows
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_subject
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class _EpochStub:

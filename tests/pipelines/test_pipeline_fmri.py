@@ -9,7 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 
-from tests.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
+from tests.utils.pipelines_test_utils import (
+    DotConfig,
+    DummyProgress,
+    NoopBatchProgress,
+    NoopProgress,
+    make_mock_fitted_model,
+    make_mock_run_meta,
+)
 
 _DummyProgress = DummyProgress
 _NoopBatchProgress = NoopBatchProgress
@@ -94,6 +101,8 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             return "contrast"
 
         build_calls = {"count": 0}
+        flm_resample = make_mock_fitted_model(runs=1, compute_contrast=compute_contrast)
+        run_meta_resample = make_mock_run_meta(runs=1)
 
         def build_contrast_from_runs_detailed(**kwargs):
             build_calls["count"] += 1
@@ -103,15 +112,18 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                 image = "mni_img"
             return (
                 image,
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=compute_contrast)),
+                run_meta_resample,
+                SimpleNamespace(
+                    flm=flm_resample,
+                    mask_img="img",
+                ),
                 "def",
                 None,
             )
 
         fake_builder = types.SimpleNamespace(
             build_contrast_from_runs_detailed=build_contrast_from_runs_detailed,
-            resample_to_freesurfer=Mock(side_effect=lambda img, fs_dir: img),
+            resample_to_freesurfer=Mock(side_effect=lambda img, fs_dir, **kw: img),
             ContrastBuilderConfig=CBuilderCfg,
         )
         fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
@@ -177,11 +189,15 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             def compute_contrast(self, *args, **kwargs):
                 raise RuntimeError("boom")
 
+        flm_boom = make_mock_fitted_model(runs=1)
+        flm_boom.compute_contrast = BoomFLM().compute_contrast
+        run_meta_boom = make_mock_run_meta(runs=1)
+
         def _build(**kwargs):
             return (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=BoomFLM()),
+                run_meta_boom,
+                SimpleNamespace(flm=flm_boom, mask_img="img"),
                 "def",
                 None,
             )
@@ -243,6 +259,8 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                 return self
 
         calls = {"n": 0}
+        flm_mni = make_mock_fitted_model(runs=1)
+        run_meta_mni = make_mock_run_meta(runs=1)
 
         def _build(**kwargs):
             calls["n"] += 1
@@ -250,8 +268,11 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                 raise RuntimeError("mni-build-fail")
             return (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                run_meta_mni,
+                SimpleNamespace(
+                    flm=flm_mni,
+                    mask_img="img",
+                ),
                 "def",
                 None,
             )
@@ -689,12 +710,17 @@ class TestFmriDeep(unittest.TestCase):
             resample_to_freesurfer: bool = False
 
         contrast_cfg = Cfg()
+        flm_full = make_mock_fitted_model(runs=1)
+        run_meta_full = make_mock_run_meta(runs=1)
 
         fake_builder = types.SimpleNamespace(
             build_contrast_from_runs_detailed=lambda **kwargs: (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                run_meta_full,
+                SimpleNamespace(
+                    flm=flm_full,
+                    mask_img="img",
+                ),
                 "def",
                 None,
             ),
@@ -773,12 +799,17 @@ class TestFmriDeep(unittest.TestCase):
 
         contrast_cfg = Cfg()
         plotting_cfg = FakePlotCfg()
+        flm_branch = make_mock_fitted_model(runs=1)
+        run_meta_branch = make_mock_run_meta(runs=1)
 
         fake_builder = types.SimpleNamespace(
             build_contrast_from_runs_detailed=lambda **kwargs: (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                run_meta_branch,
+                SimpleNamespace(
+                    flm=flm_branch,
+                    mask_img="img",
+                ),
                 "def",
                 None,
             ),
@@ -976,11 +1007,14 @@ class TestFmriCompletion(unittest.TestCase):
             build_contrast_from_runs_detailed=lambda **kwargs: (
                 "img",
                 {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                SimpleNamespace(
+                    flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x"),
+                    mask_img="img",
+                ),
                 "def",
                 None,
             ),
-            resample_to_freesurfer=lambda img, fs_dir: img,
+            resample_to_freesurfer=lambda img, fs_dir, **kw: img,
         )
         fake_nib = types.SimpleNamespace(save=lambda *a, **k: None, load=lambda *a, **k: "img")
 
@@ -1034,20 +1068,25 @@ class TestFmriCompletion(unittest.TestCase):
                 return self
 
         calls = {"n": 0}
+        flm_mni_branch = make_mock_fitted_model(runs=1)
+        run_meta_mni_branch = make_mock_run_meta(runs=1)
 
         def _build(**kwargs):
             calls["n"] += 1
             return (
                 "img",
-                {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                run_meta_mni_branch,
+                SimpleNamespace(
+                    flm=flm_mni_branch,
+                    mask_img="img",
+                ),
                 "def",
                 None,
             )
 
         fake_builder = types.SimpleNamespace(
             build_contrast_from_runs_detailed=_build,
-            resample_to_freesurfer=lambda i, d: i,
+            resample_to_freesurfer=lambda i, d, **kw: i,
             ContrastBuilderConfig=Cfg,
         )
         fake_nib = types.SimpleNamespace(

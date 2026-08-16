@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.data.features import align_feature_dataframes
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestFeatureAlignmentMasking(unittest.TestCase):

@@ -6,7 +6,7 @@ from unittest.mock import patch
 import mne
 import numpy as np
 
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class _WindowStub:

@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pandas as pd
 
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestMachineLearningValidityFixes(unittest.TestCase):

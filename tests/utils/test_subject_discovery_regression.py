@@ -9,7 +9,7 @@ from pathlib import Path
 
 from eeg_pipeline.cli.commands.info_helpers import SOURCE_BIDS_FMRI, _handle_subjects_mode
 from eeg_pipeline.utils.data.subjects import get_available_subjects
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 def test_get_available_subjects_matches_numeric_config_to_zero_padded_bids(tmp_path: Path) -> None:

@@ -1411,7 +1411,6 @@ def test_a_native_stat_map_is_not_its_own_companion(tmp_path):
 
 def _manifest_with_companion(tmp_path):
     """A fitted manifest whose contrast also has a standard-space companion on disk."""
-    import dataclasses
 
     import nibabel as nib
     from fmri_pipeline.analysis.report.manifest import read_manifest, write_report_manifest

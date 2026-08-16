@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,7 +41,6 @@ from fmri_pipeline.analysis.constraint_masking import (
     build_thresholded_constraint_mask,
 )
 from fmri_pipeline.analysis.multivariate_signatures import SignatureResult
-from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
 from fmri_pipeline.analysis.trial_signatures import (
     TrialInfo,
     TrialSignatureExtractionConfig,

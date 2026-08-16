@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 
 from eeg_pipeline.domain.features.naming import generate_manifest, infer_feature_provenance
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestFeatureProvenance(unittest.TestCase):

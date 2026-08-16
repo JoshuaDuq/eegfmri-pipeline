@@ -12,7 +12,7 @@ from eeg_pipeline.analysis.qc.scanner_harmonic_comb import (
     Spectrum,
 )
 from eeg_pipeline.preprocessing.pipeline import scanner_harmonic_qc as module
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 def _parameters() -> ScannerCombParameters:

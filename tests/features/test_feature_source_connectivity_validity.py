@@ -21,7 +21,7 @@ from eeg_pipeline.analysis.features.source_localization import (
     extract_source_connectivity_features,
 )
 from eeg_pipeline.types import TimeWindows
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class _EpochStub:

@@ -4,7 +4,7 @@ from argparse import Namespace
 
 from eeg_pipeline.cli.common import get_deriv_root
 from eeg_pipeline.cli.main import get_subjects_for_command, update_config_from_args
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 def test_update_config_from_args_applies_rest_mode_before_subject_discovery(tmp_path) -> None:

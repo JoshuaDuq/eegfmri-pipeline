@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 _derivatives_module = importlib.import_module("eeg_pipeline.preprocessing.derivatives")
 
 
-from tests.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
+from tests.utils.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
 
 _DummyProgress = DummyProgress
 _NoopBatchProgress = NoopBatchProgress

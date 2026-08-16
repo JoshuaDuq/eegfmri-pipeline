@@ -10,7 +10,7 @@ import pandas as pd
 
 from eeg_pipeline.analysis.features.api import extract_precomputed_features, _extract_pac_features
 from eeg_pipeline.types import PrecomputedData, TimeWindows
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 class TestPrecomputedMicrostatesContext(unittest.TestCase):

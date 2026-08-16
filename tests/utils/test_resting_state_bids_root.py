@@ -12,7 +12,7 @@ import pytest
 from eeg_pipeline.cli.commands.info_helpers import SOURCE_BIDS, _handle_subjects_mode
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from eeg_pipeline.utils.data.subjects import get_available_subjects, resolve_eeg_bids_root
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 
 def test_resolve_eeg_bids_root_uses_rest_root_when_rest_mode_enabled() -> None:

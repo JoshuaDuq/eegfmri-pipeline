@@ -27,7 +27,7 @@ import pytest
 
 from fmri_pipeline.analysis.report.manifest import MANIFEST_FILENAME, read_manifest
 from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
-from tests.pipelines_test_utils import DotConfig
+from tests.utils.pipelines_test_utils import DotConfig
 
 SHAPE = (8, 8, 8)
 COLUMNS = ["cond_a", "cond_b", "trans_x", "constant"]
