@@ -160,6 +160,8 @@ Explore the Documentation
 
    user_guide/index
    pulse_artifact_correction_recovery
+   scanner_harmonic_diagnosis
+   scanner_harmonic_removal
 
 .. toctree::
    :hidden:

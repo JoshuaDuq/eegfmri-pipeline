@@ -59,6 +59,7 @@ napoleon_preprocess_types = True
 # MyST (Markdown support)
 # ---------------------------------------------------------------------------
 myst_enable_extensions = ["colon_fence", "deflist", "dollarmath", "amsmath"]
+myst_heading_anchors = 4
 
 # ---------------------------------------------------------------------------
 # Intersphinx

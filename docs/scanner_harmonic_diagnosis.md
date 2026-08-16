@@ -40,7 +40,7 @@ mechanism, and the numbers below say which analyses it actually reaches — esse
 gamma.
 
 This supersedes the attribution in
-[`studies/pain_study/SCANNER_HARMONICS_QC_README.md`](../studies/pain_study/SCANNER_HARMONICS_QC_README.md).
+[`studies/pain_study/SCANNER_HARMONICS_QC_README.md`](https://github.com/JoshuaDuq/eegfmri-pipeline/blob/main/studies/pain_study/SCANNER_HARMONICS_QC_README.md).
 That review measured the residual lines correctly but assumed they were gradient residual;
 it had no gradients-off condition to test the assumption against. Its frequency list
 (37.17, 38.39, 51.57, 52.80, 57.19, 61.10, 83.98 Hz) is reproduced here to within tens of

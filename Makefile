@@ -4,6 +4,9 @@ PYTHON := .venv/bin/python
 endif
 
 SPHINXBUILD ?= sphinx-build
+ifeq ($(wildcard .venv/bin/sphinx-build),.venv/bin/sphinx-build)
+SPHINXBUILD := .venv/bin/sphinx-build
+endif
 DOCS_SRC    := docs
 DOCS_BUILD  := docs/_build/html
 
