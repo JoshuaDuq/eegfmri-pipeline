@@ -778,7 +778,6 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
         patch("eeg_pipeline.preprocessing.band_ica_report._remove_legacy_condition_tfr_entries"),
         patch("eeg_pipeline.preprocessing.band_ica_report.remove_tagged_content") as clear,
         patch("eeg_pipeline.preprocessing.band_ica_report._add_decomposition_summary"),
-        patch("eeg_pipeline.preprocessing.band_ica_report._add_component_properties"),
     ):
         _add_standard_component_review(
             report=report,
@@ -1629,7 +1628,6 @@ def test_the_standard_review_forwards_the_exclusion_reasons_it_was_given() -> No
         patch(
             "eeg_pipeline.preprocessing.band_ica_report._add_decomposition_summary"
         ) as decomposition,
-        patch("eeg_pipeline.preprocessing.band_ica_report._add_component_properties"),
     ):
         _add_standard_component_review(
             report=report,
@@ -1753,3 +1751,82 @@ def test_a_narrow_tfr_band_keeps_a_linear_axis() -> None:
 
     assert axis.get_yscale() == "linear"
     plt.close(figure)
+
+
+def _dossier_diagnostics(*, components=2, epochs=5, times=40, with_activity=True):
+    from eeg_pipeline.preprocessing.band_ica_report import SourceDiagnostics
+
+    rng = np.random.default_rng(0)
+    return SourceDiagnostics(
+        frequencies=np.linspace(1.0, 100.0, 12),
+        power_db=rng.normal(0, 1, (components, 12)),
+        tfr_frequencies=np.linspace(1.0, 100.0, 8),
+        tfr_times=np.linspace(-1.0, 2.0, 6),
+        tfr=rng.normal(0, 1, (components, 8, 6)),
+        epoch_activity=(
+            rng.normal(0, 1, (components, epochs, times)) if with_activity else None
+        ),
+        activity_times=np.linspace(-1.0, 2.0, times) if with_activity else None,
+        epoch_variance=rng.gamma(2.0, 1.0, (components, epochs)) if with_activity else None,
+    )
+
+
+def test_the_dossier_carries_the_evidence_that_audits_the_classifier() -> None:
+    """A component can look ocular and be brain, or look unremarkable and be an electrode
+    drifting in four trials. ICLabel is wrong in both directions, so the slide has to show
+    which epochs produced the component -- evidence that previously lived only in MNE's
+    plot_properties slider, one section away and beside a second copy of the topography."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        BandIcaDefinition,
+        BandReviewData,
+        ComponentLabel,
+        DossierColorLimits,
+        _create_component_dossier,
+    )
+
+    review = BandReviewData(
+        band=BandIcaDefinition("b", "Broadband 1–100 Hz", 1.0, 100.0),
+        diagnostics=_dossier_diagnostics(),
+    )
+    figure = _create_component_dossier(
+        ica=SimpleNamespace(n_components_=2, exclude=[1], plot_components=Mock()),
+        review=review,
+        label=ComponentLabel("brain", 0.9),
+        component=0,
+        color_limits=DossierColorLimits(power=1.0, differences=()),
+        settings=BandIcaReportSettings(),
+        analysis_status="Finalized — retained epochs",
+    )
+
+    titles = {axis.get_title() for axis in figure.axes}
+    assert "Activation by epoch" in titles
+    assert "Mean across epochs" in titles
+    assert "Variance per epoch" in titles
+    plt.close(figure)
+
+
+def test_epoch_variance_is_measured_before_the_display_decimation() -> None:
+    """The image is a picture and can be subsampled; the variance is a measurement, and
+    decimating first would report the variance of a subsampled signal."""
+    import mne
+
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        _ACTIVITY_DISPLAY_COLUMNS,
+        _epoch_activity,
+    )
+
+    rng = np.random.default_rng(0)
+    samples = _ACTIVITY_DISPLAY_COLUMNS * 4
+    data = rng.normal(0, 1, (3, 2, samples))
+    sources = mne.EpochsArray(
+        data, mne.create_info(["I0", "I1"], 100.0, "misc"), verbose="ERROR"
+    )
+
+    activity, times, variance = _epoch_activity(sources)
+
+    assert activity.shape[:2] == (2, 3)
+    assert activity.shape[2] <= _ACTIVITY_DISPLAY_COLUMNS + 1
+    assert times.size == activity.shape[2]
+    np.testing.assert_allclose(variance, np.swapaxes(data, 0, 1).var(axis=2))

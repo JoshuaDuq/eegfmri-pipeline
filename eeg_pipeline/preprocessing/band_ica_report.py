@@ -37,6 +37,7 @@ from eeg_pipeline.preprocessing.report.summary import (
 from eeg_pipeline.preprocessing.report.style import (
     DIVERGING_POWER_COLORMAP,
     FLAG_COLOR,
+    GUIDE_COLOR,
     OKABE_ITO,
     PRIMARY_COLOR,
     REPORT_IMAGE_FORMAT,
@@ -139,10 +140,24 @@ class SourceDiagnostics:
     tfr: np.ndarray | None
     #: Epochs contributing to each TFR frequency; ``None`` unless exclusions are active.
     tfr_eligible_counts: np.ndarray | None = None
+    #: Component activation per epoch, ``(components, epochs, times)``, decimated for
+    #: display. This and the two fields below are the evidence MNE's ``plot_properties``
+    #: carried that nothing else here draws: whether a component is a property of the
+    #: recording or of a handful of epochs. A classifier verdict cannot be audited without
+    #: it, so it belongs on the dossier rather than in a second slider beside it.
+    epoch_activity: np.ndarray | None = None
+    #: Times matching :attr:`epoch_activity`.
+    activity_times: np.ndarray | None = None
+    #: Variance of each epoch's activation, ``(components, epochs)``.
+    epoch_variance: np.ndarray | None = None
 
     @property
     def has_tfr(self) -> bool:
         return self.tfr is not None
+
+    @property
+    def has_activity(self) -> bool:
+        return self.epoch_activity is not None
 
 
 @dataclass(frozen=True)
@@ -485,6 +500,8 @@ def _source_diagnostics_from_sources(
         )
     else:
         tfr_frequencies, tfr_times, tfr, tfr_counts = None, None, None, None
+
+    activity, activity_times, variance = _epoch_activity(sources)
     return SourceDiagnostics(
         frequencies=frequencies,
         power_db=power_db,
@@ -492,7 +509,36 @@ def _source_diagnostics_from_sources(
         tfr_times=tfr_times,
         tfr=tfr,
         tfr_eligible_counts=tfr_counts,
+        epoch_activity=activity,
+        activity_times=activity_times,
+        epoch_variance=variance,
     )
+
+
+#: Columns the epoch-activation image is decimated to before it is stored.
+#:
+#: The image is read for where activity sits in the epoch and in which epochs, never for
+#: a waveform, and at full rate a 22-second epoch at 500 Hz is eleven thousand columns
+#: rendered into a panel a few hundred pixels wide. Decimating before storage is what
+#: keeps the whole decomposition's activation resident while sixty dossiers are drawn.
+_ACTIVITY_DISPLAY_COLUMNS = 300
+
+
+def _epoch_activity(
+    sources: mne.BaseEpochs,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-epoch component activation for display, and each epoch's variance.
+
+    Variance is computed at the full sampling rate, before decimation: it is a
+    measurement rather than a picture, and decimating first would report the variance of
+    a subsampled signal.
+    """
+    data = sources.get_data(copy=False)
+    # (epochs, components, times) as MNE returns it, to (components, epochs, times).
+    activity = np.swapaxes(data, 0, 1)
+    variance = activity.var(axis=2)
+    step = max(1, activity.shape[2] // _ACTIVITY_DISPLAY_COLUMNS)
+    return activity[:, :, ::step], sources.times[::step], variance
 
 
 #: Display frequencies per DPSS smoothing half-width.
@@ -1240,6 +1286,68 @@ def _plot_dossier_summary(
     figure.colorbar(image, ax=axes[2], label=power_colorbar_label(color_limit))
 
 
+def _plot_dossier_activity(
+    *,
+    figure: plt.Figure,
+    axes: np.ndarray,
+    review: BandReviewData,
+    component: int,
+) -> None:
+    """Draw where this component was active: across epochs, on average, and per epoch.
+
+    The three panels answer the question the topography and spectrum cannot. A component
+    can look ocular and be brain, or look unremarkable and be an electrode drifting in
+    four trials, and a classifier verdict is not auditable without seeing which epochs
+    produced it. Previously this evidence existed only in MNE's ``plot_properties``
+    slider, one section away, alongside a second copy of the topography and spectrum.
+    """
+    activity = review.diagnostics.epoch_activity[component]
+    times = review.diagnostics.activity_times
+    variance = review.diagnostics.epoch_variance[component]
+    epochs = np.arange(activity.shape[0])
+
+    limit = robust_symmetric_limit(activity)
+    image = axes[0].pcolormesh(
+        times,
+        epochs,
+        activity,
+        shading="auto",
+        cmap=DIVERGING_POWER_COLORMAP,
+        vmin=-limit,
+        vmax=limit,
+        rasterized=True,
+    )
+    axes[0].axvline(0.0, color="black", linestyle="--", linewidth=0.75)
+    axes[0].set(title="Activation by epoch", xlabel="Time (s)", ylabel="Epoch")
+    figure.colorbar(image, ax=axes[0], label="Activation (a.u.)")
+
+    axes[1].plot(times, activity.mean(axis=0), color=PRIMARY_COLOR, linewidth=1.2)
+    axes[1].axvline(0.0, color="black", linestyle="--", linewidth=0.75)
+    axes[1].axhline(0.0, color="0.7", linewidth=0.6)
+    axes[1].set(title="Mean across epochs", xlabel="Time (s)", ylabel="Activation (a.u.)")
+
+    axes[2].plot(epochs, variance, color=PRIMARY_COLOR, linewidth=1.0, marker="o", markersize=2.0)
+    # The median is the reference the panel is read against: a component carried by a few
+    # epochs shows as spikes far above it, which is what separates a genuine ongoing
+    # rhythm from one bad trial the decomposition gave a component to.
+    median = float(np.median(variance)) if variance.size else 0.0
+    axes[2].axhline(median, color=GUIDE_COLOR, linestyle="--", linewidth=0.8)
+    axes[2].annotate(
+        f"median {median:.3g}",
+        xy=(1.0, median),
+        xycoords=("axes fraction", "data"),
+        xytext=(-3, 3),
+        textcoords="offset points",
+        ha="right",
+        va="bottom",
+        fontsize=6,
+        color=GUIDE_COLOR,
+    )
+    axes[2].set(title="Variance per epoch", xlabel="Epoch", ylabel="Variance (a.u.²)")
+    if variance.size and float(np.min(variance)) > 0.0:
+        axes[2].set_yscale("log")
+
+
 def _comparison_titles(result: ConditionTfrResult) -> tuple[str, str, str]:
     comparison = result.comparison
     return (
@@ -1315,50 +1423,50 @@ def _create_component_dossier(
     settings: BandIcaReportSettings,
     analysis_status: str,
 ) -> plt.Figure:
-    if review.comparisons:
-        # Every comparison row is a triple — condition A, condition B, difference — so
-        # the grid has to be three wide and the summary row runs across the top of it.
-        row_count = 1 + len(review.comparisons)
-        figure, axes = plt.subplots(
-            row_count,
-            3,
-            figsize=(15.9, 3.8 * row_count),
-            squeeze=False,
-            layout="constrained",
+    # One grid shape for every dossier, three wide because a comparison row is a triple:
+    # condition A, condition B, difference. The summary row runs across the top and the
+    # activation row sits under it, so a reader moving between slides finds the same
+    # evidence in the same place whether or not the paradigm has conditions to contrast.
+    activity_rows = 1 if review.diagnostics.has_activity else 0
+    row_count = 1 + activity_rows + len(review.comparisons)
+    figure, axes = plt.subplots(
+        row_count,
+        3,
+        figsize=(15.9, 3.8 * row_count),
+        squeeze=False,
+        layout="constrained",
+    )
+    summary_axes = axes[0]
+    if not review.diagnostics.has_tfr:
+        # Nothing to draw in the third summary cell. Removed rather than left blank: an
+        # empty framed axis reads as a panel that failed to render.
+        figure.delaxes(summary_axes[2])
+    if activity_rows:
+        _plot_dossier_activity(
+            figure=figure,
+            axes=axes[1],
+            review=review,
+            component=component,
         )
-        summary_axes = axes[0]
-        for row, (result, difference_limit) in enumerate(
-            zip(review.comparisons, color_limits.differences, strict=True),
-            start=1,
-        ):
-            _plot_dossier_comparison(
-                figure=figure,
-                axes=axes[row],
-                result=result,
-                review=review,
-                component=component,
-                power_limit=color_limits.power,
-                difference_limit=difference_limit,
-                # The summary row draws the shared power scale when it has a grand
-                # average to draw it beside; the first comparison row picks it up when
-                # there is none, so the slide always carries the scale exactly once.
-                draw_power_colorbar=row == 1 and not review.diagnostics.has_tfr,
-            )
-    elif review.diagnostics.has_tfr:
-        # Without comparison rows the dossier was a single row 15.9 inches wide and 3.8
-        # tall. The browser fits that to the report column, which scales three panels
-        # down to roughly a third of the column each and takes the 6 pt annotations with
-        # them. Folding the same three panels into two rows trades width the reader does
-        # not have for height they do, and gives the time axis the wider cell.
-        figure, mosaic = plt.subplot_mosaic(
-            [["topography", "spectrum"], ["tfr", "tfr"]],
-            figsize=(11.0, 7.6),
-            layout="constrained",
+    for row, (result, difference_limit) in enumerate(
+        zip(review.comparisons, color_limits.differences, strict=True),
+        start=1 + activity_rows,
+    ):
+        _plot_dossier_comparison(
+            figure=figure,
+            axes=axes[row],
+            result=result,
+            review=review,
+            component=component,
+            power_limit=color_limits.power,
+            difference_limit=difference_limit,
+            # The summary row draws the shared power scale when it has a grand average to
+            # draw it beside; the first comparison row picks it up when there is none, so
+            # the slide always carries the scale exactly once.
+            draw_power_colorbar=(
+                row == 1 + activity_rows and not review.diagnostics.has_tfr
+            ),
         )
-        summary_axes = [mosaic["topography"], mosaic["spectrum"], mosaic["tfr"]]
-    else:
-        figure, axes = plt.subplots(1, 2, figsize=(10.6, 4.2), squeeze=False, layout="constrained")
-        summary_axes = axes[0]
 
     _plot_dossier_summary(
         figure=figure,
@@ -1808,39 +1916,6 @@ def _add_decomposition_summary(
     return summary
 
 
-def _add_component_properties(
-    *,
-    report: mne.Report,
-    ica: mne.preprocessing.ICA,
-    epochs: mne.BaseEpochs,
-    labels: Sequence[ComponentLabel],
-) -> None:
-    """Add MNE's canonical per-component panel.
-
-    The dossiers show topography, spectrum, and time-frequency power, but no view of the
-    component's actual time course. ``plot_properties`` supplies the standard evidence
-    for that: the epochs image, the ERP, and the per-epoch variance that reveals whether
-    a component is driven by a handful of epochs.
-    """
-    figures = ica.plot_properties(
-        epochs,
-        picks=list(range(int(ica.n_components_))),
-        show=False,
-        verbose="ERROR",
-    )
-    for figure in figures:
-        plt.close(figure)
-    report.add_figure(
-        fig=figures,
-        title=_slider_title("Component properties", int(ica.n_components_)),
-        caption=_component_captions(ica, labels),
-        section=_DECOMPOSITION_SECTION,
-        tags=("ica", "ica-component-review", "ica-decomposition", "ica-properties"),
-        image_format=REPORT_RASTER_IMAGE_FORMAT,
-        replace=True,
-    )
-
-
 def _add_standard_component_review(
     *,
     report: mne.Report,
@@ -1889,8 +1964,6 @@ def _add_standard_component_review(
         tags=("ica", "ica-component-review", "ica-review-guide"),
         replace=True,
     )
-
-    _add_component_properties(report=report, ica=ica, epochs=epochs, labels=labels)
 
     captions = _component_captions(ica, labels)
     nyquist = float(epochs.info["sfreq"]) / 2.0
