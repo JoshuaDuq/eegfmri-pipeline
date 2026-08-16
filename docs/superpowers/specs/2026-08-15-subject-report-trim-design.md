@@ -155,11 +155,37 @@ runner-up class when the winning class is under-confident, so `brain 0.51 / musc
 is visible where a reviewer decides what to interrogate, rather than only in the component
 TSV.
 
-## Expected result
+## Measured result
 
-Roughly 79 MB → 33–38 MB; 31 sections → 27; ~415 component figures → ~120 (59 dossiers +
-59 cardiac slides + overviews). Every one of the 59 components retains complete
+Rebuilt on `sub-0001` (61 components), against the same subject's previous report:
+
+| | before | after |
+|---|---|---|
+| File size | 78.8 MB | 41.6 MB (47% smaller) |
+| Sections | 31 | 27 |
+| Embedded images | 515 | 189 |
+| `ICA component review` | 51.4 MB over 5 sections | 23.3 MB over 1 |
+| `ICA decomposition quality` | 7.8 MB | 1.1 MB |
+| `ICA: removals` | 1.7 MB | 0.1 MB |
+| `Raw (clean)` | 0.6 MB | 0.0 MB |
+
+Higher than the 33–38 MB estimated before implementation. The estimate did not account
+for the activation row added by change 3, which makes each dossier three rows instead of
+two; that row is the evidence that made restricting the component list unnecessary, so the
+extra megabytes are the point rather than an overrun. Every component retains complete
 ICLabel-validation evidence.
+
+The cardiac screening panel of change 4 is covered by unit tests but is not in the
+measured rebuild above, which re-ran only the condition-TFR pass. It adds roughly 0.3 MB
+when the cardiac stage next runs.
+
+## Additional change found during implementation
+
+`Events` rendered after `Epoch rejection` and `Signal preservation`. All three anchor on
+`before_epoch_sections`, and the events panel is placed on every reopen and so always
+moves last, ending up nearest the epochs and behind the other two. It now anchors on the
+trial evidence itself, giving the reading order: what was presented, what survived,
+whether the survivors carry signal.
 
 ## Out of scope
 
