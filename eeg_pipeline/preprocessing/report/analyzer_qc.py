@@ -28,6 +28,7 @@ import pandas as pd
 from eeg_pipeline.preprocessing.cardiac_artifact_qc import PULSE_EVENT_ID
 from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets
+from eeg_pipeline.preprocessing.report.cohort.noise_floor import measure_locked_average
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,
@@ -404,15 +405,35 @@ class CardiacResidual:
     marker_count: int
     #: Which source the beats came from, or ``None`` when neither resolved one.
     beat_source: str | None
-    #: Peak-to-peak of the across-channel RMS of the beat-locked average, in microvolts.
+    #: RMS of the beat-locked average over the measurement window, in microvolts.
     #: ``None`` where no beat train resolved -- an artifact that could not be measured is
     #: not an artifact that is absent, and the two must not print the same.
+    #:
+    #: Not evidence on its own. Averaging N beats suppresses everything not locked to them
+    #: by sqrt(N), so this carries a floor that grows as the beat count falls; read it with
+    #: :attr:`noise_floor_uv` and :attr:`excess_power_uv2` beside it.
     residual_uv: float | None
     #: Share of the recording the beat train spans, ``None`` where no train resolved.
     #: ``residual_uv`` is an average over the beats it was given and describes only the
     #: part of the run they cover, so the two belong together: a small residual over a
     #: quarter of a run is not a corrected run.
     beat_train_coverage: float | None = None
+    #: The averaging floor at this beat count, in microvolts, from the odd-even split.
+    noise_floor_uv: float | None = None
+    #: Locked power after the floor is subtracted, in microvolts squared. Negative means
+    #: the beat-locked signal was unresolved at this averaging floor, which is a finding
+    #: rather than a failure and must not be clipped to zero.
+    excess_power_uv2: float | None = None
+    #: Beats the average was taken over. The floor is set by this, so a residual cannot be
+    #: compared across runs without it.
+    n_beats: int | None = None
+
+    @property
+    def is_resolved(self) -> bool | None:
+        """Whether any beat-locked signal cleared the averaging floor."""
+        if self.excess_power_uv2 is None:
+            return None
+        return self.excess_power_uv2 > 0.0
 
 
 #: Window the beat-locked average is cut over, and the baseline removed from it.
@@ -502,16 +523,31 @@ def compute_cardiac_residual(
     if len(epochs) < MINIMUM_RESIDUAL_BEATS:
         return CardiacResidual(recording_id, marker_count, detection.source, None, coverage)
 
-    evoked = epochs.average()
-    # Across-channel RMS rather than a single channel: the ballistocardiogram is focal and
-    # which sensor carries it depends on head position, so a fixed channel would measure
-    # where the artifact happened to land rather than how large it was.
-    rms = np.sqrt((evoked.get_data() ** 2).mean(axis=0)) * 1e6
-    inside = (evoked.times >= measurement_s[0]) & (evoked.times <= measurement_s[1])
+    inside = (epochs.times >= measurement_s[0]) & (epochs.times <= measurement_s[1])
     if not inside.any():
         return CardiacResidual(recording_id, marker_count, detection.source, None, coverage)
+
+    # The same estimator the volume-locked gradient measurement uses, for the same reason:
+    # averaging N beats suppresses everything not locked to them by sqrt(N), so the raw
+    # amplitude carries a floor that grows as the beat count falls. Measured here on
+    # sub-0008 run-1, the previous peak-to-peak read 0.14 uV over 493 beats and 2.78 uV
+    # over 59 of the same beats -- a twentyfold swing on one run's data, and at the full
+    # count it sat *below* its own circular-shift null. A cohort ordering runs by that
+    # number was ordering them by how well their beats were detected.
+    #
+    # Across-channel rather than a single channel: the ballistocardiogram is focal and
+    # which sensor carries it depends on head position, so a fixed channel would measure
+    # where the artifact happened to land rather than how large it was.
+    measured = measure_locked_average(epochs.get_data(copy=False)[:, :, inside])
     return CardiacResidual(
-        recording_id, marker_count, detection.source, float(np.ptp(rms[inside])), coverage
+        recording_id,
+        marker_count,
+        detection.source,
+        measured.locked_rms_uv,
+        coverage,
+        noise_floor_uv=measured.noise_floor_uv,
+        excess_power_uv2=measured.excess_power_uv2,
+        n_beats=measured.n_epochs,
     )
 
 

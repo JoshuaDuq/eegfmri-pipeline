@@ -39,7 +39,14 @@ import pandas as pd
 #: Layout version of the sidecar. Bumped when a column changes meaning, not when a stage
 #: adds one: a reader that meets an unknown column can ignore it, but one that meets a
 #: familiar column holding something else cannot.
-SCHEMA_VERSION = 2
+#:
+#: 3: ``bcg_residual_uv`` changed from the peak-to-peak of the across-channel RMS of the
+#: beat-locked average to the RMS of that average, and gained the floor columns beside it.
+#: The old number carried an averaging floor nobody could see, so the same run reported
+#: 0.14 uV over 493 beats and 2.78 uV over 59 of them. A cohort that read a version-2
+#: sidecar as though it were this one would compare two different quantities across
+#: participants, which is exactly what this version number exists to prevent.
+SCHEMA_VERSION = 3
 
 #: Suffix of the report the sidecar belongs to, mirroring :mod:`build_record`.
 _REPORT_SUFFIX = "_report.h5"
@@ -108,6 +115,15 @@ SCANNER_RUN_COLUMNS = (
     "beat_source",
     "bcg_residual_uv",
     "bcg_beat_train_coverage",
+    # Required, not optional. The residual amplitude above is an average over the beats it
+    # was given, so its floor moves with that count and the bare number is not comparable
+    # between runs; a sidecar that carried the amplitude without the floor would let a
+    # cohort rank runs by beat-detection quality and call it artifact. Same reasoning, and
+    # the same estimator, as the volume-locked gradient columns.
+    "bcg_noise_floor_uv",
+    "bcg_excess_power_uv2",
+    "bcg_resolved",
+    "bcg_n_beats",
 )
 
 #: The across-channel median and the worst channel, per run and stage.

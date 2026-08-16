@@ -208,6 +208,19 @@ def run_table(
             row["bcg_residual_uv"] = _finite(
                 None if residual is None else residual.residual_uv
             )
+            # The floor this residual has to clear, and what is left after it. Recorded
+            # together because the amplitude alone is not comparable across runs: it is an
+            # average over the beats it was given, and the floor grows as that count falls.
+            # Named to match the volume-locked gradient columns, which measure the same
+            # kind of quantity the same way.
+            row["bcg_noise_floor_uv"] = _finite(
+                None if residual is None else residual.noise_floor_uv
+            )
+            row["bcg_excess_power_uv2"] = _finite(
+                None if residual is None else residual.excess_power_uv2
+            )
+            row["bcg_resolved"] = None if residual is None else residual.is_resolved
+            row["bcg_n_beats"] = _finite(None if residual is None else residual.n_beats)
             # The residual is an average over the beats it was given, so it describes only
             # the share of the run they cover. Recorded beside it because a small residual
             # over a quarter of a run is not a corrected run, and the sidecar is what

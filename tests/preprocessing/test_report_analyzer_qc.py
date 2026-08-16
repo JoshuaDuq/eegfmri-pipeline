@@ -176,13 +176,81 @@ def _cardiac_raw(
     return raw
 
 
+def _injected_rms_uv(amplitude_uv: float, *, sigma_s: float = 0.03, window_s: float = 0.5) -> float:
+    """RMS over the measurement window of one injected Gaussian deflection.
+
+    The stored amplitude is the RMS of the beat-locked average over the window, not the
+    height of the deflection: a 30 ms bump spends most of a half-second window at zero.
+    Mean square of ``A exp(-((t-u)/sigma)^2 / 2)`` over the window is
+    ``A^2 sigma sqrt(pi) / window``.
+    """
+    import math
+
+    return amplitude_uv * math.sqrt(sigma_s * math.sqrt(math.pi) / window_s)
+
+
 def test_the_residual_recovers_an_injected_beat_locked_deflection() -> None:
     """The panel's whole claim is that it measures how much artifact is left."""
     from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
 
     measured = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-1")
 
-    assert measured.residual_uv == pytest.approx(20.0, rel=0.25)
+    assert measured.residual_uv == pytest.approx(_injected_rms_uv(20.0), rel=0.1)
+    # Noise-free, so the averaging floor is nothing and the locked power is all signal.
+    assert measured.noise_floor_uv == pytest.approx(0.0, abs=1e-6)
+    assert measured.excess_power_uv2 == pytest.approx(_injected_rms_uv(20.0) ** 2, rel=0.1)
+    assert measured.is_resolved is True
+
+
+def test_the_excess_power_scales_as_the_square_of_the_injected_amplitude() -> None:
+    """The floor-corrected quantity is a power, so doubling the artifact quadruples it.
+
+    Pins the scale the worklist is now ordered by, which an amplitude-shaped statistic
+    would fail.
+    """
+    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+
+    single = compute_cardiac_residual(_cardiac_raw(residual_uv=10.0), recording_id="run-1")
+    double = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-2")
+
+    assert double.excess_power_uv2 == pytest.approx(4.0 * single.excess_power_uv2, rel=0.1)
+
+
+def test_the_residual_reports_the_beat_count_its_floor_depends_on() -> None:
+    """Without it the amplitude cannot be compared between runs.
+
+    Averaging N beats suppresses everything not locked to them by sqrt(N). Measured on
+    sub-0008 run-1, the same data read 0.14 uV over 493 beats and 2.78 uV over 59 of them.
+    """
+    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+
+    measured = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-1")
+
+    assert measured.n_beats is not None and measured.n_beats > 30
+
+
+def test_an_unresolved_residual_is_reported_as_unresolved_not_as_zero() -> None:
+    """A run whose beat-locked signal does not clear its own averaging floor.
+
+    Negative excess power is the measurement -- this many beats cannot resolve a residual
+    here -- and is a weaker statement than the run carrying none, so it must not be
+    clipped. On sub-0008 run-1 every beat count gave a negative excess.
+    """
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+
+    raw = _cardiac_raw(residual_uv=0.0)
+    rng = np.random.default_rng(0)
+    data = raw.get_data()
+    picks = [index for index, kind in enumerate(raw.get_channel_types()) if kind == "eeg"]
+    data[picks] += rng.normal(0, 5e-6, (len(picks), data.shape[1]))
+    raw._data = data
+
+    measured = compute_cardiac_residual(raw, recording_id="run-1")
+
+    assert measured.excess_power_uv2 is not None
+    assert measured.is_resolved is (measured.excess_power_uv2 > 0.0)
 
 
 def test_a_corrected_run_measures_far_less_than_an_uncorrected_one() -> None:
@@ -257,7 +325,7 @@ def test_a_run_without_markers_falls_back_to_the_channel_and_says_so() -> None:
 
     assert measured.marker_count == 0
     assert measured.beat_source == "ecg-channel"
-    assert measured.residual_uv == pytest.approx(20.0, rel=0.3)
+    assert measured.residual_uv == pytest.approx(_injected_rms_uv(20.0), rel=0.15)
 
 
 def test_a_run_with_no_beat_train_at_all_measures_nothing_and_does_not_raise() -> None:

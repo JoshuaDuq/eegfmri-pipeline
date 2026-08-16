@@ -63,6 +63,10 @@ def _runs(*, in_scanner: bool) -> pd.DataFrame:
         frame["beat_source"] = ["ECG"]
         frame["bcg_residual_uv"] = [0.8]
         frame["bcg_beat_train_coverage"] = [0.98]
+        frame["bcg_noise_floor_uv"] = [0.5]
+        frame["bcg_excess_power_uv2"] = [0.39]
+        frame["bcg_resolved"] = [True]
+        frame["bcg_n_beats"] = [700.0]
     return frame
 
 

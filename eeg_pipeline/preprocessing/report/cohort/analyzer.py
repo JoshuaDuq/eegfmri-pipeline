@@ -322,6 +322,26 @@ def add_analyzer_section(
 
 
 @dataclass(frozen=True)
+class ResidualMeasurement:
+    """One run's beat-locked residual, with the averaging floor it has to clear.
+
+    Travels as a unit so that no call site can pick up the amplitude and leave the floor
+    behind, which is how the amplitude came to order a worklist on its own.
+    """
+
+    residual_uv: float | None
+    noise_floor_uv: float | None
+    excess_power_uv2: float | None
+    n_beats: int | None
+
+    @property
+    def is_resolved(self) -> bool | None:
+        if self.excess_power_uv2 is None:
+            return None
+        return self.excess_power_uv2 > 0.0
+
+
+@dataclass(frozen=True)
 class UncorrectedRun:
     """One run the upstream pulse correction never ran on."""
 
@@ -331,6 +351,15 @@ class UncorrectedRun:
     beat_source: str | None
     #: ``None`` where neither beat source resolved, so the harm could not be measured.
     residual_uv: float | None
+    #: The averaging floor the amplitude above sits on, and what clears it.
+    #:
+    #: Both carried because the amplitude alone cannot order this worklist. It is an
+    #: average over however many beats the run yielded, and the floor grows as that count
+    #: falls, so sorting on it put the runs with the worst beat detection at the top and
+    #: called them the worst artifact.
+    noise_floor_uv: float | None = None
+    excess_power_uv2: float | None = None
+    n_beats: int | None = None
 
 
 @dataclass(frozen=True)
@@ -346,6 +375,9 @@ class ParticipantCorrection:
     #: sorted worklist cannot show.
     affected_runs: str
     worst_residual_uv: float | None
+    #: What that run's residual cleared its averaging floor by, which is what "worst"
+    #: was selected on. The amplitude beside it is reported, never ranked on.
+    worst_excess_power_uv2: float | None = None
 
 
 def _run_label(recording_id: object) -> str:
@@ -399,7 +431,7 @@ def _compact_runs(labels: Sequence[str]) -> str:
     return ", ".join(spans)
 
 
-def _residual_rows(participant) -> list[tuple[str, int, str | None, float | None]]:
+def _residual_rows(participant) -> list[tuple[str, int, str | None, ResidualMeasurement]]:
     """``(run label, marker count, beat source, residual)`` for one participant.
 
     Returns nothing where the sidecar predates these columns, so a cohort assembled from
@@ -409,14 +441,21 @@ def _residual_rows(participant) -> list[tuple[str, int, str | None, float | None
     if runs.empty or "pulse_marker_count" not in runs.columns:
         return []
     counts = pd.to_numeric(runs["pulse_marker_count"], errors="coerce")
-    residuals = (
-        pd.to_numeric(runs["bcg_residual_uv"], errors="coerce")
-        if "bcg_residual_uv" in runs.columns
-        else pd.Series([np.nan] * len(runs))
-    )
+
+    def numeric(name: str) -> pd.Series:
+        if name not in runs.columns:
+            return pd.Series([np.nan] * len(runs))
+        return pd.to_numeric(runs[name], errors="coerce")
+
+    residuals = numeric("bcg_residual_uv")
+    floors = numeric("bcg_noise_floor_uv")
+    excesses = numeric("bcg_excess_power_uv2")
+    beats = numeric("bcg_n_beats")
     sources = runs["beat_source"] if "beat_source" in runs.columns else pd.Series([None] * len(runs))
     rows = []
-    for recording, count, residual, source in zip(runs["run"], counts, residuals, sources):
+    for recording, count, residual, floor, excess, n_beats, source in zip(
+        runs["run"], counts, residuals, floors, excesses, beats, sources
+    ):
         if not np.isfinite(count):
             continue
         rows.append(
@@ -424,7 +463,12 @@ def _residual_rows(participant) -> list[tuple[str, int, str | None, float | None
                 _run_label(recording),
                 int(count),
                 None if pd.isna(source) else str(source),
-                float(residual) if np.isfinite(residual) else None,
+                ResidualMeasurement(
+                    residual_uv=float(residual) if np.isfinite(residual) else None,
+                    noise_floor_uv=float(floor) if np.isfinite(floor) else None,
+                    excess_power_uv2=float(excess) if np.isfinite(excess) else None,
+                    n_beats=int(n_beats) if np.isfinite(n_beats) else None,
+                ),
             )
         )
     return rows
@@ -445,15 +489,31 @@ def uncorrected_runs(cohort: Cohort) -> list[UncorrectedRun]:
         for label, count, source, residual in _residual_rows(participant):
             if count == 0:
                 found.append(
-                    UncorrectedRun(participant.subject, label, count, source, residual)
+                    UncorrectedRun(
+                        participant.subject,
+                        label,
+                        count,
+                        source,
+                        residual.residual_uv,
+                        noise_floor_uv=residual.noise_floor_uv,
+                        excess_power_uv2=residual.excess_power_uv2,
+                        n_beats=residual.n_beats,
+                    )
                 )
-    # Descending residual, unmeasured last, then by participant and run so the order is
-    # stable across rebuilds rather than depending on how the sidecars were read.
+    # Descending floor-corrected power, unmeasured last, then by participant and run so
+    # the order is stable across rebuilds rather than depending on how the sidecars were
+    # read.
+    #
+    # Not the amplitude. That is an average over however many beats the run yielded, and
+    # its floor grows as that count falls, so ordering on it put the runs whose beats were
+    # hardest to detect at the top of a worklist that is supposed to rank surviving
+    # artifact. The excess power has the floor removed and is the quantity the ordering
+    # was always meant to express.
     return sorted(
         found,
         key=lambda row: (
-            row.residual_uv is None,
-            -(row.residual_uv or 0.0),
+            row.excess_power_uv2 is None,
+            -(row.excess_power_uv2 or 0.0),
             row.subject,
             row.run,
         ),
@@ -468,18 +528,25 @@ def participant_correction_rows(cohort: Cohort) -> list[ParticipantCorrection]:
         if not measured:
             continue
         affected = [label for label, count, _, _ in measured if count == 0]
-        residuals = [
-            residual
-            for label, count, _, residual in measured
-            if count == 0 and residual is not None
-        ]
+        # The worst run by floor-corrected power, reported as its amplitude. Selecting on
+        # the amplitude picked whichever uncorrected run had the fewest beats.
+        worst = max(
+            (
+                residual
+                for _, count, _, residual in measured
+                if count == 0 and residual.excess_power_uv2 is not None
+            ),
+            key=lambda residual: residual.excess_power_uv2,
+            default=None,
+        )
         rows.append(
             ParticipantCorrection(
                 subject=participant.subject,
                 n_runs=len(measured),
                 n_uncorrected=len(affected),
                 affected_runs=_compact_runs(affected) if affected else "",
-                worst_residual_uv=max(residuals) if residuals else None,
+                worst_residual_uv=None if worst is None else worst.residual_uv,
+                worst_excess_power_uv2=None if worst is None else worst.excess_power_uv2,
             )
         )
     return sorted(rows, key=lambda row: (-row.n_uncorrected, row.subject))
@@ -531,23 +598,46 @@ def correction_html(cohort: Cohort) -> str:
         "ballistocardiogram. These are the runs to re-export.</p>"
     )
     rows = [
-        [row.subject, row.run, row.beat_source or MISSING, _residual_decimal(row.residual_uv)]
+        [
+            row.subject,
+            row.run,
+            row.beat_source or MISSING,
+            row.n_beats if row.n_beats is not None else MISSING,
+            _residual_decimal(row.residual_uv),
+            _residual_decimal(row.noise_floor_uv),
+            _residual_decimal(row.excess_power_uv2),
+        ]
         for row in listed
     ]
     columns = (
         Column("Participant", align=Align.TEXT, code=True),
         Column("Run", align=Align.TEXT, code=True),
         Column("Beats measured from", align=Align.TEXT, code=True),
-        Column("Residual (µV)"),
+        Column("Beats"),
+        Column("Locked RMS (µV)"),
+        Column("Averaging floor (µV)"),
+        Column("Excess power (µV²)"),
     )
     document += grid_table(columns, rows)
     document += (
-        "<p>Ordered by how much beat-locked artifact each run still carries, so the worst "
-        "come first. The residual is measured before the ICA exclusions, because the "
-        "question is what the upstream correction left rather than what the decomposition "
-        "cleaned up after it. A blank residual is a run where neither the markers nor the "
-        "ECG channel yielded a beat train, so the artifact could not be measured &mdash; "
-        "not a run where there is none.</p>"
+        "<p>Ordered by excess power, so the runs carrying the most beat-locked signal "
+        "above their own averaging floor come first. The residual is measured before the "
+        "ICA exclusions, because the question is what the upstream correction left rather "
+        "than what the decomposition cleaned up after it. A blank row is a run where "
+        "neither the markers nor the ECG channel yielded a beat train, so the artifact "
+        "could not be measured &mdash; not a run where there is none.</p>"
+        "<p>The floor is why three columns stand where one used to. Averaging <em>N</em> "
+        "beats suppresses everything not locked to them by &radic;<em>N</em>, so the "
+        "locked RMS carries a floor that grows as the beat count falls: on one run here, "
+        "the same data measured over 493 beats and over 59 of them differed twentyfold, "
+        "and at the full count the amplitude sat below what a randomly shifted beat train "
+        "produced. Ordering on the amplitude therefore ranked runs by how well their "
+        "beats were detected. Excess power has the floor subtracted and is the quantity "
+        "the ordering was always meant to express.</p>"
+        "<p>A negative excess power means the beat-locked signal did not clear the floor "
+        "at this beat count. That is a measurement, not a zero: it says the run carries no "
+        "residual this many beats can resolve, which is a weaker statement than the run "
+        "carrying none.</p>"
         "<p>No threshold is applied. Marker absence is definitional and is stated as such; "
         "how large a residual has to be before it matters depends on what is measured "
         "downstream, which is the reader's call rather than this table's.</p>"
@@ -560,6 +650,7 @@ def correction_html(cohort: Cohort) -> str:
             row.n_runs,
             row.affected_runs or MISSING,
             _residual_decimal(row.worst_residual_uv),
+            _residual_decimal(row.worst_excess_power_uv2),
         ]
         for row in per_participant
     ]
@@ -568,7 +659,8 @@ def correction_html(cohort: Cohort) -> str:
         Column("Uncorrected"),
         Column("Runs"),
         Column("Which", align=Align.TEXT, code=True),
-        Column("Worst residual (µV)"),
+        Column("Locked RMS of worst run (µV)"),
+        Column("Its excess power (µV²)"),
     )
     document += "<h4>By participant</h4>" + grid_table(summary_columns, summary_rows)
     document += (
