@@ -385,3 +385,90 @@ def test_the_screening_panel_covers_every_component_and_both_detectors() -> None
     )
     assert plotted == components
     plt.close(figure)
+
+
+def _cardiac_review(*, runs=6, components=12, lift_at=(2,), near_zero=False):
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.ica_cardiac_review import ComponentCardiacReview
+
+    rng = np.random.default_rng(0)
+    ctps = np.abs(rng.normal(0.03, 0.01, (runs, components)))
+    corr = np.abs(rng.normal(0.03, 0.01, (runs, components)))
+    for component in lift_at:
+        ctps[:, component] = 0.40
+        corr[:, component] = 0.30
+    if near_zero:
+        ctps[0, -1] = 1e-9
+    flags = ctps > 0.20
+    return ComponentCardiacReview(
+        run_ids=tuple(f"run-{index + 1}" for index in range(runs)),
+        times=np.linspace(-0.2, 0.6, 10),
+        run_mean_z=rng.normal(0, 1, (runs, components, 10)),
+        correlation_scores=corr,
+        ctps_scores=ctps,
+        correlation_flags=np.zeros_like(flags),
+        ctps_flags=flags,
+        r_locked_epoch_counts=np.full(runs, 400),
+        run_ecg_z=rng.normal(0, 1, (runs, 10)),
+    )
+
+
+def test_the_screening_panel_uses_a_log_axis_and_shows_every_run() -> None:
+    """The design the ocular panel already had and this one first ignored.
+
+    One cardiac component scores an order of magnitude above the rest, so on a linear
+    axis it sets the scale and presses every other component onto the floor -- which is
+    the comparison the panel exists to make. Runs are drawn because a component cardiac
+    in one run of six is a different decision from one cardiac throughout.
+    """
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.ica_cardiac_report import _plot_component_cardiac_scores
+
+    figure = _plot_component_cardiac_scores(_cardiac_review(), excluded=[2])
+
+    axis = figure.axes[0]
+    assert axis.get_yscale() == "log"
+    labels = " | ".join(text.get_text() for text in axis.get_legend().get_texts())
+    assert "individual runs" in labels
+    assert "median across runs" in labels
+    assert "drew their line" in labels
+    plt.close(figure)
+
+
+def test_the_screening_axis_survives_a_score_at_zero() -> None:
+    """A kappa or a correlation may land arbitrarily close to zero, and one that does
+    must not drag a logarithmic floor down several decades and flatten the panel."""
+    import numpy as np
+
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.ica_cardiac_report import _plot_component_cardiac_scores
+
+    figure = _plot_component_cardiac_scores(
+        _cardiac_review(near_zero=True), excluded=[2]
+    )
+
+    low, high = figure.axes[0].get_ylim()
+    assert np.log10(high / low) < 4.0
+    plt.close(figure)
+
+
+def test_the_screening_panel_draws_no_threshold_band_when_nothing_was_flagged() -> None:
+    """The cutoff is then above every score observed, and a band there would put a
+    threshold on the figure that no decision supports."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.ica_cardiac_report import (
+        _cardiac_threshold_band,
+        _plot_component_cardiac_scores,
+    )
+
+    review = _cardiac_review(lift_at=())
+    assert _cardiac_threshold_band(review) is None
+
+    figure = _plot_component_cardiac_scores(review, excluded=[])
+    labels = [text.get_text() for text in figure.axes[0].get_legend().get_texts()]
+    assert not any("drew their line" in label for label in labels)
+    plt.close(figure)

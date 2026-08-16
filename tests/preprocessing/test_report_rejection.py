@@ -214,3 +214,38 @@ def test_dropped_and_kept_epochs_are_drawn_in_different_colours() -> None:
     colours = [patch.get_facecolor() for patch in figure.axes[0].patches]
     assert colours[0] == colours[1] == colours[7]
     assert colours[0] != colours[2]
+
+
+def test_a_session_that_dropped_nothing_gets_no_retention_breakdown() -> None:
+    """Bars at 1.0 in every group answer 'did rejection fall unevenly' with the same 'no'
+    the header already gave, and spend two panels of the figure doing it.
+
+    The position strip stays: an empty strip is the difference between nothing dropped
+    and nothing measured.
+    """
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.report.rejection import (
+        GroupRetention,
+        RejectionSummary,
+        plot_rejection,
+    )
+
+    import pandas as pd
+
+    counts = pd.Series({"44.3": 33, "48.3": 33})
+    retention = {"stimulus_temp": GroupRetention(retained=counts, presented=counts)}
+
+    kept_everything = plot_rejection(
+        RejectionSummary(total=66, kept=66, reasons={}, dropped_positions=()),
+        group_retention=retention,
+    )
+    dropped_some = plot_rejection(
+        RejectionSummary(total=66, kept=64, reasons={"PTP": 2}, dropped_positions=(3, 9)),
+        group_retention=retention,
+    )
+
+    assert len(kept_everything.axes) == 1
+    assert len(dropped_some.axes) > 1
+    plt.close(kept_everything)
+    plt.close(dropped_some)

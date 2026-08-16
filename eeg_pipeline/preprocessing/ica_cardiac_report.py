@@ -58,6 +58,38 @@ CARDIAC_REPORT_TITLES = (
 )
 
 
+def _cardiac_threshold_band(review: ComponentCardiacReview) -> tuple[float, float] | None:
+    """Bracket the score at which the detectors separated flagged from kept.
+
+    The counterpart of the ocular panel's bracket, and derived the same way and for the
+    same reason: both detectors threshold a statistic of each run's own distribution, so
+    no single score describes the cutoff, but the decisions bound it exactly -- above every
+    component a run left unflagged, and at or below the lowest one it flagged.
+
+    Spans both detectors and every run, so it is a statement about the session. ``None``
+    when nothing was flagged anywhere: the cutoff is then above every score observed, and
+    a band drawn there would put a threshold on the figure that no decision supports.
+    """
+    lows: list[float] = []
+    highs: list[float] = []
+    for scores, flags in (
+        (review.ctps_scores, review.ctps_flags),
+        (review.correlation_scores, review.correlation_flags),
+    ):
+        magnitudes = np.abs(np.asarray(scores, dtype=float))
+        marked = np.asarray(flags, dtype=bool)
+        for run_index in range(magnitudes.shape[0]):
+            flagged = np.flatnonzero(marked[run_index])
+            if not flagged.size:
+                continue
+            kept = magnitudes[run_index][~marked[run_index]]
+            highs.append(float(magnitudes[run_index][flagged].min()))
+            lows.append(float(kept.max()) if kept.size else highs[-1])
+    if not highs:
+        return None
+    return min(lows), max(highs)
+
+
 def _plot_component_cardiac_scores(
     review: ComponentCardiacReview,
     *,
@@ -96,41 +128,87 @@ def _plot_component_cardiac_scores(
         layout="constrained",
     )
 
+    # Individual runs behind their median, and a logarithmic axis, for the reasons the
+    # ocular panel states and this one first ignored: one cardiac component scores an
+    # order of magnitude above the rest, and on a linear axis it sets the scale and
+    # presses every other component -- including the ones the detector flagged -- onto the
+    # floor. Drawn first, on the earlier version, most of a fifty-eight component
+    # decomposition sat inside the bottom tenth of the panel.
+    #
+    # Runs are shown because consistency is the finding: a component cardiac in one run of
+    # six is a different review decision from one cardiac throughout, and a median alone
+    # cannot separate them.
+    positive: list[float] = []
     for scores, flags, color, name in (
         (review.ctps_scores, review.ctps_flags, AFTER_COLOR, "CTPS"),
         (review.correlation_scores, review.correlation_flags, MARK_COLOR, "ECG correlation"),
     ):
-        medians = np.median(np.abs(scores), axis=0)
+        magnitudes = np.abs(np.asarray(scores, dtype=float))
+        positive.extend(magnitudes[magnitudes > 0.0].ravel().tolist())
+        for run_index in range(magnitudes.shape[0]):
+            axis.scatter(
+                components,
+                magnitudes[run_index],
+                s=12,
+                facecolor="none",
+                edgecolor=color,
+                linewidth=0.7,
+                zorder=2,
+                label=f"{name}, individual runs" if run_index == 0 else None,
+            )
         axis.scatter(
             components,
-            medians,
+            np.median(magnitudes, axis=0),
             s=26,
             color=color,
             edgecolor="white",
             linewidth=0.5,
             zorder=3,
-            label=f"{name} (median across runs)",
+            label=f"{name}, median across runs",
         )
         flagged = np.flatnonzero(np.asarray(flags).any(axis=0))
         if flagged.size:
             axis.scatter(
                 flagged,
-                np.max(np.abs(scores), axis=0)[flagged],
+                magnitudes.max(axis=0)[flagged],
                 marker="x",
                 color=FLAG_COLOR,
                 s=48,
                 zorder=4,
-                label=f"Flagged by {name}" if name == "CTPS" else None,
+                label=f"Flagged by {name}",
             )
 
+    # A low percentile rather than the minimum. A cardiac score is a correlation or a
+    # kappa and is free to land arbitrarily close to zero, and one component that happens
+    # to do so drags a logarithmic floor down several decades and flattens the panel it
+    # was meant to open up. The ocular panel bounds on its minimum safely because an
+    # absolute EOG correlation does not approach zero the same way.
+    floor = float(np.percentile(positive, 1)) / 2.0 if positive else 1e-3
     axis.set(
         title=(
             f"Cardiac scores per component ({len(review.run_ids)} runs). "
             "Screening view: the slides below carry the evidence for any one component."
         ),
         ylabel="Score (absolute)",
+        yscale="log",
+        ylim=(floor, None),
     )
-    axis.legend(frameon=False, fontsize=8)
+    band = _cardiac_threshold_band(review)
+    if band is not None:
+        low, high = band
+        # ``fill_between`` rather than ``axhspan``, as in the ocular panel: this axis draws
+        # no patches on purpose, so "there are no bars here" stays a checkable property.
+        axis.fill_between(
+            [-0.7, component_count - 0.3],
+            low,
+            high,
+            color=FLAG_COLOR,
+            alpha=0.10,
+            linewidth=0,
+            zorder=0,
+            label="where the detectors drew their line",
+        )
+    axis.legend(frameon=False, fontsize=7, ncol=2)
     axis.grid(axis="y", alpha=0.2)
     axis.spines[["top", "right"]].set_visible(False)
 

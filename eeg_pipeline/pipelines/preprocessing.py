@@ -1914,6 +1914,25 @@ class PreprocessingPipeline(PipelineBase):
             )
             return None
 
+        # Never over the finalized reading. This pass and the final one both own the
+        # preservation section and clear it by tag, so whichever runs last is what the
+        # document shows -- and this one runs last, because the review sections are
+        # appended after the epoch stage that produces the final measurement.
+        #
+        # The effect was a section reporting the evidence from *before* ICA in the one
+        # place that asks whether anything survived it, while the landing panel quoted the
+        # measurement from after. On sub-0000 the two disagreed in sign, +0.082 against
+        # -0.10, with no epochs rejected at all: the whole difference was the ICA the
+        # section exists to judge.
+        clean_epochs_path = report_path.with_name(f"{prefix}_task-{task}_proc-clean_epo.fif")
+        if clean_epochs_path.exists():
+            self.logger.info(
+                "Clean epochs exist for sub-%s; keeping the finalized preservation reading "
+                "rather than replacing it with the provisional one",
+                subject,
+            )
+            return None
+
         status = "Provisional — all task epochs, before rejection"
         epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
         if bool(self.config.get("preprocessing.task_is_rest", False)):

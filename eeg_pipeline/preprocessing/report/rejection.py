@@ -261,6 +261,14 @@ def plot_rejection(
         for column, retention in (group_retention or {}).items()
         if retention.n_groups >= 2
     }
+    # A retention breakdown of a session that dropped nothing is a row of bars at 1.0 in
+    # every panel. It answers the question these panels exist for -- did rejection fall
+    # unevenly across runs or conditions -- with the same "no" the header already gave,
+    # and spends two panels of the figure doing it. The position strip stays, because
+    # "which epochs went" is still worth showing as an empty strip: it is the difference
+    # between nothing dropped and nothing measured.
+    if not summary.dropped_positions:
+        group_retention = {}
     panels = 1 + len(group_retention)
     figure, axes = plt.subplots(
         1,

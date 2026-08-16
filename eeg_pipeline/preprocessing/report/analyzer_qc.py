@@ -1140,15 +1140,15 @@ def plot_rr_intervals(
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
     axes[-1, 0].set_xlabel("Time in run (min)")
-    plausible_low, plausible_high = plausible_rr_range_s
-    caption = (
-        "Beat-to-beat intervals from the R markers · dashed line is the run median\n"
-        f"dotted line is {MISSED_BEAT_FACTOR:g}× the median, above which an interval is "
-        "counted as a missed beat\n"
-        f"log axis fixed to {low:g}–{high:g} s; shading marks the {plausible_low:g}–"
-        f"{plausible_high:g} s a working detector stays inside\n"
-        "triangles mark intervals outside the axis, drawn on the boundary they exceeded"
-    )
+    # The title names the figure. What the lines and shading mean is four sentences of
+    # method, and four sentences set in 9 pt above six stacked panels is a paragraph
+    # nobody reads in the one place it cannot be made larger; ``rr_interval_html`` states
+    # it in the section, where it is prose.
+    #
+    # What stays is what belongs to *this* subject rather than to the method: the runs
+    # that produced no series at all, which is a fact about the recording and is not
+    # recoverable from the panels, because a run with no series has no panel.
+    caption = "Beat-to-beat intervals from the R markers"
     if missing:
         caption += (
             "\nNo interval series for "
@@ -1277,6 +1277,18 @@ def rr_intervals_html(series: Sequence[RrIntervals], *, missing: Sequence[str] =
         "the count is left to the reviewer: a run with genuine arrhythmia and a run "
         "with a failing detector both raise it, and only the ECG trace distinguishes "
         "them.</p>"
+        # Stated here rather than above the figure. It is four sentences of method, the
+        # same for every subject and every run, and set small enough to fit over six
+        # stacked panels it was a paragraph in the one place on the page that cannot be
+        # made bigger.
+        "<p>In the panels below, the dashed line is each run's median interval and the "
+        f"dotted line {MISSED_BEAT_FACTOR:g}&times; that median, above which an interval "
+        "is counted as a missed beat. The axis is logarithmic and fixed across runs so "
+        f"the same interval sits at the same height in every panel; shading marks the "
+        f"{PLAUSIBLE_RR_RANGE_S[0]:.2f}&ndash;{PLAUSIBLE_RR_RANGE_S[1]:.2f} s a working "
+        "detector stays inside. Intervals beyond the axis are drawn as triangles on the "
+        "boundary they exceeded, so a lapse is visible as a lapse rather than lost off "
+        "the top.</p>"
     )
 
 
