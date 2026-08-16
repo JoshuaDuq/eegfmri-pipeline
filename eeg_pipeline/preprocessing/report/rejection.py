@@ -385,8 +385,6 @@ def add_rejection_review(
 ) -> RejectionSummary:
     """Append trial-retention evidence to the report and return the summary."""
     from eeg_pipeline.preprocessing.report.organize import (
-        before_epoch_sections,
-        move_tagged_content_before,
         remove_tagged_content,
     )
     from eeg_pipeline.preprocessing.report.style import report_image_format
@@ -441,7 +439,6 @@ def add_rejection_review(
         image_format=report_image_format(),
         replace=True,
     )
-    move_tagged_content_before(report, tag="epoch-rejection", anchor=before_epoch_sections)
     return summary
 
 

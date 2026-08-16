@@ -229,6 +229,7 @@ def save_subject_report(
     the page a reader opens older than the file the next stage reopens.
     """
     from eeg_pipeline.preprocessing.report.at_a_glance import add_at_a_glance_section
+    from eeg_pipeline.preprocessing.report.organize import order_sections
 
     path = Path(report_path)
     record = record_stage(path, stage=stage, measurements=measurements)
@@ -244,6 +245,10 @@ def save_subject_report(
     # written by a single stage it would freeze at that stage's view of the document.
     # Added after the build panel so it can be moved in front of it.
     add_at_a_glance_section(report=report, record=record)
+    # Last, after every stage has added whatever it adds. Ordering here rather than in the
+    # stages is what makes the document's shape a property of the pipeline instead of a
+    # property of which stages were run and in what sequence.
+    order_sections(report)
     report.save(path, overwrite=True, open_browser=False)
     report.save(path.with_suffix(".html"), overwrite=True, open_browser=False)
     return record

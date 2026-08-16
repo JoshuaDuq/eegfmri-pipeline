@@ -277,6 +277,85 @@ def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
     )
 
 
+#: The order sections appear in, as a reading order rather than a build order.
+#:
+#: Matched as prefixes, so ``ICA component review`` covers the per-band sections whose
+#: names carry the band. A section matching nothing is appended in the order it was
+#: added, which is what a new stage gets until it is named here.
+#:
+#: The document previously had no declared order at all. Each stage moved its own content
+#: relative to whatever happened to exist when it ran, so the shape of the report depended
+#: on which stages ran and in what sequence -- visible in the archive as the Analyzer and
+#: Configuration sections occupying two separate positions each, and as the events panel
+#: rendering behind the trial counts it describes because it was placed last.
+#:
+#: The sequence: what the run was, what came in, what the decomposition did, what survived.
+SECTION_ORDER = (
+    # What this report says, and what produced it.
+    "At a glance",
+    "Configuration",
+    "Filter response",
+    # What came in, and what the upstream correction left in it.
+    "Scanner artifact correction (Analyzer)",
+    "Channel and region coverage",
+    "Residual scanner gradient",
+    "Data quality over time",
+    "Raw (original)",
+    "Raw (filtered)",
+    # The decomposition: the whole of it, then each detector, then each component.
+    "ICA: epochs for fitting",
+    "ICA decomposition quality",
+    "ICA cardiac artifact review",
+    "ICA ocular artifact review",
+    "ICA component review",
+    "ICA: components",
+    "ICA: removals",
+    # Whether the cleaning worked.
+    "Sensor spectra before and after ICA",
+    # What was presented, what survived, and whether the survivors carry signal.
+    "Events",
+    "Epoch rejection",
+    "Signal preservation",
+    "Epochs (before cleaning)",
+    "Epochs (clean)",
+    "Raw (clean)",
+)
+
+
+def _section_rank(element: object) -> int:
+    """Where an element's section sits in :data:`SECTION_ORDER`.
+
+    Sectionless content sorts last. MNE leaves the configuration file and the system
+    information without a section, and both are reference material a reader reaches for
+    after the evidence rather than before it.
+    """
+    section = str(element.section or "")
+    if not section:
+        return len(SECTION_ORDER) + 1
+    for rank, name in enumerate(SECTION_ORDER):
+        if section.startswith(name):
+            return rank
+    return len(SECTION_ORDER)
+
+
+def order_sections(report: mne.Report) -> None:
+    """Put the document in :data:`SECTION_ORDER`, keeping each section's own order.
+
+    A stable sort on section rank alone: within a section the panels keep the order the
+    stage that wrote them chose, because that ordering is a judgement about one body of
+    evidence and this function has no view on it.
+
+    MNE renders a section wherever its first element sits and merges later elements into
+    it, so sorting the content by section is what makes the rendered contents match this
+    list -- and it also gathers the sections that were previously split across two
+    positions in the archive.
+    """
+    content = _content_elements(report)
+    order = sorted(range(len(content)), key=lambda index: (_section_rank(content[index]), index))
+    if order != list(range(len(content))):
+        report.reorder(order)
+
+
 def drop_superseded_mne_ica_panels(report: mne.Report) -> None:
     """Drop MNE's ICA panels, but only from a report carrying the review that replaces them.
 
@@ -472,6 +551,8 @@ __all__ = [
     "drop_replaced_per_run_bad_channels",
     "drop_replaced_raw_time_series",
     "drop_superseded_mne_ica_panels",
+    "order_sections",
+    "SECTION_ORDER",
     "move_tagged_content_before",
     "open_subject_report",
     "place_events_with_epochs",

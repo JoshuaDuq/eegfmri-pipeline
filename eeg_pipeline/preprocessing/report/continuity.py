@@ -576,9 +576,7 @@ def add_continuity_section(
 ) -> None:
     """Append the time-resolved quality panels to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
-        before_raw_sections,
         drop_replaced_raw_time_series,
-        move_tagged_content_before,
         remove_tagged_content,
     )
     from eeg_pipeline.preprocessing.report.style import report_image_format
@@ -609,7 +607,6 @@ def add_continuity_section(
     # Measured from the raw run and independent of the ICA, so it belongs with the other
     # input-quality evidence. Anchored on the ICA review it landed between the ocular
     # review and the decomposition summary, splitting the ICA sections around it.
-    move_tagged_content_before(report, tag="run-continuity", anchor=before_raw_sections)
 
 
 __all__ = [

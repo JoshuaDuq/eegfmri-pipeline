@@ -137,7 +137,6 @@ def add_provenance_review(
 ) -> None:
     """Place the provenance record at the top of the report."""
     from eeg_pipeline.preprocessing.report.organize import (
-        move_tagged_content_first,
         remove_tagged_content,
     )
 
@@ -149,7 +148,6 @@ def add_provenance_review(
         tags=("summary", "provenance"),
         replace=True,
     )
-    move_tagged_content_first(report, tag="provenance")
 
 
 __all__ = [

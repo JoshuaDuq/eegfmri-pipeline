@@ -337,8 +337,6 @@ def add_filter_review(
 ) -> None:
     """Add the realised filter response, ahead of the spectra it is read against."""
     from eeg_pipeline.preprocessing.report.organize import (
-        before_raw_sections,
-        move_tagged_content_before,
         remove_tagged_content,
     )
 
@@ -359,7 +357,6 @@ def add_filter_review(
         image_format=REPORT_IMAGE_FORMAT,
         replace=True,
     )
-    move_tagged_content_before(report, tag="filter-response", anchor=before_raw_sections)
 
 
 __all__ = [

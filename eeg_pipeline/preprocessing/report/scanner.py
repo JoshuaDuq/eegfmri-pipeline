@@ -942,8 +942,6 @@ def add_scanner_residual_section(
 ) -> None:
     """Append the per-run gradient residual evidence to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
-        before_raw_sections,
-        move_tagged_content_before,
         remove_tagged_content,
     )
     from eeg_pipeline.preprocessing.report.style import report_image_format
@@ -978,7 +976,6 @@ def add_scanner_residual_section(
         )
     # This describes what upstream correction left behind, so it belongs with the other
     # input-quality evidence ahead of the raw sections.
-    move_tagged_content_before(report, tag="scanner-residual", anchor=before_raw_sections)
 
 
 __all__ = [

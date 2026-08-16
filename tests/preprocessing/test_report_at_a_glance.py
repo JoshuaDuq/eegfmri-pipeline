@@ -113,6 +113,14 @@ def test_a_measured_fraction_is_shown_as_a_percentage() -> None:
 
 
 def test_the_panel_is_placed_before_everything_else() -> None:
+    """Placement is decided by the document's declared section order, not here.
+
+    The panel used to hoist itself to the front on the way in. Every section doing that
+    for itself is what made the document's shape depend on which stages ran; the order is
+    now stated once and applied when the report is saved.
+    """
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
     report = mne.Report(title="subject", verbose="ERROR")
     report.add_html(html="<p>config</p>", title="Configuration", section="Configuration")
 
@@ -120,6 +128,7 @@ def test_the_panel_is_placed_before_everything_else() -> None:
         report=report,
         record=_record(_stage("band-ica-report", "2026-07-25T23:51:09+00:00", n_components=22)),
     )
+    order_sections(report)
 
     assert AT_A_GLANCE_TAG in report._content[0].tags
 

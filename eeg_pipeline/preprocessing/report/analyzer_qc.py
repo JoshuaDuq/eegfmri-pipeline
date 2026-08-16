@@ -986,8 +986,6 @@ def add_marker_agreement_section(
     half the runs is precisely what this panel is for.
     """
     from eeg_pipeline.preprocessing.report.organize import (
-        before_raw_sections,
-        move_tagged_content_before,
         remove_tagged_content,
     )
     from eeg_pipeline.preprocessing.report.style import report_image_format
@@ -1011,7 +1009,6 @@ def add_marker_agreement_section(
         image_format=report_image_format(),
         replace=True,
     )
-    move_tagged_content_before(report, tag="marker-agreement", anchor=before_raw_sections)
 
 
 def compute_rr_intervals(
@@ -1293,8 +1290,6 @@ def add_rr_interval_section(
 ) -> None:
     """Append the beat-detection record to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
-        before_raw_sections,
-        move_tagged_content_before,
         remove_tagged_content,
     )
     from eeg_pipeline.preprocessing.report.style import report_image_format
@@ -1327,7 +1322,6 @@ def add_rr_interval_section(
         image_format=report_image_format(),
         replace=True,
     )
-    move_tagged_content_before(report, tag="rr-intervals", anchor=before_raw_sections)
 
 
 def add_analyzer_correction_review(

@@ -410,9 +410,7 @@ def add_coverage_review(
 ) -> ChannelCoverage | None:
     """Append channel and ROI coverage evidence to a subject report."""
     from eeg_pipeline.preprocessing.report.organize import (
-        before_raw_sections,
         drop_replaced_per_run_bad_channels,
-        move_tagged_content_before,
         remove_tagged_content,
     )
     from eeg_pipeline.preprocessing.report.style import report_image_format
@@ -464,7 +462,6 @@ def add_coverage_review(
             image_format=report_image_format(),
             replace=True,
         )
-    move_tagged_content_before(report, tag="channel-coverage", anchor=before_raw_sections)
     return coverage
 
 

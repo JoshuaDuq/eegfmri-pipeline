@@ -269,7 +269,6 @@ def add_at_a_glance_section(*, report: mne.Report, record: Mapping[str, Any]) ->
     placement of a summary would lose the sections the stage actually produced. The panel
     is the content; being first is a courtesy to the reader.
     """
-    from eeg_pipeline.preprocessing.report.organize import move_tagged_content_first
 
     document = at_a_glance_html(record)
     if not document:
@@ -286,7 +285,6 @@ def add_at_a_glance_section(*, report: mne.Report, record: Mapping[str, Any]) ->
         return
     if not any(AT_A_GLANCE_TAG in getattr(element, "tags", ()) for element in content):
         return
-    move_tagged_content_first(report, tag=AT_A_GLANCE_TAG)
 
 
 __all__ = [

@@ -490,3 +490,96 @@ def test_the_events_panel_sits_ahead_of_the_panels_that_count_its_trials() -> No
     order = [element.name for element in report._content]
     assert order.index("Events") < order.index("Trial retention")
     assert order.index("Trial retention") < order.index("Evidence that signal survived")
+
+
+def _sectioned(report: mne.Report, *sections: str) -> None:
+    figure = plt.figure()
+    for name in sections:
+        report.add_figure(fig=figure, title=f"panel in {name}", section=name, tags=("x",))
+    plt.close(figure)
+
+
+def test_the_document_follows_the_declared_order_whatever_order_stages_ran_in() -> None:
+    """The shape of the report must be a property of the pipeline, not of the run path."""
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    # Deliberately backwards: epochs written before the raw they came from.
+    _sectioned(
+        report,
+        "Epochs (clean)",
+        "Signal preservation",
+        "Raw (original)",
+        "At a glance",
+        "ICA decomposition quality",
+    )
+
+    order_sections(report)
+
+    assert [str(element.section) for element in report._content] == [
+        "At a glance",
+        "Raw (original)",
+        "ICA decomposition quality",
+        "Signal preservation",
+        "Epochs (clean)",
+    ]
+
+
+def test_a_per_band_review_section_is_placed_by_its_prefix() -> None:
+    """The band is part of the section name, so the order list cannot spell it out."""
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    _sectioned(report, "Epoch rejection", "ICA component review: Broadband 1–100 Hz")
+
+    order_sections(report)
+
+    assert [str(element.section) for element in report._content] == [
+        "ICA component review: Broadband 1–100 Hz",
+        "Epoch rejection",
+    ]
+
+
+def test_panels_keep_their_own_order_inside_a_section() -> None:
+    """Within one section the order is a judgement about one body of evidence, and this
+    function has no view on it."""
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    figure = plt.figure()
+    for title in ("first", "second", "third"):
+        report.add_figure(fig=figure, title=title, section="Epoch rejection", tags=("x",))
+    report.add_figure(fig=figure, title="glance", section="At a glance", tags=("x",))
+    plt.close(figure)
+
+    order_sections(report)
+
+    assert [element.name for element in report._content] == ["glance", "first", "second", "third"]
+
+
+def test_an_unknown_section_is_appended_rather_than_interleaved() -> None:
+    """A stage this list does not name yet must not land in the middle of the evidence."""
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    _sectioned(report, "Something new", "At a glance", "Epochs (clean)")
+
+    order_sections(report)
+
+    sections = [str(element.section) for element in report._content]
+    assert sections[0] == "At a glance"
+    assert sections[-1] == "Something new"
+
+
+def test_sectionless_reference_material_sorts_last() -> None:
+    """MNE leaves the configuration file and system information unsectioned, and both are
+    reference a reader reaches for after the evidence."""
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    report.add_html(html="<p>sys</p>", title="System information")
+    _sectioned(report, "Epochs (clean)", "At a glance")
+
+    order_sections(report)
+
+    assert [element.name for element in report._content][-1] == "System information"

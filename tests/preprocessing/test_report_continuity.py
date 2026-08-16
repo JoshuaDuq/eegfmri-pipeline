@@ -410,10 +410,13 @@ def test_filter_support_cannot_consume_both_ends_of_the_run() -> None:
 def test_the_section_sits_with_the_other_raw_input_evidence() -> None:
     """This panel is measured from the raw run and says nothing about the ICA.
 
-    It anchored before the ICA component review, which dropped it between the ocular
-    review and the decomposition summary and split the ICA sections into two blocks with
-    a raw-data panel wedged in the middle.
+    It once anchored itself before the ICA component review, which dropped it between the
+    ocular review and the decomposition summary and split the ICA sections into two blocks
+    with a raw-data panel wedged in the middle. Its position is now stated in the
+    document's section order rather than negotiated by the section itself.
     """
+    from eeg_pipeline.preprocessing.report.organize import order_sections
+
     run = compute_run_continuity(_raw(), recording_id="sub-01_task-x_run-1")
     report = mne.Report(title="continuity", verbose="ERROR")
     figure = plot_run_continuity(run)
@@ -426,9 +429,11 @@ def test_the_section_sits_with_the_other_raw_input_evidence() -> None:
     )
 
     add_continuity_section(report=report, runs=[run])
+    order_sections(report)
 
     sections = [element.section for element in report._content]
     assert sections.index("Data quality over time") < sections.index("Raw (original)")
+    assert sections.index("Raw (original)") < sections.index("ICA decomposition quality")
 
 
 def _run_continuity(*, volume_markers, gaps=()):
