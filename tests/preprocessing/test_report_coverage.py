@@ -123,8 +123,57 @@ def test_no_exclusions_needs_no_figure_at_all() -> None:
         ]
     )
 
+    at_the_reference = pd.DataFrame(
+        [
+            {"roi": "Frontal", "n_total": 12, "n_remaining": 11},
+            {"roi": "Midline", "n_total": 3, "n_remaining": 2},
+        ]
+    )
+
     assert not coverage_figure_is_informative(intact)
-    assert coverage_figure_is_informative(lost)
+    # A loss having occurred is not enough. Eight bars standing well clear of the
+    # reference answer "does every region still have enough sensors" the way the summary
+    # sentence does, only slower -- on sub-0000 four bad channels of sixty-three left
+    # every region at three or more against a minimum of two.
+    assert not coverage_figure_is_informative(lost, minimum_roi_channels=2)
+    # A region that has come down to the reference is where the distribution is worth
+    # reading rather than summarising.
+    assert coverage_figure_is_informative(at_the_reference, minimum_roi_channels=2)
+
+
+def test_a_withheld_coverage_figure_still_states_the_closest_region(tmp_path) -> None:
+    """Withholding the panel must not withhold the measurement."""
+    _write(tmp_path, rois=[_roi("Frontal", 12, 11), _roi("Midline", 3, 3)], bad="AF4")
+    coverage = load_channel_coverage(deriv_eeg_root=tmp_path, task="pain", subject="0015")
+
+    document = coverage_html(coverage, minimum_roi_channels=2)
+
+    # The region closest to the reference, which is the one at risk -- not merely the
+    # one that happened to lose a channel.
+    assert "Midline" in document
+    assert "3 of 3" in document
+
+
+def test_identical_bad_channels_across_runs_are_stated_not_tabulated() -> None:
+    """Under subject_union the runs are harmonised before this is written, so the table
+    is guaranteed-identical rows and the case its own text calls informative -- a channel
+    bad in one run alone -- cannot appear in it."""
+    from eeg_pipeline.preprocessing.report.coverage import RunBadChannels, run_bad_channel_html
+
+    same = [
+        RunBadChannels(run_label=f"run-{index}", bad_channels=("AF4", "F3"), reasons={})
+        for index in range(1, 7)
+    ]
+    differing = [
+        RunBadChannels(run_label="run-1", bad_channels=("AF4",), reasons={}),
+        RunBadChannels(run_label="run-2", bad_channels=("AF4", "T8"), reasons={}),
+    ]
+
+    collapsed = run_bad_channel_html(same)
+    assert "AF4, F3" in collapsed
+    assert "<table" not in collapsed
+
+    assert "<table" in run_bad_channel_html(differing)
 
 
 def test_the_section_says_so_when_nothing_was_excluded(tmp_path) -> None:

@@ -204,9 +204,27 @@ def run_matrix_is_informative(runs: Sequence[RunBadChannels]) -> bool:
 
 
 def run_bad_channel_html(runs: Sequence[RunBadChannels]) -> str:
-    """Render one row per run, clean runs included."""
+    """Render one row per run, or a sentence when every run names the same channels.
+
+    Under a ``subject_union`` synchronisation policy the runs are made to agree before
+    this is written, so the table is guaranteed-identical rows: on sub-0000 it listed
+    ``AF4, F3, FC6, T8`` six times. Its own paragraph says the informative case is a
+    channel bad in a single run -- which that policy makes unrepresentable, so the table
+    could not have shown it however the recording had gone.
+
+    The same predicate already withholds the matrix beneath it; a table that cannot vary
+    is no more evidence than a figure that cannot.
+    """
     if not runs:
         return ""
+    if not run_matrix_is_informative(runs):
+        shared = ", ".join(runs[0].bad_channels) or "none"
+        return (
+            f"<p>All {len(runs)} runs carry the same bad channels: "
+            f"{html.escape(shared)}. They are harmonised across runs before this is "
+            "written, so a channel that failed during one run alone would have been "
+            "spread to the others and cannot be distinguished here.</p>"
+        )
     columns = (
         Column("Run", align=Align.TEXT),
         Column("Bad channels"),
@@ -296,17 +314,61 @@ def _unassigned_rows(coverage: ChannelCoverage) -> list[tuple[str, object]]:
     return [("In no region of interest", unassigned)]
 
 
-def coverage_figure_is_informative(rois: pd.DataFrame) -> bool:
+def coverage_figure_is_informative(
+    rois: pd.DataFrame,
+    *,
+    minimum_roi_channels: int = MINIMUM_ROI_CHANNELS,
+) -> bool:
     """Whether the per-region figure shows anything the summary table does not.
 
-    The figure draws the region total behind the surviving count. When nothing was
-    excluded the two layers are identical, so the front bars hide the back ones exactly
-    and the legend names a series that is not visible anywhere on the axes. There is no
-    loss to plot, and the sentence in the summary says so more directly.
+    The figure draws the region total behind the surviving count, so with nothing
+    excluded the two layers coincide exactly and the legend names a series not visible
+    anywhere on the axes.
+
+    A loss having occurred is not by itself enough. The question this section asks is
+    whether each region still has enough sensors to average over, and eight bars standing
+    well clear of the reference answer it the way the summary sentence does, only slower:
+    on sub-0000 four bad channels of sixty-three left every region at three or more
+    against a minimum of two, and three of the eight bars carried any loss at all.
+
+    So the figure is drawn when some region has come down to the reference or below it --
+    the case where the distribution is worth reading rather than summarising. The bar is
+    the configured minimum, so nothing new is invented to tune.
     """
     if rois.empty:
         return False
-    return bool((rois["n_remaining"].to_numpy() < rois["n_total"].to_numpy()).any())
+    if not bool((rois["n_remaining"].to_numpy() < rois["n_total"].to_numpy()).any()):
+        return False
+    return bool((rois["n_remaining"].to_numpy() <= minimum_roi_channels).any())
+
+
+def _coverage_without_figure_html(
+    coverage: ChannelCoverage,
+    *,
+    minimum_roi_channels: int,
+) -> str:
+    """State in a sentence what the suppressed per-region figure would have shown.
+
+    The figure is withheld when no region came down to the reference, and the fact a
+    reader would have taken from it is the one named here: the region that came closest.
+    Withholding the panel must not withhold the measurement.
+    """
+    rois = coverage.rois
+    if rois.empty:
+        return ""
+    if not bool((rois["n_remaining"].to_numpy() < rois["n_total"].to_numpy()).any()):
+        return (
+            "<p>No channel was excluded, so every region keeps its full complement and "
+            "there is no per-region loss to plot.</p>"
+        )
+    worst = rois.loc[rois["n_remaining"].idxmin()]
+    return (
+        f"<p>Every region stayed clear of the {minimum_roi_channels}-channel reference, "
+        f"the closest being {html.escape(str(worst['roi']))} with "
+        f"{int(worst['n_remaining'])} of {int(worst['n_total'])} channels. The per-region "
+        "counts are plotted only when one of them reaches the reference, which is when "
+        "their distribution is worth reading rather than summarising.</p>"
+    )
 
 
 def coverage_html(
@@ -334,10 +396,11 @@ def coverage_html(
             ]
         )
     )
-    if not coverage_figure_is_informative(coverage.rois):
-        document += (
-            "<p>No channel was excluded, so every region keeps its full complement and "
-            "there is no per-region loss to plot.</p>"
+    if not coverage_figure_is_informative(
+        coverage.rois, minimum_roi_channels=minimum_roi_channels
+    ):
+        document += _coverage_without_figure_html(
+            coverage, minimum_roi_channels=minimum_roi_channels
         )
     below = coverage.failed_rois_below(minimum_roi_channels)
     if below:
