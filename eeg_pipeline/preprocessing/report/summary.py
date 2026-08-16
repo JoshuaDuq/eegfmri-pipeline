@@ -458,8 +458,7 @@ def exclusion_ledger_html(
     return (
         "<p>Which detector marked each component, and what excluding it cost. The "
         "decision comes from <code>*_proc-ica_components.tsv</code>, the same table the "
-        "pipeline reads when it applies the ICA, so this ledger and the cleaned data "
-        "cannot disagree.</p>"
+        "pipeline reads when it applies the ICA.</p>"
         f"{grid_table(columns, rows)}"
         "<p>Detectors are independent of each other. ICLabel classifies a component from "
         "its topography, spectrum, and time course; the cardiac and ocular detectors "

@@ -599,7 +599,7 @@ def add_continuity_section(
     )
     report.add_figure(
         fig=[plot_run_continuity(run) for run in runs],
-        title=f"Amplitude over time by channel — {len(runs)} figures, use the slider",
+        title=f"Amplitude over time by channel ({len(runs)} figures)",
         caption=[run.recording_id for run in runs],
         section=section,
         tags=("raw", "run-continuity"),

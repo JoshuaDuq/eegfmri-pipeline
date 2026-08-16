@@ -648,8 +648,8 @@ def test_standard_component_dossier_keeps_all_evidence_on_one_slide() -> None:
     assert any("pain_binary_coded ∈ [1]" in title for title in first_titles)
     assert any("pain_binary_coded ∈ [0]" in title for title in first_titles)
     assert any("pain" in title for title in first_titles)
-    assert "RETAINED" in figures[0]._suptitle.get_text()
-    assert "MARKED BAD" in figures[1]._suptitle.get_text()
+    assert "retained" in figures[0]._suptitle.get_text()
+    assert "excluded" in figures[1]._suptitle.get_text()
     assert "Provisional — all task epochs" in figures[0]._suptitle.get_text()
 
     # The grand average and every condition share one power scale by construction, so
@@ -801,11 +801,13 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
     ]
     for call in report.add_figure.call_args_list:
         assert call.kwargs["title"].startswith("Component dossiers")
-        assert "use the slider" in call.kwargs["title"]
+        # The count, so a reader scrolling past one plot knows the others exist. Not an
+        # instruction to operate the slider, which is already in front of them.
+        assert "(2 figures)" in call.kwargs["title"]
         assert call.kwargs["replace"] is True
         assert call.kwargs["caption"] == [
-            "ICA000 · brain (0.900) · RETAINED",
-            "ICA001 · eye blink (0.800) · MARKED BAD",
+            "ICA000 · brain (0.900) · retained",
+            "ICA001 · eye blink (0.800) · excluded",
         ]
 
 
@@ -1414,9 +1416,9 @@ def test_each_tfr_panel_states_its_own_peak_against_the_shared_scale() -> None:
     figures = _exploratory_figures(tfr)
 
     annotations = [
-        text.get_text() for text in figures[1].axes[2].texts if "peak" in text.get_text()
+        text.get_text() for text in figures[1].axes[2].texts if "deviation" in text.get_text()
     ]
-    assert annotations == ["peak |1.0| dB"]
+    assert annotations == ["largest deviation 1.0 dB"]
 
 
 def test_exploratory_band_figures_say_so_on_the_figure() -> None:

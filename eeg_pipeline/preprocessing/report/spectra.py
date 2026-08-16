@@ -602,7 +602,7 @@ def add_spectra_section(
     )
     report.add_figure(
         fig=figures,
-        title=f"Median sensor spectrum by run — {len(figures)} figures, use the slider",
+        title=f"Median sensor spectrum by run ({len(figures)} figures)",
         caption=[run.recording_id for run in spectra],
         section=section,
         tags=("raw", "sensor-spectra"),

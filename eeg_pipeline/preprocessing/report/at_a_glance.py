@@ -123,13 +123,13 @@ HEADLINES: tuple[Headline, ...] = (
     # document where a bare number asserted a conclusion the pipeline refuses to draw.
     Headline(
         "worst_marker_agreement_lag_ms",
-        "…nearest marker on that run (ms)",
+        "Marker-to-beat lag on that run (ms)",
         _signed_milliseconds,
         "Scanner artifact correction (Analyzer)",
     ),
     Headline(
         "worst_marker_agreement_lag_iqr_ms",
-        "…spread of that lag (ms, IQR)",
+        "Spread of that lag (ms, IQR)",
         _milliseconds,
         "Scanner artifact correction (Analyzer)",
     ),
@@ -143,10 +143,15 @@ HEADLINES: tuple[Headline, ...] = (
     # quantities: the first is what odd and even trials agreed on, the second is what that
     # implies at the full trial count, and the second does not exist at a non-positive
     # correlation because there is no shared response to have more of.
-    Headline("split_half_r", "Split-half correlation (odd vs even)", _decimal, "Signal preservation"),
+    Headline(
+        "split_half_r",
+        "Split-half correlation (odd vs even)",
+        _decimal,
+        "Signal preservation",
+    ),
     Headline(
         "split_half_r_corrected",
-        "…stepped to full trial count (Spearman-Brown)",
+        "Split-half at full trial count (Spearman-Brown)",
         _decimal,
         "Signal preservation",
     ),
@@ -161,13 +166,13 @@ HEADLINES: tuple[Headline, ...] = (
     ),
     Headline(
         "alpha_resolvable_bar_db",
-        "…level chance alone reaches (dB)",
+        "Alpha prominence reached by chance (dB)",
         _decimal,
         "Signal preservation",
     ),
     Headline(
         "alpha_peak_resolvable",
-        "…peak clears it",
+        "Alpha peak clears chance",
         _yes_no,
         "Signal preservation",
     ),
@@ -245,15 +250,13 @@ def at_a_glance_html(record: Mapping[str, Any]) -> str:
         Column("Section", align=Align.TEXT),
     )
     return (
-        "<p>The measurements below were each made by the section named beside them and "
-        "are reproduced here unchanged, so this panel cannot disagree with the evidence "
-        "it points at. What a value means &mdash; the reference figures, the caveats, and "
-        "what would explain an unusual one &mdash; is stated in that section rather than "
-        "here.</p>"
+        "<p>Each measurement below was made by the section named beside it. What a value "
+        "means &mdash; the reference figures, the caveats, and what would explain an "
+        "unusual one &mdash; is stated in that section.</p>"
         + grid_table(columns, rows)
-        + "<p>A measurement that no stage recorded has no row: a dataset recorded outside a "
+        + "<p>A measurement no stage recorded has no row: a dataset recorded outside a "
         "scanner has no marker agreement, and a resting-state recording has no trial "
-        "retention. The panel is therefore as short as the pipeline that produced it.</p>"
+        "retention.</p>"
     )
 
 

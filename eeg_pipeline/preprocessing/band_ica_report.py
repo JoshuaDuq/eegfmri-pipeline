@@ -1181,7 +1181,7 @@ def _plot_tfr(
     # is: the effect is this many decibels on a scale that reaches that many.
     peak = float(np.max(np.abs(power))) if np.isfinite(power).any() else 0.0
     axis.annotate(
-        f"peak |{peak:.1f}| dB",
+        f"largest deviation {peak:.1f} dB",
         xy=(0.0, 1.0),
         xycoords="axes fraction",
         xytext=(3, -3),
@@ -1298,8 +1298,13 @@ def _add_iclabel_panel(axis: plt.Axes, label: ComponentLabel) -> None:
 
 
 def _component_review_status(ica: mne.preprocessing.ICA, component: int) -> str:
-    """Report the status the component table currently carries for one component."""
-    return "MARKED BAD" if component in ica.exclude else "RETAINED"
+    """Report the status the component table currently carries for one component.
+
+    Set in ordinary case. Capitals are emphasis, and emphasis on one of two outcomes is
+    the panel leaning on the reader: whether an exclusion is the right call is what the
+    dossier beneath it is for.
+    """
+    return "excluded" if component in ica.exclude else "retained"
 
 
 def _plot_dossier_summary(
@@ -1881,8 +1886,11 @@ def _slider_title(title: str, slide_count: int) -> str:
     MNE renders a list of figures as a range slider showing one at a time. Without the
     count in the title a reviewer scrolling the report sees a single plot and has no
     reason to think the remaining ones exist.
+
+    The count only. Telling the reader to operate the slider is instruction rather than
+    evidence, and the control is already in front of them.
     """
-    return f"{title} — {slide_count} figures, use the slider"
+    return f"{title} ({slide_count} figures)"
 
 
 def _add_decomposition_summary(
