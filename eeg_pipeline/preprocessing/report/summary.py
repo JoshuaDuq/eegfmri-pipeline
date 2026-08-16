@@ -783,6 +783,25 @@ _SHORT_LABELS = {
 }
 
 
+def _runner_up_text(label: object) -> str:
+    """Render the classifier's second choice for one tile, or nothing when it has none.
+
+    The winning class alone cannot distinguish a confident call from a coin flip, and
+    this sheet is where a reviewer decides which components to interrogate. Reading the
+    runner-up off the component TSV instead means the decision about what to look at is
+    made without the number that should drive it.
+
+    Read through ``getattr`` like the label and probability beside it, so the sheet stays
+    drawable from any label object -- including the placeholder the exploratory report
+    uses when ICLabel did not run, which has no second choice to report.
+    """
+    runner_up = getattr(label, "runner_up", None)
+    if runner_up is None:
+        return ""
+    name, probability = runner_up
+    return f"{_SHORT_LABELS.get(name, name)} {probability:.2f}"
+
+
 def _mark_excluded_panel(axis: plt.Axes) -> None:
     """Shade one topography panel to mark the component as excluded.
 
@@ -854,7 +873,8 @@ def plot_component_overview(
         probability = getattr(label, "probability", 0.0)
         is_excluded = index in excluded
         axis.set_title(
-            f"IC{index:03d}{' ×' if is_excluded else ''}\n{short} {probability:.2f}".rstrip(),
+            f"IC{index:03d}{' ×' if is_excluded else ''}\n"
+            f"{short} {probability:.2f}\n{_runner_up_text(label)}".rstrip(),
             fontsize=6.5,
             color=EXCLUDED_COLOR if is_excluded else "black",
             pad=2,
@@ -865,7 +885,7 @@ def plot_component_overview(
         axis.remove()
     figure.suptitle(
         f"All {component_count} components · {len(excluded)} excluded (×, shaded panel) · "
-        "label and ICLabel probability beneath each topography\n"
+        "ICLabel's first and second choice beneath each topography\n"
         "Each map is scaled to its own range and ICA signs are arbitrary, so compare "
         "spatial pattern, not colour or polarity",
         fontsize=9,

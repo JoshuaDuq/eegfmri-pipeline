@@ -789,3 +789,65 @@ def test_recorded_measurements_are_json_safe() -> None:
     from eeg_pipeline.preprocessing.report.summary import decomposition_measurements
 
     json.dumps(decomposition_measurements(_summary()))
+
+
+def _overview_ica(*, component_count: int):
+    """A small fitted ICA with a montage, for the triage-sheet tests."""
+    rng = np.random.default_rng(0)
+    info = mne.create_info([f"C{index}" for index in range(8)], 100.0, "eeg")
+    info.set_montage(
+        mne.channels.make_dig_montage(
+            ch_pos={
+                name: pos
+                for name, pos in zip(info["ch_names"], rng.normal(0, 0.05, (8, 3)), strict=True)
+            },
+            coord_frame="head",
+        )
+    )
+    epochs = mne.EpochsArray(rng.normal(0, 1e-5, (5, 8, 200)), info, verbose="ERROR")
+    ica = mne.preprocessing.ICA(n_components=component_count, random_state=0, max_iter=200)
+    ica.fit(epochs, verbose="ERROR")
+    return ica
+
+
+def test_the_triage_sheet_shows_the_classifiers_second_choice() -> None:
+    """The winning class alone cannot tell a confident call from a coin flip, and this
+    sheet is where a reviewer decides which components to interrogate. ICLabel is wrong in
+    both directions, so brain 0.51 / muscle 0.44 has to be visible here rather than only
+    in the component TSV."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import ComponentLabel
+    from eeg_pipeline.preprocessing.report.summary import plot_component_overview
+
+    #                       brain muscle  eye  heart  line  chan  other
+    uncertain = ComponentLabel("brain", 0.51, (0.51, 0.44, 0.02, 0.01, 0.01, 0.005, 0.005))
+    confident = ComponentLabel("eye blink", 0.98, (0.01, 0.0, 0.98, 0.0, 0.0, 0.0, 0.01))
+
+    figure = plot_component_overview(
+        ica=_overview_ica(component_count=2),
+        labels=[uncertain, confident],
+        columns=2,
+    )
+
+    titles = [axis.get_title() for axis in figure.axes]
+    assert any("brain 0.51" in title and "muscle 0.44" in title for title in titles)
+    assert any("eye 0.98" in title for title in titles)
+    plt.close(figure)
+
+
+def test_the_triage_sheet_draws_without_a_class_distribution() -> None:
+    """The exploratory report's placeholder label has no second choice to report."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import ComponentLabel
+    from eeg_pipeline.preprocessing.report.summary import plot_component_overview
+
+    figure = plot_component_overview(
+        ica=_overview_ica(component_count=2),
+        labels=[ComponentLabel("unlabeled", 0.0), ComponentLabel("unlabeled", 0.0)],
+        columns=2,
+    )
+
+    assert figure is not None
+    plt.close(figure)

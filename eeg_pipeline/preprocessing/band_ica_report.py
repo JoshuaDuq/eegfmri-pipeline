@@ -94,6 +94,25 @@ class ComponentLabel:
     def has_distribution(self) -> bool:
         return len(self.probabilities) == len(_ICLABEL_CLASSES)
 
+    @property
+    def runner_up(self) -> tuple[str, float] | None:
+        """The second-most-probable class and its probability.
+
+        ``None`` when ICLabel did not run, which is the only case where there is no
+        second choice to report. Deliberately unconditional otherwise: no threshold
+        decides whether the runner-up is "close enough" to be worth showing, because any
+        such cutoff would be invented here and would hide exactly the component it was
+        set just above — and a component at brain 0.51 / muscle 0.44 is a different
+        review decision from brain 0.98, which is the distinction the triage sheet exists
+        to surface.
+        """
+        if not self.has_distribution:
+            return None
+        order = sorted(
+            zip(_ICLABEL_CLASSES, self.probabilities), key=lambda item: item[1], reverse=True
+        )
+        return order[1]
+
 
 @dataclass(frozen=True)
 class TfrBandParameters:
