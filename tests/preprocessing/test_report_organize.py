@@ -723,3 +723,43 @@ def test_the_overlay_rename_is_idempotent() -> None:
     # applied)".
     assert once.count(">Original and cleaned signal (exclusions as applied)</a>") == 1
     assert once.count("(exclusions as applied)") == 2
+
+
+def test_the_task_epoch_drop_logs_go_where_the_rejection_section_replaces_them() -> None:
+    """Two copies of one accounting, either side of the cleaning, and on a session that
+    dropped nothing both are empty by construction. The rejection section answers what a
+    reviewer asks of them from the same drop log, with positions and per-group rates."""
+    from eeg_pipeline.preprocessing.report.organize import drop_replaced_epoch_drop_logs
+
+    report = mne.Report(title="epochs", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure, title="Trial retention", section="Epoch rejection", tags=("epoch-rejection",)
+    )
+    for section in ("Epochs (before cleaning)", "Epochs (clean)", "ICA: epochs for fitting"):
+        report.add_figure(fig=figure, title="Drop log", section=section, tags=("epochs",))
+    plt.close(figure)
+
+    drop_replaced_epoch_drop_logs(report)
+
+    remaining = {(str(e.section), str(e.name)) for e in report._content}
+    assert ("Epochs (before cleaning)", "Drop log") not in remaining
+    assert ("Epochs (clean)", "Drop log") not in remaining
+    # A different epoch set, cut for fitting rather than analysis, and nothing in this
+    # report accounts for what was dropped from it.
+    assert ("ICA: epochs for fitting", "Drop log") in remaining
+
+
+def test_the_drop_logs_survive_without_the_section_that_replaces_them() -> None:
+    from eeg_pipeline.preprocessing.report.organize import drop_replaced_epoch_drop_logs
+
+    report = mne.Report(title="epochs", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure, title="Drop log", section="Epochs (clean)", tags=("epochs",)
+    )
+    plt.close(figure)
+
+    drop_replaced_epoch_drop_logs(report)
+
+    assert [e.name for e in report._content] == ["Drop log"]

@@ -420,6 +420,34 @@ _CLEANING_OVERLAY_STAGES = {
 }
 
 
+#: MNE's per-epoch drop log, and the sections whose copy the rejection section replaces.
+#:
+#: Only the two task-epoch sections. ``ICA: epochs for fitting`` keeps its own: those are
+#: a different epoch set, cut for fitting the decomposition rather than for analysis, and
+#: nothing in this report accounts for what was dropped from them.
+_DROP_LOG_TITLE = "Drop log"
+_REPLACED_DROP_LOG_SECTIONS = ("Epochs (before cleaning)", "Epochs (clean)")
+
+
+def drop_replaced_epoch_drop_logs(report: mne.Report) -> None:
+    """Drop MNE's task-epoch drop logs, which the rejection section replaces.
+
+    Two copies of the same accounting, in sections either side of the cleaning, and on a
+    session that dropped nothing both are empty by construction. What a reviewer asks of
+    them -- how many trials went, which ones, and whether the loss fell evenly across runs
+    and conditions -- is what ``Epoch rejection`` answers, from the same drop log, with the
+    positions drawn and the per-group rates beside them.
+
+    Guarded on that section being present, so a report built from a stage subset keeps
+    MNE's accounting rather than losing both.
+    """
+    content = _content_elements(report)
+    if not any("epoch-rejection" in element.tags for element in content):
+        return
+    for section in _REPLACED_DROP_LOG_SECTIONS:
+        drop_replaced_panels(report, section_prefix=section, titles=(_DROP_LOG_TITLE,))
+
+
 def name_cleaning_overlays_by_stage(report: mne.Report) -> None:
     """Give each raw-versus-cleaned overlay a title naming where it was drawn.
 
@@ -524,6 +552,7 @@ def open_subject_report(report_path: Path | str) -> mne.Report:
     # After the two drops above, which are what can empty a section down to its metadata.
     drop_metadata_only_raw_sections(report)
     name_cleaning_overlays_by_stage(report)
+    drop_replaced_epoch_drop_logs(report)
     place_events_with_epochs(report)
     return report
 
@@ -635,6 +664,7 @@ __all__ = [
     "before_ica_component_review",
     "drop_per_epoch_metadata_tables",
     "drop_metadata_only_raw_sections",
+    "drop_replaced_epoch_drop_logs",
     "name_cleaning_overlays_by_stage",
     "drop_replaced_clean_raw_panels",
     "drop_replaced_filtered_spectrum",
