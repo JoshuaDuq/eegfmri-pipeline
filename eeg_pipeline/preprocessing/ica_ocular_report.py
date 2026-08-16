@@ -19,6 +19,7 @@ from eeg_pipeline.preprocessing.ica_exclusions import (
 from eeg_pipeline.preprocessing.report.build_record import save_subject_report
 from eeg_pipeline.preprocessing.report.organize import (
     before_ica_component_review,
+    drop_replaced_ica_eog_panels,
     move_tagged_content_before,
     open_subject_report,
 )
@@ -634,6 +635,11 @@ def generate_ica_ocular_review(
 
     report = open_subject_report(report_path)
     _clear_ocular_review(report)
+    # MNE's own EOG panels measure the same two quantities this section is about to render
+    # per run, for one concatenated recording and with no indication of how many blinks
+    # were behind them. Dropped here so a report built without the ocular review keeps
+    # them, exactly as the cardiac review does with the ECG pair.
+    drop_replaced_ica_eog_panels(report)
     section = "ICA ocular artifact review"
     report.add_html(
         html=_ocular_review_guide_html(settings, surrogates=surrogates),

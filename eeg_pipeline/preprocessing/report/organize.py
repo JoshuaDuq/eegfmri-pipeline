@@ -40,6 +40,22 @@ _REPLACED_ICA_ECG_TITLES = (
     "Original and cleaned ECG epochs",
 )
 
+#: The ``ICA: components`` panels the per-run ocular review supersedes.
+#:
+#: The same two quantities as the ECG pair above, for the other artifact, and dropped for
+#: the same reason: the ocular review draws the EOG correlation for every component across
+#: every run, and the blink-locked overlay either side of the exclusions, both per run and
+#: both beside the blink counts that say whether to believe them. MNE draws its versions
+#: for one concatenated recording with no indication of how many blinks were behind them.
+#:
+#: These were previously left in place while the ECG pair went, which was an oversight
+#: rather than a judgement: it left a reviewer meeting the ocular evidence twice and the
+#: cardiac evidence once.
+_REPLACED_ICA_EOG_TITLES = (
+    "Scores for matching EOG patterns",
+    "Original and cleaned EOG epochs",
+)
+
 #: Panels MNE-BIDS-Pipeline writes that the authoritative component review supersedes.
 #:
 #: ``ICA component properties`` is one ``plot_properties`` figure per component, which the
@@ -198,6 +214,53 @@ def drop_replaced_ica_ecg_panels(report: mne.Report) -> None:
     )
 
 
+def drop_replaced_ica_eog_panels(report: mne.Report) -> None:
+    """Drop the ``ICA: components`` EOG panels that the ocular review supersedes.
+
+    The counterpart of :func:`drop_replaced_ica_ecg_panels`, and called from the ocular
+    review for the same reason that one is called from the cardiac review: the removal
+    belongs with the section that renders the replacement, so a run of one review alone
+    cannot take a panel away and leave nothing behind it.
+    """
+    drop_replaced_panels(
+        report,
+        section_prefix=_ICA_COMPONENTS_SECTION,
+        titles=_REPLACED_ICA_EOG_TITLES,
+    )
+
+
+#: ``Raw (clean)`` panels, each paired with the tag of the section that replaces it.
+#:
+#: ``drop_replaced_raw_time_series`` already spans this section by prefix, but it runs
+#: from the continuity stage and MNE-BIDS-Pipeline writes ``Raw (clean)`` afterwards, when
+#: it applies the ICA. The panels came back after their replacement had been added and
+#: stayed, which is the same recurrence that kept MNE's ICA panels alive.
+#:
+#: The spectrum is handled here rather than by ``drop_replaced_filtered_spectrum``, which
+#: deliberately keeps the *original* raw spectrum: the full bandwidth before filtering is
+#: the report's one view of the anti-alias corner and the gradient harmonics above the
+#: low-pass. After cleaning, nothing is left on that axis that the sensor-spectra section
+#: does not draw over the band a reader is actually reading.
+_REPLACED_CLEAN_RAW_PANELS = (
+    (_RAW_TIME_SERIES_TITLE, "run-continuity"),
+    (_SPECTRUM_TITLE, "sensor-spectra"),
+)
+
+
+def drop_replaced_clean_raw_panels(report: mne.Report) -> None:
+    """Drop each ``Raw (clean)`` panel whose replacement is in this report.
+
+    Per panel rather than per section, because the two replacements are added by
+    different stages: a report carrying the continuity section but not the sensor spectra
+    should lose the butterfly and keep the spectrum, not lose both or neither.
+    """
+    present = {tag for element in _content_elements(report) for tag in element.tags}
+    replaced = tuple(title for title, tag in _REPLACED_CLEAN_RAW_PANELS if tag in present)
+    if not replaced:
+        return
+    drop_replaced_panels(report, section_prefix="Raw (clean)", titles=replaced)
+
+
 def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
     """Drop the one-item-per-run bad-channel panels the coverage table replaces.
 
@@ -287,6 +350,10 @@ def open_subject_report(report_path: Path | str) -> mne.Report:
     # every reopen because MNE-BIDS-Pipeline rewrites the panels it drops each time
     # ``_08a_apply_ica`` runs, which is after the stages that add their replacements.
     drop_superseded_mne_ica_panels(report)
+    # Same recurrence, same treatment: MNE-BIDS-Pipeline writes "Raw (clean)" when it
+    # applies the ICA, after the continuity and sensor-spectra sections that replace its
+    # panels have been added.
+    drop_replaced_clean_raw_panels(report)
     place_events_with_epochs(report)
     return report
 
@@ -376,7 +443,9 @@ __all__ = [
     "before_raw_sections",
     "before_ica_component_review",
     "drop_per_epoch_metadata_tables",
+    "drop_replaced_clean_raw_panels",
     "drop_replaced_filtered_spectrum",
+    "drop_replaced_ica_eog_panels",
     "drop_replaced_ica_ecg_panels",
     "drop_replaced_panels",
     "drop_replaced_per_run_bad_channels",

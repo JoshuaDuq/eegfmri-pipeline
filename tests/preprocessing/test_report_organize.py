@@ -390,3 +390,77 @@ def test_the_filtered_raw_spectrum_is_dropped_but_the_original_survives() -> Non
     assert ("Raw (filtered)", "PSD") not in survivors
     assert ("Raw (original)", "PSD") in survivors
     assert ("Raw (filtered)", "Info") in survivors
+
+
+def test_the_ocular_review_supersedes_mnes_eog_panels_like_the_cardiac_one() -> None:
+    """The same two quantities as the ECG pair, for the other artifact. These were left
+    in place while the ECG pair went, which left a reviewer meeting the ocular evidence
+    twice and the cardiac evidence once."""
+    from eeg_pipeline.preprocessing.report.organize import drop_replaced_ica_eog_panels
+
+    report = mne.Report(title="ica", verbose="ERROR")
+    figure = plt.figure()
+    for title in (
+        "Scores for matching EOG patterns",
+        "Original and cleaned EOG epochs",
+        "Original and cleaned signal",
+    ):
+        report.add_figure(fig=figure, title=title, section="ICA: components", tags=("ica",))
+    plt.close(figure)
+
+    drop_replaced_ica_eog_panels(report)
+
+    # "Original and cleaned signal" overlays the raw traces either side of the exclusions,
+    # which nothing else in this report draws.
+    assert {element.name for element in report._content} == {"Original and cleaned signal"}
+
+
+def test_clean_raw_panels_go_only_where_their_replacement_exists() -> None:
+    """Two replacements added by two stages, so the drop is per panel: a report carrying
+    the continuity section but not the sensor spectra loses the butterfly and keeps the
+    spectrum."""
+    from eeg_pipeline.preprocessing.report.organize import drop_replaced_clean_raw_panels
+
+    report = mne.Report(title="raw", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure,
+        title="Amplitude over time by channel",
+        section="Data quality over time",
+        tags=("raw", "run-continuity"),
+    )
+    for title in ("Time series", "PSD"):
+        report.add_figure(fig=figure, title=title, section="Raw (clean)", tags=("raw", "clean"))
+    plt.close(figure)
+
+    drop_replaced_clean_raw_panels(report)
+
+    remaining = {element.name for element in report._content}
+    assert "Time series" not in remaining
+    assert "PSD" in remaining
+
+
+def test_reopening_drops_clean_raw_panels_written_after_their_replacement(tmp_path) -> None:
+    """MNE-BIDS-Pipeline writes 'Raw (clean)' when it applies the ICA, after the
+    continuity stage that replaced its butterfly has run."""
+    path = tmp_path / "sub-0001_report.h5"
+    report = mne.Report(title="raw", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure,
+        title="Amplitude over time by channel",
+        section="Data quality over time",
+        tags=("raw", "run-continuity"),
+    )
+    report.save(path, overwrite=True, open_browser=False)
+
+    rewritten = mne.open_report(path)
+    rewritten.add_figure(
+        fig=figure, title="Time series", section="Raw (clean)", tags=("raw", "clean")
+    )
+    rewritten.save(path, overwrite=True, open_browser=False)
+    plt.close(figure)
+
+    reopened = open_subject_report(path)
+
+    assert "Time series" not in {element.name for element in reopened._content}
