@@ -52,8 +52,13 @@ own list: `BandIcaReportSettings.review_bands`, default a single
 exploratory fits.
 
 `_tfr_parameter_groups` already walks the four DPSS parameter sets across an arbitrary
-wide band, so smoothing stays band-appropriate with no new machinery. Compute drops too:
-one TFR per component instead of five.
+wide band, so smoothing stays band-appropriate with no new machinery.
+
+Compute drops, but far less than the five-to-one section count suggests. Measured on
+`sub-0001` (61 components, 57 epochs): the review's TFR work goes from 151.9 s to 99.9 s,
+a factor of 1.5, because one 1–100 Hz band is nearly as expensive as five narrower ones —
+it is the frequency-point count that costs, not the section count. The saving is real
+(~13 min over 15 subjects) but the byte reduction is the reason for this change, not speed.
 
 Old reports rebuild cleanly — `remove_tagged_content(report, tag="ica-component-review")`
 is keyed to the tag, not the section name, and `_remove_legacy_condition_tfr_entries`
@@ -178,6 +183,37 @@ ICLabel-validation evidence.
 The cardiac screening panel of change 4 is covered by unit tests but is not in the
 measured rebuild above, which re-ran only the condition-TFR pass. It adds roughly 0.3 MB
 when the cardiac stage next runs.
+
+## Two defects found while reviewing the result
+
+Neither was in the original scope; both are the same shape — the report stating something
+it did not do.
+
+**The TFR baseline.** `_fieldtrip_tfr` masks the epoch's own time axis, so a configured
+baseline reaching outside the epoch is clipped to the overlap, while the review context
+printed the configured window. On this study's −7..15 s epochs the two agree. On an
+ordinary −2..3 s ERP epoch inheriting the same defaults, the estimate uses −2..−1.5 s
+while the panel claimed −5..−1.5 s. The panel now states the realized window and names the
+configured one beside it when they differ. `compute_split_half_reliability` already clipped
+and reported honestly, so this was an inconsistency with the codebase's own convention
+rather than a deliberate choice.
+
+**The beat-marker share on the landing panel.** `At a glance` headlined
+`worst_marker_agreement` alone — 0.5% on `sub-0001`, which reads as the cardiac markers
+having failed. In the bore they usually have not: an ordinary QRS detector locks onto the
+magnetohydrodynamic deflection, which follows the R wave by a few hundred milliseconds, so
+two good trains match at 0%. The Analyzer section has always shown the disambiguating lag;
+only the summary quoted the share by itself. The worst run's median lag and IQR are now
+recorded and headlined beside it. The cohort panel iterates the same headline list and
+picks the pair up automatically.
+
+## Considered and rejected
+
+Removing the two score panels from the cardiac per-component slide, on the grounds that
+the new screening panel shows the same quantities. It does not: the slide's panels carry
+each run's value, colour-matched to the run traces in the waveform panel beside them,
+while the screening panel shows the median across runs. A cardiac deflection in one run
+only is a different finding from one in all of them, and only the slide can show that.
 
 ## Additional change found during implementation
 
