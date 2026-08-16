@@ -674,3 +674,52 @@ def test_the_two_cleaning_overlays_are_told_apart_by_stage() -> None:
     assert ">Original and cleaned signal</a>" not in rendered
     for stage in ("exclusions proposed at fitting", "exclusions as applied"):
         assert f">Original and cleaned signal ({stage})</a>" in rendered
+
+
+def test_the_overlay_rename_repairs_a_half_renamed_report() -> None:
+    """The state an earlier, broken version of this left behind.
+
+    That version set ``name`` and not the stored markup, so reports came out with renamed
+    metadata and an unchanged page. Keyed on the name, the corrected version then read
+    those as already done and skipped them -- a fix that could not repair its own
+    predecessor's output.
+    """
+    from eeg_pipeline.preprocessing.report.organize import name_cleaning_overlays_by_stage
+
+    report = mne.Report(title="ica", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure, title="Original and cleaned signal", section="ICA: removals", tags=("ica",)
+    )
+    plt.close(figure)
+    # Exactly what the broken version produced: metadata renamed, markup untouched.
+    report._content[0].name = "Original and cleaned signal (exclusions as applied)"
+
+    name_cleaning_overlays_by_stage(report)
+
+    rendered = str(report._content[0].html)
+    assert ">Original and cleaned signal</a>" not in rendered
+    assert ">Original and cleaned signal (exclusions as applied)</a>" in rendered
+
+
+def test_the_overlay_rename_is_idempotent() -> None:
+    """It runs on every reopen, so a second pass must not append the stage twice."""
+    from eeg_pipeline.preprocessing.report.organize import name_cleaning_overlays_by_stage
+
+    report = mne.Report(title="ica", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure, title="Original and cleaned signal", section="ICA: removals", tags=("ica",)
+    )
+    plt.close(figure)
+
+    name_cleaning_overlays_by_stage(report)
+    once = str(report._content[0].html)
+    name_cleaning_overlays_by_stage(report)
+
+    assert str(report._content[0].html) == once
+    # Once as the heading and once as the image's alternative text, and no more: a second
+    # pass appending the stage again would read "(exclusions as applied) (exclusions as
+    # applied)".
+    assert once.count(">Original and cleaned signal (exclusions as applied)</a>") == 1
+    assert once.count("(exclusions as applied)") == 2

@@ -434,15 +434,23 @@ def name_cleaning_overlays_by_stage(report: mne.Report) -> None:
 
     The anchor keeps the old title, deliberately: it is what any existing link into this
     panel points at, and a heading that reads correctly is the whole purpose here.
+
+    Keyed on the stored markup rather than on ``name``, so that it is idempotent from any
+    state. An earlier version of this set ``name`` alone, which left reports whose
+    metadata was renamed and whose page was not; keyed on the name, the corrected version
+    then skipped exactly those reports as already done and never repaired them.
     """
+    heading = f">{_CLEANING_OVERLAY_TITLE}</a>"
     for element in _content_elements(report):
         renamed = _CLEANING_OVERLAY_STAGES.get(str(element.section or ""))
-        if renamed is None or str(element.name) != _CLEANING_OVERLAY_TITLE:
+        if renamed is None:
+            continue
+        markup = str(element.html)
+        if heading not in markup:
+            # Already carrying its stage, or a different panel in the same section.
             continue
         element.name = renamed
-        element.html = str(element.html).replace(
-            f">{_CLEANING_OVERLAY_TITLE}</a>", f">{renamed}</a>"
-        ).replace(
+        element.html = markup.replace(heading, f">{renamed}</a>").replace(
             f'alt="{_CLEANING_OVERLAY_TITLE}"', f'alt="{renamed}"'
         )
 
