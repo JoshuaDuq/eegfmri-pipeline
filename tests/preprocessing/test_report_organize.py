@@ -23,9 +23,112 @@ from eeg_pipeline.preprocessing.report.organize import (  # noqa: E402
     drop_replaced_panels,
     drop_replaced_per_run_bad_channels,
     drop_replaced_raw_time_series,
+    drop_superseded_mne_ica_panels,
     open_subject_report,
     place_events_with_epochs,
 )
+
+
+def _mne_ica_panels(report: mne.Report) -> None:
+    """Add the ICA panels MNE-BIDS-Pipeline writes, superseded and not."""
+    figure = plt.figure()
+    for title in (
+        "ICA component properties",
+        "ICA component topographies",
+        "ICALabel: eye blink components",
+        "ICALabel: heart beat components",
+        "ICALabel: report",
+        "Original and cleaned signal",
+        "Scores for matching ECG patterns",
+    ):
+        report.add_figure(fig=figure, title=title, section="ICA: components", tags=("ica",))
+    plt.close(figure)
+
+
+def _authoritative_review(report: mne.Report) -> None:
+    """Add a stand-in for the review this pipeline renders itself."""
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure,
+        title="All component topographies",
+        section="ICA decomposition quality",
+        tags=("ica", "ica-decomposition"),
+    )
+    plt.close(figure)
+
+
+def test_mne_ica_panels_are_dropped_when_the_review_replaces_them() -> None:
+    """The duplicated pictures go; the panels nothing here reproduces stay.
+
+    Every ``ICALabel:`` panel goes, the numeric ``ICALabel: report`` table included: the
+    exclusion ledger carries each component's decision and deciding detector, and every
+    dossier draws its full class distribution. MNE's overlay figures and its score panel
+    have no counterpart here and are left alone.
+    """
+    report = mne.Report(title="ica", verbose="ERROR")
+    _authoritative_review(report)
+    _mne_ica_panels(report)
+
+    drop_superseded_mne_ica_panels(report)
+
+    remaining = {element.name for element in report._content}
+    assert remaining == {
+        "All component topographies",
+        "Original and cleaned signal",
+        "Scores for matching ECG patterns",
+    }
+
+
+def test_mne_ica_panels_survive_a_report_with_no_replacement_for_them() -> None:
+    """The invariant: never remove a panel and leave nothing in its place.
+
+    A run that appends only the cardiac or ocular review adds nothing standing in for
+    these, so on that report MNE's panels are the only component evidence there is.
+    """
+    report = mne.Report(title="ica", verbose="ERROR")
+    _mne_ica_panels(report)
+
+    drop_superseded_mne_ica_panels(report)
+
+    assert "ICA component properties" in {element.name for element in report._content}
+
+
+def test_dropping_superseded_panels_is_safe_when_they_were_never_added() -> None:
+    """A resting-state or EEG-only run may never have produced them."""
+    report = mne.Report(title="ica", verbose="ERROR")
+
+    drop_superseded_mne_ica_panels(report)
+
+    assert report._content == []
+
+
+def test_reopening_drops_mne_ica_panels_written_after_the_review(tmp_path) -> None:
+    """The regression this move exists for.
+
+    MNE-BIDS-Pipeline rewrites these panels every time ``_08a_apply_ica`` runs, which is
+    after the stage that added their replacement. The drop used to live in that stage and
+    was reached again only when ``ica.band_specific_report.comparisons`` was configured,
+    so a dataset with no condition contrasts — what the shipped ``eeg_only`` preset sets —
+    kept both copies of every component picture forever.
+    """
+    path = tmp_path / "sub-0001_report.h5"
+    report = mne.Report(title="ica", verbose="ERROR")
+    _authoritative_review(report)
+    report.save(path, overwrite=True, open_browser=False)
+
+    # Whatever MNE-BIDS-Pipeline writes next lands in the same file.
+    rewritten = mne.open_report(path)
+    _mne_ica_panels(rewritten)
+    rewritten.save(path, overwrite=True, open_browser=False)
+
+    assert "ICA component properties" in {element.name for element in rewritten._content}
+
+    reopened = open_subject_report(path)
+
+    remaining = {element.name for element in reopened._content}
+    assert "ICA component properties" not in remaining
+    assert "ICA component topographies" not in remaining
+    assert "All component topographies" in remaining
 
 
 def _raw() -> mne.io.BaseRaw:

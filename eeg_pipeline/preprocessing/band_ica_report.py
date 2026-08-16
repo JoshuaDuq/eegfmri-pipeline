@@ -17,6 +17,7 @@ import pandas as pd
 from eeg_pipeline.preprocessing.ica_exclusions import read_ica_with_reviewed_exclusions
 from eeg_pipeline.preprocessing.report.build_record import save_subject_report
 from eeg_pipeline.preprocessing.report.organize import (
+    drop_superseded_mne_ica_panels,
     open_subject_report,
     remove_tagged_content,
 )
@@ -1536,52 +1537,6 @@ def _remove_legacy_condition_tfr_entries(report: mne.Report) -> None:
         )
 
 
-#: Panels MNE-BIDS-pipeline writes that this module's own sections now supersede.
-#:
-#: ``ICA component properties`` is 22 ``plot_properties`` figures, which the decomposition
-#: section renders itself with the ICLabel verdict on each slide; ``ICA component
-#: topographies`` is the grid ``plot_component_overview`` replaced; and the per-class
-#: ICLabel grids show subsets of components that the overview already shows all of, each
-#: annotated with its full class distribution. Keeping both cost 2.3 MB of duplicated
-#: pictures and gave a reviewer two places to look for one answer.
-#:
-#: Deliberately absent: MNE's ``Info`` block, its original-versus-cleaned overlays, and
-#: its score panel. Nothing here reproduces those.
-_SUPERSEDED_MNE_ICA_PANELS = (
-    "ICA component properties",
-    "ICA component topographies",
-)
-
-#: Prefix of the MNE-ICALabel panels this module supersedes.
-#:
-#: Spans the per-class topography grids and ``ICALabel: report``, the numeric table of
-#: per-class probabilities. That table was previously kept, on the reasoning that nothing
-#: else carried the numbers. Two things do: the exclusion ledger states each component's
-#: decision, its deciding detector and its variance cost, and every component dossier
-#: draws the full ICLabel class distribution as a stacked bar. What the table added was a
-#: second vocabulary for the same decision — "Excluded: Yes" against the ledger's
-#: "excluded" — in the one table in this document still carrying MNE-ICALabel's inline
-#: ``border="1"`` styling.
-_SUPERSEDED_ICLABEL_GRID_PREFIX = "ICALabel: "
-
-
-def drop_superseded_mne_ica_panels(report: mne.Report) -> None:
-    """Remove the MNE-written ICA panels this module renders a replacement for.
-
-    Called from the function that adds the replacements, so the report can never end up
-    with neither: a run that appends only the cardiac or ocular review leaves MNE's panels
-    untouched, because that run does not add anything that stands in for them.
-    """
-    titles = {
-        element.name
-        for element in report._content
-        if element.name in _SUPERSEDED_MNE_ICA_PANELS
-        or element.name.startswith(_SUPERSEDED_ICLABEL_GRID_PREFIX)
-    }
-    for title in titles:
-        report.remove(title=title, remove_all=True)
-
-
 _DECOMPOSITION_SECTION = "ICA decomposition quality"
 
 #: Tag for evidence about the decomposition as a whole, rather than about a component.
@@ -1803,8 +1758,6 @@ def _add_standard_component_review(
     the page are the previous pass's rather than this one's.
     """
     _remove_legacy_condition_tfr_entries(report)
-    # Safe to do here and only here: this function adds the panels that replace them.
-    drop_superseded_mne_ica_panels(report)
     # Every panel this function writes carries "ica-component-review". Clearing the tag
     # first makes the rebuild idempotent: renaming a panel cannot strand the previous
     # one, because removal is keyed to the tag rather than to the title.
@@ -1871,6 +1824,11 @@ def _add_standard_component_review(
             ),
             replace=True,
         )
+    # After the replacements exist, not before: the drop is guarded on their presence, so
+    # calling it at the top of this function would find nothing to stand in for MNE's
+    # panels and leave them. ``open_subject_report`` re-applies it on every later reopen,
+    # which is what catches the copies MNE-BIDS-Pipeline writes again after this stage.
+    drop_superseded_mne_ica_panels(report)
     _organize_component_review(report)
     return summary
 

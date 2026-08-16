@@ -40,6 +40,35 @@ _REPLACED_ICA_ECG_TITLES = (
     "Original and cleaned ECG epochs",
 )
 
+#: Panels MNE-BIDS-Pipeline writes that the authoritative component review supersedes.
+#:
+#: ``ICA component properties`` is one ``plot_properties`` figure per component, which the
+#: component dossier renders itself with the ICLabel verdict on each slide; ``ICA component
+#: topographies`` is the grid ``plot_component_overview`` replaced. Keeping both costs
+#: duplicated pictures and gives a reviewer two places to look for one answer.
+#:
+#: Deliberately absent: MNE's ``Info`` block, its original-versus-cleaned overlays, and its
+#: score panel. Nothing in this pipeline reproduces those.
+_SUPERSEDED_MNE_ICA_PANELS = (
+    "ICA component properties",
+    "ICA component topographies",
+)
+
+#: Prefix of the MNE-ICALabel panels the authoritative review supersedes.
+#:
+#: Spans the per-class topography grids and ``ICALabel: report``, the numeric table of
+#: per-class probabilities. Two things carry those numbers: the exclusion ledger states
+#: each component's decision, its deciding detector and its variance cost, and every
+#: dossier draws the full ICLabel class distribution as a stacked bar.
+_SUPERSEDED_ICLABEL_GRID_PREFIX = "ICALabel: "
+
+#: Tags marking the content that stands in for the panels above.
+#:
+#: ``ica-component-review`` is the per-component evidence and ``ica-decomposition`` the
+#: whole-decomposition evidence. Either one present means the authoritative review is in
+#: this document and MNE's version of it is a duplicate.
+_AUTHORITATIVE_REVIEW_TAGS = frozenset({"ica-component-review", "ica-decomposition"})
+
 #: Section MNE-BIDS-Pipeline puts its per-run bad-channel items in.
 #:
 #: Matched as a prefix, which also spans "Data quality over time". Nothing in that
@@ -185,6 +214,35 @@ def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
     )
 
 
+def drop_superseded_mne_ica_panels(report: mne.Report) -> None:
+    """Drop MNE's ICA panels, but only from a report carrying the review that replaces them.
+
+    The guard is what makes this callable from anywhere, including from
+    :func:`open_subject_report`. Without it the function could only be called from the
+    code adding the replacements, and that is what let the duplicates survive: MNE-BIDS-
+    Pipeline rewrites these panels every time ``_08a_apply_ica`` runs, while the last
+    stage that dropped them was reached only when ``ica.band_specific_report.comparisons``
+    was configured. A dataset with no condition contrasts -- which is most of them, and is
+    what the shipped ``eeg_only`` preset sets -- therefore kept both copies forever, and
+    turning the expensive review *off* produced the more duplicated document of the two.
+
+    Keying the guard to the replacement rather than to configuration also preserves the
+    rule the rest of this module follows: a report can never end up with the panel removed
+    and nothing in its place, whichever subset of stages ran.
+    """
+    content = _content_elements(report)
+    if not any(_AUTHORITATIVE_REVIEW_TAGS & set(element.tags) for element in content):
+        return
+    titles = {
+        element.name
+        for element in content
+        if element.name in _SUPERSEDED_MNE_ICA_PANELS
+        or str(element.name or "").startswith(_SUPERSEDED_ICLABEL_GRID_PREFIX)
+    }
+    for title in titles:
+        report.remove(title=title, remove_all=True)
+
+
 def place_events_with_epochs(report: mne.Report) -> None:
     """Give the events panel a section and move it in front of the epochs it describes.
 
@@ -224,6 +282,11 @@ def open_subject_report(report_path: Path | str) -> mne.Report:
     report = mne.open_report(report_path)
     apply_report_css(report)
     drop_per_epoch_metadata_tables(report)
+    # Guarded on the replacement being present, so this is a document-wide policy rather
+    # than a removal that depends on which stage is running. It has to be re-applied on
+    # every reopen because MNE-BIDS-Pipeline rewrites the panels it drops each time
+    # ``_08a_apply_ica`` runs, which is after the stages that add their replacements.
+    drop_superseded_mne_ica_panels(report)
     place_events_with_epochs(report)
     return report
 
@@ -318,6 +381,7 @@ __all__ = [
     "drop_replaced_panels",
     "drop_replaced_per_run_bad_channels",
     "drop_replaced_raw_time_series",
+    "drop_superseded_mne_ica_panels",
     "move_tagged_content_before",
     "open_subject_report",
     "place_events_with_epochs",

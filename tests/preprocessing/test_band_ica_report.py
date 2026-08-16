@@ -1009,55 +1009,6 @@ def test_generate_band_report_persists_real_mne_html_sections(tmp_path) -> None:
         assert band.title in exploratory
 
 
-def test_mne_panels_our_own_sections_supersede_are_dropped() -> None:
-    """MNE-BIDS-pipeline renders 22 ``plot_properties`` figures and a topography grid that
-    our decomposition section now renders itself, so the report carried both — 2.3 MB of
-    the same pictures twice, and two places to look for one answer.
-
-    Every ``ICALabel:`` panel goes, the numeric ``ICALabel: report`` table included: the
-    exclusion ledger carries each component's decision and deciding detector, and every
-    dossier draws its full class distribution. MNE's overlay figures and its score panel
-    have no counterpart here and are left alone.
-    """
-    import mne
-
-    from eeg_pipeline.preprocessing.band_ica_report import drop_superseded_mne_ica_panels
-
-    report = mne.Report(title="ica", verbose="ERROR")
-    figure = plt_figure()
-    for title in (
-        "ICA component properties",
-        "ICA component topographies",
-        "ICALabel: eye blink components",
-        "ICALabel: heart beat components",
-        "Original and cleaned signal",
-        "Scores for matching ECG patterns",
-        "ICALabel: report",
-    ):
-        report.add_figure(fig=figure, title=title, section="ICA: components", tags=("ica",))
-
-    drop_superseded_mne_ica_panels(report)
-
-    remaining = {element.name for element in report._content}
-    assert remaining == {
-        "Original and cleaned signal",
-        "Scores for matching ECG patterns",
-    }
-
-
-def test_dropping_superseded_panels_is_safe_when_they_were_never_added() -> None:
-    """A resting-state or EEG-only run may never have produced them."""
-    import mne
-
-    from eeg_pipeline.preprocessing.band_ica_report import drop_superseded_mne_ica_panels
-
-    report = mne.Report(title="ica", verbose="ERROR")
-
-    drop_superseded_mne_ica_panels(report)
-
-    assert report._content == []
-
-
 def test_exploratory_bands_share_one_section_so_the_toc_has_one_entry() -> None:
     """Ten TOC entries differing only by an ``ICA component review:``/``Band-specific``
     prefix could not be told apart without opening one, and the exploratory half is the
