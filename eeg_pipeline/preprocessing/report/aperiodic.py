@@ -85,11 +85,12 @@ def fit_aperiodic(
 ) -> AperiodicFit | None:
     """Fit the aperiodic background of a spectrum already expressed in decibels.
 
-    The fit runs twice. Oscillatory peaks are positive deviations from the background,
-    so bins whose first-pass residual sits in the upper quartile are dropped and the
-    line refitted on the remainder. That removes the alpha bump, and any residual
-    narrowband artifact that survived ``excluded_windows``, without having to name in
-    advance which peaks a given recording contains.
+    The fit runs twice. Bins whose first-pass residual sits in either tail are dropped and
+    the line refitted on the remainder, without having to name in advance what a given
+    recording contains. The upper tail is oscillatory peaks and narrowband artifact that
+    survived ``excluded_windows``; the lower tail is filter stopbands, which are an
+    absence of signal rather than a measurement of the background and pull the slope just
+    as hard.
 
     Returns ``None`` when too few bins survive to define a slope, so a short or heavily
     masked run simply has no fit rather than a fabricated one.
@@ -120,7 +121,21 @@ def fit_aperiodic(
     slope, intercept = np.polyfit(log_frequency, values, deg=1)
     residual = values - (slope * log_frequency + intercept)
     threshold = float(np.quantile(residual, PEAK_RESIDUAL_QUANTILE))
-    background = residual <= threshold
+    # Trimmed from both tails, not only the upper one.
+    #
+    # The upper trim removes oscillatory peaks, which is what this fit was written for.
+    # Keeping everything below it meant ``residual <= threshold`` retained -- and
+    # preferentially so -- bins that sit far *under* the background, and those are not
+    # background either: a notch stopband is an absence of signal, not a measurement of
+    # it. On data cleaned of line noise upstream, sub-0000 run-5 carries four-bin holes
+    # 25 to 31 dB deep at 28 and 38 Hz, inside the 2-45 Hz fit range, and they dragged the
+    # slope from -12.0 to -15.8 dB per decade.
+    #
+    # Symmetric in the quantile already defined rather than a depth in decibels, so the
+    # rule stays a statement about the residual distribution and introduces no threshold
+    # to tune per recording.
+    floor = float(np.quantile(residual, 1.0 - PEAK_RESIDUAL_QUANTILE))
+    background = (residual <= threshold) & (residual >= floor)
     if int(background.sum()) < MINIMUM_FIT_BINS:
         # Refitting on too few bins is less trustworthy than keeping the first pass.
         background = np.ones_like(residual, dtype=bool)
@@ -132,6 +147,17 @@ def fit_aperiodic(
     residual_variance = float(np.sum((observed - fitted) ** 2))
     r_squared = 1.0 - residual_variance / total_variance if total_variance > 0 else 0.0
 
+    # The scatter is measured over the peak-trimmed set, not the two-sided one that the
+    # slope is fitted on. The two want different things from the same residuals: a slope
+    # must not be pulled by a hole, while the scatter is the noise a peak has to clear and
+    # is understated by any set the low tail has been cut out of. Measured on the
+    # symmetric set it fell far enough that a recording with no rhythm at all was credited
+    # with a resolvable peak twenty-six times in a hundred instead of six.
+    scatter_set = residual <= threshold
+    if int(scatter_set.sum()) < MINIMUM_FIT_BINS:
+        scatter_set = np.ones_like(residual, dtype=bool)
+    scatter_residual = values[scatter_set] - (slope * log_frequency[scatter_set] + intercept)
+
     return AperiodicFit(
         offset_db=float(intercept),
         exponent=float(-slope / 10.0),
@@ -139,9 +165,7 @@ def fit_aperiodic(
         fit_range_hz=(float(low), float(high)),
         n_bins_used=int(background.sum()),
         n_bins_available=available,
-        # Free: the residual sum of squares is already formed for the coefficient of
-        # determination above, and this is only its per-bin root.
-        residual_db=float(np.sqrt(residual_variance / max(int(background.sum()), 1))),
+        residual_db=float(np.sqrt(np.mean(scatter_residual**2))),
     )
 
 

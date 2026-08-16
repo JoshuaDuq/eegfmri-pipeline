@@ -98,3 +98,48 @@ def test_the_line_is_undefined_at_zero_frequency() -> None:
 
     with pytest.raises(ValueError, match="undefined at or below zero"):
         aperiodic_line_db(fit, np.array([0.0, 10.0]))
+
+
+def test_a_notch_stopband_does_not_drag_the_slope() -> None:
+    """The fit trims oscillatory peaks from the upper tail of its residuals. Keeping
+    everything below that threshold retained -- preferentially -- bins sitting far under
+    the background, and a notch stopband is an absence of signal rather than a
+    measurement of it.
+
+    Ground truth here: a 1/f background with a known slope, and a four-bin hole cut into
+    it of the depth line-cleaned data actually carries.
+    """
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.report.aperiodic import fit_aperiodic
+
+    frequencies = np.arange(2.0, 45.0, 0.25)
+    truth = -12.0
+    clean = truth * np.log10(frequencies) + 30.0
+
+    notched = clean.copy()
+    hole = (frequencies >= 28.0) & (frequencies <= 28.75)
+    notched[hole] -= 28.0
+
+    recovered = fit_aperiodic(frequencies=frequencies, power_db=notched, fit_range_hz=(2.0, 45.0))
+
+    assert recovered is not None
+    assert abs(recovered.slope_db_per_decade - truth) < 0.5
+
+
+def test_an_oscillatory_peak_is_still_trimmed() -> None:
+    """Making the trim two-sided must not cost it what it was written for."""
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.report.aperiodic import fit_aperiodic
+
+    frequencies = np.arange(2.0, 45.0, 0.25)
+    truth = -12.0
+    values = truth * np.log10(frequencies) + 30.0
+    alpha = (frequencies >= 9.0) & (frequencies <= 12.0)
+    values[alpha] += 8.0
+
+    recovered = fit_aperiodic(frequencies=frequencies, power_db=values, fit_range_hz=(2.0, 45.0))
+
+    assert recovered is not None
+    assert abs(recovered.slope_db_per_decade - truth) < 0.5
