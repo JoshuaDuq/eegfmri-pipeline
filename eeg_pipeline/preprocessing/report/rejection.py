@@ -10,6 +10,7 @@ uses it, because the surviving trials of that condition are no longer a random s
 from __future__ import annotations
 
 import html
+import logging
 from collections import Counter
 from dataclasses import dataclass
 from typing import Mapping, Sequence
@@ -34,6 +35,8 @@ from eeg_pipeline.preprocessing.report.tables import Metric, metric_table
 #: column candidates, since trial loss that falls unevenly across conditions biases
 #: every contrast built from them.
 DEFAULT_GROUPING_COLUMNS = ("run_id", "trial_type")
+
+_LOGGER = logging.getLogger(__name__)
 
 #: Maximum distinct values before a column is treated as continuous rather than a factor.
 MAXIMUM_GROUP_LEVELS = 12
@@ -447,6 +450,28 @@ def add_rejection_review(
         image_format=report_image_format(),
         replace=True,
     )
+    # The counts above say how many trials survived; this says what they are like. The
+    # report measures time-resolved quality on the raw runs and, without this, nothing at
+    # all on the epochs it delivers -- so a trial set could pass every count in this
+    # section while carrying a channel that is noisy in a third of its trials.
+    from eeg_pipeline.preprocessing.report.continuity import plot_epoch_channel_amplitude
+
+    try:
+        amplitude_figure = plot_epoch_channel_amplitude(clean_epochs)
+    except ValueError as exc:
+        # No EEG channels, or none with usable positions. The section keeps its counts
+        # rather than losing them to a panel that could not be drawn.
+        amplitude_figure = None
+        _LOGGER.info("No epoch amplitude panel: %s", exc)
+    if amplitude_figure is not None:
+        report.add_figure(
+            fig=amplitude_figure,
+            title="Amplitude by epoch and channel (retained epochs)",
+            section=section,
+            tags=("epochs", "epoch-rejection"),
+            image_format=report_image_format(has_dense_image=True),
+            replace=True,
+        )
     return summary
 
 

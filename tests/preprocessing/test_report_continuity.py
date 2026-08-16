@@ -525,3 +525,76 @@ def test_acquisition_markers_are_not_drawn_as_task_events() -> None:
     )
 
     assert run.event_onsets == (20.0,)
+
+
+def _clean_epochs(n_epochs=8, n_channels=6):
+    import mne
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    info = mne.create_info([f"C{index}" for index in range(n_channels)], 100.0, "eeg")
+    info.set_montage(
+        mne.channels.make_dig_montage(
+            ch_pos={
+                name: pos
+                for name, pos in zip(
+                    info["ch_names"], rng.normal(0, 0.05, (n_channels, 3)), strict=True
+                )
+            },
+            coord_frame="head",
+        )
+    )
+    data = rng.normal(0, 1e-5, (n_epochs, n_channels, 100))
+    # One epoch loud across the montage, one channel loud throughout: the two failures
+    # this panel exists to separate from a retention count.
+    data[3] *= 6.0
+    data[:, 1, :] *= 5.0
+    return mne.EpochsArray(data, info, verbose="ERROR")
+
+
+def test_the_epoch_panel_scores_each_channel_against_its_own_median() -> None:
+    """A constitutionally noisy sensor must not paint its whole row, while a sensor that
+    failed for a few trials must show those trials."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.report.continuity import plot_epoch_channel_amplitude
+
+    figure = plot_epoch_channel_amplitude(_clean_epochs())
+
+    mesh = [c for c in figure.axes[0].collections if hasattr(c, "get_array")][0]
+    # The mesh is drawn transposed: rows are channels, columns are epochs.
+    values = np.asarray(mesh.get_array()).reshape(6, 8)
+    # Channel 1 is loud in every epoch, so against its own median it is unremarkable.
+    assert abs(float(np.median(values[1, :]))) < 1.0
+    # Epoch 3 is loud across the montage and has to stand out.
+    assert float(np.median(values[:, 3])) > 3.0
+    plt.close(figure)
+
+
+def test_the_epoch_panel_runs_anterior_to_posterior_like_the_run_panel() -> None:
+    """pcolormesh draws row 0 at the bottom, so without inverting, the axis runs the
+    opposite way to its own label and to the run-level panel beside it."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.report.continuity import plot_epoch_channel_amplitude
+
+    figure = plot_epoch_channel_amplitude(_clean_epochs())
+
+    bottom, top = figure.axes[0].get_ylim()
+    assert bottom > top, "the channel axis must be inverted so anterior sits at the top"
+    plt.close(figure)
+
+
+def test_the_epoch_panel_refuses_a_recording_with_no_eeg() -> None:
+    import mne
+    import numpy as np
+    import pytest as _pytest
+
+    from eeg_pipeline.preprocessing.report.continuity import plot_epoch_channel_amplitude
+
+    info = mne.create_info(["M1", "M2"], 100.0, "misc")
+    epochs = mne.EpochsArray(np.zeros((3, 2, 50)), info, verbose="ERROR")
+
+    with _pytest.raises(ValueError, match="at least one EEG channel"):
+        plot_epoch_channel_amplitude(epochs)

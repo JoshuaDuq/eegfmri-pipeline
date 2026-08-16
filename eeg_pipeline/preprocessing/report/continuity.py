@@ -32,6 +32,7 @@ from eeg_pipeline.preprocessing.report.style import (
     DIVERGING_POWER_COLORMAP,
     FLAG_COLOR,
     GUIDE_COLOR,
+    MARK_COLOR,
     robust_symmetric_limit,
     run_label,
 )
@@ -218,6 +219,90 @@ def _event_onsets(
             continue
         onsets.append(float(annotation["onset"] - start))
     return tuple(onsets)
+
+
+def plot_epoch_channel_amplitude(epochs: mne.BaseEpochs) -> plt.Figure:
+    """Amplitude of every retained epoch in every channel, against that channel's median.
+
+    The report measures time-resolved quality on the *raw* runs and nothing on the epochs
+    that are actually delivered. Those are not the same question. Rejection removes whole
+    epochs and repair rewrites channels inside the ones it keeps, so a trial set can pass
+    every count in this section and still carry a channel that is noisy in a third of its
+    trials, or a handful of trials noisy across the montage -- neither of which a
+    retention fraction can express.
+
+    Read per channel, like the run-level panel: each channel is scored against its own
+    median across epochs, so a constitutionally noisy sensor does not paint its whole row
+    and a sensor that failed for ten trials does. Decibels, because amplitude across
+    sensors spans orders of magnitude and a linear scale would show only the largest.
+    """
+    picks = mne.pick_types(epochs.info, eeg=True, exclude=())
+    if picks.size == 0:
+        raise ValueError("Epoch amplitude needs at least one EEG channel.")
+    ordered = _anterior_to_posterior(epochs, picks)
+    data = epochs.get_data(picks=ordered, copy=False)
+    # Root-mean-square within each epoch: one number per epoch and channel, which is the
+    # grain the panel is about. Peak-to-peak would be set by the single worst sample and
+    # would rank epochs by their sharpest transient rather than by how noisy they are.
+    amplitude = np.sqrt((data**2).mean(axis=2))
+    median = np.median(amplitude, axis=0, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        relative_db = 20.0 * np.log10(amplitude / np.maximum(median, np.finfo(float).tiny))
+    relative_db = np.where(np.isfinite(relative_db), relative_db, 0.0)
+
+    limit = robust_symmetric_limit(relative_db)
+    figure, (map_axis, trace_axis) = plt.subplots(
+        2,
+        1,
+        figsize=(11.0, 5.6),
+        height_ratios=(3, 1),
+        sharex=True,
+        layout="constrained",
+    )
+    image = map_axis.pcolormesh(
+        np.arange(relative_db.shape[0] + 1) - 0.5,
+        np.arange(ordered.size + 1),
+        relative_db.T,
+        cmap=DIVERGING_POWER_COLORMAP,
+        vmin=-limit,
+        vmax=limit,
+        rasterized=True,
+    )
+    names = [epochs.ch_names[index] for index in ordered]
+    step = max(1, len(names) // 14)
+    map_axis.set_yticks(np.arange(len(names))[::step] + 0.5)
+    map_axis.set_yticklabels(names[::step], fontsize=6)
+    map_axis.set_ylabel("EEG channel (anterior → posterior)")
+    # Row 0 is the most anterior channel and pcolormesh draws row 0 at the bottom, so
+    # without this the axis runs posterior to anterior while its label says otherwise --
+    # and reads upside down against the run-level panel a reviewer compares it with.
+    map_axis.invert_yaxis()
+    map_axis.set_title(
+        f"{relative_db.shape[0]} retained epochs · {ordered.size} channels · "
+        "each channel against its own median across epochs"
+    )
+    figure.colorbar(
+        image,
+        ax=map_axis,
+        label=f"Amplitude vs channel median (dB, clipped at ±{limit:.1f})",
+    )
+
+    trace_axis.plot(
+        np.arange(relative_db.shape[0]),
+        np.median(relative_db, axis=1),
+        color=GUIDE_COLOR,
+        linewidth=1.0,
+    )
+    trace_axis.axhline(0.0, color="0.7", linewidth=0.8)
+    trace_axis.set(
+        xlabel="Retained epoch",
+        ylabel="Median across\nchannels (dB)",
+        xlim=(-0.5, relative_db.shape[0] - 0.5),
+    )
+    trace_axis.grid(alpha=0.2)
+    trace_axis.spines[["top", "right"]].set_visible(False)
+    plt.close(figure)
+    return figure
 
 
 def _anterior_to_posterior(raw: mne.io.BaseRaw, picks: np.ndarray) -> np.ndarray:
@@ -519,13 +604,18 @@ def plot_run_continuity(run: RunContinuity) -> plt.Figure:
         # so the ticks sit just inside the floor whatever the decibel limits turn out to
         # be. Pinned to the floor in data coordinates they landed under the spine and
         # were invisible.
+        # Coloured and sized to be distinguishable from the axis ticks a few pixels below
+        # them. In grey at 0.9 pt the rug was the same hue and weight as the x-axis
+        # furniture directly beneath it, so a legend reading "11 event(s)" sat over marks
+        # a reader takes for tick marks -- present, correctly placed, and unreadable as
+        # what they are.
         trace_axis.vlines(
             onsets,
             0.0,
-            0.08,
+            0.14,
             transform=trace_axis.get_xaxis_transform(),
-            color=GUIDE_COLOR,
-            linewidth=0.9,
+            color=MARK_COLOR,
+            linewidth=1.3,
             label=f"{len(run.event_onsets)} event(s)",
         )
         trace_axis.legend(frameon=False, fontsize=6, loc="upper right")
