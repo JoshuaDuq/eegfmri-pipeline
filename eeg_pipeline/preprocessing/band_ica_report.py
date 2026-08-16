@@ -948,6 +948,47 @@ def dossier_color_limits(
     )
 
 
+#: Frequency ticks worth labelling, at the edges of the conventional EEG bands.
+_FREQUENCY_TICKS = (1, 2, 4, 8, 13, 20, 30, 50, 100)
+
+
+def _scale_frequency_axis(
+    axis: plt.Axes,
+    *,
+    low: float,
+    high: float,
+    vertical: bool,
+) -> None:
+    """Put a frequency axis on a log scale once it spans more than an octave.
+
+    Shared by the spectrum, where the frequency axis is horizontal, and the
+    time-frequency map, where it is vertical, so the two panels of one dossier cannot
+    disagree about where 10 Hz is.
+
+    Below an octave the linear axis is already proportionate and a log scale would only
+    make the tick labels harder to read. Above it the argument is the one that decides
+    the whole panel: on a linear 1-100 Hz axis, delta through theta occupies seven per
+    cent of the axis, and that is where the eye-blink structure separating an ocular
+    component from a frontal brain one lives.
+    """
+    if low <= 0.0 or high / low < 2.0:
+        return
+    ticks = [tick for tick in _FREQUENCY_TICKS if low <= tick <= high]
+    if vertical:
+        axis.set_yscale("log")
+        axis.set_yticks(ticks)
+        scaled = axis.yaxis
+    else:
+        axis.set_xscale("log")
+        axis.set_xticks(ticks)
+        scaled = axis.xaxis
+    scaled.set_major_formatter(ScalarFormatter())
+    # The log locator also labels its own minor ticks, which arrive formatted as
+    # "3 × 10⁰" and sit between the plain "2" and "4" chosen above. Silencing them
+    # leaves one labelling convention on the axis instead of two.
+    scaled.set_minor_formatter(NullFormatter())
+
+
 def _plot_source_spectrum(
     axis: plt.Axes,
     *,
@@ -997,16 +1038,7 @@ def _plot_source_spectrum(
         color=PRIMARY_COLOR,
     )
     axis.set(title=title, xlabel="Frequency (Hz)", ylabel="Power (dB)")
-    if band.fmax / max(band.fmin, 1e-9) >= 2.0:
-        axis.set_xscale("log")
-        axis.set_xticks(
-            [tick for tick in (1, 2, 4, 8, 13, 20, 30, 50, 100) if band.fmin <= tick <= band.fmax]
-        )
-        axis.xaxis.set_major_formatter(ScalarFormatter())
-        # The log locator also labels its own minor ticks, which arrive formatted as
-        # "3 × 10⁰" and sit between the plain "2" and "4" chosen above. Silencing them
-        # leaves one labelling convention on the axis instead of two.
-        axis.xaxis.set_minor_formatter(NullFormatter())
+    _scale_frequency_axis(axis, low=band.fmin, high=band.fmax, vertical=False)
     axis.set_xlim(band.fmin, band.fmax)
     axis.legend(frameon=False, fontsize=6)
 
@@ -1033,6 +1065,12 @@ def _plot_tfr(
     )
     axis.axvline(0.0, color="black", linestyle="--", linewidth=0.75)
     axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
+    _scale_frequency_axis(
+        axis,
+        low=float(np.min(frequencies)),
+        high=float(np.max(frequencies)),
+        vertical=True,
+    )
     # The colour scale is shared across the decomposition so that components can be
     # compared, which means a component whose modulation is small against the strongest
     # one renders almost entirely neutral. Stating this component's own peak turns that

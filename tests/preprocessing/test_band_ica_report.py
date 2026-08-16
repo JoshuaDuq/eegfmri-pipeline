@@ -1707,3 +1707,49 @@ def test_generate_band_report_reads_the_exclusion_reasons_from_the_component_tab
         "",
         "Auto-detected ECG artifact (MNE)",
     ]
+
+
+def test_the_tfr_frequency_axis_is_logarithmic_over_a_wide_band() -> None:
+    """A linear 1-100 Hz axis gives delta through theta seven per cent of the height,
+    which is where the structure separating an ocular component from a frontal brain one
+    lives. The spectrum panel beside it already scales this way; the two must agree about
+    where 10 Hz is."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import _plot_tfr
+
+    figure, axis = plt.subplots()
+    _plot_tfr(
+        axis=axis,
+        power=np.zeros((6, 4)),
+        frequencies=np.array([1.0, 4.0, 8.0, 20.0, 50.0, 100.0]),
+        times=np.linspace(-1.0, 1.0, 4),
+        title="Grand average",
+        color_limit=1.0,
+    )
+
+    assert axis.get_yscale() == "log"
+    labelled = [tick for tick in axis.get_yticks() if 1.0 <= tick <= 100.0]
+    assert 8.0 in labelled
+    plt.close(figure)
+
+
+def test_a_narrow_tfr_band_keeps_a_linear_axis() -> None:
+    """Below an octave a linear axis is already proportionate, and a log scale would only
+    make the tick labels harder to read."""
+    import matplotlib.pyplot as plt
+
+    from eeg_pipeline.preprocessing.band_ica_report import _plot_tfr
+
+    figure, axis = plt.subplots()
+    _plot_tfr(
+        axis=axis,
+        power=np.zeros((3, 4)),
+        frequencies=np.array([8.0, 10.0, 13.0]),
+        times=np.linspace(-1.0, 1.0, 4),
+        title="Grand average",
+        color_limit=1.0,
+    )
+
+    assert axis.get_yscale() == "linear"
+    plt.close(figure)
