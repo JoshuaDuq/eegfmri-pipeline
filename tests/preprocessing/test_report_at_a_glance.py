@@ -180,3 +180,33 @@ def test_every_headline_points_at_a_section_the_document_has() -> None:
 
     assert "Trial retention" not in sections
     assert "Epoch rejection" in sections
+
+
+def test_the_beat_marker_share_is_never_headlined_without_its_lag() -> None:
+    """A share near zero reads as the markers being wrong. In the bore it usually is not:
+    an ordinary QRS detector locks onto the magnetohydrodynamic deflection, which follows
+    the R wave by a few hundred milliseconds, so two good trains match at 0%. The Analyzer
+    section has always shown the lag that separates a detector offset from real
+    disagreement; the landing panel quoted the share alone."""
+    from eeg_pipeline.preprocessing.report.at_a_glance import HEADLINES, at_a_glance_html
+
+    keys = [headline.key for headline in HEADLINES]
+    share = keys.index("worst_marker_agreement")
+    assert keys[share + 1] == "worst_marker_agreement_lag_ms"
+    assert keys[share + 2] == "worst_marker_agreement_lag_iqr_ms"
+
+    rendered = at_a_glance_html(
+        _record(
+            _stage(
+                "report-review",
+                "2026-08-15T12:53:04+00:00",
+                worst_marker_agreement=0.005,
+                worst_marker_agreement_lag_ms=303.0,
+                worst_marker_agreement_lag_iqr_ms=19.0,
+            )
+        )
+    )
+
+    assert "0.5%" in rendered
+    assert "+303" in rendered
+    assert "19" in rendered

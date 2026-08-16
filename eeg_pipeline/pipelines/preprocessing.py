@@ -150,13 +150,28 @@ def _review_stage_measurements(*, coverage, evidence) -> dict:
         # The lowest agreement across runs, because the panel exists to surface the run
         # that stands apart rather than an average that hides it. Runs whose fraction is
         # undefined carry no number to be lowest.
-        fractions = [
-            agreement.matched_fraction
+        scored = [
+            agreement
             for agreement in getattr(evidence, "marker_agreements", ())
             if agreement.matched_fraction is not None
         ]
-        if fractions:
-            measurements["worst_marker_agreement"] = float(min(fractions))
+        if scored:
+            worst = min(scored, key=lambda agreement: agreement.matched_fraction)
+            measurements["worst_marker_agreement"] = float(worst.matched_fraction)
+            # Recorded with the share, never without it. A low share alone reads as the
+            # beat markers being wrong, and in the bore it usually is not: an ordinary QRS
+            # detector locks onto the magnetohydrodynamic deflection, which is larger than
+            # the R wave and sits a few hundred milliseconds after it, so two perfectly
+            # good trains match at 0%. A tight lag says exactly that; a broad one is real
+            # disagreement. The Analyzer section has stated both all along -- it was the
+            # landing panel, quoting the share by itself, that turned a detector offset
+            # into an apparent failure.
+            if worst.median_lag_s is not None:
+                measurements["worst_marker_agreement_lag_ms"] = float(worst.median_lag_s * 1000.0)
+            if worst.lag_iqr_s is not None:
+                measurements["worst_marker_agreement_lag_iqr_ms"] = float(
+                    worst.lag_iqr_s * 1000.0
+                )
     return measurements
 
 

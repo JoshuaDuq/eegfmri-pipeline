@@ -51,6 +51,15 @@ def _decimal(value: Any) -> str:
     return f"{float(value):.2f}"
 
 
+def _signed_milliseconds(value: Any) -> str:
+    """Render a lag, signed, because its direction says which train leads."""
+    return f"{float(value):+.0f}"
+
+
+def _milliseconds(value: Any) -> str:
+    return f"{float(value):.0f}"
+
+
 @dataclass(frozen=True)
 class Headline:
     """One measurement worth meeting before the document is scrolled."""
@@ -90,6 +99,27 @@ HEADLINES: tuple[Headline, ...] = (
         "worst_marker_agreement",
         "Lowest per-run beat-marker agreement",
         _percentage,
+        "Scanner artifact correction (Analyzer)",
+    ),
+    # Paired with the share above, and the pairing is the point.
+    #
+    # A share near zero reads as the beat markers being wrong. In the bore it usually is
+    # not: an ordinary QRS detector locks onto the magnetohydrodynamic deflection, which
+    # is larger than the R wave and follows it by a few hundred milliseconds, so two
+    # perfectly good trains match at 0%. The lag separates the two readings — tight means
+    # a fixed detector offset, broad means genuine disagreement — and the Analyzer section
+    # has always shown it. Quoting the share alone up here was the one place in this
+    # document where a bare number asserted a conclusion the pipeline refuses to draw.
+    Headline(
+        "worst_marker_agreement_lag_ms",
+        "…nearest marker on that run (ms)",
+        _signed_milliseconds,
+        "Scanner artifact correction (Analyzer)",
+    ),
+    Headline(
+        "worst_marker_agreement_lag_iqr_ms",
+        "…spread of that lag (ms, IQR)",
+        _milliseconds,
         "Scanner artifact correction (Analyzer)",
     ),
     # "Epoch rejection", not "Trial retention": the latter is the title of a figure inside
