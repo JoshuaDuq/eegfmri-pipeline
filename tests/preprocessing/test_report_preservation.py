@@ -625,3 +625,53 @@ def test_a_maximum_on_the_band_edge_is_not_a_peak() -> None:
 
     assert alpha.is_resolvable()
     assert not on_edge.is_resolvable()
+
+
+def test_spearman_brown_is_withheld_at_a_non_positive_correlation() -> None:
+    """The formula steps up a reliability, and a non-positive split-half correlation is
+    not one: the halves share no response to have more of. Applied anyway, 2r/(1+r) leaves
+    the correlation range below r = -1/3 -- and short of that it still inflates a
+    meaningless number, which is how -0.300 was recorded and reported as -0.858."""
+    import mne
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.report.preservation import compute_split_half_reliability
+
+    rng = np.random.default_rng(3)
+    info = mne.create_info([f"C{i}" for i in range(8)], 100.0, "eeg")
+    # Anti-correlated halves: odd trials carry a bump, even trials carry its inverse.
+    n = 40
+    times = np.arange(60) / 100.0
+    bump = np.exp(-((times - 0.2) ** 2) / 0.002) * 1e-5
+    data = rng.normal(0, 1e-7, (n, 8, times.size))
+    data[0::2] += bump
+    data[1::2] -= bump
+    epochs = mne.EpochsArray(data, info, tmin=0.0, verbose="ERROR")
+
+    result = compute_split_half_reliability(epochs, response_window_s=(0.0, 0.5))
+
+    assert result is not None
+    assert result.correlation < 0.0
+    assert result.corrected_correlation is None
+
+
+def test_spearman_brown_is_reported_where_it_applies() -> None:
+    """A positive correlation still gets its step-up, above the raw value."""
+    import mne
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.report.preservation import compute_split_half_reliability
+
+    rng = np.random.default_rng(4)
+    info = mne.create_info([f"C{i}" for i in range(8)], 100.0, "eeg")
+    times = np.arange(60) / 100.0
+    bump = np.exp(-((times - 0.2) ** 2) / 0.002) * 1e-5
+    data = rng.normal(0, 3e-6, (40, 8, times.size)) + bump
+    epochs = mne.EpochsArray(data, info, tmin=0.0, verbose="ERROR")
+
+    result = compute_split_half_reliability(epochs, response_window_s=(0.0, 0.5))
+
+    assert result is not None and result.correlation > 0.0
+    assert result.corrected_correlation is not None
+    assert result.corrected_correlation > result.correlation
+    assert abs(result.corrected_correlation) <= 1.0

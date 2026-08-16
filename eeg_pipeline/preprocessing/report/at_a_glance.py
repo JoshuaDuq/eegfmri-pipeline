@@ -128,7 +128,17 @@ HEADLINES: tuple[Headline, ...] = (
     # pointer in both documents.
     Headline("epochs_kept", "Epochs retained", _count, "Epoch rejection"),
     Headline("epochs_total", "Epochs before rejection", _count, "Epoch rejection"),
-    Headline("split_half_r", "Split-half reliability", _decimal, "Signal preservation"),
+    # The measurement, then its step-up. Separate rows because they are separate
+    # quantities: the first is what odd and even trials agreed on, the second is what that
+    # implies at the full trial count, and the second does not exist at a non-positive
+    # correlation because there is no shared response to have more of.
+    Headline("split_half_r", "Split-half correlation (odd vs even)", _decimal, "Signal preservation"),
+    Headline(
+        "split_half_r_corrected",
+        "…stepped to full trial count (Spearman-Brown)",
+        _decimal,
+        "Signal preservation",
+    ),
     Headline(
         "alpha_prominence_db", "Posterior alpha prominence (dB)", _decimal, "Signal preservation"
     ),

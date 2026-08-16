@@ -176,8 +176,19 @@ class SplitHalfReliability:
     spatial_correlation: np.ndarray
     #: Correlation between the two halves over channels and time.
     correlation: float
-    #: Same quantity corrected to the full trial count by Spearman-Brown.
-    corrected_correlation: float
+    #: Same quantity stepped up to the full trial count by Spearman-Brown, or ``None``
+    #: where the formula does not apply.
+    #:
+    #: Spearman-Brown steps up a *reliability*, and a non-positive split-half correlation
+    #: is not one: the two halves carry no shared response to have more of. Applied
+    #: anyway, ``2r / (1 + r)`` leaves the correlation range entirely -- on this cohort it
+    #: printed -1.11, -7.20 and -12.13 for three of fifteen participants, and a QC report
+    #: stating a correlation of -12 is not one a reader can trust about anything else.
+    #:
+    #: ``None`` rather than a clamp to zero or to -1. A clamp would put a number in the
+    #: cell, and every number in this panel is a measurement; "not defined here" is the
+    #: honest content, and the raw correlation beside it is the measurement that stands.
+    corrected_correlation: float | None
     #: Interval the correlation was computed over. Reported because the number is
     #: meaningless without it.
     response_window_s: tuple[float, float]
@@ -260,9 +271,15 @@ def compute_split_half_reliability(
     even = picked[even_indices].average().get_data()
     correlation = float(np.corrcoef(odd.ravel(), even.ravel())[0, 1])
     # Spearman-Brown steps the two half-length averages up to the reliability the full
-    # trial count supports, which is the quantity the analysis actually runs on.
-    denominator = 1.0 + correlation
-    corrected = (2.0 * correlation / denominator) if denominator > 0 else 0.0
+    # trial count supports, which is the quantity the analysis actually runs on -- but
+    # only where there is a reliability to step up. The formula is a statement about
+    # lengthening a test that already measures something; at r <= 0 the two halves share
+    # no response, 2r / (1 + r) walks straight out of the correlation range, and the
+    # panel ends up printing an impossible number in the one section whose job is to say
+    # whether anything survived preprocessing.
+    corrected = (
+        (2.0 * correlation / (1.0 + correlation)) if correlation > 0.0 else None
+    )
     return SplitHalfReliability(
         n_trials=n_used,
         times_s=np.asarray(picked.times, dtype=float),
@@ -270,7 +287,7 @@ def compute_split_half_reliability(
         even_gfp_uv=even.std(axis=0) * 1e6,
         spatial_correlation=_spatial_correlation_by_time(odd, even),
         correlation=correlation,
-        corrected_correlation=float(corrected),
+        corrected_correlation=None if corrected is None else float(corrected),
         response_window_s=(low, high),
     )
 
@@ -523,10 +540,25 @@ def preservation_html(
                     ("Odd-vs-even correlation", f"{reliability.correlation:.3f}"),
                     Metric(
                         "Spearman-Brown corrected",
-                        f"{reliability.corrected_correlation:.3f}",
+                        (
+                            f"{reliability.corrected_correlation:.3f}"
+                            if reliability.corrected_correlation is not None
+                            else "not defined at r ≤ 0"
+                        ),
                         emphasis=True,
                     ),
                 ]
+            )
+            + (
+                ""
+                if reliability.corrected_correlation is not None
+                else "<p>The step-up is left blank rather than filled. Spearman-Brown "
+                "lengthens a test that already measures something, and a non-positive "
+                "split-half correlation means the two halves recovered no shared "
+                "response to have more of. The odd-vs-even correlation above is the "
+                "measurement; what explains it — a paradigm whose response falls outside "
+                "the correlated window, too few trials, or a genuinely absent evoked "
+                "response — is what the rest of this section is for.</p>"
             )
             + "<p>Odd and even trials are averaged separately and correlated over channels "
             "and time. Splitting by alternating position rather than at the midpoint "
@@ -588,10 +620,15 @@ def _draw_split_half(axis: plt.Axes, reliability: SplitHalfReliability) -> None:
     # the axis starts there rather than floating on the data's own minimum.
     axis.set_ylim(bottom=0.0)
     window_start, window_stop = reliability.response_window_s
+    corrected = (
+        f" ({reliability.corrected_correlation:.3f} corrected)"
+        if reliability.corrected_correlation is not None
+        else ""
+    )
     axis.set(
         title=(
-            f"Split-half evoked response · r = {reliability.correlation:.3f} "
-            f"({reliability.corrected_correlation:.3f} corrected)\n"
+            f"Split-half evoked response · r = {reliability.correlation:.3f}"
+            f"{corrected}\n"
             f"correlated over {window_start:.2f} to {window_stop:.2f} s"
         ),
         xlabel="Time (s)",

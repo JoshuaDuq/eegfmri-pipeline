@@ -88,7 +88,15 @@ def _preservation_measurements(*, reliability, alpha) -> dict:
     """
     measurements: dict = {}
     if reliability is not None:
-        measurements["split_half_r"] = float(reliability.corrected_correlation)
+        # The raw odd-vs-even correlation, under the key named after it. This previously
+        # held the Spearman-Brown value, so a reader of the record, the sidecar, or the
+        # cohort's "Split-half reliability" row was given a stepped-up number under a name
+        # that says otherwise -- and for a negative correlation the step-up inflates the
+        # magnitude of a quantity that means nothing to begin with (-0.300 was recorded
+        # as -0.858 here). The measurement and its correction are now separate keys.
+        measurements["split_half_r"] = float(reliability.correlation)
+        if reliability.corrected_correlation is not None:
+            measurements["split_half_r_corrected"] = float(reliability.corrected_correlation)
         # Reliability grows with test length, so the correlation above is only comparable
         # with another participant's once both are stepped to a common trial count. The
         # count is recorded here so a cohort can do that without reopening the epochs.
@@ -1853,7 +1861,7 @@ class PreprocessingPipeline(PipelineBase):
         self.logger.info(
             "sub-%s preservation: split-half r=%s posterior alpha=%s",
             subject,
-            "n/a" if reliability is None else f"{reliability.corrected_correlation:.3f}",
+            "n/a" if reliability is None else f"{reliability.correlation:.3f}",
             "n/a" if alpha is None else f"{alpha.prominence_db:.1f} dB",
         )
         return _preservation_measurements(reliability=reliability, alpha=alpha)

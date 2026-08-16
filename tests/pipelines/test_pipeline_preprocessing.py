@@ -1545,6 +1545,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
 
         measurements = _preservation_measurements(
             reliability=SimpleNamespace(
+                correlation=0.71,
                 corrected_correlation=0.83,
                 n_trials=80,
                 response_window_s=(0.1, 0.6),
@@ -1553,7 +1554,11 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         )
 
         assert measurements == {
-            "split_half_r": 0.83,
+            # The measurement under the key named after it, and the step-up under its own.
+            # These were one key holding the stepped-up value, so the record, the sidecar
+            # and the cohort's reliability row all reported a corrected number as "r".
+            "split_half_r": 0.71,
+            "split_half_r_corrected": 0.83,
             "alpha_prominence_db": 6.4,
             # Reliability grows with test length, so the trial count and the window it was
             # measured over travel with the correlation: a cohort cannot compare two
@@ -1588,9 +1593,12 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         evidence = SimpleNamespace(
             spectra=[object()] * 6,
             marker_agreements=[
-                SimpleNamespace(matched_fraction=0.93),
-                SimpleNamespace(matched_fraction=0.0),
-                SimpleNamespace(matched_fraction=None),
+                SimpleNamespace(matched_fraction=0.93, median_lag_s=0.004, lag_iqr_s=0.002),
+                # The run the landing panel reports: a share of zero with a tight lag,
+                # which is a detector locking onto the magnetohydrodynamic deflection
+                # rather than markers in the wrong place.
+                SimpleNamespace(matched_fraction=0.0, median_lag_s=0.303, lag_iqr_s=0.019),
+                SimpleNamespace(matched_fraction=None, median_lag_s=None, lag_iqr_s=None),
             ],
         )
 
