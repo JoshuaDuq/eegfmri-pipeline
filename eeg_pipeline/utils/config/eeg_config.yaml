@@ -41,10 +41,22 @@ paths:
   # "eeg", so the data depended on a flag someone had to remember. 81 of 119 recorded
   # preprocessing runs carried the flag and the rest did not. Producing the cleaned copy is
   # `eeg-pipeline line-comb apply`, whose own config pins the raw root it reads.
-  bids_root: "../../../data/bids_output/eeg_linecleaned"  # BIDS-formatted EEG data directory
+  # The post-Decomb tree, staged so that MNE-BIDS-Pipeline finds it: the Decomb output
+  # names its recordings desc-decomb while the sidecars stay desc-less, and preprocessing
+  # cannot read that layout until the pair is reconciled. eeg_linecleaned, which this
+  # pointed at, is the earlier line-comb copy and still carries the lines Decomb removes:
+  # on sub-0001 run-1 the 47 Hz line is untouched there and 19 dB down in the staged tree,
+  # and the delivered derivatives carry the 34 dB stopband that only the staged tree
+  # explains. The config named one input while the science was built on another.
+  bids_root: "../../../data/bids_output/eeg_decombed_auto_staged"  # BIDS-formatted EEG data
   # Null preserves ordinary datasets. A configured Decomb manifest activates spectral
   # exclusions and requires preprocessing.notch_freq: null.
-  decomb_manifest: null
+  #
+  # Set, because the recordings above have had per-recording lines removed and every panel
+  # that reads power at a frequency needs to know where. Without it the report treats a
+  # 30 dB stopband as data: it draws the trough unmarked, and the aperiodic fit was
+  # measuring slopes across holes it had no way to recognise.
+  decomb_manifest: "../../../data/bids_output/eeg_decombed_auto_staged/line_notch_manifest.tsv"
   bids_rest_root: null  # Optional resting-state EEG BIDS directory used when task_is_rest is enabled
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
@@ -296,7 +308,20 @@ preprocessing:
   # change in absolute 59.5-60.5 Hz power, spectrum_fit took 2.77 dB and ZapLine 1.65 dB
   # against 56.66 dB here -- and this notch measured 0.00 dB collateral in both 45-58 and
   # 62-95 Hz, because its whole footprint lies inside the unanalysed 58-62 gap.
-  notch_freq: 60
+  # Null, because paths.decomb_manifest is configured and the manifest is then the
+  # authoritative account of which frequencies were removed -- which is what
+  # check_config_coherence requires, and what lets every panel that reads power at a
+  # frequency know where the holes are instead of inferring one notch at 60 Hz.
+  #
+  # The reasoning below is why this notch was chosen over spectrum_fit and ZapLine when
+  # the pipeline removed mains itself, and it stands for a dataset that does. Decomb
+  # removes lines per recording ahead of preprocessing, so a second fixed notch here adds
+  # a stopband the manifest does not describe.
+  #
+  # NOTE: the derivatives currently on disk were produced with this set to 60, so they
+  # carry a 56.5-61.0 Hz hole that is partly this notch. Preprocessing has to be re-run
+  # for the delivered data to match this configuration.
+  notch_freq: null
   line_freq: 60
 
   # The scanner room's line comb is removed before this pipeline reads the data, by
