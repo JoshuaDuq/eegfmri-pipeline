@@ -326,12 +326,16 @@ def test_the_subject_report_links_to_the_exploratory_file_it_no_longer_holds(tmp
 
     _run_band_report(tmp_path, settings=BandIcaReportSettings(), report=report)
 
+    # Written to its own file, all that stays behind is a paragraph and a link, so it
+    # goes with the other decomposition-level material rather than claiming a contents
+    # entry that promises a body of evidence and delivers a sentence.
     linking = [
         call
         for call in report.add_html.call_args_list
-        if call.kwargs.get("section") == EXPLORATORY_BAND_SECTION
+        if "exploratorybandica" in str(call.kwargs.get("html", ""))
     ]
     assert linking, "the subject report must keep a pointer to the exploratory file"
+    assert {call.kwargs["section"] for call in linking} == {"ICA decomposition quality"}
     document = "".join(str(call.kwargs["html"]) for call in linking)
     assert "sub-0001_desc-exploratorybandica_report.html" in document
 
@@ -1003,10 +1007,12 @@ def test_generate_band_report_persists_real_mne_html_sections(tmp_path) -> None:
         return [figure]
 
     def add_standard_review(**kwargs):
+        # Where the real function puts it: inside the review section, not beside it.
+        band = kwargs["settings"].review_bands[0]
         kwargs["report"].add_html(
             "authoritative",
             title="How to review ICA component dossiers",
-            section="ICA component review guide",
+            section=f"ICA component review: {band.title}",
             tags=("ica", "ica-component-review"),
         )
 
@@ -1050,10 +1056,14 @@ def test_generate_band_report_persists_real_mne_html_sections(tmp_path) -> None:
         )
 
     html = report_path.with_suffix(".html").read_text(encoding="utf-8")
-    assert "ICA component review guide" in html
-    # The subject report keeps the section and the pointer; the figures themselves live in
-    # the linked file, so the heavy sliders are not in this document.
-    assert html.count(EXPLORATORY_BAND_SECTION) >= 1
+    # The guide sits inside the review section it describes rather than claiming a
+    # contents entry of its own for one paragraph.
+    assert "How to review ICA component dossiers" in html
+    assert "ICA component review guide" not in html
+    # The subject report keeps the pointer; the figures themselves live in the linked
+    # file, so the heavy sliders are not in this document and the section that would have
+    # held them is not an entry promising evidence it does not have.
+    assert EXPLORATORY_BAND_SECTION not in html
     assert "sub-0001_desc-exploratorybandica_report.html" in html
     for band in BAND_ICA_DEFINITIONS:
         assert f"Band-specific ICA: {band.title}" not in html

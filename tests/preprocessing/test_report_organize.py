@@ -583,3 +583,86 @@ def test_sectionless_reference_material_sorts_last() -> None:
     order_sections(report)
 
     assert [element.name for element in report._content][-1] == "System information"
+
+
+def test_a_raw_section_reduced_to_metadata_is_dropped() -> None:
+    """Its butterfly and spectrum are replaced elsewhere; an Info table alone is a
+    contents entry pointing at nothing a reader came for."""
+    from eeg_pipeline.preprocessing.report.organize import drop_metadata_only_raw_sections
+
+    report = mne.Report(title="raw", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure, title="Magnitude and step response", section="Filter response",
+        tags=("filter-response",),
+    )
+    report.add_figure(
+        fig=figure, title="Channels remaining per region", section="Channel and region coverage",
+        tags=("channel-coverage",),
+    )
+    report.add_figure(fig=figure, title="Info", section="Raw (filtered)", tags=("raw",))
+    report.add_figure(fig=figure, title="Info", section="Raw (original)", tags=("raw",))
+    report.add_figure(fig=figure, title="PSD", section="Raw (original)", tags=("raw",))
+    plt.close(figure)
+
+    drop_metadata_only_raw_sections(report)
+
+    sections = [str(element.section) for element in report._content]
+    assert "Raw (filtered)" not in sections
+    # Raw (original) keeps evidence, so its metadata keeps company with it.
+    assert sections.count("Raw (original)") == 2
+
+
+def test_a_raw_section_keeps_its_metadata_while_it_still_holds_evidence() -> None:
+    from eeg_pipeline.preprocessing.report.organize import drop_metadata_only_raw_sections
+
+    report = mne.Report(title="raw", verbose="ERROR")
+    figure = plt.figure()
+    for section, tag in (("Filter response", "filter-response"),
+                         ("Channel and region coverage", "channel-coverage")):
+        report.add_figure(fig=figure, title=f"panel {tag}", section=section, tags=(tag,))
+    report.add_figure(fig=figure, title="Info", section="Raw (clean)", tags=("raw",))
+    report.add_figure(fig=figure, title="Time series", section="Raw (clean)", tags=("raw",))
+    plt.close(figure)
+
+    drop_metadata_only_raw_sections(report)
+
+    assert "Info" in {element.name for element in report._content}
+
+
+def test_metadata_survives_when_nothing_replaces_it() -> None:
+    """A report built from a stage subset must not lose the only record of the file."""
+    from eeg_pipeline.preprocessing.report.organize import drop_metadata_only_raw_sections
+
+    report = mne.Report(title="raw", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(fig=figure, title="Info", section="Raw (filtered)", tags=("raw",))
+    plt.close(figure)
+
+    drop_metadata_only_raw_sections(report)
+
+    assert [element.name for element in report._content] == ["Info"]
+
+
+def test_the_two_cleaning_overlays_are_told_apart_by_stage() -> None:
+    """MNE draws this overlay when it fits the ICA and again when it applies it, under one
+    title both times. The figures differ -- different exclusion sets -- and nothing said
+    which was which."""
+    from eeg_pipeline.preprocessing.report.organize import name_cleaning_overlays_by_stage
+
+    report = mne.Report(title="ica", verbose="ERROR")
+    figure = plt.figure()
+    for section in ("ICA: components", "ICA: removals"):
+        report.add_figure(
+            fig=figure, title="Original and cleaned signal", section=section, tags=("ica",)
+        )
+    plt.close(figure)
+
+    name_cleaning_overlays_by_stage(report)
+
+    names = [element.name for element in report._content]
+    assert names == [
+        "Original and cleaned signal (exclusions proposed at fitting)",
+        "Original and cleaned signal (exclusions as applied)",
+    ]
+    assert len(set(names)) == 2

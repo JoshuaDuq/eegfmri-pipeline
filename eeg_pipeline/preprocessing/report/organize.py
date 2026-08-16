@@ -310,6 +310,7 @@ SECTION_ORDER = (
     "ICA component review",
     "ICA: components",
     "ICA: removals",
+    "Exploratory band-fitted ICAs",
     # Whether the cleaning worked.
     "Sensor spectra before and after ICA",
     # What was presented, what survived, and whether the survivors carry signal.
@@ -385,6 +386,71 @@ def drop_superseded_mne_ica_panels(report: mne.Report) -> None:
         report.remove(title=title, remove_all=True)
 
 
+#: Sections whose evidence this pipeline replaces, leaving MNE's metadata table behind.
+#:
+#: ``Raw (filtered)`` and ``Raw (clean)`` each held a butterfly and a spectrum that the
+#: continuity and sensor-spectra sections replace. Once those go the section is an ``Info``
+#: table on its own, and a contents entry pointing at one is a stop a reader makes to find
+#: they have not arrived anywhere.
+#:
+#: ``Raw (original)`` is deliberately absent. Its spectrum is the report's only view of the
+#: data before filtering, so the section keeps evidence and its ``Info`` keeps company with
+#: it.
+_METADATA_STUB_SECTIONS = ("Raw (filtered)", "Raw (clean)")
+
+#: What has to be in the document before a metadata table is redundant.
+#:
+#: The filter panel states what the filter actually is rather than what was requested, and
+#: the coverage panel states which channels survived. Between them they carry what a reader
+#: would otherwise mine out of ``Info``, in a form built to be read.
+_METADATA_REPLACEMENT_TAGS = frozenset({"filter-response", "channel-coverage"})
+
+
+#: MNE's raw-versus-cleaned overlay, drawn twice under one name.
+#:
+#: MNE-BIDS-Pipeline writes it when it fits the ICA and again when it applies it, into two
+#: different sections and with the same title both times. The two figures are not the same
+#: -- they are drawn against different exclusion sets -- and nothing in either title said
+#: which was which, so a reader met one quantity under one name in two places and could
+#: only tell them apart by remembering which section came first.
+_CLEANING_OVERLAY_TITLE = "Original and cleaned signal"
+_CLEANING_OVERLAY_STAGES = {
+    "ICA: components": f"{_CLEANING_OVERLAY_TITLE} (exclusions proposed at fitting)",
+    "ICA: removals": f"{_CLEANING_OVERLAY_TITLE} (exclusions as applied)",
+}
+
+
+def name_cleaning_overlays_by_stage(report: mne.Report) -> None:
+    """Give each raw-versus-cleaned overlay a title naming where it was drawn.
+
+    Renamed rather than deduplicated: both are real, and which exclusions were in force
+    is the difference between them. Applied on every reopen because MNE-BIDS-Pipeline
+    rewrites them under the original title whenever its stages run again.
+    """
+    for element in _content_elements(report):
+        renamed = _CLEANING_OVERLAY_STAGES.get(str(element.section or ""))
+        if renamed is not None and str(element.name) == _CLEANING_OVERLAY_TITLE:
+            element.name = renamed
+
+
+def drop_metadata_only_raw_sections(report: mne.Report) -> None:
+    """Drop a ``Raw`` section that evidence has been taken out of, leaving only ``Info``.
+
+    Conservative on both sides. The section goes only when ``Info`` is the last thing in
+    it -- a section still holding a figure keeps its metadata -- and only when the panels
+    that carry the same facts are present, so a report built from a stage subset never
+    loses the only record of what was in the file.
+    """
+    content = _content_elements(report)
+    present = {tag for element in content for tag in element.tags}
+    if not _METADATA_REPLACEMENT_TAGS.issubset(present):
+        return
+    for section in _METADATA_STUB_SECTIONS:
+        names = [str(element.name) for element in content if element.section == section]
+        if names == ["Info"]:
+            drop_replaced_panels(report, section_prefix=section, titles=("Info",))
+
+
 def place_events_with_epochs(report: mne.Report) -> None:
     """Give the events panel a section and move it in front of the epochs it describes.
 
@@ -433,6 +499,9 @@ def open_subject_report(report_path: Path | str) -> mne.Report:
     # applies the ICA, after the continuity and sensor-spectra sections that replace its
     # panels have been added.
     drop_replaced_clean_raw_panels(report)
+    # After the two drops above, which are what can empty a section down to its metadata.
+    drop_metadata_only_raw_sections(report)
+    name_cleaning_overlays_by_stage(report)
     place_events_with_epochs(report)
     return report
 
@@ -543,6 +612,8 @@ __all__ = [
     "before_raw_sections",
     "before_ica_component_review",
     "drop_per_epoch_metadata_tables",
+    "drop_metadata_only_raw_sections",
+    "name_cleaning_overlays_by_stage",
     "drop_replaced_clean_raw_panels",
     "drop_replaced_filtered_spectrum",
     "drop_replaced_ica_eog_panels",

@@ -2025,10 +2025,13 @@ def _add_standard_component_review(
         )
     guide_title = "How to review ICA component dossiers"
     report.remove(title=guide_title, remove_all=True)
+    # Inside the section it describes, not beside it. A whole contents entry for one
+    # paragraph of instructions is a stop a reader makes only to find they have not
+    # arrived anywhere, and guidance is read next to the thing it guides or not at all.
     report.add_html(
         html=_review_guide_html(settings, analysis_status),
         title=guide_title,
-        section="ICA component review guide",
+        section=f"ICA component review: {settings.review_bands[0].title}",
         tags=("ica", "ica-component-review", "ica-review-guide"),
         replace=True,
     )
@@ -2300,7 +2303,15 @@ def generate_band_ica_report(
                 else ""
             )
         ),
-        section=EXPLORATORY_BAND_SECTION,
+        # A section of its own only when it holds the figures too. Written to a separate
+        # file, all that remains here is a paragraph and a link, and a contents entry
+        # promising a body of evidence that turns out to be a sentence is worse than no
+        # entry at all -- so it goes with the rest of the decomposition-level material.
+        section=(
+            _DECOMPOSITION_SECTION
+            if settings.exploratory_separate_file
+            else EXPLORATORY_BAND_SECTION
+        ),
         tags=("ica", "band-specific-ica"),
         replace=True,
     )
