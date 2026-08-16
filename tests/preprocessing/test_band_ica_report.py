@@ -1830,3 +1830,58 @@ def test_epoch_variance_is_measured_before_the_display_decimation() -> None:
     assert activity.shape[2] <= _ACTIVITY_DISPLAY_COLUMNS + 1
     assert times.size == activity.shape[2]
     np.testing.assert_allclose(variance, np.swapaxes(data, 0, 1).var(axis=2))
+
+
+def test_the_panel_states_the_baseline_the_estimate_actually_used() -> None:
+    """_fieldtrip_tfr masks the epoch's own time axis, so a configured baseline reaching
+    outside the epoch is silently clipped to the overlap. Printing the configured window
+    regardless made the panel state a 3.5 s baseline where the estimate used 0.5 s -- a
+    report making a false claim about its own method, on any dataset whose epochs are
+    shorter than this study's."""
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        _tfr_configuration_title,
+        realized_baseline_window,
+    )
+
+    settings = BandIcaReportSettings()  # baseline -5.0 to -1.5
+    band = settings.review_bands[0]
+    short = np.arange(-2.0, 3.0, 1 / 250.0)
+
+    assert realized_baseline_window(short, settings) == (-2.0, -1.5)
+
+    stated = _tfr_configuration_title(band, settings, times=short)
+    assert "baseline -2–-1.5 s" in stated
+    assert "clipped to the epoch" in stated
+    assert "-5" in stated  # the configured window is still named, so nothing is hidden
+
+
+def test_a_baseline_inside_the_epoch_is_stated_without_a_caveat() -> None:
+    """This study's own epochs contain the configured window, so nothing is clipped and
+    the panel must not imply otherwise."""
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        _tfr_configuration_title,
+        realized_baseline_window,
+    )
+
+    settings = BandIcaReportSettings()
+    band = settings.review_bands[0]
+    long = np.arange(-7.0, 15.0, 1 / 250.0)
+
+    assert realized_baseline_window(long, settings) == (-5.0, -1.5)
+    stated = _tfr_configuration_title(band, settings, times=long)
+    assert "baseline -5–-1.5 s" in stated
+    assert "clipped" not in stated
+
+
+def test_the_configuration_title_still_renders_without_epoch_times() -> None:
+    """The exploratory report names the configuration in a figure title rather than
+    describing a measurement, so it has no epoch axis to check against."""
+    from eeg_pipeline.preprocessing.band_ica_report import (
+        _tfr_configuration_title,
+        realized_baseline_window,
+    )
+
+    settings = BandIcaReportSettings()
+
+    assert realized_baseline_window(None, settings) is None
+    assert "baseline -5–-1.5 s" in _tfr_configuration_title(settings.review_bands[0], settings)

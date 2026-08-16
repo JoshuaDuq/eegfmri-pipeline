@@ -804,9 +804,37 @@ def _fieldtrip_tfr(
     return frequencies, decimated_times[time_mask], power_db[..., time_mask], eligible_counts
 
 
+def realized_baseline_window(
+    times: np.ndarray | None,
+    settings: BandIcaReportSettings,
+) -> tuple[float, float] | None:
+    """The baseline window that will actually be averaged over these epochs.
+
+    ``_fieldtrip_tfr`` selects baseline samples by masking the epoch's own time axis, so
+    a configured window reaching outside the epoch is silently clipped to the overlap.
+    Reporting the configured window regardless meant that on any dataset with epochs
+    shorter than this study's, the panel stated a baseline the estimate never used --
+    a report making a false claim about its own method, which is worse than a report
+    that omits the claim.
+
+    ``None`` when the epoch times are unknown to the caller, which is the exploratory
+    report: it names the configuration in a figure title rather than describing a
+    measurement, so there is nothing there to be wrong about.
+    """
+    if times is None or not len(times):
+        return None
+    low = max(float(settings.baseline_tmin_s), float(np.min(times)))
+    high = min(float(settings.baseline_tmax_s), float(np.max(times)))
+    if high < low:
+        return None
+    return (low, high)
+
+
 def _tfr_configuration_title(
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
+    *,
+    times: np.ndarray | None = None,
 ) -> str:
     if not settings.tfr_enabled:
         return (
@@ -817,10 +845,20 @@ def _tfr_configuration_title(
         f"{parameters.window_seconds:g} s, ±{parameters.smoothing_hz:g} Hz"
         for parameters, _ in _tfr_parameter_groups(band, settings)
     )
+    realized = realized_baseline_window(times, settings)
+    configured = (float(settings.baseline_tmin_s), float(settings.baseline_tmax_s))
+    baseline = realized or configured
+    clipped = realized is not None and realized != configured
     return (
         f"DPSS {parameter_text} · {settings.frequency_step_hz:g} Hz × "
         f"{settings.time_step_s:g} s grid · baseline "
-        f"{settings.baseline_tmin_s:g}–{settings.baseline_tmax_s:g} s · relative dB"
+        f"{baseline[0]:g}–{baseline[1]:g} s · relative dB"
+        + (
+            f" (clipped to the epoch from the configured "
+            f"{configured[0]:g}–{configured[1]:g} s)"
+            if clipped
+            else ""
+        )
     )
 
 
@@ -1711,6 +1749,8 @@ def _review_context_html(
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
     analysis_status: str,
+    *,
+    times: np.ndarray | None = None,
 ) -> str:
     if not settings.tfr_enabled:
         return (
@@ -1727,7 +1767,8 @@ def _review_context_html(
         f"<p><strong>{html.escape(analysis_status)}</strong>. Each slide keeps one "
         "standard ICA component's topography, band-limited spectrum, grand-average TFR, "
         "and configured condition comparisons together.</p>"
-        f"<p>{html.escape(_tfr_configuration_title(band, settings))}. The grand average "
+        f"<p>{html.escape(_tfr_configuration_title(band, settings, times=times))}. "
+        "The grand average "
         "and every condition share one symmetric color scale, held fixed across all "
         "components, so a panel that looks stronger than its neighbour is stronger. Each "
         "difference uses its own symmetric zero-centred scale, because a difference of "
@@ -2016,7 +2057,11 @@ def _add_standard_component_review(
         )
         section = f"ICA component review: {band.title}"
         report.add_html(
-            html=_review_context_html(band, settings, analysis_status),
+            # The epoch times decide the baseline the estimate could actually use, which
+            # is not always the one configured.
+            html=_review_context_html(
+                band, settings, analysis_status, times=getattr(epochs, "times", None)
+            ),
             title="Review context",
             section=section,
             tags=("ica", "ica-component-review", band.slug),
