@@ -666,3 +666,11 @@ def test_the_two_cleaning_overlays_are_told_apart_by_stage() -> None:
         "Original and cleaned signal (exclusions as applied)",
     ]
     assert len(set(names)) == 2
+    # The heading a reader actually sees, not only the metadata the archive carries.
+    # MNE renders each element when it is added and stores the markup, so an earlier
+    # version of this that set ``name`` alone left the rendered page untouched -- and
+    # this test passed anyway, because it only looked at ``name``.
+    rendered = "".join(str(element.html) for element in report._content)
+    assert ">Original and cleaned signal</a>" not in rendered
+    for stage in ("exclusions proposed at fitting", "exclusions as applied"):
+        assert f">Original and cleaned signal ({stage})</a>" in rendered

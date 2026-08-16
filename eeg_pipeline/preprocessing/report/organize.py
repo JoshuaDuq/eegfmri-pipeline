@@ -426,11 +426,25 @@ def name_cleaning_overlays_by_stage(report: mne.Report) -> None:
     Renamed rather than deduplicated: both are real, and which exclusions were in force
     is the difference between them. Applied on every reopen because MNE-BIDS-Pipeline
     rewrites them under the original title whenever its stages run again.
+
+    ``name`` alone is not enough. MNE renders each element's HTML when it is added and
+    stores the result; ``name`` is metadata for the table of contents, so setting it
+    changes the archive and leaves the page a reader opens exactly as it was. The heading
+    and the image's alternative text are rewritten in that stored markup too.
+
+    The anchor keeps the old title, deliberately: it is what any existing link into this
+    panel points at, and a heading that reads correctly is the whole purpose here.
     """
     for element in _content_elements(report):
         renamed = _CLEANING_OVERLAY_STAGES.get(str(element.section or ""))
-        if renamed is not None and str(element.name) == _CLEANING_OVERLAY_TITLE:
-            element.name = renamed
+        if renamed is None or str(element.name) != _CLEANING_OVERLAY_TITLE:
+            continue
+        element.name = renamed
+        element.html = str(element.html).replace(
+            f">{_CLEANING_OVERLAY_TITLE}</a>", f">{renamed}</a>"
+        ).replace(
+            f'alt="{_CLEANING_OVERLAY_TITLE}"', f'alt="{renamed}"'
+        )
 
 
 def drop_metadata_only_raw_sections(report: mne.Report) -> None:
