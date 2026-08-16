@@ -59,6 +59,22 @@ class BandIcaDefinition:
     fmax: float
 
 
+#: Frequency ranges the authoritative component review draws a dossier over.
+#:
+#: One, spanning the analysis band. Distinct from :data:`BAND_ICA_DEFINITIONS`, which the
+#: exploratory report fits a *separate* ICA per band with — there the narrow bands are the
+#: analysis. Here every band shows the same broadband decomposition, so a second band buys
+#: a second copy of each component's topography and a rescaled copy of its spectrum, and
+#: only the time-frequency panel differs.
+#:
+#: The five ranges this replaced were nested: delta+theta, alpha and beta all sat inside
+#: broadband 1-30, so three of the five sections were a zoom on a fourth. Together they
+#: were 49 MB of a 79 MB report and 295 slides for 59 components.
+DEFAULT_REVIEW_BANDS = (
+    BandIcaDefinition("broadband1to100", "Broadband 1–100 Hz", 1.0, 100.0),
+)
+
+
 @dataclass(frozen=True)
 class ComponentLabel:
     """Exploratory ICLabel result for one component.
@@ -165,6 +181,13 @@ class BandIcaReportSettings:
     comparisons: tuple[ConditionComparison, ...] = ()
     run_iclabel: bool = False
     tfr_enabled: bool = True
+    #: Bands the authoritative per-component review draws a dossier over.
+    #:
+    #: One by default. Every extra band redraws the same decomposition: identical
+    #: topography, the same spectrum on a narrower axis, and a time-frequency panel over a
+    #: sub-range of the one already drawn. Set several only when the frequency axis of a
+    #: single dossier genuinely cannot be read for the judgement being made.
+    review_bands: tuple[BandIcaDefinition, ...] = DEFAULT_REVIEW_BANDS
     #: Whether the exploratory band decompositions get a report file of their own.
     #:
     #: They dominate the subject report while explicitly controlling nothing in it: on
@@ -191,6 +214,7 @@ class BandIcaReportSettings:
             comparisons=_parse_comparisons(values.get("comparisons", [])),
             run_iclabel=bool(values.get("run_iclabel", cls.run_iclabel)),
             tfr_enabled=bool(tfr_values.get("enabled", cls.tfr_enabled)),
+            review_bands=_parse_review_bands(values.get("review_bands")),
             exploratory_separate_file=bool(
                 values.get("exploratory_separate_file", cls.exploratory_separate_file)
             ),
@@ -252,6 +276,48 @@ _ICLABEL_CLASSES = (
     "channel noise",
     "other",
 )
+
+
+def _parse_review_bands(values: Any) -> tuple[BandIcaDefinition, ...]:
+    """Build the authoritative review bands from config, or keep the default.
+
+    An explicitly empty list is rejected rather than treated as "use the default": a
+    reviewer who wrote ``review_bands: []`` asked for a report with no component
+    dossiers in it, and silently giving them one would hide that the request did nothing.
+    """
+    if values is None:
+        return DEFAULT_REVIEW_BANDS
+    if not isinstance(values, list) or not values:
+        raise TypeError(
+            "ica.band_specific_report.review_bands must be a non-empty list of bands."
+        )
+    bands = []
+    slugs = set()
+    for entry in values:
+        if not isinstance(entry, Mapping):
+            raise TypeError("Each ica.band_specific_report.review_bands entry must be a mapping.")
+        missing = {"slug", "title", "fmin", "fmax"} - set(entry)
+        if missing:
+            raise ValueError(
+                f"A review band is missing {', '.join(sorted(missing))}."
+            )
+        slug = str(entry["slug"]).strip()
+        if not slug:
+            raise ValueError("A review band slug must not be empty.")
+        if slug in slugs:
+            # The slug is the panel tag and part of the section name, so a repeat would
+            # have the second band's dossiers replace the first band's rather than sit
+            # beside them.
+            raise ValueError(f"Review band slug {slug!r} is used more than once.")
+        slugs.add(slug)
+        fmin = float(entry["fmin"])
+        fmax = float(entry["fmax"])
+        if fmin <= 0.0:
+            raise ValueError(f"Review band {slug!r} fmin must be above zero.")
+        if fmin >= fmax:
+            raise ValueError(f"Review band {slug!r} fmin must be below fmax.")
+        bands.append(BandIcaDefinition(slug, str(entry["title"]), fmin, fmax))
+    return tuple(bands)
 
 
 def _parse_group(values: Any, *, comparison_name: str, group_name: str) -> ConditionGroup:
@@ -1789,7 +1855,20 @@ def _add_standard_component_review(
     _add_component_properties(report=report, ica=ica, epochs=epochs, labels=labels)
 
     captions = _component_captions(ica, labels)
-    for band in BAND_ICA_DEFINITIONS:
+    nyquist = float(epochs.info["sfreq"]) / 2.0
+    for band in settings.review_bands:
+        if band.fmax >= nyquist:
+            raise ValueError(
+                f"Review band {band.slug!r} reaches {band.fmax:g} Hz, at or above the "
+                f"{nyquist:g} Hz Nyquist frequency of these epochs. Lower "
+                "ica.band_specific_report.review_bands, or review a recording sampled "
+                "high enough to carry the band."
+            )
+    # ``settings.review_bands``, not ``BAND_ICA_DEFINITIONS``: that constant belongs to the
+    # exploratory report, which fits a separate ICA per band. Here every band shows the
+    # same decomposition, so the two lists answer different questions and sharing one made
+    # the review inherit a five-way split it had no use for.
+    for band in settings.review_bands:
         review = _build_band_review_data(
             ica=ica,
             epochs=epochs,

@@ -528,6 +528,27 @@ ica:
     # reader who wants it and costs nothing to the many who do not. Set false for a single
     # self-contained file.
     exploratory_separate_file: true
+    # Frequency ranges the AUTHORITATIVE per-component review draws a dossier over.
+    #
+    # Not the same list as the exploratory bands above. Those each fit an ICA of their
+    # own, where the narrow band is the analysis. Every band here redraws one and the
+    # same broadband decomposition, so a second band buys a second copy of each
+    # component's topography and a rescaled copy of its spectrum, and only the
+    # time-frequency panel differs.
+    #
+    # One band by default. The five that this replaced were nested — delta+theta, alpha
+    # and beta all sit inside broadband 1-30 — so three of the five sections were a zoom
+    # on a fourth, and together they were 49 MB of a 79 MB report.
+    #
+    # Every fitted component keeps a dossier whatever this is set to. The list controls
+    # how many times each component is drawn, never which components are drawn: ICLabel
+    # is wrong in both directions, and a report that showed only the components it
+    # flagged could not be used to find the ones it missed.
+    #
+    # Uncomment to split the axis again; fmax must stay below Nyquist.
+    # review_bands:
+    #   - {slug: low,  title: "Low (1–30 Hz)",    fmin: 1.0,  fmax: 30.0}
+    #   - {slug: high, title: "High (30–100 Hz)", fmin: 30.0, fmax: 100.0}
     tfr:
       # Event-locked, baseline-relative time-frequency power for each component.
       # Set false for resting-state or any continuous recording: fixed-length epochs

@@ -38,6 +38,56 @@ def test_band_definitions_match_requested_report_sections() -> None:
     ]
 
 
+def test_the_review_draws_one_band_by_default_and_leaves_the_exploratory_bands_alone() -> None:
+    """The two lists answer different questions and must not be the same list.
+
+    Every review band redraws the same broadband decomposition, so a second one buys a
+    second copy of each topography and a rescaled copy of each spectrum. The exploratory
+    bands each fit an ICA of their own, where the narrow band *is* the analysis.
+    """
+    settings = BandIcaReportSettings()
+
+    assert len(settings.review_bands) == 1
+    band = settings.review_bands[0]
+    assert (band.fmin, band.fmax) == (1.0, 100.0)
+    assert len(BAND_ICA_DEFINITIONS) == 5
+
+
+def test_review_bands_are_configurable() -> None:
+    settings = BandIcaReportSettings.from_mapping(
+        {
+            "review_bands": [
+                {"slug": "low", "title": "Low (1–30 Hz)", "fmin": 1.0, "fmax": 30.0},
+                {"slug": "high", "title": "High (30–100 Hz)", "fmin": 30.0, "fmax": 100.0},
+            ]
+        }
+    )
+
+    assert [band.slug for band in settings.review_bands] == ["low", "high"]
+    assert settings.review_bands[1].title == "High (30–100 Hz)"
+
+
+def test_review_bands_reject_configurations_that_would_silently_do_nothing() -> None:
+    """An empty list is a request for a report with no dossiers, not a request for the
+    default; a repeated slug would have the second band replace the first rather than
+    sit beside it, because the slug is the panel tag and part of the section name."""
+    with pytest.raises(TypeError, match="non-empty"):
+        BandIcaReportSettings.from_mapping({"review_bands": []})
+    with pytest.raises(ValueError, match="more than once"):
+        BandIcaReportSettings.from_mapping(
+            {
+                "review_bands": [
+                    {"slug": "same", "title": "One", "fmin": 1.0, "fmax": 30.0},
+                    {"slug": "same", "title": "Two", "fmin": 30.0, "fmax": 90.0},
+                ]
+            }
+        )
+    with pytest.raises(ValueError, match="fmin must be below fmax"):
+        BandIcaReportSettings.from_mapping(
+            {"review_bands": [{"slug": "b", "title": "T", "fmin": 40.0, "fmax": 40.0}]}
+        )
+
+
 def test_band_report_settings_fail_fast_on_invalid_values() -> None:
     with pytest.raises(ValueError, match="fit_decim"):
         BandIcaReportSettings.from_mapping({"fit_decim": 0})
@@ -709,8 +759,11 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
         tfr_times=np.array([0.0]),
         tfr=np.ones((2, 1, 1)),
     )
-    reviews = [BandReviewData(band=band, diagnostics=diagnostics) for band in BAND_ICA_DEFINITIONS]
-    figures = [[Mock(), Mock()] for _ in BAND_ICA_DEFINITIONS]
+    settings = BandIcaReportSettings()
+    reviews = [
+        BandReviewData(band=band, diagnostics=diagnostics) for band in settings.review_bands
+    ]
+    figures = [[Mock(), Mock()] for _ in settings.review_bands]
 
     with (
         patch(
@@ -730,19 +783,22 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
         _add_standard_component_review(
             report=report,
             ica=ica,
-            epochs=SimpleNamespace(),
+            epochs=SimpleNamespace(info={"sfreq": 500.0}),
             metadata=None,
             labels=labels,
-            settings=BandIcaReportSettings(),
+            settings=settings,
             analysis_status="Pending provisional task epochs",
         )
 
     clear.assert_called_once_with(report, tag="ica-component-review")
-    assert build_review.call_count == len(BAND_ICA_DEFINITIONS)
+    # The review bands, not BAND_ICA_DEFINITIONS: that constant drives the exploratory
+    # report, which fits a separate ICA per band. Every review band redraws one and the
+    # same decomposition.
+    assert build_review.call_count == len(settings.review_bands)
     assert all(call.kwargs["ica"] is ica for call in build_review.call_args_list)
-    assert report.add_figure.call_count == len(BAND_ICA_DEFINITIONS)
+    assert report.add_figure.call_count == len(settings.review_bands)
     assert [call.kwargs["section"] for call in report.add_figure.call_args_list] == [
-        f"ICA component review: {band.title}" for band in BAND_ICA_DEFINITIONS
+        f"ICA component review: {band.title}" for band in settings.review_bands
     ]
     for call in report.add_figure.call_args_list:
         assert call.kwargs["title"].startswith("Component dossiers")
@@ -1553,17 +1609,19 @@ def test_the_standard_review_forwards_the_exclusion_reasons_it_was_given() -> No
         tfr=np.ones((2, 1, 1)),
     )
     reasons = ("", "Auto-detected ECG artifact (MNE)")
+    settings = BandIcaReportSettings()
 
     with (
         patch(
             "eeg_pipeline.preprocessing.band_ica_report._build_band_review_data",
             side_effect=[
-                BandReviewData(band=band, diagnostics=diagnostics) for band in BAND_ICA_DEFINITIONS
+                BandReviewData(band=band, diagnostics=diagnostics)
+                for band in settings.review_bands
             ],
         ),
         patch(
             "eeg_pipeline.preprocessing.band_ica_report._build_standard_component_dossiers",
-            side_effect=[[Mock(), Mock()] for _ in BAND_ICA_DEFINITIONS],
+            side_effect=[[Mock(), Mock()] for _ in settings.review_bands],
         ),
         patch("eeg_pipeline.preprocessing.band_ica_report._organize_component_review"),
         patch("eeg_pipeline.preprocessing.band_ica_report._remove_legacy_condition_tfr_entries"),
@@ -1576,10 +1634,10 @@ def test_the_standard_review_forwards_the_exclusion_reasons_it_was_given() -> No
         _add_standard_component_review(
             report=report,
             ica=SimpleNamespace(n_components_=2, exclude=[1]),
-            epochs=SimpleNamespace(),
+            epochs=SimpleNamespace(info={"sfreq": 500.0}),
             metadata=None,
             labels=[ComponentLabel("brain", 0.9), ComponentLabel("brain", 0.93)],
-            settings=BandIcaReportSettings(),
+            settings=settings,
             analysis_status="Pending provisional task epochs",
             status_descriptions=reasons,
         )
