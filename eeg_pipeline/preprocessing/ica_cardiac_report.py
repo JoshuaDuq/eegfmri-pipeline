@@ -22,6 +22,7 @@ from eeg_pipeline.preprocessing.report.style import (
     MARK_COLOR,
     REFERENCE_COLOR,
     RUN_COLORS,
+    draw_component_status_strip,
     report_image_format,
     apply_report_style,
     run_label,
@@ -52,8 +53,94 @@ CARDIAC_REPORT_TITLES = (
     "How to review ECG artifacts",
     "ECG detection summary",
     "ECG detection and provisional correction by run",
+    "ICA components: cardiac scores across the decomposition",
     "ICA components: R-locked cardiac evidence",
 )
+
+
+def _plot_component_cardiac_scores(
+    review: ComponentCardiacReview,
+    *,
+    excluded: Sequence[int],
+):
+    """Plot every component's cardiac scores on one axis, both detectors together.
+
+    The per-component slides that follow show one component at a time, which cannot
+    answer the question screening has to answer first: which components stand out
+    *against the rest of this decomposition*. That matters more here than anywhere else
+    in the report, because a cardiac component the classifier labelled brain and kept is
+    the failure the per-component slides cannot lead you to — you have to already suspect
+    a component to go and look at it.
+
+    Both detectors are drawn because they disagree, and the disagreement is information.
+    CTPS responds to phase locking with the beat and correlation to waveform similarity,
+    so a component high on one and low on the other is a different review decision from
+    one high on both.
+
+    This is added beside the per-component slides, never instead of them: a suspicion
+    raised here has to be answerable, and the answer is the R-locked evidence.
+    """
+    import matplotlib.pyplot as plt
+
+    component_count = int(review.ctps_scores.shape[1])
+    components = np.arange(component_count)
+    # Width is capped for the reason the ocular panel caps it: a wide decomposition
+    # otherwise renders a figure the browser scales down until nothing is readable.
+    width = float(np.clip(0.22 * component_count, 8.0, 14.0))
+    figure, (axis, status_axis) = plt.subplots(
+        2,
+        1,
+        figsize=(width, 4.8),
+        height_ratios=(12, 1),
+        sharex=True,
+        layout="constrained",
+    )
+
+    for scores, flags, color, name in (
+        (review.ctps_scores, review.ctps_flags, AFTER_COLOR, "CTPS"),
+        (review.correlation_scores, review.correlation_flags, MARK_COLOR, "ECG correlation"),
+    ):
+        medians = np.median(np.abs(scores), axis=0)
+        axis.scatter(
+            components,
+            medians,
+            s=26,
+            color=color,
+            edgecolor="white",
+            linewidth=0.5,
+            zorder=3,
+            label=f"{name} (median across runs)",
+        )
+        flagged = np.flatnonzero(np.asarray(flags).any(axis=0))
+        if flagged.size:
+            axis.scatter(
+                flagged,
+                np.max(np.abs(scores), axis=0)[flagged],
+                marker="x",
+                color=FLAG_COLOR,
+                s=48,
+                zorder=4,
+                label=f"Flagged by {name}" if name == "CTPS" else None,
+            )
+
+    axis.set(
+        title=(
+            f"Cardiac scores per component ({len(review.run_ids)} runs). "
+            "Screening view: the slides below carry the evidence for any one component."
+        ),
+        ylabel="Score (absolute)",
+    )
+    axis.legend(frameon=False, fontsize=8)
+    axis.grid(axis="y", alpha=0.2)
+    axis.spines[["top", "right"]].set_visible(False)
+
+    draw_component_status_strip(
+        status_axis,
+        excluded=excluded,
+        component_count=component_count,
+    )
+    plt.close(figure)
+    return figure
 
 
 def _plot_run_cardiac_review(
@@ -757,6 +844,16 @@ def generate_ica_cardiac_review(
         section=section,
         tags=("ica", "ecg", "ica-cardiac-review", "ecg-run-review"),
         image_format=report_image_format(is_figure_list=True),
+        replace=True,
+    )
+    # Ahead of the per-component slides: screening comes before drilling down, and this
+    # is the only panel that can show a cardiac component the classifier kept.
+    report.add_figure(
+        fig=_plot_component_cardiac_scores(component_review, excluded=ica.exclude),
+        title="ICA components: cardiac scores across the decomposition",
+        section=section,
+        tags=("ica", "ecg", "ica-cardiac-review", "ecg-component-review"),
+        image_format=report_image_format(),
         replace=True,
     )
     component_figures = [

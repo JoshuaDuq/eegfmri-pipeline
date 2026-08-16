@@ -338,3 +338,50 @@ def test_the_ctps_axis_never_descends_below_zero() -> None:
 
     ctps_axis = next(a for a in figure.axes if a.get_title() == "CTPS (kappa)")
     assert ctps_axis.get_ylim()[0] >= 0.0
+
+
+def test_the_screening_panel_covers_every_component_and_both_detectors() -> None:
+    """The per-component slides show one component at a time, which cannot say which
+    components stand out against the rest of the decomposition. That is the only way to
+    reach a cardiac component the classifier labelled brain and kept, because the slides
+    require you to already suspect it.
+
+    Both detectors are drawn because they disagree: CTPS responds to phase locking with
+    the beat and correlation to waveform similarity.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from eeg_pipeline.preprocessing.ica_cardiac_report import _plot_component_cardiac_scores
+    from eeg_pipeline.preprocessing.ica_cardiac_review import ComponentCardiacReview
+
+    runs, components = 3, 6
+    rng = np.random.default_rng(0)
+    ctps = rng.uniform(0.0, 0.2, (runs, components))
+    ctps[:, 4] = 0.8
+    review = ComponentCardiacReview(
+        run_ids=tuple(f"run-{index}" for index in range(runs)),
+        times=np.linspace(-0.2, 0.6, 10),
+        run_mean_z=rng.normal(0, 1, (runs, components, 10)),
+        correlation_scores=rng.uniform(0.0, 0.3, (runs, components)),
+        ctps_scores=ctps,
+        correlation_flags=np.zeros((runs, components), dtype=bool),
+        ctps_flags=np.tile(np.arange(components) == 4, (runs, 1)),
+        r_locked_epoch_counts=np.full(runs, 100),
+        run_ecg_z=rng.normal(0, 1, (runs, 10)),
+    )
+
+    figure = _plot_component_cardiac_scores(review, excluded=[4])
+
+    axis = figure.axes[0]
+    labels = " ".join(text.get_text() for text in axis.get_legend().get_texts())
+    assert "CTPS" in labels
+    assert "correlation" in labels.lower()
+    # Every component is on the axis, not only the flagged one.
+    plotted = max(
+        collection.get_offsets().shape[0]
+        for collection in axis.collections
+        if collection.get_offsets().shape[0] > 1
+    )
+    assert plotted == components
+    plt.close(figure)
