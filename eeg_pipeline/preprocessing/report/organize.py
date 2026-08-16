@@ -326,7 +326,7 @@ def place_events_with_epochs(report: mne.Report) -> None:
         return
     for element in events:
         element.section = _EVENTS_SECTION
-    move_tagged_content_before(report, tag=_EVENTS_TAG, anchor=before_epoch_sections)
+    move_tagged_content_before(report, tag=_EVENTS_TAG, anchor=before_trial_evidence)
 
 
 def open_subject_report(report_path: Path | str) -> mne.Report:
@@ -432,6 +432,26 @@ def before_epoch_sections(element: object) -> bool:
     return str(element.section or "").startswith("Epochs")
 
 
+def before_trial_evidence(element: object) -> bool:
+    """Match the first panel that counts trials, or the epochs section itself.
+
+    Three sections anchor on :func:`before_epoch_sections` — the events panel, epoch
+    rejection, and signal preservation — so whichever moves last ends up nearest the
+    epochs and the other two sit ahead of it. The events panel is placed on every reopen
+    and therefore always moved last, which put "how many trials survived" and "did signal
+    survive" in front of the panel saying what the trials were.
+
+    Anchoring the events panel here instead puts it ahead of both, which is the reading
+    order: what was presented, then what survived, then whether the survivors carry
+    signal.
+    """
+    tags = set(element.tags)
+    return (
+        bool(tags & {"epoch-rejection", "signal-preservation"})
+        or str(element.section or "").startswith("Epochs")
+    )
+
+
 def before_ica_component_review(element: object) -> bool:
     """Match the first element of MNE's own ICA component section or our review of it."""
     return "ica-component-review" in element.tags or element.section == "ICA: components"
@@ -439,6 +459,7 @@ def before_ica_component_review(element: object) -> bool:
 
 __all__ = [
     "before_epoch_sections",
+    "before_trial_evidence",
     "move_tagged_content_first",
     "before_raw_sections",
     "before_ica_component_review",

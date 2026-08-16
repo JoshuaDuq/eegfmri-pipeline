@@ -464,3 +464,29 @@ def test_reopening_drops_clean_raw_panels_written_after_their_replacement(tmp_pa
     reopened = open_subject_report(path)
 
     assert "Time series" not in {element.name for element in reopened._content}
+
+
+def test_the_events_panel_sits_ahead_of_the_panels_that_count_its_trials() -> None:
+    """Reading order: what was presented, then what survived, then whether the survivors
+    carry signal. Three sections anchor near the epochs, and the events panel is placed on
+    every reopen and so always moved last -- which put the trial counts in front of the
+    panel saying what the trials were."""
+    report = mne.Report(title="events", verbose="ERROR")
+    figure = plt.figure()
+    report.add_figure(
+        fig=figure, title="Trial retention", section="Epoch rejection", tags=("epoch-rejection",)
+    )
+    report.add_figure(
+        fig=figure,
+        title="Evidence that signal survived",
+        section="Signal preservation",
+        tags=("signal-preservation",),
+    )
+    report.add_figure(fig=figure, title="Events", section=None, tags=("events",))
+    plt.close(figure)
+
+    place_events_with_epochs(report)
+
+    order = [element.name for element in report._content]
+    assert order.index("Events") < order.index("Trial retention")
+    assert order.index("Trial retention") < order.index("Evidence that signal survived")

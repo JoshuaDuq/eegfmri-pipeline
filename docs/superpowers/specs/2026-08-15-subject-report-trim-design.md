@@ -112,8 +112,27 @@ Consequences today:
   means the drop never runs at all, so the cheap configuration produces the *more*
   duplicated document.
 
-The call moves to `_append_report_review_sections` (`pipelines/preprocessing.py:1905`),
-which already runs last and unconditionally.
+The call moves to `report/organize.py` and becomes **guarded on its replacement being
+present**: it drops MNE's panels only from a report that already carries content tagged
+`ica-component-review` or `ica-decomposition`. That guard is what lets it be called from
+`open_subject_report`, so every stage that reopens the report re-applies it — including
+whichever stage runs after `_08a_apply_ica`.
+
+Keying the guard to the replacement rather than to a call site preserves the invariant the
+rest of the module follows: a report can never end up with a panel removed and nothing in
+its place, whichever subset of stages ran. Moving the call to a pipeline stage instead
+would not have — `_append_report_review_sections` returns early on `report.enabled: false`,
+which is independent of `band_specific_report.enabled`, so a report carrying the
+replacement could still keep the duplicate.
+
+### 5b. `Raw (clean)` has the same recurrence
+
+`drop_replaced_raw_time_series` already spans `Raw (clean)` by section prefix, but it runs
+from the continuity stage and MNE-BIDS-Pipeline writes `Raw (clean)` afterwards when it
+applies the ICA. Same fix: a guarded `drop_replaced_clean_raw_panels`, re-applied by
+`open_subject_report`. Guarded per panel rather than per section, because the butterfly and
+the spectrum are replaced by different stages — a report with the continuity section but no
+sensor spectra should lose the butterfly and keep the spectrum.
 
 ### 6. Drop the remaining superseded MNE panels
 
@@ -122,9 +141,11 @@ drop lives with the section rendering its replacement:
 
 - The two EOG panels in `ICA: components` (`Scores for matching EOG patterns`, `Original
   and cleaned EOG epochs`). The matching ECG pair is already dropped, and the ocular
-  review renders both equivalents; the asymmetry is unintentional.
-- `Raw (clean)`'s `Time series` and `PSD`, which the continuity and sensor-spectra
-  sections replace.
+  review renders both equivalents; the asymmetry is unintentional. Called from the ocular
+  review, mirroring where the ECG drop is called from.
+
+`Raw (clean)`'s panels are covered by 5b above, since they recur rather than merely
+survive.
 
 ### 7. Runner-up class on the triage sheet
 
