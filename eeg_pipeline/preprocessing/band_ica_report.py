@@ -2281,8 +2281,14 @@ def generate_band_ica_report(
             title=f"{output_prefix} · exploratory band-fitted ICAs",
             verbose="ERROR",
         )
+    # Removed by title before it is re-added, not replaced in place. ``replace=True``
+    # substitutes the content of an existing panel and leaves it in the section it was
+    # first written to, so a report built before this paragraph moved would keep the
+    # section it used to have -- an empty heading surviving the change that emptied it.
+    exploratory_title = "How to read the exploratory band ICAs"
+    report.remove(title=exploratory_title, remove_all=True)
     report.add_html(
-        title="How to read the exploratory band ICAs",
+        title=exploratory_title,
         html=(
             "<p><strong>Exploratory only.</strong> Each decomposition "
             f"{'in the linked file' if settings.exploratory_separate_file else 'below'} was "
