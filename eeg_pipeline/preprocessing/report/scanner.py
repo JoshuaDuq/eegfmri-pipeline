@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets, onset_events
 from eeg_pipeline.preprocessing.report.cohort.noise_floor import measure_locked_average
@@ -302,6 +303,26 @@ def _excess_db_per_channel(
     return excess
 
 
+@dataclass(frozen=True)
+class CombNotMeasured:
+    """A run the comb measurement declined, and why.
+
+    Returned instead of ``None`` because the four reasons below are not interchangeable
+    and none of them is a property of the data quality. A run dropped without a reason
+    leaves a table holding only the runs that still had a comb, which reads as though the
+    absent ones had been measured and found clean -- on sub-0001 that described four runs
+    of six, all of them with a residual the section never showed.
+    """
+
+    recording_id: str
+    #: Sentence fragment completing "not measured: ...".
+    reason: str
+    #: Harmonics the band contained, and how many sat inside a stopband. Zero where the
+    #: run was declined before the harmonics were known.
+    n_harmonics: int = 0
+    n_notched: int = 0
+
+
 def compute_comb_residual(
     raw: mne.io.BaseRaw,
     cleaned: mne.io.BaseRaw,
@@ -313,7 +334,7 @@ def compute_comb_residual(
     line_frequency: float | None = None,
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
     unavailable_intervals: Sequence[tuple[float, float]] | None = None,
-) -> CombResidual | None:
+) -> CombResidual | CombNotMeasured:
     """Measure the gradient comb against its background, before and after ICA.
 
     ``cleaned`` is passed in rather than derived here so that a caller measuring several
@@ -324,15 +345,23 @@ def compute_comb_residual(
     describes the filter and not the correction. Left unset, every harmonic is scored,
     which is correct for a recording that was never notched.
 
-    Returns ``None`` when the frequency resolution cannot separate the comb from its
-    background, which is a property of the volume rate and the run length rather than of
-    the data quality, and so is reported as an absent measurement rather than a bad one.
+    Returns a :class:`CombNotMeasured` naming the reason where the measurement cannot be
+    made. Each reason is a property of the volume rate, the run length or the upstream
+    filtering rather than of the data quality, so it is reported as an absent measurement
+    rather than a bad one -- and reported rather than dropped, so a reader can tell an
+    absent measurement from a clean run.
     """
     fmin, fmax = band_hz
     fmax = min(fmax, float(raw.info["sfreq"]) / 2.0 - 1.0)
     spacing = timing.fundamental_hz
     if fmax <= fmin or spacing * welch_seconds < MINIMUM_BINS_PER_HARMONIC:
-        return None
+        return CombNotMeasured(
+            recording_id=recording_id,
+            reason=(
+                f"the frequency resolution of a {welch_seconds:g} s window cannot separate "
+                f"harmonics {spacing:.3f} Hz apart from the background between them"
+            ),
+        )
 
     frequencies, before_power = _channel_spectrum(
         raw, fmin=fmin, fmax=fmax, welch_seconds=welch_seconds
@@ -344,10 +373,19 @@ def compute_comb_residual(
     margin = BACKGROUND_FRACTION_RANGE[1] * spacing
     lowest, highest = frequencies[0] + margin, frequencies[-1] - margin
     if highest <= lowest:
-        return None
+        return CombNotMeasured(
+            recording_id=recording_id,
+            reason=(
+                f"the {fmin:g}–{fmax:g} Hz band is narrower than the background windows "
+                "each harmonic has to be compared against"
+            ),
+        )
     harmonics = np.asarray(timing.harmonics(fmin=lowest, fmax=highest), dtype=float)
     if harmonics.size == 0:
-        return None
+        return CombNotMeasured(
+            recording_id=recording_id,
+            reason=f"no multiple of the {spacing:.3f} Hz volume rate falls inside the band",
+        )
 
     notched = in_notch(
         harmonics,
@@ -360,8 +398,19 @@ def compute_comb_residual(
     )
     if notched.all():
         # Every line sits in a stopband, so there is no comb left to measure. Reported as
-        # an absent measurement rather than a table of filter depths.
-        return None
+        # an absent measurement rather than a table of filter depths -- and named, because
+        # the run is not clean, it is unmeasurable on this grid. What survives upstream
+        # removal of every k/TR line repeats over two volumes rather than one, so the
+        # volume-locked panel beside this one is the evidence that remains.
+        return CombNotMeasured(
+            recording_id=recording_id,
+            reason=(
+                f"all {harmonics.size} harmonic(s) in the band sit inside an upstream "
+                "stopband, so no comb line survives to score"
+            ),
+            n_harmonics=int(harmonics.size),
+            n_notched=int(notched.sum()),
+        )
 
     good = mne.pick_types(raw.info, eeg=True)
     return CombResidual(
@@ -397,6 +446,11 @@ class VolumeLockedAverage:
     #: Signed floor-adjusted power. Negative means unresolved, not zero artifact.
     before_excess_power_uv2: float | None = None
     after_excess_power_uv2: float | None = None
+    #: Correlation between the odd-epoch and even-epoch averages the floor was taken from.
+    #: See :attr:`LockedAverage.half_correlation`; carried here so the table can report the
+    #: condition the floor was measured under beside the floor itself.
+    before_half_correlation: float | None = None
+    after_half_correlation: float | None = None
 
     @property
     def before_is_resolved(self) -> bool:
@@ -507,6 +561,8 @@ def compute_volume_locked_average(
         after_noise_floor_uv=after_measured.noise_floor_uv,
         before_excess_power_uv2=before_measured.excess_power_uv2,
         after_excess_power_uv2=after_measured.excess_power_uv2,
+        before_half_correlation=before_measured.half_correlation,
+        after_half_correlation=after_measured.half_correlation,
     )
 
 
@@ -549,6 +605,18 @@ def volume_locked_note_html() -> str:
         "RMS squared minus floor squared. Only a positive excess supports a resolved "
         "floor-adjusted amplitude; a negative value is reported as unresolved rather "
         "than clipped to zero.</p>"
+        "<p>Halves agree is the correlation between the odd-epoch and even-epoch averages "
+        "the floor was taken from, and it says which of two very different situations an "
+        "unresolved row describes. The split estimates noise only where the locked "
+        "waveform <em>cancels</em> between the halves, which requires that it be the same "
+        "waveform in both. Near +1 it is, and the floor is what it claims to be; near 0 "
+        "there is no locked waveform for the halves to share. Near −1 the halves are "
+        "mirror images, so the waveform cancels in the average and doubles in the "
+        "difference: the reported floor is then the residual itself and the excess is "
+        "negative by construction. That is what a residual repeating over two volume "
+        "periods rather than one looks like, which is what removing every integer harmonic "
+        "of the volume rate upstream leaves behind — and it makes an unresolved row mean "
+        "the opposite of an absent artifact. No threshold is applied to this column.</p>"
         "<p>It is an envelope, not the artifact waveform: the RMS across channels is "
         "non-negative, so the trace carries magnitude over time and not polarity. A "
         "channel whose residual is large but opposite in sign to its neighbours' raises "
@@ -634,14 +702,17 @@ def _locked_table(averages: Sequence[VolumeLockedAverage]) -> str:
         Column("Observed locked RMS (µV)"),
         Column("Noise floor (µV)"),
         Column("Signed excess power (µV²)"),
+        Column("Halves agree (r)", align=Align.TEXT),
         Column("Floor-adjusted amplitude (µV)", align=Align.TEXT),
     )
     rows = []
     for locked in averages:
         before, after = _locked_stage_measurements(locked)
-        for stage, observed_rms, noise_floor, excess_power, resolved_amplitude in (
-            ("Before ICA", *before),
-            ("After ICA", *after),
+        correlations = (locked.before_half_correlation, locked.after_half_correlation)
+        for (stage, observed_rms, noise_floor, excess_power, resolved_amplitude), agreement in zip(
+            (("Before ICA", *before), ("After ICA", *after)),
+            correlations,
+            strict=True,
         ):
             amplitude = "unresolved" if resolved_amplitude is None else f"{resolved_amplitude:.2f}"
             rows.append(
@@ -652,20 +723,51 @@ def _locked_table(averages: Sequence[VolumeLockedAverage]) -> str:
                     f"{observed_rms:.2f}",
                     f"{noise_floor:.2f}",
                     f"{excess_power:+.3f}",
+                    "—" if agreement is None or not np.isfinite(agreement) else f"{agreement:+.2f}",
                     amplitude,
                 ]
             )
     return grid_table(columns, rows)
 
 
+def _declined_table(declined: Sequence[CombNotMeasured]) -> str:
+    """Account for the runs the comb measurement could not be made on."""
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Harmonics in band"),
+        Column("Inside a stopband"),
+        Column("Not measured because", align=Align.TEXT),
+    )
+    rows = [
+        [
+            run_label(item.recording_id),
+            item.n_harmonics if item.n_harmonics else "—",
+            item.n_notched if item.n_harmonics else "—",
+            item.reason,
+        ]
+        for item in declined
+    ]
+    return (
+        "<p>These runs carry volume markers but no comb measurement. They are listed "
+        "because a run missing from the table above has not been measured and found "
+        "clean — it has not been measured. Where the reason is upstream filtering, the "
+        "residual that survives it no longer repeats once per volume, so the "
+        "volume-locked table below is where the evidence for these runs is.</p>"
+        + grid_table(columns, rows)
+    )
+
+
 def scanner_residual_html(
     combs: Sequence[CombResidual],
     averages: Sequence[VolumeLockedAverage],
+    declined: Sequence[CombNotMeasured] = (),
 ) -> str:
     """Render whichever of the two gradient measurements the runs supported."""
     sections = []
     if combs:
         sections.append(_COMB_INTRO + _comb_table(combs) + _COMB_NOTE)
+    if declined:
+        sections.append(_declined_table(declined))
     if averages:
         sections.append(_locked_table(averages) + _LOCKED_NOTE)
     if not sections:
@@ -676,6 +778,36 @@ def scanner_residual_html(
 def _comb_run_label(recording_id: str) -> str:
     """Return the run-identifying tail of a recording id, or the id when it has none."""
     return run_label(recording_id)
+
+
+#: Width of one character at a given font size, as a fraction of that size. Matplotlib's
+#: default sans face averages close to this over lower-case prose, which is what these
+#: labels are.
+_CHARACTER_WIDTH_RATIO = 0.62
+
+#: Points a legend entry spends on its handle and the padding either side of it.
+_LEGEND_HANDLE_POINTS = 34.0
+
+
+def legend_columns(figure: plt.Figure, labels: Sequence[str], *, fontsize: float) -> int:
+    """Columns that keep the widest legend entry inside ``figure``.
+
+    A fixed column count sets the legend's width from the number of entries and ignores
+    the figure it has to fit in. On a single-column panel layout that ran the first and
+    last of six entries off opposite edges, cut mid-word, so the key explaining which
+    trace was which could not be read at all.
+
+    Estimated from the label text rather than measured from a render, because the figure
+    is built without a canvas and drawing one here to place a legend would pay a full
+    render on every panel. The estimate only has to be good enough to choose between one,
+    two and three columns.
+    """
+    if not labels:
+        return 1
+    widest = max(len(label) for label in labels)
+    entry_points = widest * fontsize * _CHARACTER_WIDTH_RATIO + _LEGEND_HANDLE_POINTS
+    figure_points = figure.get_figwidth() * 72.0
+    return max(1, min(len(labels), int(figure_points // entry_points)))
 
 
 def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
@@ -694,7 +826,11 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
     figure, axes = plt.subplots(
         rows,
         columns,
-        figsize=(5.6 * columns, 2.5 * rows + 1.0),
+        # The trailing inches are the legend's, not the panels'. Six entries that no
+        # longer fit on one line need two or three rows beneath the axes, and taking that
+        # space out of the panels instead pushed the tick labels of vertically adjacent
+        # panels into each other and into the y-axis label.
+        figsize=(5.6 * columns, 2.5 * rows + 1.8),
         squeeze=False,
         sharex=True,
         # Shared limits are the point of the grid: an eye moving between panels should
@@ -713,7 +849,7 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
                 typical,
                 color=color,
                 linewidth=0.9,
-                label=f"{label}, median channel",
+                label=label,
             )
             # Filled markers on the harmonics that carry a measurement, hollow on the
             # ones inside the notch stopband. Drawing them alike let the notch's −25 dB
@@ -740,7 +876,6 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
                 color=color,
                 linewidth=0.8,
                 linestyle=":",
-                label=f"{label}, channelwise maximum envelope",
             )
         # The zero line is explained in the legend rather than by a caption pinned to
         # the line itself, which landed on top of the traces in every panel.
@@ -749,7 +884,7 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
             color=GUIDE_COLOR,
             linestyle="--",
             linewidth=1.0,
-            label="0 dB: peak and background statistics are equal",
+            label="0 dB: peak equals background",
         )
         axis.set_title(
             f"{_comb_run_label(comb.recording_id)} · median "
@@ -782,10 +917,17 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
     if finite.size:
         margin = max(0.05 * float(np.ptp(finite)), 1.0)
         flat[0].set_ylim(float(finite.min()) - margin, float(finite.max()) + margin)
+    # Few enough ticks that the bottom label of one panel and the top label of the panel
+    # below it cannot meet. Stacked panels share an edge, so the default density puts two
+    # numbers within a few points of each other and both become hard to read.
+    flat[0].yaxis.set_major_locator(MaxNLocator(nbins=4, steps=[1, 2, 5, 10]))
     for axis in flat[len(combs) :]:
         axis.remove()
     for row in range(rows):
-        flat[row * columns].set_ylabel("Excess over\nbackground (dB)")
+        # Sized with the panel titles rather than at the default. Rotated, two lines of
+        # default-size text stand almost as tall as a panel, so the label of one row
+        # reached the bottom tick label of the row above it.
+        flat[row * columns].set_ylabel("Excess over\nbackground (dB)", fontsize=8)
     # The bottom-most surviving panel in each column carries the frequency axis. When
     # the last row is short, ``sharex`` has already hidden the tick labels of the panel
     # above the removed slot, so they are turned back on explicitly.
@@ -812,6 +954,18 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
         )
     figure.suptitle(f"Gradient comb against its local background · {timing_text}", fontsize=10)
     handles, labels = flat[0].get_legend_handles_labels()
+    # Colour carries the stage and line style carries the statistic, so the legend states
+    # each of those once instead of spelling out all four combinations. As four sentences
+    # the widest entry was 39 characters, which no arrangement fits across a single-column
+    # panel layout: the key ran off both edges of the figure, cut mid-word.
+    for linestyle, linewidth, name in (
+        ("-", 0.9, "median channel"),
+        (":", 0.8, "channelwise maximum envelope"),
+    ):
+        handles.append(
+            Line2D([], [], color=GUIDE_COLOR, linestyle=linestyle, linewidth=linewidth)
+        )
+        labels.append(name)
     # The hollow marker is a legend concept, so it is explained in the legend rather than
     # in a footnote below it. As free-floating figure text the explanation sat in
     # coordinates ``constrained_layout`` never reads, and printed through this very
@@ -831,13 +985,13 @@ def plot_comb_residual(combs: Sequence[CombResidual]) -> plt.Figure:
             )
         )
         labels.append(
-            f"inside the notch stopband: {notched_count} harmonic(s) drawn but not scored"
+            f"notch stopband: {notched_count} drawn, not scored"
         )
     figure.legend(
         handles,
         labels,
         loc="outside lower center",
-        ncol=min(len(labels), 3),
+        ncol=legend_columns(figure, labels, fontsize=7),
         frameon=False,
         fontsize=7,
     )
@@ -938,6 +1092,7 @@ def add_scanner_residual_section(
     report: mne.Report,
     combs: Sequence[CombResidual],
     averages: Sequence[VolumeLockedAverage],
+    declined: Sequence[CombNotMeasured] = (),
     section: str = "Residual scanner gradient",
 ) -> None:
     """Append the per-run gradient residual evidence to a subject report."""
@@ -950,7 +1105,7 @@ def add_scanner_residual_section(
         raise ValueError("The gradient section requires at least one measured run.")
     remove_tagged_content(report, tag="scanner-residual")
     report.add_html(
-        html=scanner_residual_html(combs, averages),
+        html=scanner_residual_html(combs, averages, declined=declined),
         title="Gradient residual by run",
         section=section,
         tags=("raw", "scanner-residual"),
@@ -981,6 +1136,7 @@ def add_scanner_residual_section(
 __all__ = [
     "BACKGROUND_FRACTION_RANGE",
     "COMB_WELCH_SECONDS",
+    "CombNotMeasured",
     "HARMONIC_PEAK_FRACTION",
     "MINIMUM_BINS_PER_HARMONIC",
     "MINIMUM_VOLUMES",

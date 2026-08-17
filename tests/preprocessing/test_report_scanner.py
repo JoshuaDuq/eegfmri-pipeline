@@ -12,6 +12,7 @@ import pytest
 matplotlib.use("Agg")
 
 from eeg_pipeline.preprocessing.report.scanner import (  # noqa: E402
+    CombNotMeasured,
     CombResidual,
     MINIMUM_VOLUMES,
     VOLUME_MARKER_DESCRIPTION,
@@ -133,11 +134,19 @@ def test_largest_line_value_frequency_and_channel_share_one_index() -> None:
 
 
 def test_comb_plot_names_the_channelwise_maximum_as_an_envelope() -> None:
+    """Colour carries the stage and line style the statistic, so each is named once.
+
+    Spelling out all four combinations gave a widest entry of 39 characters, which no
+    column arrangement fits across a single-column panel layout; the key then ran off both
+    edges of the figure. The envelope still has to be named as an envelope.
+    """
     figure = plot_comb_residual(_combs_for(1))
 
-    labels = figure.axes[0].get_legend_handles_labels()[1]
-    assert "After ICA, channelwise maximum envelope" in labels
-    assert "0 dB: peak and background statistics are equal" in labels
+    labels = figure.legends[0].get_texts()
+    text = [label.get_text() for label in labels]
+    assert "channelwise maximum envelope" in text
+    assert "median channel" in text
+    assert "Before ICA" in text and "After ICA" in text
 
 
 def test_a_clean_recording_shows_no_comb() -> None:
@@ -164,7 +173,50 @@ def test_a_resolution_too_coarse_for_the_comb_reports_no_measurement() -> None:
         welch_seconds=1.0,
     )
 
-    assert comb is None
+    assert isinstance(comb, CombNotMeasured)
+    assert "resolution" in comb.reason
+
+
+def test_a_run_whose_every_harmonic_was_removed_upstream_says_so() -> None:
+    """The case that made four of sub-0001's six runs disappear from the table.
+
+    Upstream line removal had notched every integer multiple of the volume rate, so there
+    was no comb line left to score. Dropping the run silently leaves the reader with a
+    table of the two runs that still had a comb and no reason to think the others differ.
+    """
+    raw = _raw(comb_channels=(0, 1))
+    timing = measure_volume_timing(raw)
+
+    comb = compute_comb_residual(
+        raw,
+        raw.copy(),
+        timing=timing,
+        recording_id="sub-01_run-1",
+        unavailable_intervals=[(0.0, 200.0)],
+    )
+
+    assert isinstance(comb, CombNotMeasured)
+    assert comb.recording_id == "sub-01_run-1"
+    assert comb.n_harmonics > 0
+    assert comb.n_notched == comb.n_harmonics
+    assert "stopband" in comb.reason
+
+
+def test_the_section_accounts_for_every_run_it_could_not_measure() -> None:
+    """A run absent from the comb table has to be absent for a stated reason."""
+    measured = _combs_for(1)
+    declined = CombNotMeasured(
+        recording_id="sub-01_run-4",
+        reason="every harmonic sits inside an upstream stopband",
+        n_harmonics=68,
+        n_notched=68,
+    )
+
+    document = scanner_residual_html(measured, _averages_for(1), declined=[declined])
+
+    assert "run-4" in document
+    assert "upstream stopband" in document
+    assert "68" in document
 
 
 def _notched_raw(*, line_frequency=60.0, depth=1e-3, stopband_half_width=0.25):
@@ -334,6 +386,57 @@ def test_the_locked_table_censors_amplitude_below_the_measured_floor() -> None:
     assert "Signed excess power" in document
     assert document.count("unresolved") >= 2
     assert "Locked residual before ICA (µV p-p)" not in document
+
+
+def test_the_locked_table_reports_whether_the_halves_the_floor_came_from_agree() -> None:
+    """The floor assumes the locked waveform cancels between odd and even epochs.
+
+    That assumption is the one thing the estimate cannot check from its own output, and a
+    floor measured under a broken one is indistinguishable from an honest one. Reported so
+    the reader can tell the two apart; no threshold is applied to it here.
+    """
+    locked = _averages_for(1)[0]
+    opposed = replace(
+        locked,
+        before_locked_rms_uv=0.03,
+        before_noise_floor_uv=0.78,
+        before_excess_power_uv2=-0.61,
+        before_half_correlation=-0.988,
+        after_half_correlation=-0.981,
+    )
+
+    document = scanner_residual_html([], [opposed])
+
+    assert "Halves agree (r)" in document
+    assert "-0.99" in document
+
+
+def test_the_locked_average_measures_the_agreement_between_its_halves() -> None:
+    """Carried from the estimator rather than recomputed, so the table and the floor
+    cannot disagree about which epochs went into which half."""
+    raw = _raw(comb_channels=tuple(range(12)), comb_amplitude=5e-6)
+    timing = measure_volume_timing(raw)
+
+    locked = compute_volume_locked_average(
+        raw, raw.copy(), timing=timing, recording_id="run-1"
+    )
+
+    assert locked.before_half_correlation > 0.9
+    assert locked.after_half_correlation > 0.9
+
+
+def test_the_locked_note_says_what_opposing_halves_do_to_the_floor() -> None:
+    """A negative correlation is the case where "unresolved" means the opposite of
+    absence, so the note has to say so rather than leaving the word to carry it.
+
+    Asserted on the column's own name so this cannot pass on the existing sentence about
+    one channel's residual opposing its neighbours', which is a different thing.
+    """
+    document = scanner_residual_html([], _averages_for(1))
+    note = document.split("Halves agree (r)", 1)[-1]
+
+    assert "cancels" in note
+    assert "two volume" in note or "two marker" in note
 
 
 def test_rebuilding_the_section_replaces_rather_than_accumulates() -> None:
@@ -523,7 +626,7 @@ def test_the_zero_line_is_explained_off_the_data() -> None:
     figure = plot_comb_residual(_combs_for(2))
 
     legend_labels = {text.get_text() for text in figure.legends[0].get_texts()}
-    assert any("peak and background statistics are equal" in label for label in legend_labels)
+    assert any("peak equals background" in label for label in legend_labels)
     assert not figure.axes[0].texts
 
 
@@ -560,6 +663,26 @@ def test_the_notch_note_is_readable_rather_than_printed_over_the_legend() -> Non
     labels = {text.get_text() for text in figure.legends[0].get_texts()}
     assert any("notch stopband" in label for label in labels)
     assert colliding_text(figure) == []
+
+
+def test_the_comb_legend_fits_inside_the_figure() -> None:
+    """Six long entries across three columns ran off both edges of a narrow figure.
+
+    On sub-0001 the first and last entries were cut mid-word — "…n channel" on the left
+    and "…17 harmonic" on the right — so the legend explaining which trace is which was
+    itself unreadable. The single-column layout is the narrow one, which is exactly where
+    it broke.
+    """
+    from tests.utils.figure_layout import rendered
+
+    figure = plot_comb_residual(_notched_combs_for(2))
+    renderer = rendered(figure)
+    figure_box = figure.bbox
+
+    for text in figure.legends[0].get_texts():
+        box = text.get_window_extent(renderer)
+        assert box.x0 >= figure_box.x0 - 0.5, f"{text.get_text()!r} runs off the left edge"
+        assert box.x1 <= figure_box.x1 + 0.5, f"{text.get_text()!r} runs off the right edge"
 
 
 def test_the_comb_scale_is_set_by_the_harmonics_it_scores() -> None:

@@ -213,3 +213,101 @@ def test_measurement_defining_report_settings_are_provenance() -> None:
         "Continuity window",
     ):
         assert label in document
+
+
+def _runless_raw(tmp_path, sfreq=250.0):
+    """A single baseline acquisition: no run entity, no scanner, no ECG."""
+    return _raw(tmp_path, name="sub-0001_task-baseline_proc-filt_raw.fif", sfreq=sfreq)
+
+
+def test_a_runless_recording_needs_no_run_entity_to_be_measured(tmp_path) -> None:
+    """BIDS omits ``run-`` when there is nothing to tell apart, which is the baseline case."""
+    path, raw = _runless_raw(tmp_path)
+    ica = mne.preprocessing.ICA(n_components=5, random_state=0, max_iter=200)
+    ica.fit(raw, verbose="ERROR")
+
+    evidence = measure_runs(filtered_raw_paths=[path], ica=ica, settings=ReportSettings())
+
+    assert len(evidence.spectra) == 1
+    assert not evidence.has_scanner_evidence
+    assert evidence.declined_combs == []
+
+
+def test_a_runless_table_is_not_keyed_by_the_subject(tmp_path) -> None:
+    """Every per-run table is keyed by ``run_label``, so a runless dataset repeated the
+    subject and task in every row of every one of them — identical in each, and already
+    the title of the report they sit in.
+
+    Asserted on the table cells only. A figure caption naming the recording it was drawn
+    from is provenance and belongs there.
+    """
+    import re
+
+    from eeg_pipeline.preprocessing.report.style import run_label
+
+    path, raw = _runless_raw(tmp_path)
+    ica = mne.preprocessing.ICA(n_components=5, random_state=0, max_iter=200)
+    ica.fit(raw, verbose="ERROR")
+    report = mne.Report(title="baseline", verbose="ERROR")
+
+    add_run_evidence_review(
+        report=report, filtered_raw_paths=[path], ica=ica, settings=ReportSettings()
+    )
+
+    rendered = "".join(
+        str(element.html) for element in report._content if getattr(element, "html", None)
+    )
+    cells = re.findall(r"<td[^>]*>(.*?)</td>", rendered, re.S)
+    assert cells, "the run evidence should have rendered at least one table"
+    assert not [cell for cell in cells if "sub-0001" in cell]
+    assert run_label("sub-0001_task-baseline") in cells
+
+
+def test_the_gradient_section_declines_nothing_without_volume_markers(tmp_path) -> None:
+    """The declined-comb table exists to explain a run the comb could not be measured on.
+
+    Out of a scanner there is no comb to measure and no run to explain, so the table must
+    be absent rather than listing every run under a reason that does not apply.
+    """
+    from eeg_pipeline.preprocessing.report.scanner import scanner_residual_html
+
+    path, raw = _runless_raw(tmp_path)
+    ica = mne.preprocessing.ICA(n_components=5, random_state=0, max_iter=200)
+    ica.fit(raw, verbose="ERROR")
+
+    evidence = measure_runs(filtered_raw_paths=[path], ica=ica, settings=ReportSettings())
+
+    assert evidence.combs == []
+    assert evidence.declined_combs == []
+    with pytest.raises(ValueError, match="at least one measured run"):
+        scanner_residual_html([], [], declined=[])
+
+
+def test_the_filter_section_claims_no_upstream_removal_without_a_manifest() -> None:
+    """``unavailable_intervals_by_recording`` is empty for a dataset no comb removal ran on."""
+    from eeg_pipeline.preprocessing.report.filtering import (
+        describe_filter,
+        filter_response_html,
+    )
+
+    html = filter_response_html(
+        describe_filter(sfreq=250.0, l_freq=1.0, h_freq=40.0),
+        unavailable_intervals_by_recording={},
+        subject="0001",
+    )
+
+    assert "upstream" not in html.lower()
+    assert "Stopbands" not in html
+
+
+def test_the_cardiac_guide_says_nothing_about_a_detector_it_never_ran() -> None:
+    """A montage with no ECG lead reviews no beats, so the guide states no source."""
+    from eeg_pipeline.preprocessing import ica_cardiac_report
+    from eeg_pipeline.preprocessing.ica_cardiac_review import CardiacReviewSettings
+
+    html = ica_cardiac_report._cardiac_review_guide_html(
+        CardiacReviewSettings.from_mapping({}), beat_sources=()
+    )
+
+    assert "Analyzer" not in html.split("find_bads_ecg")[0]
+    assert "does not depend on BrainVision Analyzer" not in html

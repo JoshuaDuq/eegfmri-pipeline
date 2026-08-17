@@ -35,6 +35,7 @@ from eeg_pipeline.preprocessing.ica_exclusions import (
     read_ica_with_reviewed_exclusions,
 )
 from eeg_pipeline.preprocessing.ica_cardiac_review import (
+    ANALYZER_MARKER_SOURCE,
     CardiacReviewSettings,
     ComponentCardiacReview,
     RunCardiacReview,
@@ -48,6 +49,19 @@ from eeg_pipeline.preprocessing.ica_cardiac_review import (
 
 #: Runs below this count give a quantile band no more meaning than a min-max envelope.
 MINIMUM_RUNS_FOR_QUANTILE_BAND = 5
+
+
+def beat_source_phrase(source: str) -> str:
+    """Name the detector a panel's beats came from, for a title or a caption.
+
+    Written out rather than printed as the internal constant, because the distinction the
+    reader needs is not which code path ran but whose detection they are looking at: the
+    marker train drove the upstream pulse correction and is measured against the ECG in
+    the marker-agreement section, which is where a poor one shows up.
+    """
+    if source == ANALYZER_MARKER_SOURCE:
+        return "Analyzer R markers"
+    return "R peaks detected from the ECG signal"
 
 CARDIAC_REPORT_TITLES = (
     "How to review ECG artifacts",
@@ -258,7 +272,7 @@ def _plot_run_cardiac_review(
         label="Detected R peak",
     )
     axes["ecg"].set(
-        title="Representative ECG with signal-detected R peaks",
+        title=f"Representative ECG with {beat_source_phrase(review.beat_source)}",
         xlabel="Recording time (s)",
         ylabel="ECG (mV)",
     )
@@ -632,13 +646,53 @@ def _clear_cardiac_review(report: mne.Report) -> None:
         report.remove(title=title, tags=("ica-cardiac-review",), remove_all=True)
 
 
-def _cardiac_review_guide_html(settings: CardiacReviewSettings) -> str:
+def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
+    """State where this section's beats came from, reading the runs rather than asserting.
+
+    ``detect_ecg_events`` prefers Analyzer's marker train wherever a run carries one, and
+    the two sources fail on different runs, so a section can hold both. The sentence has
+    to be built from what the runs actually used: the panels are read to judge detection
+    quality, and a claim about which detection they show is the one thing that must not be
+    guessed. Where the markers were used, the marker-agreement section measures that same
+    train against the ECG and is where a poor one becomes visible.
+    """
+    if not beat_sources:
+        return ""
+    total = len(beat_sources)
+    from_markers = sum(1 for source in beat_sources if source == ANALYZER_MARKER_SOURCE)
+    if from_markers == 0:
+        return (
+            "<p>R peaks are detected directly from the configured ECG signal, so this "
+            "review does not depend on BrainVision Analyzer R markers.</p>"
+        )
+    if from_markers == total:
+        return (
+            "<p>The beats every panel here is locked to are <strong>Analyzer's R "
+            "markers</strong>, not peaks detected from the ECG signal: the marker train "
+            "is preferred wherever a run carries one, because it is the detection that "
+            "drove the upstream pulse-artifact correction. That train is measured against "
+            "the recorded ECG in the marker-agreement section, and a run where the two "
+            "disagree carries every panel below on the disagreeing train.</p>"
+        )
+    return (
+        f"<p>The beats these panels are locked to come from <strong>Analyzer's R markers "
+        f"on {from_markers} of {total} run(s)</strong> and from R peaks detected in the "
+        "ECG signal on the rest: the marker train is preferred wherever a run carries "
+        "one, because it is the detection that drove the upstream pulse-artifact "
+        "correction. Each run panel names its own source in the ECG panel title, and the "
+        "marker-agreement section measures the marker train against the recorded ECG.</p>"
+    )
+
+
+def _cardiac_review_guide_html(
+    settings: CardiacReviewSettings,
+    beat_sources: Sequence[str] = (),
+) -> str:
     ctps_threshold = str(settings.ctps_threshold)
     return (
-        "<p><strong>Manual ECG review; no components are excluded here.</strong> "
-        "R peaks are detected directly from the configured ECG signal, so this review does "
-        "not depend on BrainVision Analyzer R markers.</p>"
-        "<p>Inspect the detected peaks, beat-to-beat heart rate, R-locked EEG, component "
+        "<p><strong>Manual ECG review; no components are excluded here.</strong></p>"
+        + _beat_source_sentence(beat_sources)
+        + "<p>Inspect the detected peaks, beat-to-beat heart rate, R-locked EEG, component "
         "topography, and R-locked component waveform directly. Correlation and CTPS scores "
         "and red × markers come from MNE <code>find_bads_ecg</code>. They are displayed "
         "without additional pipeline classification or recommendation.</p>"
@@ -901,7 +955,10 @@ def generate_ica_cardiac_review(
     drop_replaced_ica_ecg_panels(report)
     section = "ICA cardiac artifact review"
     report.add_html(
-        html=_cardiac_review_guide_html(settings),
+        html=_cardiac_review_guide_html(
+            settings,
+            beat_sources=tuple(review.beat_source for review in run_reviews),
+        ),
         title="How to review ECG artifacts",
         section=section,
         tags=("ica", "ecg", "ica-cardiac-review"),

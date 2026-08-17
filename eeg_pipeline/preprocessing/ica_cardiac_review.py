@@ -165,6 +165,14 @@ class RunCardiacReview:
     before_topography_uv: np.ndarray
     after_topography_uv: np.ndarray
     topography_time: float
+    #: Which detector produced the beats every panel here is locked to.
+    #:
+    #: :data:`ANALYZER_MARKER_SOURCE` or :data:`ECG_CHANNEL_SOURCE`, carried through from
+    #: :class:`EcgDetection`. The panels are read to judge detection quality, so the one
+    #: thing they cannot leave the reader to assume is which detection they are showing --
+    #: and :func:`detect_ecg_events` prefers the marker train, so the answer is usually not
+    #: the ECG channel.
+    beat_source: str = ECG_CHANNEL_SOURCE
 
 
 @dataclass(frozen=True)
@@ -605,6 +613,7 @@ def _build_run_cardiac_review(
         before_topography_uv=before_evoked[:, peak_index],
         after_topography_uv=after_evoked[:, peak_index],
         topography_time=float(before_times[peak_index]),
+        beat_source=detection.source,
     )
 
 

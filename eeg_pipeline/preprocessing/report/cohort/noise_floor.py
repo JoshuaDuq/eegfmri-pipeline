@@ -63,6 +63,20 @@ class LockedAverage:
     #: Epochs entering the odd-even split. One fewer than ``n_epochs`` when that is odd, so
     #: the two halves stay equal and the algebra above stays exact.
     n_paired_epochs: int
+    #: Correlation between the odd-epoch and even-epoch averages.
+    #:
+    #: The assumption above -- that ``s`` cancels in ``D`` -- is the one thing this
+    #: estimator cannot check from its own output, and a floor derived under a violated
+    #: assumption is indistinguishable from an honest one. Near +1 the halves agree and
+    #: the floor is noise, as intended. Near 0 there is no locked waveform for them to
+    #: share. Near -1 they are mirror images: the waveform cancels in ``A`` and doubles in
+    #: ``D``, so what is reported as a floor is the residual itself, and the unresolved
+    #: verdict that follows means the opposite of absence. That happens when the residual
+    #: repeats over two marker intervals rather than one, which is what upstream removal
+    #: of every integer harmonic of the marker rate leaves behind.
+    #:
+    #: NaN where a half average is constant, since a correlation with it is undefined.
+    half_correlation: float
 
     @property
     def is_resolved(self) -> bool:
@@ -113,7 +127,9 @@ def measure_locked_average(epoch_data: np.ndarray) -> LockedAverage:
     locked_power = float(np.mean(average**2))
 
     paired = 2 * (n_epochs // 2)
-    difference = data[0:paired:2].mean(axis=0) - data[1:paired:2].mean(axis=0)
+    odd = data[0:paired:2].mean(axis=0)
+    even = data[1:paired:2].mean(axis=0)
+    difference = odd - even
     paired_floor_power = float(np.mean(difference**2)) / 4.0
     floor_power = paired_floor_power * paired / n_epochs
 
@@ -124,7 +140,21 @@ def measure_locked_average(epoch_data: np.ndarray) -> LockedAverage:
         excess_power_uv2=float((locked_power - floor_power) * 1e12),
         n_epochs=n_epochs,
         n_paired_epochs=paired,
+        half_correlation=_half_correlation(odd, even),
     )
+
+
+def _half_correlation(odd: np.ndarray, even: np.ndarray) -> float:
+    """Pearson correlation between the two half averages, over channels and latencies.
+
+    Taken on the halves rather than on the average and the difference, because those two
+    are correlated with each other by construction and would report agreement that is
+    only arithmetic.
+    """
+    first, second = odd.ravel(), even.ravel()
+    if first.std() == 0.0 or second.std() == 0.0:
+        return float("nan")
+    return float(np.corrcoef(first, second)[0, 1])
 
 
 __all__ = ["LockedAverage", "measure_locked_average"]

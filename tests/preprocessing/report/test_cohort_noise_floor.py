@@ -120,6 +120,73 @@ def test_a_single_epoch_cannot_be_corrected() -> None:
         measure_locked_average(_epochs(1))
 
 
+def _alternating_epochs(n_epochs: int, *, amplitude_v=ARTIFACT_AMPLITUDE_V, seed=6) -> np.ndarray:
+    """Epochs whose locked waveform reverses sign with the epoch index.
+
+    What a recording looks like once every integer multiple of the volume rate has been
+    filtered out upstream: the surviving residual repeats over two volumes rather than
+    one, so consecutive epochs hold opposite halves of it.
+    """
+    rng = np.random.default_rng(seed)
+    data = rng.standard_normal((n_epochs, N_CHANNELS, N_TIMES)) * NOISE_V
+    latency = np.arange(N_TIMES)
+    sign = np.where(np.arange(n_epochs) % 2 == 0, 1.0, -1.0)
+    data += sign[:, None, None] * amplitude_v * np.sin(2 * np.pi * latency / N_TIMES)
+    return data - data.mean(axis=2, keepdims=True)
+
+
+def test_a_stationary_locked_waveform_agrees_between_the_halves() -> None:
+    """The estimator's own assumption, measured rather than assumed.
+
+    Paired with the alternating case below: the same waveform at the same amplitude,
+    differing only in whether it holds its sign across epochs.
+    """
+    measured = measure_locked_average(_epochs(400, amplitude_v=200e-6))
+
+    assert measured.half_correlation > 0.9
+    assert measured.is_resolved
+
+
+def test_the_halves_agree_in_proportion_to_how_far_the_waveform_clears_the_floor() -> None:
+    """Not a threshold: the correlation is s^2 / (s^2 + sigma^2) in each half average.
+
+    Pinned because it is what stops the number being read as a detector. At an artifact
+    equal to the half-average noise it sits near 0.5 with the waveform plainly present,
+    so only the sign carries the warning.
+    """
+    # Sine RMS is amplitude / sqrt(2); the half average holds 200 epochs of noise.
+    matched = measure_locked_average(
+        _epochs(400, amplitude_v=NOISE_V * np.sqrt(2) / np.sqrt(200))
+    )
+
+    assert matched.half_correlation == pytest.approx(0.5, abs=0.1)
+
+
+def test_an_alternating_residual_is_reported_as_opposing_halves() -> None:
+    """The case where the floor is measuring the artifact instead of the noise.
+
+    The odd and even averages come out as mirror images, so they cancel in the full
+    average and double in the difference the floor is taken from. The estimate is
+    unresolved either way; the correlation is what separates "nothing was there" from
+    "the assumption behind this floor does not hold here".
+    """
+    measured = measure_locked_average(_alternating_epochs(400, amplitude_v=200e-6))
+
+    assert measured.half_correlation < -0.9
+    assert not measured.is_resolved
+
+    # And the floor it reports is the artifact, not the noise: far above the sigma /
+    # sqrt(N) an honest floor would sit at.
+    assert measured.noise_floor_uv > 10.0 * NOISE_V * 1e6 / np.sqrt(400)
+
+
+def test_pure_noise_leaves_the_halves_uncorrelated() -> None:
+    """Neither agreement nor opposition: there is no locked waveform to share."""
+    measured = measure_locked_average(_epochs(400, amplitude_v=0.0, seed=7))
+
+    assert abs(measured.half_correlation) < 0.2
+
+
 def test_detectability_is_reported_separately_and_is_not_the_pooled_quantity() -> None:
     """It grows with epoch count by construction, so a cohort cannot pool it."""
     short = measure_locked_average(_epochs(50))

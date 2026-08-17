@@ -122,3 +122,50 @@ def test_labels_are_placed_in_value_order_whatever_order_they_arrived_in() -> No
     placed = separated_labels([(10.0, "high"), (0.0, "low")], minimum_gap=1.0)
 
     assert [label for _, label in placed] == ["low", "high"]
+
+
+def test_a_recording_with_a_run_entity_is_labelled_by_its_run() -> None:
+    from eeg_pipeline.preprocessing.report.style import run_label
+
+    assert run_label("sub-0001_task-thermalactive_run-3") == "run-3"
+    assert run_label("sub-0001_task-thermalactive_run-3", bare=True) == "3"
+
+
+def test_a_label_that_is_already_a_label_passes_through() -> None:
+    """Cohort tables carry a bare ``run-2`` rather than a full recording id.
+
+    Pinned because collapsing those onto one value put six runs in a single column of the
+    cohort grid, which read as a participant with one run.
+    """
+    from eeg_pipeline.preprocessing.report.style import run_label
+
+    assert run_label("run-2") == "run-2"
+
+
+def test_a_runless_recording_is_not_labelled_with_the_whole_recording_id() -> None:
+    """A baseline or single-session acquisition carries no ``run-`` entity.
+
+    The whole id came back, so every row of every per-run table read
+    ``sub-0001_task-baseline`` — the subject and task the report is already titled with,
+    repeated once per row and identical in all of them.
+    """
+    from eeg_pipeline.preprocessing.report.style import run_label
+
+    label = run_label("sub-0001_task-baseline")
+
+    assert "sub-0001" not in label
+    assert label == "task-baseline"
+
+
+def test_a_runless_recording_keeps_whatever_does_distinguish_it() -> None:
+    """Without runs, the session is what tells two recordings apart."""
+    from eeg_pipeline.preprocessing.report.style import run_label
+
+    assert run_label("sub-0001_ses-02_task-rest") == "ses-02_task-rest"
+
+
+def test_a_recording_id_with_nothing_left_to_name_it_says_so() -> None:
+    """Rather than an empty cell, which reads as a missing value."""
+    from eeg_pipeline.preprocessing.report.style import run_label
+
+    assert run_label("sub-0001") == "recording"

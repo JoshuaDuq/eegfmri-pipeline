@@ -38,7 +38,7 @@ from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.style import (
     apply_report_style,
     report_image_format,
-    run_label,
+    run_entity,
 )
 from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 
@@ -149,24 +149,6 @@ class RunPosition(NamedTuple):
     heading: str
 
 
-def _run_token(recording_id: object) -> str | None:
-    """The run entity of a recording id, where it carries one.
-
-    ``run_label`` wants a full BIDS recording id and looks for ``_run-``. A bare ``run-2``
-    has no leading underscore, so it came back unrecognised and every run of a participant
-    collapsed into a single column named "run" -- the grid silently lost every run but the
-    last, and looked like a participant who had recorded once. Both spellings are read here.
-    """
-    text = str(recording_id)
-    label = run_label(text, bare=True)
-    if label != text:
-        return label
-    for part in text.split("_"):
-        if part.startswith("run-"):
-            return part[len("run-") :]
-    return None
-
-
 def _positions(recordings: Sequence[object]) -> list[RunPosition]:
     """Assign one participant's recordings their columns in the grid.
 
@@ -191,7 +173,7 @@ def _positions(recordings: Sequence[object]) -> list[RunPosition]:
     ordinal = 0
     positions: list[RunPosition] = []
     for recording in recordings:
-        token = _run_token(recording)
+        token = run_entity(recording)
         if token is not None:
             positions.append(RunPosition(token, f"run-{token}"))
             continue

@@ -845,6 +845,7 @@ def plot_marker_agreement(agreements: Sequence[MarkerAgreement]) -> plt.Figure:
         sharex=True,
         layout="constrained",
     )
+    drawn_rates: list[np.ndarray] = []
     for axis, agreement in zip(axes[:, 0], agreements, strict=True):
         onsets = np.concatenate([agreement.marker_onsets_s, agreement.detected_onsets_s])
         stop = float(onsets.max()) if onsets.size else MARKER_RATE_BIN_S
@@ -904,18 +905,30 @@ def plot_marker_agreement(agreements: Sequence[MarkerAgreement]) -> plt.Figure:
                 f"\nnearest marker {median_lag * 1000:+.0f} ms away "
                 f"(IQR {agreement.lag_iqr_s * 1000:.0f} ms)"
             )
-        # Zero is on the axis only when a detector reached it. Anchoring there always
-        # spent half the panel on rates neither trace visits, while the comparison the
-        # panel exists for is between two traces a few beats per minute apart.
-        observed = np.concatenate(rates) if rates else np.zeros(1)
-        floor = 0.0 if observed.min() <= 0.0 else max(float(observed.min()) - 10.0, 0.0)
+        drawn_rates.extend(rates)
         axis.set(
             title=title,
             ylabel="Beats per min",
-            ylim=(floor, None),
         )
         axis.grid(axis="y", alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
+    # One range over every run, not one per panel. Panels that each chose their own ran
+    # 0–80, 40–80, 50–78 and 50–90 bpm in the same figure, so a 6 bpm wobble on a healthy
+    # run drew as much ink as a collapse and the eye recalibrated at every panel —
+    # comparing runs is the only reason to stack them.
+    #
+    # Zero is on the axis only when some detector reached it, which is the rule the panels
+    # already used, now applied to the runs together: anchoring there always spent half
+    # the height on rates neither trace visits, while the comparison this figure exists
+    # for is between two traces a few beats per minute apart.
+    observed = np.concatenate(drawn_rates) if drawn_rates else np.zeros(1)
+    finite = observed[np.isfinite(observed)]
+    if finite.size:
+        floor = 0.0 if finite.min() <= 0.0 else max(float(finite.min()) - 10.0, 0.0)
+        ceiling = float(finite.max())
+        headroom = max(0.05 * (ceiling - floor), 2.0)
+        for axis in axes[:, 0]:
+            axis.set_ylim(floor, ceiling + headroom)
     # Below the grid rather than inside the first panel. Placed in-axes it sat on top of
     # the marker trace of whichever run came first, which on sub-0012 was the run with the
     # sparsest markers — the one the panel most needed to show.

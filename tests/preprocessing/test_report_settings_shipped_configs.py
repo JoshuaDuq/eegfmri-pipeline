@@ -90,3 +90,37 @@ def test_no_shipped_default_names_a_trial_prefix_of_this_study() -> None:
             continue
         prefixes = ReportSettings.from_mapping(block).non_event_prefixes
         assert not any(prefix.upper().startswith("TRIG") for prefix in prefixes), relative
+
+
+def test_the_out_of_scanner_preset_needs_no_file_only_this_study_has() -> None:
+    """``eeg_only`` is the entry point for a user with no scanner and no line removal.
+
+    ``paths.decomb_manifest`` is inherited from the packaged config, where it points at
+    the line-notch manifest of the study this repository was developed on. Building the
+    report settings then raised FileNotFoundError on a path the new user has never heard
+    of, before a single section was rendered — for a dataset that had no gradient comb to
+    remove in the first place.
+    """
+    preset = yaml.safe_load(
+        (CONFIG_ROOT / "eeg_pipeline/utils/config/presets/eeg_only.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert preset["paths"]["decomb_manifest"] is None
+
+
+def test_a_configured_manifest_that_is_absent_is_still_an_error() -> None:
+    """Opting in and mistyping the path must not silently drop the stopband mask.
+
+    Without the mask the comb section scores filtered bins as measured residual, which is
+    the failure the mask exists to prevent — so a study that asks for a manifest and does
+    not have one has to hear about it.
+    """
+
+    class _Config:
+        def get(self, key, default=None):
+            return {"paths.decomb_manifest": "/no/such/manifest.tsv"}.get(key, default)
+
+    with pytest.raises(FileNotFoundError, match="Decomb manifest"):
+        ReportSettings.from_config(_Config())

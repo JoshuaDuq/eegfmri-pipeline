@@ -71,6 +71,19 @@
 
 extends: "../eeg_config.yaml"
 
+paths:
+  # Line-comb removal is part of the scanner chain: the manifest records which bands a
+  # decomb stage took out of a gradient-corrected recording, and the report reads it to
+  # avoid scoring filtered bins as surviving artifact. Out of a scanner there was no comb
+  # to remove and there is no manifest.
+  #
+  # Inherited, the packaged path resolves to the line-notch manifest of the study this
+  # repository was developed on, and building the report raised FileNotFoundError on a
+  # file the new user has never heard of. Nulled here rather than made tolerant in the
+  # reader: a study that does opt in and mistypes the path must still hear about it,
+  # because a silently missing mask makes the comb section report the filter as residual.
+  decomb_manifest: null
+
 project:
   paradigm: "task"
   # Deliberately unset: the BIDS task label selects which recordings are read, and

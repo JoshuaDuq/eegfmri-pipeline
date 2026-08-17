@@ -191,6 +191,43 @@ def test_cardiac_review_guide_has_no_custom_classification_language() -> None:
     assert "ranking" not in html.lower()
 
 
+def test_the_guide_reports_which_detector_the_runs_actually_used() -> None:
+    """The guide asserted the review "does not depend on BrainVision Analyzer R markers".
+
+    ``detect_ecg_events`` prefers exactly those markers wherever a run carries them, so on
+    a dataset like sub-0001 the sentence was false for every run in the section. The guide
+    has to read the runs rather than assert one of the two branches.
+    """
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({})
+
+    from_markers = cardiac_report._cardiac_review_guide_html(
+        settings, beat_sources=(cardiac_review.ANALYZER_MARKER_SOURCE,) * 3
+    )
+    from_channel = cardiac_report._cardiac_review_guide_html(
+        settings, beat_sources=(cardiac_review.ECG_CHANNEL_SOURCE,) * 3
+    )
+
+    assert "Analyzer" in from_markers and "R markers" in from_markers
+    assert "does not depend on BrainVision Analyzer" not in from_markers
+    assert "does not depend on BrainVision Analyzer" in from_channel
+
+
+def test_the_guide_names_a_split_between_the_two_detectors() -> None:
+    """The two sources fail on different runs, so a section can hold both."""
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({})
+
+    html = cardiac_report._cardiac_review_guide_html(
+        settings,
+        beat_sources=(
+            cardiac_review.ANALYZER_MARKER_SOURCE,
+            cardiac_review.ECG_CHANNEL_SOURCE,
+            cardiac_review.ECG_CHANNEL_SOURCE,
+        ),
+    )
+
+    assert "1 of 3" in html or "2 of 3" in html
+
+
 def test_pulse_marker_events_use_preserved_analyzer_annotations() -> None:
     raw = _pulse_locked_raw(artifact_scale=1.0)
 

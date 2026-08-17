@@ -134,6 +134,28 @@ def report_image_format(*, has_dense_image: bool = False, is_figure_list: bool =
     return REPORT_IMAGE_FORMAT
 
 
+def run_entity(recording_id: object) -> str | None:
+    """The run entity of a recording id, or ``None`` where it carries none.
+
+    "Does this recording have a run entity" is a question with a real answer, and callers
+    that need it were inferring it from :func:`run_label` returning its input unchanged.
+    That made a labelling decision load-bearing: as soon as the label improved, a cohort
+    grid read the new label as a run token and headed a column ``run-task-rest_acq-a``.
+
+    Both spellings are read. A full recording id carries ``_run-2``; cohort tables carry a
+    bare ``run-2``, and missing that spelling once collapsed every run of a participant
+    into a single column.
+    """
+    text = str(recording_id)
+    _, separator, run = text.partition("_run-")
+    if separator:
+        return run.split("_")[0]
+    for part in text.split("_"):
+        if part.startswith("run-"):
+            return part[len("run-") :]
+    return None
+
+
 def run_label(recording_id: object, *, bare: bool = False) -> str:
     """Return the run-identifying tail of a BIDS recording id.
 
@@ -144,13 +166,32 @@ def run_label(recording_id: object, *, bare: bool = False) -> str:
 
     Shared because three modules previously parsed this string three ways and two of them
     disagreed about whether the ``run-`` prefix was part of the label.
+
+    A recording with no ``run-`` entity is an ordinary acquisition, not a broken one: a
+    baseline or single-session recording is complete without one, and BIDS only requires
+    the entity to tell several apart. Returning the whole id then put
+    ``sub-0001_task-baseline`` in every row of every per-run table — the subject and task
+    the report is already titled with, identical in all of them and identifying nothing.
+    What is left after the subject is what actually distinguishes such a recording, so
+    that is the label.
+
+    A value that is already a label is returned unchanged. Cohort tables carry a bare
+    ``run-2`` rather than a full path, and rewriting those collapsed six runs onto one
+    value, which read as a participant who had recorded a single run.
     """
     text = str(recording_id)
-    _, separator, run = text.partition("_run-")
-    if not separator:
+    run = run_entity(text)
+    if run is not None:
+        return run if bare else f"run-{run}"
+    if not text.startswith("sub-"):
         return text
-    run = run.split("_")[0]
-    return run if bare else f"run-{run}"
+    # A full BIDS recording id carrying no run entity. Drop the subject, which the report
+    # is titled with, and the derivative suffix, which names the processing stage rather
+    # than the recording.
+    _, _, remainder = text.partition("_")
+    for suffix in ("_proc-", "_desc-", "_eeg", "_raw"):
+        remainder = remainder.partition(suffix)[0]
+    return remainder or "recording"
 
 
 def separated_labels(
@@ -391,6 +432,7 @@ __all__ = [
     "report_image_format",
     "power_colorbar_label",
     "robust_symmetric_limit",
+    "run_entity",
     "run_label",
     "separated_labels",
 ]

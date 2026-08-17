@@ -47,6 +47,7 @@ def _run_review(
     *,
     heart_rate_bpm: np.ndarray | None = None,
     average_pulse_bpm: float = 60.0,
+    beat_source: str = "ecg-channel",
 ) -> RunCardiacReview:
     times = np.arange(0.0, 10.0, 1.0 / SFREQ)
     peak_times = np.arange(0.5, 10.0, 1.0)
@@ -72,7 +73,32 @@ def _run_review(
         before_topography_uv=np.linspace(-2.0, 2.0, len(CHANNELS)),
         after_topography_uv=np.linspace(-1.0, 1.0, len(CHANNELS)),
         topography_time=0.17,
+        beat_source=beat_source,
     )
+
+
+def test_the_ecg_panel_names_which_detector_put_the_peaks_there() -> None:
+    """The panel title claimed "signal-detected R peaks" on every run.
+
+    ``detect_ecg_events`` prefers the Analyzer marker train wherever the export carries
+    one and only falls back to detecting from the ECG channel. On sub-0001 that meant all
+    six panels were drawn from markers the report measures elsewhere at 0.5% agreement
+    with the ECG, under a title asserting the ECG had been used.
+    """
+    from eeg_pipeline.preprocessing.ica_cardiac_review import (
+        ANALYZER_MARKER_SOURCE,
+        ECG_CHANNEL_SOURCE,
+    )
+
+    from_markers = _run_review(beat_source=ANALYZER_MARKER_SOURCE)
+    from_channel = _run_review(beat_source=ECG_CHANNEL_SOURCE)
+
+    marker_title = _ecg_axis(_plot_run_cardiac_review(from_markers, ica=_Ica())).get_title()
+    channel_title = _ecg_axis(_plot_run_cardiac_review(from_channel, ica=_Ica())).get_title()
+
+    assert "Analyzer" in marker_title
+    assert "Analyzer" not in channel_title
+    assert marker_title != channel_title
 
 
 def _ecg_axis(figure):

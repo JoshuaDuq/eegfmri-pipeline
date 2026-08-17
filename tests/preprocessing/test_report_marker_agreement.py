@@ -316,6 +316,51 @@ def test_a_train_that_stops_still_shows_its_floor() -> None:
     assert axis.get_ylim()[0] == pytest.approx(0.0)
 
 
+def test_every_run_panel_shares_one_rate_axis() -> None:
+    """Six panels each choosing their own range is six different figures stacked.
+
+    On sub-0001 the panels ran 0–80, 40–80, 50–78 and 50–90 bpm, so a 6 bpm wobble on a
+    healthy run drew the same amount of ink as run-1's collapse and the eye had to
+    recalibrate at every panel. Comparing runs is the only reason to stack them.
+    """
+    beats = np.arange(0.0, 600.0, 0.85)
+    healthy = compute_marker_agreement(
+        recording_id="sub-01_run-1",
+        marker_onsets_s=beats,
+        detected_onsets_s=beats,
+    )
+    slower = compute_marker_agreement(
+        recording_id="sub-01_run-2",
+        marker_onsets_s=np.arange(0.0, 600.0, 1.05),
+        detected_onsets_s=np.arange(0.0, 600.0, 1.05),
+    )
+
+    figure = plot_marker_agreement([healthy, slower])
+
+    limits = {axis.get_ylim() for axis in figure.axes}
+    assert len(limits) == 1
+
+
+def test_a_run_that_collapses_puts_every_panel_on_the_axis_that_shows_it() -> None:
+    """The shared range is taken over the runs together, so the floor a stopped train
+    reaches is on every panel rather than only on its own."""
+    beats = np.arange(0.0, 600.0, 0.85)
+    healthy = compute_marker_agreement(
+        recording_id="sub-01_run-1",
+        marker_onsets_s=beats,
+        detected_onsets_s=beats,
+    )
+    collapsing = compute_marker_agreement(
+        recording_id="sub-01_run-2",
+        marker_onsets_s=beats[beats < 200.0],
+        detected_onsets_s=beats,
+    )
+
+    figure = plot_marker_agreement([healthy, collapsing])
+
+    assert figure.axes[0].get_ylim()[0] == pytest.approx(0.0)
+
+
 def test_the_figure_refuses_an_empty_set_rather_than_drawing_a_blank() -> None:
     with pytest.raises(ValueError, match="at least one run"):
         plot_marker_agreement([])

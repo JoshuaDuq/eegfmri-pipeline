@@ -2015,6 +2015,14 @@ class PreprocessingPipeline(PipelineBase):
                             report=report,
                             description=description,
                             epoch_window_s=self._configured_epoch_window(),
+                            # What an upstream line- or comb-removal stage took out of
+                            # these recordings. Not in any configuration key, so without
+                            # this the section shows a flat passband over data with tens
+                            # of stopbands in it.
+                            unavailable_intervals_by_recording=(
+                                report_settings.unavailable_intervals_by_recording
+                            ),
+                            subject=subject,
                         )
                 analyzer = add_analyzer_correction_review(
                     report=report,

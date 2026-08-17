@@ -15,7 +15,7 @@ being measured, which this module cannot see.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -28,8 +28,15 @@ from eeg_pipeline.preprocessing.report.style import (
     GUIDE_COLOR,
     PRIMARY_COLOR,
     REPORT_IMAGE_FORMAT,
+    run_label,
 )
-from eeg_pipeline.preprocessing.report.tables import Metric, metric_table
+from eeg_pipeline.preprocessing.report.tables import (
+    Align,
+    Column,
+    Metric,
+    grid_table,
+    metric_table,
+)
 
 #: Attenuation defining a filter corner, matching the convention MNE reports its own
 #: filters with, so the numbers here and in MNE's log are the same quantity.
@@ -210,7 +217,71 @@ def describe_configured_filter(config: object, *, sfreq: float) -> FilterDescrip
     )
 
 
-def filter_response_html(description: FilterDescription) -> str:
+def _upstream_stopband_html(
+    unavailable_intervals_by_recording: Mapping[str, Sequence[tuple[float, float]]],
+    subject: str | None,
+) -> str:
+    """Account for frequencies a stage before this pipeline removed from the recordings.
+
+    The response above describes the filter *this configuration* builds. Where a line- or
+    comb-removal stage ran upstream, the delivered data also carries its stopbands, and
+    nothing in the configuration records them: a report whose filter section shows a flat
+    passband from 0.06 to 112 Hz over data with eighty notches in it is describing a
+    recording that does not exist.
+
+    The intervals are the same ones the comb measurement masks its harmonics with, so the
+    two sections cannot disagree about what was removed.
+    """
+    # These settings hold every participant in the study, and a run label drops the
+    # subject: rendered whole, a six-run session showed ninety-six rows cycling through
+    # run-1..run-6, each subject's intervals presented as this one's.
+    prefix = f"sub-{subject}_" if subject else None
+    rows = []
+    for recording_id, intervals in sorted(unavailable_intervals_by_recording.items()):
+        if prefix is not None and not recording_id.startswith(prefix):
+            continue
+        usable = [(float(low), float(high)) for low, high in intervals if high > low]
+        if not usable:
+            continue
+        removed = sum(high - low for low, high in usable)
+        span = (min(low for low, _ in usable), max(high for _, high in usable))
+        rows.append(
+            [
+                run_label(recording_id),
+                len(usable),
+                f"{removed:.1f}",
+                f"{span[0]:.1f}–{span[1]:.1f}",
+            ]
+        )
+    if not rows:
+        return ""
+    columns = (
+        Column("Run", align=Align.TEXT),
+        Column("Stopbands"),
+        Column("Bandwidth removed (Hz)"),
+        Column("Between (Hz)", align=Align.TEXT),
+    )
+    return (
+        "<p>Frequencies an upstream stage removed before this pipeline read the "
+        "recordings. They are not part of the response above, which describes only the "
+        "filter this configuration builds — but they are part of the data every spectrum "
+        "in this report is measured on, and no configuration key records them. A trough "
+        "in a spectrum at one of these frequencies is that removal, not the recording.</p>"
+        + grid_table(columns, rows)
+        + "<p>Bandwidth removed is the total width of the stopbands, which is not the "
+        "same as the span they fall between: a comb of narrow notches and one wide one "
+        "can remove the same bandwidth over very different ranges. These are the "
+        "intervals the gradient comb measurement excludes its harmonics with, so the two "
+        "sections describe one set of removals.</p>"
+    )
+
+
+def filter_response_html(
+    description: FilterDescription,
+    unavailable_intervals_by_recording: Mapping[str, Sequence[tuple[float, float]]]
+    | None = None,
+    subject: str | None = None,
+) -> str:
     """Render the filter's measured properties beside the settings that requested them."""
 
     def frequency(value: float | None) -> str:
@@ -242,6 +313,7 @@ def filter_response_html(description: FilterDescription) -> str:
         "&mdash; a slow evoked response and a burst-rate estimate are not equally exposed "
         "to it &mdash; so the step response below is drawn against the epoch window "
         "rather than judged here.</p>"
+        + _upstream_stopband_html(unavailable_intervals_by_recording or {}, subject)
     )
 
 
@@ -333,6 +405,9 @@ def add_filter_review(
     report: mne.Report,
     description: FilterDescription,
     epoch_window_s: tuple[float, float] | None = None,
+    unavailable_intervals_by_recording: Mapping[str, Sequence[tuple[float, float]]]
+    | None = None,
+    subject: str | None = None,
     section: str = "Filter response",
 ) -> None:
     """Add the realised filter response, ahead of the spectra it is read against."""
@@ -343,7 +418,11 @@ def add_filter_review(
     remove_tagged_content(report, tag="filter-response")
     tags = ("raw", "filter-response")
     report.add_html(
-        html=filter_response_html(description),
+        html=filter_response_html(
+            description,
+            unavailable_intervals_by_recording=unavailable_intervals_by_recording,
+            subject=subject,
+        ),
         title="What the configured filter actually is",
         section=section,
         tags=tags,

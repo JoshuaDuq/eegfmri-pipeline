@@ -38,6 +38,7 @@ from eeg_pipeline.preprocessing.report.scanner import (
     CombResidual,
     VolumeLockedAverage,
     VolumeTiming,
+    CombNotMeasured,
     add_scanner_residual_section,
     compute_comb_residual,
     compute_volume_locked_average,
@@ -69,6 +70,10 @@ class RunEvidence:
 
     spectra: list[RunSpectra] = field(default_factory=list)
     combs: list[CombResidual] = field(default_factory=list)
+    #: Runs carrying volume markers that the comb measurement declined, with the reason.
+    #: Reported rather than dropped: a run absent from the comb table has not been
+    #: measured and found clean, it has not been measured.
+    declined_combs: list[CombNotMeasured] = field(default_factory=list)
     locked_averages: list[VolumeLockedAverage] = field(default_factory=list)
     #: Volume timing per run, keyed by recording. Kept per run rather than pooled because
     #: the repetition time sets the frequency of every comb harmonic, and a cohort that
@@ -175,7 +180,9 @@ def _measure_gradient(
         notch_half_width_hz=settings.notch_exclusion_half_width_hz,
         unavailable_intervals=settings.unavailable_intervals_by_recording.get(recording_id),
     )
-    if comb is not None:
+    if isinstance(comb, CombNotMeasured):
+        evidence.declined_combs.append(comb)
+    else:
         evidence.combs.append(comb)
 
     locked = compute_volume_locked_average(
@@ -374,6 +381,7 @@ def add_run_evidence_sections(
             report=report,
             combs=evidence.combs,
             averages=evidence.locked_averages,
+            declined=evidence.declined_combs,
         )
     if evidence.continuity:
         add_continuity_section(report=report, runs=evidence.continuity)
