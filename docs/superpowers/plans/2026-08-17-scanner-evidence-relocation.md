@@ -827,6 +827,20 @@ Correct the block comment above `cardiac_review:` — it currently claims R peak
 
 In `utils/config/loader.py`, add `"marker_description"` to `_NON_PATH_KEYS`. **This is required, not cosmetic:** `"Pulse Artifact/R"` contains a slash, and without the entry the loader resolves it as a filesystem path.
 
+Register `beat_source` in the two lists that track settings which move a measurement:
+`cohort/homogeneity.py` `COMPARED_SETTINGS` (bare setting names) and `provenance.py`
+`PROVENANCE_KEYS` (`(dotted.key, "Human label")` tuples). Changing the beat source changes
+which beats are detected and therefore every cardiac number downstream, so a cohort mixing
+subjects processed under different values must raise a homogeneity flag, and a subject's
+provenance table must say which source produced its beats. `marker_description` belongs in
+provenance for the same reason — two runs whose markers were spelled differently are not
+comparable — but not in `COMPARED_SETTINGS`, since a study may legitimately carry several
+spellings across sites without that making the numbers incomparable.
+
+*Added during execution: Task 2's review caught exactly this omission for
+`aperiodic_exclude_hz`. The rule generalises — any config key this plan adds that changes a
+measured value goes in both lists.*
+
 - [ ] **Step 6: Prove behaviour is preserved**
 
 ```bash
