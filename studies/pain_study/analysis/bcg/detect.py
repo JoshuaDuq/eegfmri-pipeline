@@ -141,6 +141,183 @@ class RecoverySettings:
     factor: float = 1.5
     refractory_percentile: float = 1.0
     refractory_cap_fraction: float = 0.75
+    #: Clear Analyzer's own double marks before searching for gaps. On by default because
+    #: leaving them in place silently loosens ``physiological_floor`` on the runs whose
+    #: marks are least trustworthy, and because a mark where no beat is makes the
+    #: correction subtract a pulse template against nothing.
+    clear_double_marks: bool = True
+
+
+#: Fraction of the modal interval below which an interval is not a heartbeat but a marker
+#: landing twice inside one cycle. Chosen well below the shortest interval ordinary
+#: heart-rate variability produces, so only a genuine second mark trips it.
+DOUBLE_MARK_FRACTION = 0.65
+
+#: Mass at twice the modal interval, relative to the mode's own, above which the mode is
+#: read as a split cycle rather than the beat period. Set below 0.5 because a run that
+#: doubles every cycle puts exactly half as many intervals at the period as at the split,
+#: and that case must still resolve to the period.
+SPLIT_CYCLE_RATIO = 0.45
+
+
+def modal_interval(
+    beat_seconds: np.ndarray,
+    *,
+    window_s: float = 0.06,
+    minimum_s: float = 0.30,
+    maximum_s: float = MAXIMUM_BEAT_PERIOD_S,
+) -> float:
+    """The period this heart actually beats at, as the densest interval in the train.
+
+    Neither the median nor a low percentile survives the two failures that matter here.
+    A train missing most of its beats has an inflated median -- sub-0008 run 4 reads
+    4.07 s against a true 1.0 s -- while a train that marks some cycles twice has a
+    deflated low percentile. The mode is set by whichever spacing occurs most often, which
+    under both failures is still the beat-to-beat interval, because most cycles are marked
+    once and only once.
+
+    Returns nan when there are too few intervals to have a mode.
+    """
+    intervals = np.diff(np.sort(np.asarray(beat_seconds, dtype=float)))
+    if intervals.size < 5:
+        return float("nan")
+    grid = np.arange(minimum_s, maximum_s, 0.005)
+    counts = np.array([np.sum((intervals >= edge) & (intervals < edge + window_s)) for edge in grid])
+    edge = float(grid[int(np.argmax(counts))])
+    # The window only locates the cluster; the estimate is the median of what it caught.
+    # Taking the window's own midpoint instead biases the result by up to half its width,
+    # because `argmax` settles on the first of the several windows that tie when the
+    # intervals are tightly grouped.
+    caught = intervals[(intervals >= edge) & (intervals < edge + window_s)]
+    estimate = float(np.median(caught)) if caught.size else float(edge + window_s / 2.0)
+
+    # A run that marks most of its cycles twice puts more intervals at half the beat period
+    # than at the period itself, and the plain mode then reports the split -- on sub-0005
+    # run 4 it reads 0.53 s against a 1.05 s beat, after which no interval looks short and
+    # the double marks become invisible to every test downstream. The asymmetry that makes
+    # this safe to correct: marking a cycle twice creates a cluster at a *sub*-multiple of
+    # the period, while nothing creates one at a multiple -- a missed beat spreads intervals
+    # across 2P, 3P, ... rather than piling them at 2P. So comparable mass at twice the mode
+    # means the mode is the split, and never the reverse.
+    # The neighbourhood is searched rather than the doubling point itself, because a split
+    # is not symmetric: Analyzer's two marks sit 0.53 s and 0.50 s apart on sub-0005, so the
+    # period is a little under twice the denser half and a window centred on exactly twice
+    # it clips the cluster. Run 5 missed by one interval that way.
+    if 1.7 * estimate <= maximum_s:
+        lower, upper = 1.7 * estimate, 2.3 * estimate
+        span = grid[(grid >= lower - window_s) & (grid <= upper)]
+        if span.size:
+            span_counts = np.array(
+                [np.sum((intervals >= edge) & (intervals < edge + window_s)) for edge in span]
+            )
+            best = float(span[int(np.argmax(span_counts))])
+            if span_counts.max() >= SPLIT_CYCLE_RATIO * caught.size:
+                near = intervals[(intervals >= best) & (intervals < best + window_s)]
+                if near.size:
+                    estimate = float(np.median(near))
+    return estimate
+
+
+@dataclass(frozen=True)
+class DoubleMarkResult:
+    kept: np.ndarray
+    dropped: np.ndarray
+    modal_interval_s: float
+
+
+def _beat_scores(
+    ecg_uv: np.ndarray,
+    beats: np.ndarray,
+    sfreq: float,
+    window: tuple[float, float],
+    template: np.ndarray,
+) -> np.ndarray:
+    """Correlation of each beat's own ECG window against the template, index-aligned.
+
+    Written out rather than routed through ``epoch_stack`` because that drops epochs
+    running off either end, which would silently shift every score onto the wrong beat.
+    """
+    centred = template - template.mean()
+    norm = np.linalg.norm(centred)
+    starts = np.round(np.asarray(beats) * sfreq).astype(int) + int(round(window[0] * sfreq))
+    length = centred.size
+    scores = np.full(beats.size, -np.inf)
+    if norm == 0:
+        return scores
+    for position, start in enumerate(starts):
+        if start < 0 or start + length > ecg_uv.size:
+            continue
+        segment = ecg_uv[start : start + length]
+        segment = segment - segment.mean()
+        magnitude = np.linalg.norm(segment)
+        scores[position] = float(segment @ centred / (magnitude * norm)) if magnitude else 0.0
+    return scores
+
+
+def drop_double_marks(
+    ecg_uv: np.ndarray,
+    beat_seconds: np.ndarray,
+    sfreq: float,
+    *,
+    window: tuple[float, float] = (-0.2, 0.4),
+    fraction: float = DOUBLE_MARK_FRACTION,
+) -> DoubleMarkResult:
+    """Remove marks that land twice inside one cardiac cycle, keeping the better-locked one.
+
+    Analyzer marks the QRS more reliably than any general-purpose detector measured on this
+    cohort, but on some runs it also marks the magnetohydrodynamic deflection riding the
+    T-wave, giving one cycle two marks. Cohort-wide there are 180 such cycles, all six
+    sub-0005 runs and sub-0007 runs 3 and 5, and the gap recovery leaves every one of them
+    in place because it only ever adds beats.
+
+    They are worth removing for two reasons. A mark where no beat is makes the correction
+    subtract a pulse template against nothing, injecting artifact rather than removing it.
+    And they corrupt ``physiological_floor``: their short intervals *are* the low percentile
+    it reads, so the filter meant to reject beats that are too close together is disarmed by
+    exactly the runs that need it.
+
+    Which of the two marks to drop is decided by the ECG, not by position: the template is
+    built from the cycles that are marked once, and whichever of the pair correlates less
+    with it is the one that goes. Marks are removed one at a time, shortest interval first,
+    so a cycle carrying more than two survives the process with one mark left.
+    """
+    beats = np.sort(np.asarray(beat_seconds, dtype=float))
+    modal = modal_interval(beats)
+    empty = np.empty(0)
+    if beats.size < 5 or not np.isfinite(modal):
+        return DoubleMarkResult(kept=beats, dropped=empty, modal_interval_s=modal)
+
+    threshold = fraction * modal
+    intervals = np.diff(beats)
+    if not np.any(intervals < threshold):
+        return DoubleMarkResult(kept=beats, dropped=empty, modal_interval_s=modal)
+
+    # Seed the template only from cycles marked once, so the shape being matched against is
+    # not itself an average of QRS complexes and T-waves.
+    crowded = np.zeros(beats.size, dtype=bool)
+    short = intervals < threshold
+    crowded[:-1] |= short
+    crowded[1:] |= short
+    seed = beats[~crowded]
+    template = qrs_template(ecg_uv, seed if seed.size >= MINIMUM_SEED_BEATS else beats, sfreq, window)
+    scores = _beat_scores(ecg_uv, beats, sfreq, window, template)
+
+    alive = np.ones(beats.size, dtype=bool)
+    while True:
+        live = np.flatnonzero(alive)
+        if live.size < 2:
+            break
+        spacing = np.diff(beats[live])
+        offending = np.flatnonzero(spacing < threshold)
+        if offending.size == 0:
+            break
+        pair = offending[int(np.argmin(spacing[offending]))]
+        left, right = live[pair], live[pair + 1]
+        alive[left if scores[left] < scores[right] else right] = False
+
+    return DoubleMarkResult(
+        kept=beats[alive], dropped=beats[~alive], modal_interval_s=modal
+    )
 
 
 def physiological_floor(
@@ -157,9 +334,14 @@ def physiological_floor(
     across 45 cohort runs, that percentile sits at a median of 0.82 of the beat-to-beat
     interval.
 
-    It is then capped against the combined train's median, because a sparsely marked run
-    has an inflated RR distribution -- on sub-0008 run 6 the percentile reaches 0.98 of the
-    median, which taken literally would reject almost every recovered beat.
+    **Intervals short enough to be a cycle marked twice are excluded before the percentile
+    is read, and both the percentile and the cap are measured against the modal interval
+    rather than the median.** A low percentile of Analyzer's raw intervals is set by
+    Analyzer's own double marks wherever it makes them: on sub-0005 it returns 0.52 s
+    against a 1.10 s beat period -- 0.48 of it, where a clean subject reads 0.75 -- so the
+    filter is loosened by precisely the runs whose marks are least trustworthy. The median
+    fails the mirror-image case, a sparsely marked run whose intervals are all inflated.
+    The mode survives both.
 
     Returns 0.0 when there is too little evidence to estimate, which disables filtering
     rather than guessing.
@@ -168,9 +350,16 @@ def physiological_floor(
     combined_rr = np.diff(np.sort(np.asarray(combined_beats, dtype=float)))
     if analyzer_rr.size < 10 or combined_rr.size < 10:
         return 0.0
-    subject = float(np.percentile(analyzer_rr, percentile))
-    cap = cap_fraction * float(np.median(combined_rr))
-    return min(subject, cap)
+    modal = modal_interval(analyzer_beats)
+    trusted = analyzer_rr
+    if np.isfinite(modal):
+        candidate = analyzer_rr[analyzer_rr >= DOUBLE_MARK_FRACTION * modal]
+        if candidate.size >= 10:
+            trusted = candidate
+    subject = float(np.percentile(trusted, percentile))
+    combined_modal = modal_interval(combined_beats)
+    reference = combined_modal if np.isfinite(combined_modal) else float(np.median(combined_rr))
+    return min(subject, cap_fraction * reference)
 
 
 def _enforce_floor(
@@ -205,6 +394,9 @@ class BeatQuality:
     implied_bpm: float
     refractory_violations: int
     refractory_rejected: int
+    #: Analyzer marks removed as a second mark inside one cardiac cycle, before any gap
+    #: was searched. Zero on a run whose marks are one per beat, which is most of them.
+    double_marks_dropped: int
     recovered_beats: int
     gap_seconds_before: float
     gap_seconds_after: float
@@ -279,6 +471,15 @@ def recover_beats(
     before = gap_summary(
         analyzer, duration, minimum_seconds=settings.minimum_seconds, factor=settings.factor
     )
+
+    # Cleared first, so the gap search and the floor both read a marker train that carries
+    # one mark per cycle. Done afterwards it would be too late: the floor is computed from
+    # these intervals, and the gaps are measured against their median.
+    double_marks_dropped = 0
+    if settings.clear_double_marks and analyzer.size >= MINIMUM_SEED_BEATS:
+        cleared = drop_double_marks(ecg_uv, analyzer, sfreq, window=window)
+        double_marks_dropped = int(cleared.dropped.size)
+        analyzer = cleared.kept
 
     if analyzer.size < MINIMUM_SEED_BEATS:
         return BeatRecovery(
@@ -363,6 +564,7 @@ def recover_beats(
             "ok",
             rejected=rejected,
             floor_s=floor,
+            double_marks_dropped=double_marks_dropped,
         ),
     )
 
@@ -381,6 +583,7 @@ def _quality(
     *,
     rejected: int = 0,
     floor_s: float = 0.0,
+    double_marks_dropped: int = 0,
 ) -> BeatQuality:
     intervals = np.diff(combined) if combined.size > 1 else np.array([np.nan])
     median_rr = float(np.median(intervals)) if combined.size > 1 else float("nan")
@@ -404,6 +607,7 @@ def _quality(
             int(np.sum(intervals < refractory_floor)) if combined.size > 1 else 0
         ),
         refractory_rejected=int(rejected),
+        double_marks_dropped=int(double_marks_dropped),
         recovered_beats=int(recovered.size),
         gap_seconds_before=float(before["gap_seconds"]),
         gap_seconds_after=float(after["gap_seconds"]),

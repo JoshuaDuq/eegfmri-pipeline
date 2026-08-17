@@ -63,6 +63,7 @@ def _recovery(recovered, gap_seconds_before, status="ok"):
         implied_bpm=nan,
         refractory_violations=0,
         refractory_rejected=0,
+        double_marks_dropped=0,
         recovered_beats=recovered,
         gap_seconds_before=gap_seconds_before,
         gap_seconds_after=nan,

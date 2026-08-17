@@ -7,6 +7,8 @@ from studies.pain_study.analysis.bcg.detect import (
     crosscheck_agreement,
     find_gaps,
     gap_summary,
+    drop_double_marks,
+    modal_interval,
     physiological_floor,
     qrs_template,
     recover_beats,
@@ -289,3 +291,140 @@ def test_crosscheck_degrades_gracefully_when_neurokit_fails():
     report = crosscheck_agreement(np.array([1.0, 2.0]), np.zeros(100), SFREQ)
 
     assert report["status"] != "ok"
+
+
+# --- Analyzer's own false positives -------------------------------------------------
+#
+# Analyzer sometimes marks the same cardiac cycle twice, once on the QRS and once on the
+# magnetohydrodynamic deflection riding the T-wave. Cohort-wide there are 180 such cycles,
+# concentrated in sub-0005 (all six runs) and sub-0007 runs 3 and 5.
+
+
+def _double_marked(beats, every=4, offset_s=0.30):
+    """Analyzer's train with a spurious T-wave mark on every nth cycle."""
+    spurious = beats[::every] + offset_s
+    return np.sort(np.concatenate([beats, spurious])), spurious
+
+
+def test_modal_interval_reads_the_beat_period_from_a_train_missing_beats():
+    """The median is inflated by missed beats; the modal interval is not."""
+    beats = np.arange(5.0, 200.0, 0.9)
+    sparse = np.concatenate([beats[:40], beats[40::3]])
+
+    assert np.median(np.diff(sparse)) > 1.5  # the median has already failed
+    assert abs(modal_interval(sparse) - 0.9) < 0.06
+
+
+def test_modal_interval_is_not_pulled_down_by_double_marks():
+    beats = np.arange(5.0, 200.0, 0.9)
+    train, _ = _double_marked(beats)
+
+    assert abs(modal_interval(train) - 0.9) < 0.06
+
+
+def test_t_wave_double_marks_are_dropped_and_the_qrs_is_kept():
+    beats = np.arange(5.0, 150.0, 0.9)
+    ecg = _synthetic_ecg(beats, 160.0, t_wave_uv=400.0)
+    train, spurious = _double_marked(beats)
+
+    result = drop_double_marks(ecg, train, SFREQ)
+
+    assert result.dropped.size >= spurious.size - 1
+    for beat in spurious:
+        assert np.min(np.abs(result.dropped - beat)) < 0.02
+    for beat in beats:
+        assert np.min(np.abs(result.kept - beat)) < 0.02
+
+
+def test_a_clean_marker_train_loses_nothing():
+    beats = np.arange(5.0, 150.0, 0.9)
+    ecg = _synthetic_ecg(beats, 160.0)
+
+    result = drop_double_marks(ecg, beats, SFREQ)
+
+    assert result.dropped.size == 0
+    assert np.array_equal(result.kept, beats)
+
+
+def test_genuine_bradycardia_is_not_treated_as_double_marking():
+    """A steady 40 bpm run has no short intervals at all and must survive intact."""
+    beats = np.arange(5.0, 190.0, 1.5)
+    ecg = _synthetic_ecg(beats, 200.0)
+
+    result = drop_double_marks(ecg, beats, SFREQ)
+
+    assert result.dropped.size == 0
+
+
+def test_physiological_floor_is_not_dragged_down_by_analyzer_double_marks():
+    """The floor exists to reject beats closer together than this heart ever beats.
+
+    Read from a low percentile of Analyzer's raw intervals it is set by Analyzer's own
+    false positives instead, which is the one case it most needs to survive: on sub-0005
+    it lands at 0.48x the beat period where a clean subject reads 0.75x, so the filter
+    that should catch double marks is disabled by their presence.
+    """
+    beats = np.arange(5.0, 200.0, 0.9)
+    train, _ = _double_marked(beats)
+
+    floor = physiological_floor(train, train)
+
+    assert floor > 0.5 * 0.9
+
+
+def test_modal_interval_prefers_the_full_cycle_when_most_cycles_are_marked_twice():
+    """Double-marking creates a spurious mode at half the beat period, never at twice it.
+
+    On sub-0005 run 4 it reaches 29% of intervals and the split interval becomes the
+    densest value outright, so a plain mode reads 0.53 s against a 1.05 s beat period and
+    the double marks it exists to expose stop looking short at all.
+    """
+    beats = np.arange(5.0, 300.0, 1.05)
+    doubled = beats[::2] + 0.52
+    train = np.sort(np.concatenate([beats, doubled]))
+
+    assert abs(modal_interval(train) - 1.05) < 0.08
+
+
+def test_double_marks_are_dropped_even_when_they_outnumber_clean_cycles():
+    beats = np.arange(5.0, 200.0, 1.05)
+    doubled = beats[::2] + 0.52
+    ecg = _synthetic_ecg(beats, 210.0, t_wave_uv=400.0)
+    train = np.sort(np.concatenate([beats, doubled]))
+
+    result = drop_double_marks(ecg, train, SFREQ)
+
+    assert result.dropped.size >= doubled.size - 2
+    for beat in doubled:
+        assert np.min(np.abs(result.dropped - beat)) < 0.02
+
+
+def test_recovery_clears_double_marks_before_filling_gaps():
+    """Order matters: a cycle marked twice inflates nothing once, but it lowers the floor.
+
+    Left in place its short intervals are the low percentile ``physiological_floor``
+    reads, so the filter that rejects implausibly close recovered beats is loosened by
+    exactly the runs whose marks are least trustworthy.
+    """
+    beats = np.arange(5.0, 190.0, 1.05)
+    ecg = _synthetic_ecg(beats, 200.0, t_wave_uv=400.0)
+    marked = np.sort(np.concatenate([beats, beats[::4] + 0.52]))
+
+    result = recover_beats(ecg, marked, SFREQ)
+
+    intervals = np.diff(result.combined_beats)
+    assert np.min(intervals) > 0.65 * 1.05
+    assert result.quality.double_marks_dropped >= beats[::4].size - 2
+
+
+def test_double_mark_clearing_can_be_switched_off():
+    beats = np.arange(5.0, 190.0, 1.05)
+    ecg = _synthetic_ecg(beats, 200.0, t_wave_uv=400.0)
+    marked = np.sort(np.concatenate([beats, beats[::4] + 0.52]))
+
+    result = recover_beats(
+        ecg, marked, SFREQ, settings=RecoverySettings(clear_double_marks=False)
+    )
+
+    assert result.quality.double_marks_dropped == 0
+    assert np.all(np.isin(marked, result.combined_beats))
