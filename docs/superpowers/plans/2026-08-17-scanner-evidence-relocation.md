@@ -12,6 +12,7 @@
 
 ## Global Constraints
 
+- **No docstrings in code this plan writes.** New modules, classes, functions and tests get none. Where a line genuinely needs explaining — a threshold, an ordering, a decision that will look wrong later — use a short `#` comment above it. This applies to code *authored* here; a file that is moved keeps the contents it already had, because a move is a move. Every code block below already follows this rule; do not reintroduce docstrings to match surrounding style.
 - **Never run the full pytest suite.** It takes ~9 minutes. Run the targeted subsets named in each task.
 - **Work directly in the main checkout.** Do not create git worktrees.
 - `test_config_loader_paths` fails at HEAD in this environment because of external-drive paths. That is pre-existing and not a regression — ignore it.
@@ -70,7 +71,7 @@
 Create `tests/preprocessing/test_clean_events_qc_gating.py`:
 
 ```python
-"""ECG coupling needs a recorded lead, not a scanner."""
+# ECG coupling needs a recorded lead, not a scanner.
 
 from __future__ import annotations
 
@@ -256,16 +257,14 @@ In `eeg_pipeline/preprocessing/report/spectra.py`, add the parameter to `compute
     aperiodic_exclude_hz: Sequence[tuple[float, float]] = (),
 ```
 
-Add to its docstring:
+Leave the existing docstring alone. Explain the new parameter with a comment where it is consumed instead:
 
-```
-    ``aperiodic_exclude_hz`` names frequency windows to withhold from the aperiodic fit,
-    beyond the notch stopbands and anything a decomb manifest reports as unavailable. It
-    exists for a persistent narrowband feature that is instrumental rather than neural --
-    an equipment line, a residual comb -- which a robust fit would otherwise tilt toward.
-    Empty by default: a fit should sit on the data unless there is a named reason it
-    cannot.
-```
+```python
+    # Windows withheld from the aperiodic fit beyond the notch stopbands and anything a
+    # decomb manifest reports unavailable. For a persistent narrowband feature that is
+    # instrumental rather than neural -- an equipment line, a residual comb -- which a
+    # robust fit would otherwise tilt toward. Empty unless a study names a reason.
+
 
 Extend the `excluded` tuple:
 
@@ -289,8 +288,8 @@ Extend the `excluded` tuple:
 In `eeg_pipeline/preprocessing/report/settings.py`, add to the `ReportSettings` dataclass beside `aperiodic_fit_range_hz`:
 
 ```python
-    #: Frequency windows withheld from the aperiodic fit, beyond the notch stopbands and
-    #: anything a decomb manifest reports as unavailable.
+    # Withheld from the aperiodic fit, on top of the notch stopbands and the
+    # decomb-unavailable intervals.
     aperiodic_exclude_hz: tuple[tuple[float, float], ...] = ()
 ```
 
@@ -584,7 +583,7 @@ git commit -m "refactor(gradient): move the comb and volume-locked measurement t
 Create `studies/tests/scripts/test_gradient_outputs.py`:
 
 ```python
-"""The gradient workflow writes tables and figures, not report sections."""
+# The gradient workflow writes tables and figures, not report sections.
 
 from __future__ import annotations
 
@@ -678,7 +677,7 @@ git commit -m "feat(gradient): draw the comb and locked residual as figures and 
 Create `tests/preprocessing/test_ica_cardiac_beat_source.py`:
 
 ```python
-"""Beat times come from markers, the channel, or whichever is available."""
+# Beat times come from markers, the channel, or whichever is available.
 
 from __future__ import annotations
 
@@ -720,18 +719,13 @@ Expected: FAIL — the fields do not exist.
 In `ica_cardiac_review.py`, add to `CardiacReviewSettings`:
 
 ```python
-    #: Where beat times come from: ``markers``, ``detect``, or ``auto``.
-    #:
-    #: ``auto`` prefers a marker train and falls back to channel detection, which is what
-    #: this module did unconditionally before the choice existed. The preference was fixed
-    #: because of an in-scanner problem -- an ordinary QRS detector locks onto the
-    #: magnetohydrodynamic deflection, reporting 8 and 2 bpm where the markers report 61
-    #: and 60. Outside a bore that reason does not apply, so the order is a choice.
+    # markers | detect | auto. "auto" is what this module did unconditionally before the
+    # choice existed: prefer a marker train, fall back to the channel. That preference was
+    # fixed because a QRS detector locks onto the magnetohydrodynamic deflection in a
+    # magnet, reporting 8 and 2 bpm where markers report 61 and 60. Elsewhere it is wrong.
     beat_source: str = "auto"
-    #: Annotation carrying one mark per heartbeat, exactly as the recording spells it.
-    #:
-    #: ``None`` means the recording carries none, which is the ordinary case: a montage
-    #: with an ECG lead and no marker train detects from the channel.
+    # The beat annotation, spelled as the recording spells it. None means there is none,
+    # which is ordinary: a lead without a marker train is detected from the channel.
     marker_description: str | None = None
 ```
 
@@ -883,7 +877,7 @@ Expected: FAIL with `ImportError`.
 
 - [ ] **Step 3: Move the code**
 
-Move `add_rr_interval_section` (`analyzer_qc.py:1308`), its table builder (`:1258`), its two figures (`:1146`, `:1237`), `MISSED_BEAT_FACTOR` and the RR dataclasses into `report/rr_intervals.py`. Give it a docstring stating it is ECG physiology and reads no scanner quantity.
+Move `add_rr_interval_section` (`analyzer_qc.py:1308`), its table builder (`:1258`), its two figures (`:1146`, `:1237`), `MISSED_BEAT_FACTOR` and the RR dataclasses into `report/rr_intervals.py`. Head the module with a one-line `#` comment: it is ECG physiology and reads no scanner quantity.
 
 Its section name changes from `"Scanner artifact correction (Analyzer)"` to `"Cardiac rhythm"`, and its tag from the Analyzer tag to `"rr-intervals"`. Add `"Cardiac rhythm"` to `SECTION_ORDER` in `organize.py`, positioned with the ICA cardiac review.
 
@@ -993,7 +987,19 @@ Strip the MNE-report rendering as in Task 4 — `add_*_section` functions and `g
 
 - [ ] **Step 2: Move the tests**
 
-`git mv` `tests/preprocessing/test_report_analyzer_qc.py`, `tests/preprocessing/report/test_cohort_analyzer.py`, `tests/preprocessing/test_pulse_artifact_qc.py`, `tests/preprocessing/test_cardiac_artifact_qc.py`, `tests/preprocessing/test_report_marker_agreement.py` into `studies/tests/analysis/`. Update imports; drop HTML assertions.
+`git mv` into `studies/tests/analysis/`:
+
+```bash
+git mv tests/preprocessing/test_report_analyzer_qc.py studies/tests/analysis/
+git mv tests/preprocessing/report/test_cohort_analyzer.py studies/tests/analysis/
+git mv tests/preprocessing/test_pulse_artifact_qc.py studies/tests/analysis/
+git mv tests/preprocessing/test_cardiac_artifact_qc.py studies/tests/analysis/
+git mv tests/preprocessing/test_report_marker_agreement.py studies/tests/analysis/
+git mv tests/preprocessing/test_report_cohort_qc.py studies/tests/analysis/
+git mv tests/preprocessing/report/test_cohort_noise_floor.py studies/tests/analysis/
+```
+
+The last two cover `cohort_qc.py` and the noise-floor estimator whose core copy this task deletes; both were unnamed in earlier drafts of this plan. Update imports; drop HTML assertions.
 
 - [ ] **Step 3: Run them**
 
@@ -1172,15 +1178,28 @@ Expected: FAIL — the module imports fine.
 - `preprocessing_overrides.py`: delete the `--trim-to-volume-bounds` override and its argparse flag.
 - `pipelines/preprocessing.py`: delete `STEP_SCANNER_HARMONIC_QC`, `STEP_PULSE_MARKER_QC`, `STEP_CARDIAC_ATTENUATION_QC`, their `_get_steps_for_mode` insertions, `_run_scanner_harmonic_qc`, `_is_eeg_fmri`, `_validate_eeg_fmri_declaration`, and the `_is_eeg_fmri()` gate on the ICA cardiac review at line 1140 — that stage now runs whenever `ica.cardiac_review.enabled` is set.
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 4: Retire the gating test whose subject just disappeared**
+
+`tests/pipelines/test_eeg_only_gating.py` (243 lines) exists to prove that
+`preprocessing.eeg_fmri` and `preprocessing.brainvision_analyzer.enabled` are two switches
+rather than one — a distinction that stops existing when the first key is deleted. Most of
+it must go, but **read it before deleting it**: anything asserting that the ordinary path
+still runs — filtering, PyPREP, ICA, the ocular review, epoching — is now asserting the
+*only* path, and that is worth more than it was before, not less.
+
+Move those cases into `tests/pipelines/test_pipeline_preprocessing.py` with the scanner
+premise stripped from their names and setup, then delete the file. Do not delete wholesale
+and do not keep it limping with its scanner cases commented out.
+
+- [ ] **Step 5: Run the tests**
 
 ```bash
-python -m pytest tests/preprocessing/test_report_settings_shipped_configs.py tests/preprocessing/test_report_modes.py -k "config or coherence or mode" -v
+python -m pytest tests/pipelines/ tests/preprocessing/test_report_settings_shipped_configs.py tests/preprocessing/test_report_modes.py -v
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add -A eeg_pipeline tests
@@ -1307,24 +1326,49 @@ Expected: FAIL on the first path.
 
 Delete the `("harmonics", f"{_EEG}.harmonics", "harmonics", False)` row from `cli/commands/__init__.py:98`, and register the command study-side in `command_registry.py` alongside `line_comb_command()` so `eeg-pipeline harmonics` keeps working for the study.
 
-- [ ] **Step 4: Move the tests**
+- [ ] **Step 4: Reverse the protection assertion that guards the plot**
 
-`git mv tests/preprocessing/test_scanner_harmonic_qc.py studies/tests/analysis/`, plus any test covering `analysis/qc/`. Find them with:
+`tests/architecture/test_tui_plotting_removal.py:13` declares:
 
-```bash
-grep -rln "analysis.qc\|scanner_harmonic" tests/
+```python
+PROTECTED_PLOTS = ("eeg_pipeline/plotting/scanner_harmonic_comb.py",)
 ```
 
-- [ ] **Step 5: Run the tests**
+That file asserts this plot **must exist in core** — it was deliberately kept when the rest of the plotting tree was removed. Moving it is a reversal of that decision, not an oversight, so make the reversal explicit: drop the entry from `PROTECTED_PLOTS`, and if the tuple empties, delete it and its test rather than leaving an assertion over nothing. Add a line to that file's rationale recording that the plot moved to the study rather than being deleted.
+
+Also check whether `eeg_pipeline/plotting/` still warrants being a package: after this move it holds only `component_tfr.py`. Leave it — one module is a thin package, not a wrong one.
+
+- [ ] **Step 5: Move the tests**
+
+Four files, named rather than grepped for:
 
 ```bash
-python -m pytest tests/architecture/ studies/tests/analysis/ -v
+git mv tests/preprocessing/test_scanner_harmonic_qc.py studies/tests/analysis/
+git mv tests/analysis/test_scanner_harmonics.py studies/tests/analysis/
+git mv tests/analysis/test_scanner_harmonic_comb.py studies/tests/analysis/
+git mv tests/plotting/test_scanner_harmonic_comb_plot.py studies/tests/scripts/
+```
+
+Two study-side tests already import these modules from core and need their imports repointed, not moved: `studies/tests/pipelines/test_study1_scanner_harmonic_figure.py` and `test_study1_scanner_harmonic_spectrum.py`.
+
+Confirm nothing was missed:
+
+```bash
+grep -rln "analysis\.qc\|scanner_harmonic" tests/
+```
+
+Expected: no hits.
+
+- [ ] **Step 6: Run the tests**
+
+```bash
+python -m pytest tests/architecture/ studies/tests/ tests/plotting/ -v
 eeg-pipeline harmonics --help
 ```
 
 Expected: PASS, and the command still resolves.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A eeg_pipeline studies tests
@@ -1455,7 +1499,7 @@ git commit -m "refactor(cohort): drop the scanner columns and bump the sidecar s
 
 - [ ] **Step 1: Write the failing tests**
 
-Replace the module docstring's first line with:
+Replace the module docstring's first line — this file already has one and keeps it, since the contract is what the file exists to state:
 
 ```python
 """``eeg_pipeline/`` holds what is true of any EEG study. This checks it stayed that way.
@@ -1464,14 +1508,10 @@ Replace the module docstring's first line with:
 and append:
 
 ```python
-#: Compound terms that only mean something inside an MR scanner.
-#:
-#: Compound, not the bare word ``gradient``: core legitimately contains ``np.gradient``
-#: (analysis/features/quality.py, analysis/features/spectral.py),
-#: ``GradientBoostingRegressor`` (analysis/machine_learning/uncertainty.py) and
-#: ``cnn_gradient_clip_norm`` (analysis/machine_learning/cnn.py). ``fmri`` is unusable for
-#: the same reason -- ``resolve_fmri_bids_root`` and the ``eeg-pipeline fmri`` commands are
-#: correct code driving this repository's separate fMRI pipeline.
+# Compound terms, deliberately. Bare "gradient" would hit np.gradient,
+# GradientBoostingRegressor and cnn_gradient_clip_norm, all legitimate and all under
+# eeg_pipeline/analysis/. Bare "fmri" would hit resolve_fmri_bids_root and the
+# eeg-pipeline fmri commands, which drive this repo's separate fMRI pipeline.
 SCANNER_MARKERS = (
     "volume_locked",
     "repetition_time_s",
@@ -1481,14 +1521,10 @@ SCANNER_MARKERS = (
     "brainvision_analyzer",
 )
 
-#: Bare words forbidden in the preprocessing tree, where no legitimate use survives.
-#:
-#: Safe here and nowhere else: ``eeg_pipeline/preprocessing/`` contains no ``np.gradient``,
-#: no ``GradientBoostingRegressor`` and no ``gradient_clip`` -- every one of those lives
-#: under ``eeg_pipeline/analysis/``, as does ``source_localization``'s "scanner RAS", which
-#: is a FreeSurfer coordinate frame and not an artifact.
-#:
-#: ``volume`` is deliberately absent: it is ordinary English and an MNE source-space term.
+# Bare words, safe in this tree and nowhere else: eeg_pipeline/preprocessing/ has no
+# np.gradient, no GradientBoostingRegressor, no gradient_clip, and no "scanner RAS" --
+# those all live under eeg_pipeline/analysis/. "volume" is deliberately absent: ordinary
+# English, and an MNE source-space term.
 PREPROCESSING_FORBIDDEN_WORDS = (
     "scanner",
     "gradient",
