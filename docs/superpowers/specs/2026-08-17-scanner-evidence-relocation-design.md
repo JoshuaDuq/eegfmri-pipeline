@@ -96,14 +96,41 @@ its odd-even split measures half-to-half *correlation*, not a floor-corrected am
 
 ### To `studies/pain_study/scripts/gradient/` (new)
 
-| Source | Note |
+The scanner-harmonic subsystem — an entire `eeg-pipeline harmonics` command with its own QC
+package, 1,583 lines across eight files:
+
+| Source | Lines |
 |---|---|
-| `eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py` | Already an I/O-and-outputs stage |
-| `eeg_pipeline/plotting/scanner_harmonic_comb.py` | Already a plot |
+| `eeg_pipeline/analysis/qc/scanner_harmonics.py` | 510 |
+| `eeg_pipeline/analysis/qc/scanner_harmonic_comb.py` | 330 |
+| `eeg_pipeline/plotting/scanner_harmonic_comb.py` | 310 |
+| `eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py` | 218 |
+| `eeg_pipeline/cli/commands/harmonics_parser.py` | 96 |
+| `eeg_pipeline/cli/commands/harmonics_orchestrator.py` | 81 |
+| `eeg_pipeline/analysis/qc/__init__.py` | 29 |
+| `eeg_pipeline/cli/commands/harmonics.py` | 9 |
+
+`eeg_pipeline/analysis/qc/` holds nothing else, so the package directory goes with them, and
+the `("harmonics", ...)` row at `cli/commands/__init__.py:98` is removed. The command
+re-registers study-side through `command_registry.py` like `line-comb` and `cardiac-gaps`,
+so `eeg-pipeline harmonics` keeps working for the study.
 
 New files, following `scripts/line_comb/`: `plot.py` (the three figures —
 `plot_comb_residual`, `plot_volume_locked_average`, `plot_cohort_comb` — written as PNG),
 `config.yaml`, `README.md`, `__init__.py`.
+
+### To `studies/pain_study/scripts/conversion/` (exists)
+
+`eeg_pipeline/preprocessing/brainvision_markers.py` — "strict BrainVision marker sanitation
+for scanner-trigger collisions." It exists because this study's `Vas_on/V  1` VAS marker
+collides with the scanner's `Volume/V  1`, and it hardcodes both vocabularies
+(`VAS_MARKER_TYPE`, `SANITIZED_VAS_DESCRIPTION`, `SCANNER_DESCRIPTION = "V  1"`). One
+paradigm's marker names, one acquisition's collision.
+
+Both its consumers are already study conversion scripts —
+`sanitize_brainvision_vas_markers.py` and `export_brainvision_matlab.py` — so this is a core
+module that only the study calls. `tests/preprocessing/test_brainvision_markers.py` follows
+it to `studies/tests/`.
 
 ### CLI
 
@@ -178,6 +205,58 @@ callers, `add_*_section` functions and MNE wiring go rather than move.
   `STEP_CARDIAC_ATTENUATION_QC`, their insertion in `_get_steps_for_mode`,
   `_run_scanner_harmonic_qc`, `_is_eeg_fmri`, `_validate_eeg_fmri_declaration`, and the
   `_is_eeg_fmri()` gate on the ICA cardiac review at line 1140.
+- `preprocessing/band_ica_report.py` — the `analyzer_marker_ctps_fallback` branch at
+  lines 2353-2354, its panel constant at 1932, and the warning text at 1946 naming
+  Analyzer's 0.21 s default delay. **This one rots silently rather than failing.** The
+  column is written by `cardiac_artifact_qc.py:194`, which moves to the study; the read is
+  guarded by `if "analyzer_marker_ctps_fallback" in components.columns`, so after the move
+  nothing raises — the branch simply becomes unreachable, and a core module keeps carrying
+  prose about a vendor default that core no longer knows anything about. Exactly the kind of
+  residue that makes a report read as though it were assembled from parts of another
+  pipeline.
+
+## What the report reads like afterwards
+
+Removing the code is the easy half. A report whose remaining sections explain themselves by
+reference to sections that no longer exist is the "all over the place" failure this change is
+supposed to cure, not cause.
+
+### The prose sweep is part of the work, not tidying afterwards
+
+Roughly 370 mentions of scanner vocabulary sit across the report modules, and **about 130 of
+them are in modules that stay**. The dense ones: `cohort/spectra.py` (22 bare scanner-words),
+`continuity.py` (17), `cohort/sidecar.py` (14), `run_evidence.py` (11), `at_a_glance.py` (11),
+`ica_cardiac_review.py` (10), `settings.py` (9), `cohort/record.py` (9).
+
+Some are attached to code being deleted and go with it. The rest are docstrings and rendered
+prose that would survive their subject — `run_evidence.py:74` explaining what absence from
+the comb table means, `sidecar.py:145` and `:421` describing "the comb table",
+`settings.py:322` promising that a dataset without volume markers "simply gets no gradient
+section", `cohort/composition.py:17` warning a reader who meets something "in the middle of
+the gradient section". Each is a sentence pointing at a section the reader cannot reach.
+
+`ica_cardiac_review.py` and `ica_cardiac_report.py` are the notable case: they *stay*, and
+their prose is written throughout in terms of ballistocardiogram and bore, because that was
+the only context they had. Once they are the general ECG review, that prose is describing the
+wrong thing to the reader who now uses them.
+
+### No section is emptied by the cuts
+
+Checked rather than assumed, because a section that survives as a heading over nothing is the
+same defect from the other direction:
+
+- **`at_a_glance`** keeps 14 of its 17 headline rows. The three that go are the Analyzer
+  marker-agreement trio, and the panel already drops rows whose key is absent.
+- **`cohort/composition.py`** loses only the In scanner / Outside scanner strata. Its
+  participant table, durations, channel counts, pipeline versions and mixed-cohort note are
+  untouched.
+- **`cohort/multiplicity.py`** drops to three families safely. `FAMILY_ORDER` is already
+  filtered to families actually present, and each metric's outer decile is computed
+  independently inside `for source in sources:` — so removing the two scanner metrics changes
+  no other metric's placement. This is not a family-wise correction whose denominator moves.
+- **`SECTION_ORDER`** goes from 24 entries to 22, and the reading-order comments above each
+  group need re-checking: the group headed "What came in, and what the upstream correction
+  left in it" loses two of its four members and no longer describes what follows it.
 
 ## What is *not* a scanner reference
 
@@ -412,8 +491,8 @@ so it inherits the configured beat source rather than reading Analyzer's markers
 
 ## Sequencing
 
-One rule change, but roughly 4,000 lines relocating across ~20 core modules, the config
-tree, and ~45 test files. One plan, six phases, each leaving the suite green:
+One rule change, but roughly 5,000 lines relocating across ~30 core modules, the config tree,
+and ~45 test files. One plan, seven phases, each leaving the suite green:
 
 0. **The ECG coupling gate**, as its own commit with its own test. Independent of everything
    else, and it should read as a bug fix rather than as fallout from a move.
@@ -436,8 +515,15 @@ tree, and ~45 test files. One plan, six phases, each leaving the suite green:
 4. **Config.** Keys out of `eeg_config.yaml` into the workflow configs, `acquisition.py`
    deleted, `coherence.py` and `loader.py` trimmed, `eeg_only.yaml` retired, study configs
    updated.
-5. **Cohort sidecar, architecture test, pipeline steps.** The schema change, the new
-   contract written down, and the STEP constants removed once nothing dispatches to them.
+5. **The harmonics subsystem and the conversion helpers.** `analysis/qc/`, the three
+   `cli/commands/harmonics*` modules and the `("harmonics", ...)` registration;
+   `brainvision_markers.py` and `trim_to_volume_bounds` to `scripts/conversion/`. Structurally
+   independent of phases 1-3, and large enough to deserve its own review.
+6. **Cohort sidecar, architecture test, pipeline steps, and the prose sweep.** The schema
+   change, the two new gates written down, the STEP constants removed once nothing dispatches
+   to them, and the ~130 surviving scanner references reworded until the strict gate reads
+   zero. The sweep goes last because until everything has moved, it is not yet knowable which
+   sentences are stale.
 
 Two phases have a behavioural seam and the rest are pure movement. Phase 1 must leave
 aperiodic exponents **bit-identical** on a real in-scanner subject, and phase 2 must leave
@@ -471,10 +557,31 @@ are correct code that must survive.
 
 A companion assertion should check `eeg_config.yaml` for the same terms.
 
+### A second, stricter gate over `eeg_pipeline/preprocessing/`
+
+The compound-marker check above is deliberately loose, so it cannot catch the prose sweep —
+docstrings say "scanner" and "gradient" in plain English, not `volume_locked`. A second
+assertion, scoped to `eeg_pipeline/preprocessing/` alone, forbids the **bare** words
+`scanner`, `gradient`, `bore`, `analyzer`, `ballistocardiogram` and `bcg`.
+
+That tighter scope is what makes the bare list safe, and it was verified rather than assumed:
+`eeg_pipeline/preprocessing/` contains **no** `np.gradient`, `GradientBoostingRegressor` or
+`gradient_clip` — every one of those lives under `eeg_pipeline/analysis/`. The one other
+false positive in core, `source_localization.py`'s "scanner RAS" (a FreeSurfer coordinate
+frame, unrelated to gradient artifact), is also outside `preprocessing/`.
+
+Reaching zero on this gate is the completion criterion for the prose sweep. It is achievable:
+every remaining hit is in a file that is either moving, having the reference deleted, or
+being reworded.
+
+`volume` is deliberately **not** on either list — it appears legitimately in ordinary English
+and in MNE's volume source spaces.
+
 Moving to `studies/tests/` with their subjects: `test_report_scanner.py` (736 ln),
 `test_cohort_gradient.py` (429 ln), `test_report_analyzer_qc.py`, `test_cohort_analyzer.py`,
 `test_pulse_artifact_qc.py`, `test_cardiac_artifact_qc.py`,
-`test_report_marker_agreement.py`, `test_scanner_harmonic_qc.py`.
+`test_report_marker_agreement.py`, `test_scanner_harmonic_qc.py`,
+`test_brainvision_markers.py`, and whatever covers `analysis/qc/` and the harmonics CLI.
 
 Staying in core, but re-pointed at the extracted modules:
 `test_report_rr_intervals.py`, `test_ica_cardiac_report_figures.py`,
