@@ -39,6 +39,7 @@ COMPARED_SETTINGS = (
     "spectra_line_frequency",
     "notch_exclusion_half_width_hz",
     "aperiodic_fit_range_hz",
+    "aperiodic_exclude_hz",
     "alpha_band_hz",
     "alpha_reference_band_hz",
     # Selects the sensors the rhythm is measured over, so it changes the pooled

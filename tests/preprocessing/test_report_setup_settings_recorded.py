@@ -29,6 +29,7 @@ class _Config:
 
 
 NEW_KEYS = (
+    "report.analysis.aperiodic_exclude_hz",
     "report.analysis.alpha_reference_band_hz",
     "report.analysis.bcg_residual_window_s",
     "report.analysis.bcg_residual_baseline_s",
@@ -64,6 +65,7 @@ def test_a_setting_the_dataset_never_configured_is_omitted_rather_than_listed() 
 
 
 COMPARED_NEW_KEYS = (
+    "aperiodic_exclude_hz",
     "alpha_reference_band_hz",
     "posterior_channel_pattern",
     "plausible_heart_rate_bpm",
@@ -122,3 +124,42 @@ def test_agreeing_participants_are_not_reported_as_a_disagreement() -> None:
     shared = {"component_label_patterns": [["eog", "eye"]], "alpha_reference_band_hz": [3.0, 25.0]}
     found = _disagreements({"0001": dict(shared), "0002": dict(shared)}, COMPARED_SETTINGS)
     assert found == {}
+
+
+def test_aperiodic_exclude_hz_compares_without_failing_on_an_unhashable_value() -> None:
+    # Same shape as component_label_patterns: a list of pairs, JSON gives back as nested lists.
+    from eeg_pipeline.preprocessing.report.cohort.homogeneity import _disagreements
+
+    found = _disagreements(
+        {
+            "0001": {"aperiodic_exclude_hz": [[20.0, 25.0]]},
+            "0002": {"aperiodic_exclude_hz": [[58.0, 62.0]]},
+        },
+        ("aperiodic_exclude_hz",),
+    )
+    assert "aperiodic_exclude_hz" in found
+
+
+def test_aperiodic_exclude_hz_agreement_is_not_reported_as_a_disagreement() -> None:
+    from eeg_pipeline.preprocessing.report.cohort.homogeneity import _disagreements
+
+    shared = {"aperiodic_exclude_hz": [[20.0, 25.0], [58.0, 62.0]]}
+    found = _disagreements(
+        {"0001": dict(shared), "0002": dict(shared)}, ("aperiodic_exclude_hz",)
+    )
+    assert found == {}
+
+
+def test_an_empty_sequence_setting_reads_as_none_not_a_blank_cell() -> None:
+    # aperiodic_exclude_hz ships empty by default; joining zero items gave back "" before.
+    from eeg_pipeline.preprocessing.report.provenance import _format_value
+
+    assert _format_value(()) == "none"
+    assert _format_value([]) == "none"
+
+
+def test_a_configured_empty_exclusion_list_is_recorded_as_none_in_the_table() -> None:
+    html = provenance_html(_Config({"report.analysis.aperiodic_exclude_hz": []}))
+
+    assert "Aperiodic exclusion windows" in html
+    assert "none" in html

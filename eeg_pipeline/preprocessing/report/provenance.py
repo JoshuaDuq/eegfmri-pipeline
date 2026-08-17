@@ -44,6 +44,7 @@ PROVENANCE_KEYS = (
     ("time_windows.baseline_tfr_multitaper", "TFR baseline, multitaper (s)"),
     ("preprocessing.brainvision_analyzer.enabled", "Analyzer correction upstream"),
     ("report.analysis.aperiodic_fit_range_hz", "Aperiodic fit range (Hz)"),
+    ("report.analysis.aperiodic_exclude_hz", "Aperiodic exclusion windows (Hz)"),
     ("report.analysis.response_window_s", "Split-half response window (s)"),
     ("report.analysis.alpha_band_hz", "Posterior rhythm band (Hz)"),
     ("report.analysis.alpha_reference_band_hz", "Posterior rhythm reference band (Hz)"),
@@ -81,6 +82,11 @@ def _format_value(value: Any) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, (list, tuple)):
+        # An empty sequence is a real, common value here -- aperiodic_exclude_hz ships
+        # empty by default -- and joining zero items silently gives back "", which reads
+        # as a blank cell rather than as the recorded choice it is.
+        if not value:
+            return "none"
         return ", ".join(str(item) for item in value)
     return str(value)
 
