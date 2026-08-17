@@ -44,9 +44,10 @@ should do on hitting an ambiguous case.
 |---|---|
 | How far does the rule reach? | Everything scanner-derived — the gradient sections, the Analyzer section, the in/out-of-scanner strata, the scanner metric family. |
 | Delete, or relocate? | **Relocate.** Every measurement survives under `studies/pain_study/`, rendered as plots and TSVs instead of report sections. |
-| Do the volume-rate-reading measurement helpers go? | **Yes, all three** — `gradient_windows`, `gradient_marks_hz`, continuity volume gaps. Accepted consequence: aperiodic exponents change. |
+| Do the volume-rate-reading measurement helpers go? | `gradient_marks_hz` and the continuity volume gaps, yes. `gradient_windows` is generalized instead — see the row below and the audit that changed this answer. |
 | Does ECG analysis go? | **No.** ICA cardiac review, RR interval evidence and the ECG coupling QC all stay in core and stay in the report. |
 | Does the ECG *marker* path go? | **No.** Any EEG study may carry beat markers. The path stays, genericized off Analyzer's marker name via new config. |
+| Does the aperiodic comb exclusion go? | **No.** Generalized to a config-supplied window list, so core stops deriving it from a volume rate without losing the capability. |
 | Configuration? | **In scope.** The scanner keys leave the core config for study workflow configs, and the config machinery that reads them goes with them. |
 
 ## What moves
@@ -81,6 +82,18 @@ only written account of what the measurements mean.
 | `eeg_pipeline/preprocessing/pulse_artifact_qc.py` | Analyzer pulse markers; owns `PULSE_MARKER_DESCRIPTION` |
 | `eeg_pipeline/preprocessing/cardiac_artifact_qc.py` | BCG attenuation |
 
+### To `studies/pain_study/analysis/noise_floor.py` (new)
+
+`report/cohort/noise_floor.py` — the odd-even averaging-floor estimator. Both movers import
+it (`scanner.py` and `analyzer_qc.py`) and, once they leave, **nothing in core does**. It is
+placed at the `analysis/` root rather than inside either folder because both use it.
+
+The technique is general — an odd-even split estimates the noise floor of any event-locked
+average — so leaving it in core is defensible in principle. It is moved anyway: an unused
+general-purpose module is how a core tree becomes something nobody can navigate, and if a
+core consumer appears later it can come back. `report/preservation.py` is not that consumer;
+its odd-even split measures half-to-half *correlation*, not a floor-corrected amplitude.
+
 ### To `studies/pain_study/scripts/gradient/` (new)
 
 | Source | Note |
@@ -100,7 +113,7 @@ alongside `line-comb` and `cardiac-gaps`.
 
 ## What stays in core
 
-Named explicitly, because the earlier draft had two of these leaving:
+Named explicitly, because earlier drafts had several of these leaving:
 
 - **`ica_cardiac_review.py` and `ica_cardiac_report.py`** — ECG-based ICA component review,
   and the "ICA cardiac artifact review" report section.
@@ -133,9 +146,9 @@ callers, `add_*_section` functions and MNE wiring go rather than move.
 
 **Spectra**
 
-- `report/spectra.py` — `gradient_windows`, `_HARMONIC_SKIRT_BINS`, the
-  `gradient_fundamental_hz` parameter of `compute_run_spectra`, and the gradient clause in
-  the figure caption at line 444.
+- `report/spectra.py` — the `gradient_fundamental_hz` parameter of `compute_run_spectra` and
+  the gradient clause in the figure caption at line 444. **`gradient_windows` is generalized
+  rather than deleted** — see below.
 - `report/cohort/spectra.py` — `MARKED_GRADIENT_HARMONICS`, the in-scanner/out-of-scanner
   linestyle split and legend, and the two-branch aperiodic interpretation prose.
 
@@ -166,6 +179,30 @@ callers, `add_*_section` functions and MNE wiring go rather than move.
   `_run_scanner_harmonic_qc`, `_is_eeg_fmri`, `_validate_eeg_fmri_declaration`, and the
   `_is_eeg_fmri()` gate on the ICA cardiac review at line 1140.
 
+## What is *not* a scanner reference
+
+Three things look in scope and are not. Getting these wrong would break working code or
+throw away general capability, so they are named before the removals.
+
+**`paths.decomb_manifest` and `eeg_pipeline/spectral_availability/` stay in core.** An
+earlier draft moved the manifest path to the line-comb workflow config. That was wrong on
+three counts. `pipelines/features.py:1089` reads the same key, so moving it breaks the
+features pipeline, not just preprocessing. The package is general — its manifest schema is
+`recording, unavailable_low_hz, unavailable_high_hz, outcome, removal_round`, which names no
+scanner concept and describes any upstream narrowband removal. And the artifact itself is
+not a gradient artifact: the residual comb here is mains-synchronous and room-borne, which
+is why `studies/pain_study/analysis/line_comb/` already holds the room's measured
+frequencies while the mechanism stays in core. "These bands were filtered upstream, do not
+score them as residual artifact" is something any EEG lab needs.
+
+**fMRI *pipeline integration* stays.** `fmri_pipeline/` is a separate tree in this repo, and
+core legitimately reaches it: `resolve_fmri_bids_root`, `resolve_resting_state_fmri_mode`,
+`bids_fmri_root`, the `eeg-pipeline fmri` commands. The rule is about EEG artifact
+correction that only makes sense inside a bore — not about the repository's fMRI pipeline
+or the CLI that launches it. A rule applied that broadly would delete working, correct code.
+
+**ECG coupling was never a scanner stage** — see the bug fix below.
+
 ## Configuration changes
 
 The keys leave core for the workflow config of whichever study folder now owns the code
@@ -176,16 +213,46 @@ resolution order: paths come from core, workflow settings sit next to their code
 
 | Key | Goes to |
 |---|---|
-| `paths.decomb_manifest` | `scripts/line_comb/config.yaml` |
 | `preprocessing.eeg_fmri` | deleted — nothing gates on it once the stages are gone |
 | `preprocessing.brainvision_analyzer.*` (10 keys, incl. `pulse_artifact_qc` and `cardiac_artifact_qc` blocks) | `scripts/bcg/config.yaml` (new) |
 | `preprocessing.scanner_harmonic_qc.*` (5 keys) | `scripts/gradient/config.yaml` |
-| `alignment.trim_to_volume_bounds` | `scripts/conversion/` — already exposed there as `--trim-to-volume-bounds` |
+| `alignment.trim_to_volume_bounds` | **deleted — the key is dead.** Nothing reads it. It is defined here, warned about in `coherence.py:213`, written by the `--trim-to-volume-bounds` CLI override at `preprocessing_overrides.py:137`, and set false in `eeg_only.yaml` — but no code consumes its value. The real trimming is driven by the study's own argparse flag through `run_paradigm_specific.py`. Delete the key, the coherence entry and the CLI override. The *function* `utils/data/preprocessing.py:278` has one caller, `scripts/conversion/eeg_raw_to_bids.py`, and moves there. |
 | `report.thresholds.min_r_markers_per_volume` | `scripts/bcg/config.yaml` |
 | `report.thresholds.comb_frequency_range_hz`, `comb_welch_seconds`, `repetition_time_tolerance_s` | `scripts/gradient/config.yaml` |
 | `report.analysis.bcg_residual_window_s`, `bcg_residual_baseline_s`, `bcg_residual_measurement_s` | `scripts/bcg/config.yaml` |
 | `report.acquisition.volume_marker_description` | `scripts/gradient/config.yaml` |
 | `report.acquisition.pulse_marker_description` | replaced by `ica.cardiac_review.marker_description` below; the study sets `"Pulse Artifact/R"` as an override |
+
+### Into `eeg_config.yaml`: aperiodic exclusion windows
+
+The earlier draft deleted `gradient_windows` outright, on the reasoning that it reads a
+volume rate. Checking what it actually does changes the answer.
+
+`gradient_windows(None, ...)` returns `()`. Its argument comes from volume markers, so on a
+recording made outside a scanner the function is **already inert** — deleting it buys the
+pipeline's new audience nothing, because that code path never fires for them. What deletion
+*would* do is silently degrade the pain study, which still runs core preprocessing on
+in-scanner recordings: its aperiodic slopes would start being fitted across a comb that
+nothing excludes.
+
+`compute_run_spectra` already withholds two kinds of window from the fit — notch stopbands,
+and intervals a decomb manifest reports as unavailable. The right change is to let a third
+come from config:
+
+```yaml
+  analysis:
+    # Frequency windows withheld from the aperiodic fit, beyond the notch stopbands and
+    # anything a decomb manifest reports as unavailable. For a persistent narrowband
+    # feature that is instrumental rather than neural -- an equipment line, a residual
+    # comb -- which a robust fit would otherwise tilt toward. Empty by default: a fit
+    # should sit on the data unless there is a named reason it cannot.
+    aperiodic_exclude_hz: []
+```
+
+This is general — any lab with a stable equipment line wants it — and it removes the fMRI
+reference just as completely, because core stops deriving the windows from a volume rate
+and merely honours a list. The study puts its comb harmonics in its own override and keeps
+the fits it has.
 
 ### Into `eeg_config.yaml`: the ECG beat source
 
@@ -218,32 +285,48 @@ The block also corrects a comment that is already wrong: `eeg_config.yaml:505` s
 `ica.cardiac_review.ecg_channel` already name the same lead in two places. That predates this
 change and merging them is its own piece of work.
 
-Prose edits where a surviving key is justified by a scanner fact: the `notch_freq: null`
-comment (line 311) and the line-comb note (line 327) both explain themselves by reference
-to the decomb chain, and `report.display.spectra_marked_frequencies` (line 754) describes
-gradient harmonics that are no longer added automatically.
+### `paths.decomb_manifest` keeps its key and loses its default
+
+The key stays — the features and preprocessing pipelines both read it, and the mechanism is
+general. What is wrong is its **default**: `eeg_config.yaml:59` ships
+`"../../../data/bids_output/eeg_decombed_auto_staged/line_notch_manifest.tsv"`, a path into
+one study's derivatives, in the shared config. That is the same fault
+`test_the_workflow_scripts_do_not_pin_a_drive` already guards against elsewhere, and it is
+why `eeg_only.yaml` had to null the key at all.
+
+Core defaults to `null`; the pain study sets the real path in its own override. Nothing
+about the reading code changes.
+
+Prose edits where a surviving key is justified by a scanner fact: `report.display.spectra_marked_frequencies`
+(line 754) describes gradient harmonics that are no longer added automatically, and the
+line-comb note (line 327) calls the comb "the scanner room's" when the measurement says it is
+mains-synchronous and room-borne — a misattribution worth correcting while the file is open.
 
 ### Out of the config machinery
 
 - `eeg_pipeline/utils/config/acquisition.py` — deleted entirely (`is_eeg_fmri`).
 - `utils/config/coherence.py` — `_check_scanner_settings` deleted, the `is_eeg_fmri` import
-  and its call site with it. `_check_decomb_notch` moves to the line-comb workflow.
-  **`_check_ecg_settings` stays** — it checks for a named ECG channel, which is the right
-  requirement whether or not there was a scanner.
+  and its call site with it, and its `alignment.trim_to_volume_bounds` entry.
+  **`_check_ecg_settings` and `_check_decomb_notch` both stay** — the first checks for a named
+  ECG channel, the second that `notch_freq` is null when a decomb manifest is configured.
+  Neither needs a scanner, and the decomb check guards a key that is staying in core.
 - `utils/config/loader.py` — `volume_marker_description` and `pulse_marker_description` out
   of `_NON_PATH_KEYS` (lines 55-56), and **`marker_description` added in their place**. That
   set exists to stop path-resolution from claiming values that merely look path-like, and
   `"Pulse Artifact/R"` contains a slash: renaming the key without moving its entry would
   send the loader looking for a file called `Pulse Artifact/R` under the project root.
-- `utils/data/preprocessing.py` — `trim_to_volume_bounds`, and its `is_eeg_fmri` import.
+- `utils/data/preprocessing.py` — the `trim_to_volume_bounds` *function* moves to
+  `scripts/conversion/eeg_raw_to_bids.py`, its only caller, and drops out of `__all__`. The
+  `is_eeg_fmri` import goes; see the bug fix below, which makes that a correction rather than
+  cleanup.
 - `cli/commands/preprocessing_overrides.py` — the `--trim-to-volume-bounds` override.
 
 ### `presets/eeg_only.yaml` is retired
 
-This preset exists to switch scanner stages off: `eeg_fmri: false`,
-`brainvision_analyzer.enabled: false`, `trim_to_volume_bounds: false`,
-`decomb_manifest: null`. Every one of those keys is being deleted, because core no longer
-has the stages they disable.
+This preset exists to switch scanner stages off. `eeg_fmri: false`,
+`brainvision_analyzer.enabled: false` and `trim_to_volume_bounds: false` set keys that are
+being deleted; `decomb_manifest: null` restates what becomes the core default once the
+study's path moves to the study's override. Every line of it is then either gone or a no-op.
 
 **Core becomes EEG-only by construction, so "EEG only" stops being a preset.** What is left
 of the file is genuinely useful and should not be lost: the `task: null` deliberate-unset,
@@ -262,7 +345,27 @@ dropped.
   the beats Analyzer never marked and writes a corrected tree, while this one *measures*
   what the correction achieved. Sharing a config would tie a remediation step's settings to
   a QC step's, and the pairing with the existing `analysis/bcg/` is what the layout expects.
-- `studies/pain_study/scripts/line_comb/config.yaml` — gains `decomb_manifest`.
+- `studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml` — gains the real
+  `paths.decomb_manifest` path, `ica.cardiac_review.marker_description`, and
+  `report.analysis.aperiodic_exclude_hz` populated with the comb harmonics.
+
+## A bug this change fixes
+
+`utils/data/preprocessing.py` gates the ECG coupling QC on `is_eeg_fmri(config)` in two
+places — line 501 force-disables it outside a scanner, and line 575 silently disables the
+whole `clean_events_qc` block rather than raising. ECG coupling correlates EEG against a
+recorded ECG lead. It needs the lead; it has never needed a scanner.
+
+This is a known error that was only half-fixed. `coherence.py:231` documents it explicitly:
+issue #14 was that the ECG stages keyed off `preprocessing.eeg_fmri`, "so a montage with an
+ECG channel was told that" it could not run them. The fix landed in `coherence.py`, which
+now checks for a named channel, and **was never applied to `utils/data/preprocessing.py`**,
+so a non-scanner dataset with an ECG lead still has its coupling QC switched off underneath
+it.
+
+Deleting `is_eeg_fmri` removes both call sites, and the correct gate is already sitting
+beside them: the presence of a named ECG channel. This should land as its own commit with
+its own test, so the fix is visible as a fix rather than buried in a relocation.
 
 ## Two rewires
 
@@ -290,12 +393,16 @@ so it inherits the configured beat source rather than reading Analyzer's markers
 
 ## Consequences accepted
 
-1. **Aperiodic exponents change.** Deleting `gradient_windows` means the comb harmonics are
-   no longer withheld from the aperiodic fit, so the fitted line is tilted by the comb.
-   Every exponent in the subject and cohort reports, and every `aperiodic_*` sidecar value,
-   shifts — and will not be comparable to anything already computed.
-2. **The cohort sidecar loses 11 columns**, requiring a schema version bump. Cohort reports
-   cannot read sidecars written before this change, and vice versa.
+1. **Aperiodic exponents need not change** — this consequence is withdrawn from the earlier
+   draft. Generalizing `gradient_windows` to `report.analysis.aperiodic_exclude_hz` instead of
+   deleting it means the study keeps its exclusions by listing its comb harmonics, and an
+   out-of-scanner dataset was never affected either way. **The migration must actually set
+   that key**: leaving it empty silently reintroduces the exponent shift, and a silent shift
+   in a fitted slope is precisely the failure this design is trying not to cause.
+2. **The cohort sidecar loses 11 columns**, so `SCHEMA_VERSION` goes 3 → 4. This is safe
+   rather than merely breaking: `sidecar.py:483` already refuses a document whose version
+   does not match, so an old sidecar is rejected with an error instead of being read with
+   eleven columns quietly missing.
 3. **Existing study configs break.** Any config setting `preprocessing.eeg_fmri`,
    `brainvision_analyzer.*` or the moved report keys now names a key core does not define.
    `studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml` and the study1/2/3
@@ -306,11 +413,19 @@ so it inherits the configured beat source rather than reading Analyzer's markers
 ## Sequencing
 
 One rule change, but roughly 4,000 lines relocating across ~20 core modules, the config
-tree, and ~45 test files. One plan, five phases, each leaving the suite green:
+tree, and ~45 test files. One plan, six phases, each leaving the suite green:
 
-1. **Gradient.** `report/scanner.py` and `report/cohort/gradient.py` out; the new
-   `analysis/gradient/`, `scripts/gradient/` and CLI command in. Report structure, spectra
-   and continuity edits land here.
+0. **The ECG coupling gate**, as its own commit with its own test. Independent of everything
+   else, and it should read as a bug fix rather than as fallout from a move.
+1. **Gradient.** `report/scanner.py`, `report/cohort/gradient.py` and
+   `report/cohort/noise_floor.py` out; the new `analysis/gradient/`, `analysis/noise_floor.py`,
+   `scripts/gradient/` and CLI command in. Report structure, spectra and continuity edits
+   land here.
+
+   **`report.analysis.aperiodic_exclude_hz` must land first, with the study's comb harmonics
+   already populated in its override.** Generalizing the exclusion and migrating the value
+   are one atomic step; done in either order separately, there is a commit in between whose
+   aperiodic slopes are wrong, and a bisect that lands on it reads as a real regression.
 2. **Extract and genericize what stays.** `add_rr_interval_section` to
    `report/rr_intervals.py`; the `ecg` beat-source config and the config-driven marker name
    in `ica_cardiac_review.py`. Both before anything cardiac moves, so the suite never passes
@@ -324,8 +439,11 @@ tree, and ~45 test files. One plan, five phases, each leaving the suite green:
 5. **Cohort sidecar, architecture test, pipeline steps.** The schema change, the new
    contract written down, and the STEP constants removed once nothing dispatches to them.
 
-Phase 1 alone changes aperiodic exponents. Worth confirming against a real subject at the
-end of it rather than discovering it at the end of phase 5.
+Two phases have a behavioural seam and the rest are pure movement. Phase 1 must leave
+aperiodic exponents **bit-identical** on a real in-scanner subject, and phase 2 must leave
+beat detections identical on a run that carries markers. Both are cheap to check and both
+are the kind of drift that is invisible in a report and expensive to find later. Everything
+else is code and config changing address.
 
 ## Testing
 
@@ -335,14 +453,23 @@ The architecture test is the specification. `RELOCATED` gains the moved core pat
 docstring records the new rule.
 
 A new assertion should check that core Python names no scanner concept, in the same spirit
-as `PARADIGM_MARKERS`. **The markers must be compound terms, not the bare word
-`gradient`:** `volume_locked`, `repetition_time_s`, `volume_marker`, `Pulse Artifact/R`,
-`scanner gradient`, `brainvision_analyzer`. Core legitimately contains `np.gradient`
+as `PARADIGM_MARKERS`, with two scoping constraints that a careless version gets wrong.
+
+**It must run over `eeg_pipeline/` only, not `CORE_TREES`.** That tuple is
+`("eeg_pipeline", "fmri_pipeline")`, and `fmri_pipeline/` exists — an assertion that no core
+tree names an fMRI concept fails instantly, on the tree whose entire job is fMRI.
+
+**The markers must be compound terms, not the bare word `gradient`.** Use `volume_locked`,
+`repetition_time_s`, `volume_marker`, `Pulse Artifact/R`, `scanner gradient`,
+`brainvision_analyzer`. Core legitimately contains `np.gradient`
 (`analysis/features/quality.py`, `analysis/features/spectral.py`),
 `GradientBoostingRegressor` (`analysis/machine_learning/uncertainty.py`) and
-`cnn_gradient_clip_norm` (`analysis/machine_learning/cnn.py`) — five files a naive
-substring check would fail on, none of which has anything to do with a scanner. A companion
-assertion should check `eeg_config.yaml` for the same terms.
+`cnn_gradient_clip_norm` (`analysis/machine_learning/cnn.py`) — five files a naive substring
+check would fail on, none of which has anything to do with a scanner. `fmri` is likewise
+unusable as a marker, because `resolve_fmri_bids_root` and the `eeg-pipeline fmri` commands
+are correct code that must survive.
+
+A companion assertion should check `eeg_config.yaml` for the same terms.
 
 Moving to `studies/tests/` with their subjects: `test_report_scanner.py` (736 ln),
 `test_cohort_gradient.py` (429 ln), `test_report_analyzer_qc.py`, `test_cohort_analyzer.py`,
@@ -353,7 +480,11 @@ Staying in core, but re-pointed at the extracted modules:
 `test_report_rr_intervals.py`, `test_ica_cardiac_report_figures.py`,
 `test_ica_cardiac_promotion_wiring.py`.
 
-New coverage for the beat source, since it is the one behavioural seam in this change:
+New coverage for `report.analysis.aperiodic_exclude_hz`: an empty list leaving the fit range
+untouched, a listed window being withheld, and the windows composing with — not replacing —
+the notch stopbands and the decomb-unavailable intervals.
+
+New coverage for the beat source, the other behavioural seam:
 each of `markers` / `detect` / `auto` resolving as documented; `markers` failing loudly
 rather than silently detecting when the named annotation is absent; `auto` with a marker
 description set reproducing today's detections exactly; and `marker_description` surviving
@@ -374,6 +505,14 @@ full suite.
 - `studies/pain_study/analysis/line_comb`, `scripts/line_comb`, `gradient_trough_ica`,
   `scanner_contamination.py` — already study-side and correctly placed. They gain config
   keys but no code moves.
+- `fmri_pipeline/`, and core's integration with it. A separate pipeline, legitimately about
+  fMRI.
+- **Renaming `utils/data/fmri_signature_targets.py`.** Despite the name it holds generic
+  run-label and TSV column helpers (`parse_run_label_to_int`, `find_run_column`) with nothing
+  fMRI-specific in them, so the filename is a stray reference rather than misplaced code.
+  Worth renaming for clarity, but it touches four import sites across core and the study and
+  has no bearing on the boundary. Better as its own small commit than as noise inside this
+  one.
 - Regenerating derivatives. Existing reports and sidecars are not migrated; the schema bump
   means they are read by the version that wrote them.
 - **Beat-train QC, deferred to its own spec.** `drop_double_marks`, `find_gaps` and
