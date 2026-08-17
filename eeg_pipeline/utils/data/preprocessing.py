@@ -28,7 +28,6 @@ from eeg_pipeline.utils.analysis.artifact_qc import (
     pick_channels,
     window_mask,
 )
-from eeg_pipeline.utils.config.acquisition import is_eeg_fmri
 from eeg_pipeline.utils.config.loader import get_config_value
 
 logger = logging.getLogger(__name__)
@@ -493,12 +492,14 @@ class CleanEventsQCConfig:
             path="preprocessing.clean_events_qc.peripheral_low_gamma",
         )
         # The ECG coupling metric correlates each EEG channel against a recorded ECG
-        # lead. Outside a scanner there is no ballistocardiogram to look for and, on
-        # these montages, no ECG channel either — so leaving it on would fail at
-        # ``pick_channels`` with "references missing channels: ['ECG']", after PyPREP,
-        # ICA and epoching had already run. The dataset declaration answers this, so it
-        # is answered here rather than left for the reader to discover at the crash.
-        ecg_coupling_enabled = bool(ecg_raw.get("enabled", True)) and is_eeg_fmri(config)
+        # lead. What it needs is the lead. Gated on the scanner declaration until now,
+        # which switched it off for anyone recording ECG outside a bore -- issue #14,
+        # fixed in config coherence and missed here. Left on with no channel named, it
+        # fails at ``pick_channels`` after PyPREP, ICA and epoching have already run,
+        # so the guard stays; only its question changes.
+        ecg_coupling_enabled = bool(ecg_raw.get("enabled", True)) and bool(
+            get_config_value(config, "eeg.ecg_channels", None)
+        )
 
         cfg = cls(
             enabled=bool(raw.get("enabled", True)),
@@ -569,10 +570,12 @@ class CleanEventsQCConfig:
                 )
         if not cfg.ecg_coupling.enabled and not cfg.peripheral_low_gamma.enabled:
             # Asking for QC and naming no metric is a config mistake worth raising on —
-            # unless the only metric requested was the cardiac one and this dataset was
-            # not recorded in a scanner, in which case there is nothing left to compute
-            # and nothing the user got wrong.
-            if not is_eeg_fmri(config) and bool(ecg_raw.get("enabled", True)):
+            # unless the only metric requested was the cardiac one and this dataset has
+            # no ECG lead named, in which case there is nothing left to compute and
+            # nothing the user got wrong.
+            if not get_config_value(config, "eeg.ecg_channels", None) and bool(
+                ecg_raw.get("enabled", True)
+            ):
                 return replace(cfg, enabled=False)
             raise ValueError(
                 "preprocessing.clean_events_qc.enabled=true requires at least one QC metric."

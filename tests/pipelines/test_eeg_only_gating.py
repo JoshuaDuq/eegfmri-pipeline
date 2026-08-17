@@ -183,13 +183,9 @@ def test_an_explicit_declaration_wins_over_the_fallback(pipeline) -> None:
     assert module.PreprocessingPipeline._is_eeg_fmri(pipeline) is False
 
 
-def test_the_ecg_coupling_metric_is_gated_on_the_same_declaration() -> None:
-    """The one scanner-only input the step gating did not cover.
-
-    ``clean_events_qc.ecg_coupling`` correlates EEG against a recorded ECG lead. Left on
-    for an out-of-scanner dataset it raised from ``pick_channels`` with "references
-    missing channels: ['ECG']" — during epoching, after PyPREP and ICA had already run.
-    """
+def test_the_ecg_coupling_metric_is_gated_on_the_lead_not_the_declaration() -> None:
+    # Issue #14: an out-of-scanner dataset with a recorded ECG lead used to have this
+    # metric switched off underneath it. It now runs wherever the lead is named.
     from eeg_pipeline.utils.config.loader import load_config
     from eeg_pipeline.utils.data.preprocessing import CleanEventsQCConfig
 
@@ -197,8 +193,9 @@ def test_the_ecg_coupling_metric_is_gated_on_the_same_declaration() -> None:
     config["preprocessing.eeg_fmri"] = False
     config["preprocessing.clean_events_qc.enabled"] = True
     config["preprocessing.clean_events_qc.ecg_coupling.enabled"] = True
+    config["eeg.ecg_channels"] = ["ECG"]
 
-    assert CleanEventsQCConfig.from_config(config).ecg_coupling.enabled is False
+    assert CleanEventsQCConfig.from_config(config).ecg_coupling.enabled is True
 
 
 def test_the_ecg_coupling_metric_survives_for_an_eeg_fmri_dataset() -> None:
@@ -214,17 +211,19 @@ def test_the_ecg_coupling_metric_survives_for_an_eeg_fmri_dataset() -> None:
 
 
 def test_cardiac_only_qc_switches_itself_off_rather_than_raising() -> None:
-    """Asking for QC and naming no metric is a config mistake worth raising on. Asking
-    for the cardiac metric alone, outside a scanner, is not: nothing is left to compute
-    and the user got nothing wrong."""
+    # Asking for QC and naming no metric is a config mistake worth raising on. Asking
+    # for the cardiac metric alone with no ECG lead named is not: nothing is left to
+    # compute and the user got nothing wrong. True inside a scanner too -- the room is
+    # not the condition.
     from eeg_pipeline.utils.config.loader import load_config
     from eeg_pipeline.utils.data.preprocessing import CleanEventsQCConfig
 
     config = load_config()
-    config["preprocessing.eeg_fmri"] = False
+    config["preprocessing.eeg_fmri"] = True
     config["preprocessing.clean_events_qc.enabled"] = True
     config["preprocessing.clean_events_qc.ecg_coupling.enabled"] = True
     config["preprocessing.clean_events_qc.peripheral_low_gamma.enabled"] = False
+    config["eeg.ecg_channels"] = []
 
     assert CleanEventsQCConfig.from_config(config).enabled is False
 
