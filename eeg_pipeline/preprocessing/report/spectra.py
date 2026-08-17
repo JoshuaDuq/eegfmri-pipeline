@@ -271,6 +271,7 @@ def compute_run_spectra(
     gradient_fundamental_hz: float | None = None,
     aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ,
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
+    aperiodic_exclude_hz: Sequence[tuple[float, float]] = (),
     unavailable_intervals: Sequence[tuple[float, float]] | None = None,
 ) -> RunSpectra:
     """Compute the across-channel sensor spectrum before and after ICA.
@@ -293,14 +294,22 @@ def compute_run_spectra(
 
     frequencies, before_channels = _channel_spectra_db(raw, fmin=fmin, fmax=upper)
     _, after_channels = _channel_spectra_db(cleaned, fmin=fmin, fmax=upper)
-    excluded = tuple(
-        notch_windows(
-            line_frequency,
-            fmax=upper,
-            half_width=notch_half_width_hz,
-            unavailable_intervals=unavailable_intervals,
+    # Windows withheld from the aperiodic fit beyond the notch stopbands and anything a
+    # decomb manifest reports unavailable. For a persistent narrowband feature that is
+    # instrumental rather than neural -- an equipment line, a residual comb -- which a
+    # robust fit would otherwise tilt toward. Empty unless a study names a reason.
+    excluded = (
+        tuple(
+            notch_windows(
+                line_frequency,
+                fmax=upper,
+                half_width=notch_half_width_hz,
+                unavailable_intervals=unavailable_intervals,
+            )
         )
-    ) + gradient_windows(gradient_fundamental_hz, frequencies=frequencies)
+        + gradient_windows(gradient_fundamental_hz, frequencies=frequencies)
+        + tuple((float(low), float(high)) for low, high in aperiodic_exclude_hz)
+    )
     return RunSpectra(
         recording_id=recording_id,
         frequencies=frequencies,

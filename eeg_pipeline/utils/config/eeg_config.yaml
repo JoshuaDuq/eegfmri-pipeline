@@ -769,6 +769,12 @@ report:
     # Frequency interval used for the robust log-log aperiodic fit. Keep its upper edge
     # below line noise so the notch and its skirts cannot determine the slope.
     aperiodic_fit_range_hz: [2.0, 45.0]
+    # Frequency windows withheld from the aperiodic fit, beyond the notch stopbands and
+    # anything a decomb manifest reports as unavailable. For a persistent narrowband
+    # feature that is instrumental rather than neural -- an equipment line, a residual
+    # comb -- which a robust fit would otherwise tilt toward. Empty by default: a fit
+    # should sit on the data unless there is a named reason it cannot.
+    aperiodic_exclude_hz: []
     # Post-stimulus interval used for split-half evoked reliability.
     response_window_s: [0.0, 1.0]
     # Posterior rhythm band used as signal-preservation evidence.

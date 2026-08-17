@@ -318,3 +318,45 @@ def test_the_comb_exclusion_reaches_the_fit() -> None:
     assert with_comb.before.aperiodic is not None
     # Withholding the teeth leaves the line describing the background it is meant to.
     assert with_comb.before.aperiodic.r_squared >= without.before.aperiodic.r_squared
+
+
+def test_aperiodic_exclude_hz_withholds_a_named_window():
+    raw = _raw(focal_channels=(), n_channels=8, exponent=1.0)
+    baseline = compute_run_spectra(raw, raw, recording_id="sub-01_run-1", fmax=100.0)
+    excluded = compute_run_spectra(
+        raw,
+        raw,
+        recording_id="sub-01_run-1",
+        fmax=100.0,
+        aperiodic_exclude_hz=((20.0, 25.0),),
+    )
+    assert excluded.before.aperiodic.exponent != baseline.before.aperiodic.exponent
+
+
+def test_aperiodic_exclude_hz_empty_leaves_the_fit_untouched():
+    raw = _raw(focal_channels=(), n_channels=8, exponent=1.0)
+    baseline = compute_run_spectra(raw, raw, recording_id="sub-01_run-1", fmax=100.0)
+    empty = compute_run_spectra(
+        raw, raw, recording_id="sub-01_run-1", fmax=100.0, aperiodic_exclude_hz=()
+    )
+    assert empty.before.aperiodic.exponent == baseline.before.aperiodic.exponent
+
+
+def test_aperiodic_exclude_hz_composes_with_notch_windows():
+    # Both sources must apply together, not one in place of the other. The default fit
+    # range (2-45 Hz) sits below a 60 Hz notch, so that window alone would never touch the
+    # fit and "composes" would pass whether or not the two sources actually combined.
+    # Widening the fit range to hold both windows makes "both excluded" separable from
+    # "either excluded alone", so a later edit that made one source replace the other
+    # changes the result to match a single-source fit instead of the combined one.
+    raw = _raw(focal_channels=(), n_channels=8, exponent=1.0)
+    shared = dict(recording_id="sub-01_run-1", fmax=100.0, aperiodic_fit_range_hz=(2.0, 90.0))
+    both = compute_run_spectra(
+        raw, raw, line_frequency=60.0, aperiodic_exclude_hz=((20.0, 25.0),), **shared
+    )
+    notch_only = compute_run_spectra(raw, raw, line_frequency=60.0, **shared)
+    exclude_only = compute_run_spectra(
+        raw, raw, aperiodic_exclude_hz=((20.0, 25.0),), **shared
+    )
+    assert both.before.aperiodic.exponent != notch_only.before.aperiodic.exponent
+    assert both.before.aperiodic.exponent != exclude_only.before.aperiodic.exponent

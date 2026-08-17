@@ -109,6 +109,7 @@ _DISPLAY_KEYS = frozenset(
 _ANALYSIS_KEYS = frozenset(
     {
         "aperiodic_fit_range_hz",
+        "aperiodic_exclude_hz",
         "response_window_s",
         "alpha_band_hz",
         "alpha_reference_band_hz",
@@ -179,6 +180,30 @@ def _pair(
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise TypeError(f"{setting} must contain exactly two values.")
     return (float(value[0]), float(value[1]))
+
+
+# _pair reads a single bounded numeric pair; this reads a list of them, e.g. the windows
+# aperiodic_exclude_hz names. Absent elsewhere in this module, so it is built to match
+# _pair's numeric conversion and _label_patterns' per-entry validation rather than either
+# alone.
+def _pair_sequence(
+    block: Mapping[str, Any],
+    key: str,
+    *,
+    default: tuple[tuple[float, float], ...],
+    setting: str,
+) -> tuple[tuple[float, float], ...]:
+    if key not in block:
+        return default
+    value = block[key]
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(f"{setting} must be a list of [low, high] pairs.")
+    pairs = []
+    for entry in value:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            raise TypeError(f"{setting} entries must each contain exactly two values.")
+        pairs.append((float(entry[0]), float(entry[1])))
+    return tuple(pairs)
 
 
 def _string_tuple(
@@ -318,6 +343,9 @@ class ReportSettings:
     #: Band the aperiodic background is fitted over. Keep it below the line-noise
     #: fundamental so the notch and its skirts cannot tilt the slope.
     aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ
+    # Withheld from the aperiodic fit, on top of the notch stopbands and the
+    # decomb-unavailable intervals.
+    aperiodic_exclude_hz: tuple[tuple[float, float], ...] = ()
     #: Annotation marking each scanner volume. A dataset that spells it differently, or
     #: has none, simply gets no gradient section.
     volume_marker_description: str = VOLUME_MARKER_DESCRIPTION
@@ -454,6 +482,12 @@ class ReportSettings:
                 "aperiodic_fit_range_hz",
                 default=cls.aperiodic_fit_range_hz,
                 setting="report.analysis.aperiodic_fit_range_hz",
+            ),
+            aperiodic_exclude_hz=_pair_sequence(
+                analysis,
+                "aperiodic_exclude_hz",
+                default=cls.aperiodic_exclude_hz,
+                setting="report.analysis.aperiodic_exclude_hz",
             ),
             response_window_s=_pair(
                 analysis,

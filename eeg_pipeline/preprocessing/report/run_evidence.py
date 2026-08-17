@@ -242,6 +242,7 @@ def measure_runs(
                 gradient_fundamental_hz=None if timing is None else timing.fundamental_hz,
                 aperiodic_fit_range_hz=settings.aperiodic_fit_range_hz,
                 notch_half_width_hz=settings.notch_exclusion_half_width_hz,
+                aperiodic_exclude_hz=settings.aperiodic_exclude_hz,
                 unavailable_intervals=settings.unavailable_intervals_by_recording.get(
                     recording_id
                 ),
