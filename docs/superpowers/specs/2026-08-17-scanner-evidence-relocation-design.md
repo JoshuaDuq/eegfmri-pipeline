@@ -46,6 +46,7 @@ should do on hitting an ambiguous case.
 | Delete, or relocate? | **Relocate.** Every measurement survives under `studies/pain_study/`, rendered as plots and TSVs instead of report sections. |
 | Do the volume-rate-reading measurement helpers go? | **Yes, all three** — `gradient_windows`, `gradient_marks_hz`, continuity volume gaps. Accepted consequence: aperiodic exponents change. |
 | Does ECG analysis go? | **No.** ICA cardiac review, RR interval evidence and the ECG coupling QC all stay in core and stay in the report. |
+| Does the ECG *marker* path go? | **No.** Any EEG study may carry beat markers. The path stays, genericized off Analyzer's marker name via new config. |
 | Configuration? | **In scope.** The scanner keys leave the core config for study workflow configs, and the config machinery that reads them goes with them. |
 
 ## What moves
@@ -79,7 +80,6 @@ only written account of what the measurements mean.
 | `eeg_pipeline/preprocessing/report/cohort_qc.py` (243 ln) | Cohort roll-up of Analyzer correction quality |
 | `eeg_pipeline/preprocessing/pulse_artifact_qc.py` | Analyzer pulse markers; owns `PULSE_MARKER_DESCRIPTION` |
 | `eeg_pipeline/preprocessing/cardiac_artifact_qc.py` | BCG attenuation |
-| `ica_cardiac_review._marker_beats` | The Analyzer R-marker preference, extracted — see rewire 1 |
 
 ### To `studies/pain_study/scripts/gradient/` (new)
 
@@ -104,10 +104,13 @@ Named explicitly, because the earlier draft had two of these leaving:
 
 - **`ica_cardiac_review.py` and `ica_cardiac_report.py`** — ECG-based ICA component review,
   and the "ICA cardiac artifact review" report section.
+- **`detect_ecg_events` and `_marker_beats`** — including the marker path. Any EEG study may
+  carry beat markers; what is Analyzer-specific is the hardcoded marker *name*, not the
+  ability to read one. Genericized rather than moved — see rewire 1.
 - **`add_rr_interval_section`** — beat-to-beat interval evidence. It currently lives inside
-  `analyzer_qc.py`, so it must be **extracted to its own module before that file moves**,
-  and re-sourced from ECG-detected R peaks rather than Analyzer's marker train. A tachogram
-  is ECG physiology; it reads no scanner quantity once its beat source changes.
+  `analyzer_qc.py`, so it must be **extracted to its own module before that file moves**.
+  A tachogram is ECG physiology; it reads no scanner quantity once it takes its beats from
+  `detect_ecg_events` rather than from `analyzer_qc`'s own marker reading.
 - **`preprocessing.clean_events_qc.ecg_coupling`** — correlates EEG against the lead.
   Depends on an ECG channel, never on a scanner.
 
@@ -181,7 +184,39 @@ resolution order: paths come from core, workflow settings sit next to their code
 | `report.thresholds.min_r_markers_per_volume` | `scripts/bcg/config.yaml` |
 | `report.thresholds.comb_frequency_range_hz`, `comb_welch_seconds`, `repetition_time_tolerance_s` | `scripts/gradient/config.yaml` |
 | `report.analysis.bcg_residual_window_s`, `bcg_residual_baseline_s`, `bcg_residual_measurement_s` | `scripts/bcg/config.yaml` |
-| `report.acquisition.volume_marker_description`, `pulse_marker_description` | `scripts/gradient/` and `scripts/bcg/` respectively |
+| `report.acquisition.volume_marker_description` | `scripts/gradient/config.yaml` |
+| `report.acquisition.pulse_marker_description` | replaced by `ica.cardiac_review.marker_description` below; the study sets `"Pulse Artifact/R"` as an override |
+
+### Into `eeg_config.yaml`: the ECG beat source
+
+Two core consumers now need to know where beat times come from — the ICA cardiac review and
+the extracted RR interval section — and today neither the marker name nor the preference
+order is configurable. Added under `ica.cardiac_review`, beside the `ecg_channel` key that
+already lives there:
+
+```yaml
+    # Where beat times come from.
+    #   markers  read the annotation named below; fail if it is absent
+    #   detect   run find_ecg_events on the ECG channel, ignoring any markers
+    #   auto     prefer markers where present, fall back to detection
+    beat_source: auto
+    # Annotation carrying one mark per heartbeat, exactly as the recording spells it.
+    # Null means the recording carries none, which is the ordinary case: a montage with
+    # an ECG lead and no marker train detects from the channel.
+    marker_description: null
+```
+
+`auto` reproduces today's behaviour, so nothing changes for a study that sets
+`marker_description`. The pain study sets `"Pulse Artifact/R"` in its own override and keeps
+the marker preference it depends on.
+
+The block also corrects a comment that is already wrong: `eeg_config.yaml:505` says R peaks
+"are detected from the ECG signal and do not require Analyzer R annotations," while
+`detect_ecg_events` in fact prefers the marker train where one exists.
+
+**Not consolidated here, but worth noting:** `eeg.ecg_channels` and
+`ica.cardiac_review.ecg_channel` already name the same lead in two places. That predates this
+change and merging them is its own piece of work.
 
 Prose edits where a surviving key is justified by a scanner fact: the `notch_freq: null`
 comment (line 311) and the line-comb note (line 327) both explain themselves by reference
@@ -196,7 +231,10 @@ gradient harmonics that are no longer added automatically.
   **`_check_ecg_settings` stays** — it checks for a named ECG channel, which is the right
   requirement whether or not there was a scanner.
 - `utils/config/loader.py` — `volume_marker_description` and `pulse_marker_description` out
-  of the key registry at lines 55-56.
+  of `_NON_PATH_KEYS` (lines 55-56), and **`marker_description` added in their place**. That
+  set exists to stop path-resolution from claiming values that merely look path-like, and
+  `"Pulse Artifact/R"` contains a slash: renaming the key without moving its entry would
+  send the loader looking for a file called `Pulse Artifact/R` under the project root.
 - `utils/data/preprocessing.py` — `trim_to_volume_bounds`, and its `is_eeg_fmri` import.
 - `cli/commands/preprocessing_overrides.py` — the `--trim-to-volume-bounds` override.
 
@@ -230,26 +268,25 @@ dropped.
 
 Both follow from ICA cardiac review staying while the modules it leans on leave.
 
-**1. `ica_cardiac_review.py` detects from ECG only.** It currently imports
-`PULSE_MARKER_DESCRIPTION` from `pulse_artifact_qc.py` (line 12) and prefers Analyzer's
-R-marker train via `_marker_beats`, falling back to ECG detection. `pulse_artifact_qc.py`
-moves to the study, and core must not import from `studies/` — enforced by
-`test_core_does_not_import_the_study`.
+**1. `ica_cardiac_review.py` reads its marker name from config.** It currently imports
+`PULSE_MARKER_DESCRIPTION` from `pulse_artifact_qc.py` (line 12), which moves to the study —
+and core must not import from `studies/`, enforced by `test_core_does_not_import_the_study`.
 
-The fix is to **delete the Analyzer-marker path** rather than re-point it at config:
-Analyzer is scanner-correction software, so preferring its markers is exactly the fMRI
-dependency this change removes. Core detects R peaks from the ECG channel directly, which
-is what an EEG-only pipeline should do anyway.
+The fix is to **keep the marker path and genericize it**, not to delete it. Reading beat
+markers is a general capability: any EEG study may record a beat marker train, from a pulse
+oximeter trigger or the amplifier itself. What is Analyzer-specific is the hardcoded string,
+so `_marker_beats` takes the description from `ica.cardiac_review.marker_description` and
+`detect_ecg_events` honours `beat_source` instead of a fixed preference order.
 
-The preference is not lost — it moves to `analysis/bcg/`, where it matters. On this dataset
-a third of runs carry no Analyzer markers at all, and the in-scanner ECG detector locks
-onto the magnetohydrodynamic deflection rather than the R wave, so the study still needs
-both trains and the lag between them. That is study knowledge, and it belongs on the study
-side.
+The default `beat_source: auto` preserves current behaviour exactly. Note that the reason
+core hardcodes marker-preference today is an in-scanner one — the channel detector locks
+onto the magnetohydrodynamic deflection and reports 8 and 2 bpm where the markers report 61
+and 60. Outside a bore that reason does not apply, which is why the order becomes a choice
+rather than a rule.
 
 **2. `add_rr_interval_section` is extracted before `analyzer_qc.py` moves.** It goes to its
-own core module — `report/rr_intervals.py` — and takes its beat source from the same ECG
-detection as the cardiac review instead of from the Analyzer marker train.
+own core module — `report/rr_intervals.py` — and takes its beats from `detect_ecg_events`,
+so it inherits the configured beat source rather than reading Analyzer's markers itself.
 
 ## Consequences accepted
 
@@ -262,11 +299,9 @@ detection as the cardiac review instead of from the Analyzer marker train.
 3. **Existing study configs break.** Any config setting `preprocessing.eeg_fmri`,
    `brainvision_analyzer.*` or the moved report keys now names a key core does not define.
    `studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml` and the study1/2/3
-   configs must be checked and updated in the same change.
-4. **The cardiac review changes what it detects on this dataset.** Dropping the Analyzer
-   preference means core detects from ECG on runs that previously used markers. Given the
-   MHD lock-on, the study should read its cardiac evidence from `analysis/bcg/` rather than
-   from the core report.
+   configs must be checked and updated in the same change — including setting
+   `ica.cardiac_review.marker_description: "Pulse Artifact/R"`, without which the review
+   silently switches to channel detection and meets the MHD lock-on.
 
 ## Sequencing
 
@@ -276,9 +311,11 @@ tree, and ~45 test files. One plan, five phases, each leaving the suite green:
 1. **Gradient.** `report/scanner.py` and `report/cohort/gradient.py` out; the new
    `analysis/gradient/`, `scripts/gradient/` and CLI command in. Report structure, spectra
    and continuity edits land here.
-2. **Extract what stays.** `add_rr_interval_section` to `report/rr_intervals.py`, and the
-   ECG-only path in `ica_cardiac_review.py`. Both before anything cardiac moves, so the
-   suite never passes through a state with no ECG review.
+2. **Extract and genericize what stays.** `add_rr_interval_section` to
+   `report/rr_intervals.py`; the `ecg` beat-source config and the config-driven marker name
+   in `ica_cardiac_review.py`. Both before anything cardiac moves, so the suite never passes
+   through a state with no ECG review. This phase must be behaviour-preserving — `auto` with
+   the study's marker description set has to reproduce today's detections exactly.
 3. **Analyzer and BCG.** `analyzer_qc.py`, `cohort/analyzer.py`, `cohort_qc.py`,
    `pulse_artifact_qc.py`, `cardiac_artifact_qc.py` out to `analysis/bcg/`.
 4. **Config.** Keys out of `eeg_config.yaml` into the workflow configs, `acquisition.py`
@@ -316,6 +353,12 @@ Staying in core, but re-pointed at the extracted modules:
 `test_report_rr_intervals.py`, `test_ica_cardiac_report_figures.py`,
 `test_ica_cardiac_promotion_wiring.py`.
 
+New coverage for the beat source, since it is the one behavioural seam in this change:
+each of `markers` / `detect` / `auto` resolving as documented; `markers` failing loudly
+rather than silently detecting when the named annotation is absent; `auto` with a marker
+description set reproducing today's detections exactly; and `marker_description` surviving
+config load with its slash intact.
+
 Edited in place: `test_cohort_record.py`, `test_cohort_sidecar.py`, `test_cohort_report.py`,
 `test_cohort_multiplicity.py`, `test_cohort_composition.py`, `test_cohort_spectra.py`,
 `test_cohort_at_a_glance.py`, `test_cohort_end_to_end.py`, `test_report_modes.py`,
@@ -333,3 +376,17 @@ full suite.
   keys but no code moves.
 - Regenerating derivatives. Existing reports and sidecars are not migrated; the schema bump
   means they are read by the version that wrote them.
+- **Beat-train QC, deferred to its own spec.** `drop_double_marks`, `find_gaps` and
+  `physiological_floor` in `studies/pain_study/analysis/bcg/detect.py` are general — they
+  answer "can this beat train be trusted", which any study with markers should ask, and the
+  percentile-based gap test catches the single missed beat a 2x-median threshold is blind
+  to. They are held back because this change is a relocation: folding a new capability in
+  alongside shifting aperiodic exponents and a sidecar schema bump would make a regression
+  impossible to attribute. Their thresholds would also need promoting from cohort-tuned
+  constants to documented config defaults, which is its own work.
+- **`recover_beats` stays in the study, permanently.** It is gap repair rather than
+  detection — it needs `MINIMUM_SEED_BEATS = 8` existing marks, builds its template from
+  them, and searches only inside gaps, so it cannot detect from scratch and is not an
+  alternative beat source. It is also calibrated on one cohort and one vendor's failure
+  mode, and its own A/B was net -36% residual BCG with 4 runs regressing. That is a valid
+  result for this dataset and not a general capability.
