@@ -1936,18 +1936,6 @@ _DECOMPOSITION_TAGS = ("ica", _DECOMPOSITION_TAG)
 #: about the subject's data, and folding it into replaceable content is what let a
 #: rebuild drop it. Separating them also puts it beside the other decomposition evidence
 #: rather than inside a "how to" panel a reader may reasonably skip.
-_FALLBACK_WARNING_TITLE = "Cardiac marker fallback"
-
-_FALLBACK_WARNING_HTML = (
-    '<div style="background-color: #fff3cd; color: #856404; padding: 15px; '
-    'margin-bottom: 20px; border: 1px solid #ffeeba; border-radius: 4px;">'
-    "<strong>&#9888; DATA QUALITY WARNING:</strong> "
-    "Some runs in this subject lacked manual BrainVision R-peak markers "
-    "(Analyzer defaulted to a 0.21s delay). "
-    "Cardiac QC metrics (CTPS and attenuation) for this subject relied on "
-    "automated MNE fallback detection and may be noisier than standard."
-    "</div>"
-)
 
 
 def _should_rebuild_decomposition(
@@ -2002,7 +1990,6 @@ def _add_decomposition_summary(
     labels: Sequence[ComponentLabel],
     filtered_raw_paths: Sequence[Path] | None,
     status_descriptions: Sequence[str] | None = None,
-    has_fallback_runs: bool = False,
 ) -> DecompositionSummary:
     """Add whole-decomposition evidence ahead of the per-component review.
 
@@ -2012,14 +1999,6 @@ def _add_decomposition_summary(
     the previous pass wrote it rather than replaced by one that cannot name a detector.
     """
     remove_tagged_content(report, tag=_DECOMPOSITION_TAG)
-    if has_fallback_runs:
-        report.add_html(
-            html=_FALLBACK_WARNING_HTML,
-            title=_FALLBACK_WARNING_TITLE,
-            section=_DECOMPOSITION_SECTION,
-            tags=(*_DECOMPOSITION_TAGS, "ica-fallback-warning"),
-            replace=True,
-        )
     summary = summarize_decomposition(ica=ica, epochs=epochs)
     report.add_figure(
         fig=plot_component_overview(ica=ica, labels=labels),
@@ -2094,7 +2073,6 @@ def _add_standard_component_review(
     labels: Sequence[ComponentLabel],
     settings: BandIcaReportSettings,
     analysis_status: str,
-    has_fallback_runs: bool = False,
     filtered_raw_paths: Sequence[Path] | None = None,
     status_descriptions: Sequence[str] | None = None,
     spectral_availability: Any = None,
@@ -2122,7 +2100,6 @@ def _add_standard_component_review(
             labels=labels,
             filtered_raw_paths=filtered_raw_paths,
             status_descriptions=status_descriptions,
-            has_fallback_runs=has_fallback_runs,
         )
     guide_title = "How to review ICA component dossiers"
     report.remove(title=guide_title, remove_all=True)
@@ -2346,12 +2323,9 @@ def generate_band_ica_report(
     standard_labels = _label_components(epochs=epochs, ica=standard_ica)
 
     components_path = epochs_path.with_name(f"{output_prefix}_proc-ica_components.tsv")
-    has_fallback_runs = False
     status_descriptions = None
     if components_path.is_file():
         components = pd.read_csv(components_path, sep="\t")
-        if "analyzer_marker_ctps_fallback" in components.columns:
-            has_fallback_runs = bool(components["analyzer_marker_ctps_fallback"].any())
         # Read from the table that decides the exclusions rather than from the labels, so
         # the panel naming the detector cannot disagree with the data the pipeline built.
         if "status_description" in components.columns:
@@ -2366,7 +2340,6 @@ def generate_band_ica_report(
         labels=standard_labels,
         settings=settings,
         analysis_status="Pending provisional task epochs",
-        has_fallback_runs=has_fallback_runs,
         filtered_raw_paths=filtered_raw_paths,
         status_descriptions=status_descriptions,
     )

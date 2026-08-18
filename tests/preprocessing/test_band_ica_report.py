@@ -2048,3 +2048,11 @@ def test_the_variance_panel_is_bounded_and_says_what_it_pushed_off() -> None:
     assert axis.get_ylim()[0] > 1e-10
     assert any("below the axis" in text.get_text() for text in axis.texts)
     plt.close(figure)
+
+
+def test_band_ica_report_names_no_vendor_fallback():
+    from pathlib import Path
+
+    source = Path("eeg_pipeline/preprocessing/band_ica_report.py").read_text(encoding="utf-8")
+    assert "analyzer_marker_ctps_fallback" not in source
+    assert "0.21s" not in source
