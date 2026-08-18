@@ -599,7 +599,7 @@ Expected: FAIL.
 - `organize.py`: delete `"Residual scanner gradient"` from `SECTION_ORDER`. Update the group comment above it — `"What came in, and what the upstream correction left in it"` now covers only the coverage and data-quality sections.
 - `run_evidence.py`: delete the `scanner` import block, `MARKED_GRADIENT_HARMONICS`, `gradient_marks_hz`, `has_scanner_evidence`, the `combs`/`locked_averages`/`declined_combs` fields, the `add_scanner_residual_section` call, and `MARKED_GRADIENT_HARMONICS` from `__all__`. In the `add_spectra_section` call, `marked_frequencies` becomes `tuple(settings.spectra_marked_frequencies)` alone.
 - `cohort/report.py`: delete the `add_gradient_section` import and call, and the `comb` entry from `_audit_tables`.
-- `continuity.py`: delete `VOLUME_GAP_FACTOR`, `_volume_gaps`, `has_volume_markers`, the `volume_gaps` field, the `volume_description` parameter, and the volume-marker rug.
+- `continuity.py`: delete `VOLUME_GAP_FACTOR`, `_volume_gaps`, the `volume_gaps` field, and the volume-marker rug. **Keep `has_volume_markers` and keep the `volume_description` parameter.** Both are still reachable: `cohort/record.py`'s `acquisition_context_of` reads `has_volume_markers` to classify every participant IN_SCANNER/OUT_OF_SCANNER, and that classification feeds `sidecar.py`, `collect.py`, `composition.py` and `analyzer.py`. `volume_description` leaves in Task 12 together with `settings.volume_marker_description`; `has_volume_markers` leaves in Task 17 together with `AcquisitionContext`.
 - `cohort/spectra.py`: delete `MARKED_GRADIENT_HARMONICS` and the harmonic marks derived from it.
 
 - [ ] **Step 4: Run the affected tests**
@@ -1286,6 +1286,8 @@ Change `paths.decomb_manifest`'s default to `null` with a comment saying a study
 
 Delete the matching fields from `report/settings.py` — `volume_marker_description`, `pulse_marker_description`, `comb_frequency_range_hz`, `comb_welch_seconds`, `repetition_time_tolerance_s`, `bcg_residual_window_s`, `bcg_residual_baseline_s`, `bcg_residual_measurement_s`, `DEFAULT_REPETITION_TIME_TOLERANCE_S` — and the five scanner rows from `provenance.py`.
 
+Deleting `volume_marker_description` orphans its only consumer, so remove that chain in the same commit: the `volume_description=settings.volume_marker_description` argument at `run_evidence.py:159`, and in `continuity.py` the `volume_description` parameter of `compute_run_continuity`, the `annotation_onsets(raw, volume_description)` branch it guards, and its slot in the `marker_descriptions` tuple (which keeps the pulse description alone). Task 4 deliberately left this parameter in place because it was still reachable then.
+
 - [ ] **Step 4: Run the tests**
 
 ```bash
@@ -1626,7 +1628,8 @@ Expected: FAIL — version 3, both attributes present.
 - [ ] **Step 3: Remove the columns**
 
 - `sidecar.py`: bump `SCHEMA_VERSION` to `4` and add a comment recording that version 4 dropped the eleven scanner columns. Delete `SCANNER_RUN_COLUMNS` and `AcquisitionContext`. The existing guard at `:483` already refuses a mismatched version — leave it alone.
-- `record.py`: delete the `scanner` import at line 51, `_acquisition_context`, and the in-scanner row block.
+- `record.py`: delete the `scanner` import at line 51, `acquisition_context_of` (that is the real name — the function is not called `_acquisition_context`), and the in-scanner row block.
+- `continuity.py`: `acquisition_context_of` was the last consumer of `RunContinuity.has_volume_markers`, so the field goes here too, along with its assignment in `compute_run_continuity` and the `any(run.has_volume_markers for run in runs)` branch that picks the `why_it_matters` wording in `continuity_html` — keep the else-branch wording unconditionally. Task 4 deliberately left this field in place because the cohort classification still read it.
 - `multiplicity.py`: delete `SCANNER_FAMILY`, its two `MetricSource` entries, and its slot in `FAMILY_ORDER`. `FAMILY_ORDER` is already filtered to families present and each metric's decile is computed independently, so no other placement moves.
 - `composition.py`: delete the In scanner / Outside scanner strata and the `AcquisitionContext` label map. Its participant table and the rest of the section are untouched.
 - `cohort/spectra.py`: deleting `AcquisitionContext` breaks this module too, so it must change in the same commit. Remove the dashed/solid in-scanner linestyle split and its two legend entries (~lines 507-535), the `scanner_note` suffix on the aperiodic figure title, and the two-branch interpretation prose at ~612-650 that reads a downward exponent shift one way inside a bore and the other way outside. What remains is one unconditional reading of the shift.
