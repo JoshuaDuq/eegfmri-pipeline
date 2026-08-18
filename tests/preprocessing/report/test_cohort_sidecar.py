@@ -347,3 +347,11 @@ def test_a_writer_omitting_a_required_column_fails_before_touching_disk(tmp_path
         write_sidecar(report, _sidecar(runs=_runs(in_scanner=False)))
 
     assert not sidecar_paths(report).runs.exists()
+
+
+def test_schema_version_is_four_and_scanner_columns_are_gone():
+    from eeg_pipeline.preprocessing.report.cohort import sidecar
+
+    assert sidecar.SCHEMA_VERSION == 4
+    assert not hasattr(sidecar, "SCANNER_RUN_COLUMNS")
+    assert not hasattr(sidecar, "AcquisitionContext")

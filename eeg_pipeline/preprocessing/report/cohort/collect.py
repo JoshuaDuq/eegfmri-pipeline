@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
     has_sidecar,
@@ -76,30 +75,16 @@ class Cohort:
     def tasks(self) -> tuple[str, ...]:
         return tuple(sorted({participant.task for participant in self.participants}))
 
-    @property
-    def contexts(self) -> tuple[AcquisitionContext, ...]:
-        found = {participant.context for participant in self.participants}
-        return tuple(context for context in AcquisitionContext if context in found)
 
     @property
     def paradigms(self) -> tuple[Paradigm, ...]:
         found = {participant.paradigm for participant in self.participants}
         return tuple(paradigm for paradigm in Paradigm if paradigm in found)
 
-    @property
-    def is_mixed(self) -> bool:
-        """Whether the cohort spans more than one acquisition context.
-
-        The axis the report refuses to pool across. A mixed cohort is a normal thing to
-        have and a normal thing to report on; what it is not is a single population whose
-        median describes anybody.
-        """
-        return len(self.contexts) > 1
 
     def select(
         self,
         *,
-        context: AcquisitionContext | None = None,
         paradigm: Paradigm | None = None,
     ) -> "Cohort":
         """The sub-cohort a section applies to.
@@ -110,14 +95,10 @@ class Cohort:
         chosen = tuple(
             participant
             for participant in self.participants
-            if (context is None or participant.context is context)
-            and (paradigm is None or participant.paradigm is paradigm)
+            if paradigm is None or participant.paradigm is paradigm
         )
         return Cohort(participants=chosen, not_aggregated=self.not_aggregated)
 
-    def stratified(self) -> tuple[tuple[AcquisitionContext, "Cohort"], ...]:
-        """The cohort split along the axis that must not be pooled."""
-        return tuple((context, self.select(context=context)) for context in self.contexts)
 
 
 def discover_reports(

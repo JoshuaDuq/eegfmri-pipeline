@@ -32,14 +32,13 @@ from eeg_pipeline.preprocessing.report.rr_intervals import (
     RrIntervals,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
+    RUN_COLUMNS,
     CHANNEL_COLUMNS,
     COMB_COLUMNS,
     CONDITION_COLUMNS,
     SPECTRUM_COLUMNS,
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
-    run_columns_for,
 )
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
 from eeg_pipeline.preprocessing.report.settings import (
@@ -53,17 +52,6 @@ BEFORE = "before"
 AFTER = "after"
 
 
-def acquisition_context_of(continuity: Sequence[RunContinuity]) -> AcquisitionContext:
-    """Classify the acquisition from whether volume markers were observed.
-
-    Timing estimation requires enough markers to characterize the interval distribution.
-    Acquisition classification does not: even one observed volume marker is direct
-    evidence of an in-scanner recording. This is the axis the cohort report refuses to
-    pool across, so failed timing estimation must not silently move a participant into
-    the out-of-scanner stratum.
-    """
-    observed = any(run.has_volume_markers for run in continuity)
-    return AcquisitionContext.IN_SCANNER if observed else AcquisitionContext.OUT_OF_SCANNER
 
 
 def paradigm_of(continuity: Sequence[RunContinuity]) -> Paradigm:
@@ -101,7 +89,6 @@ def run_table(
     rr_intervals: Sequence[RrIntervals] = (),
     marker_agreements: Sequence[Any] = (),
     cardiac_residuals: Sequence[Any] = (),
-    context: AcquisitionContext,
 ) -> pd.DataFrame:
     """One row per run, holding every run-level scalar a cohort panel reads.
 
@@ -109,10 +96,8 @@ def run_table(
     whatever the acquisition supported afterwards.
     """
     continuity_by_run = _by_recording(continuity)
-    locked_by_run = _by_recording(locked_averages)
     rr_by_run = _by_recording(rr_intervals)
     agreement_by_run = _by_recording(marker_agreements)
-    residual_by_run = _by_recording(cardiac_residuals)
 
     rows: list[dict[str, Any]] = []
     for run in spectra:
@@ -169,71 +154,12 @@ def run_table(
         row["marker_median_lag_s"] = _finite(None if agreement is None else agreement.median_lag_s)
         row["marker_lag_iqr_s"] = _finite(None if agreement is None else agreement.lag_iqr_s)
 
-        if context is AcquisitionContext.IN_SCANNER:
-            timing = timings.get(recording_id)
-            locked = locked_by_run.get(recording_id)
-            row["n_volumes"] = _finite(None if timing is None else timing.n_volumes)
-            row["repetition_time_s"] = _finite(
-                None if timing is None else timing.repetition_time_s
-            )
-            # Marker jitter smears the comb across neighbouring bins, which lowers every
-            # measured excess without the residual itself having changed, so a timing
-            # outlier invalidates the gradient section rather than merely annotating it.
-            row["volume_jitter_s"] = _finite(None if timing is None else timing.interval_jitter_s)
-            for stage in (BEFORE, AFTER):
-                suffix = "before" if stage == BEFORE else "after"
-                row[f"volume_locked_rms_{suffix}_uv"] = _finite(
-                    None if locked is None else getattr(locked, f"{suffix}_locked_rms_uv")
-                )
-                row[f"volume_locked_floor_{suffix}_uv"] = _finite(
-                    None if locked is None else getattr(locked, f"{suffix}_noise_floor_uv")
-                )
-                row[f"volume_locked_excess_power_{suffix}_uv2"] = _finite(
-                    None if locked is None else getattr(locked, f"{suffix}_excess_power_uv2")
-                )
-                row[f"volume_locked_resolved_{suffix}"] = (
-                    None if locked is None else bool(getattr(locked, f"{suffix}_is_resolved"))
-                )
-            # What the upstream pulse correction left behind, and whether it had a beat
-            # train to work from at all. A run with no markers had no subtraction applied,
-            # so this is the column that says which runs need re-exporting from Analyzer.
-            residual = residual_by_run.get(recording_id)
-            row["pulse_marker_count"] = _finite(
-                None if residual is None else residual.marker_count
-            )
-            row["beat_source"] = None if residual is None else residual.beat_source
-            row["bcg_residual_uv"] = _finite(
-                None if residual is None else residual.residual_uv
-            )
-            # The floor this residual has to clear, and what is left after it. Recorded
-            # together because the amplitude alone is not comparable across runs: it is an
-            # average over the beats it was given, and the floor grows as that count falls.
-            # Named to match the volume-locked gradient columns, which measure the same
-            # kind of quantity the same way.
-            row["bcg_noise_floor_uv"] = _finite(
-                None if residual is None else residual.noise_floor_uv
-            )
-            row["bcg_excess_power_uv2"] = _finite(
-                None if residual is None else residual.excess_power_uv2
-            )
-            row["bcg_resolved"] = None if residual is None else residual.is_resolved
-            row["bcg_n_beats"] = _finite(None if residual is None else residual.n_beats)
-            # The residual is an average over the beats it was given, so it describes only
-            # the share of the run they cover. Recorded beside it because a small residual
-            # over a quarter of a run is not a corrected run, and the sidecar is what
-            # cross-run analyses read.
-            row["bcg_beat_train_coverage"] = _finite(
-                None if residual is None else residual.beat_train_coverage
-            )
         rows.append(row)
 
     frame = pd.DataFrame(rows)
-    missing = [name for name in run_columns_for(context) if name not in frame.columns]
+    missing = [name for name in RUN_COLUMNS if name not in frame.columns]
     if missing:
-        raise ValueError(
-            f"The run table is missing {', '.join(missing)} for a "
-            f"{context.value} acquisition."
-        )
+        raise ValueError(f"The run table is missing {', '.join(missing)}.")
     return frame
 
 
@@ -554,7 +480,6 @@ def build_subject_sidecar(
         raise ValueError(
             f"sub-{subject} has no measured runs, so there is nothing for a cohort to read."
         )
-    context = acquisition_context_of(continuity)
     paradigm = paradigm_of(continuity)
     alpha = dict(alpha or {})
     combined: dict[str, Any] = dict(measurements or {})
@@ -568,7 +493,6 @@ def build_subject_sidecar(
     return SubjectSidecar(
         subject=str(subject),
         task=str(task),
-        context=context,
         paradigm=paradigm,
         measurements=combined,
         settings=dict(settings or {}),
@@ -582,8 +506,7 @@ def build_subject_sidecar(
             rr_intervals=rr_intervals,
             marker_agreements=marker_agreements,
             cardiac_residuals=cardiac_residuals,
-            context=context,
-        ),
+            ),
         spectrum_curves=spectrum_curves(spectra),
         comb_curves=comb_curves(combs),
         channels=channel_table(
@@ -607,7 +530,6 @@ __all__ = [
     "AFTER",
     "BEFORE",
     "COMPONENT_LABEL_CLASSES",
-    "acquisition_context_of",
     "alpha_measurements",
     "build_subject_sidecar",
     "channel_table",

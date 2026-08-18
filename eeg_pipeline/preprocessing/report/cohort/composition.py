@@ -32,7 +32,6 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -48,11 +47,6 @@ COMPOSITION_SECTION = "Cohort composition"
 COMPOSITION_TITLE = "Who this report describes"
 COMPOSITION_TAG = "cohort-composition"
 
-#: How each context reads in a table, in the reader's terms rather than the schema's.
-_CONTEXT_LABELS = {
-    AcquisitionContext.IN_SCANNER: "In scanner",
-    AcquisitionContext.OUT_OF_SCANNER: "Outside scanner",
-}
 
 _PARADIGM_LABELS = {
     Paradigm.TASK: "Task",
@@ -86,7 +80,6 @@ def participant_rows(cohort: Cohort) -> list[list[Any]]:
         rows.append(
             [
                 participant.subject,
-                _CONTEXT_LABELS[participant.context],
                 _PARADIGM_LABELS[participant.paradigm],
                 participant.task,
                 participant.n_runs,
@@ -112,14 +105,12 @@ def _channel_count(participant: SubjectSidecar) -> int | None:
 
 def _summary_rows(cohort: Cohort, *, gates: BandGates) -> list[Metric]:
     regime = gates.regime_for(cohort.n_participants)
-    contexts = ", ".join(_CONTEXT_LABELS[context] for context in cohort.contexts)
     paradigms = ", ".join(_PARADIGM_LABELS[paradigm] for paradigm in cohort.paradigms)
     total_runs = sum(participant.n_runs for participant in cohort.participants)
     rows = [
         Metric("Participants aggregated", cohort.n_participants, emphasis=True),
         Metric("Runs behind them", total_runs),
         Metric("Tasks", ", ".join(cohort.tasks) or None),
-        Metric("Acquisition contexts", contexts or None),
         Metric("Paradigms", paradigms or None),
         Metric("What the participant count supports", _REGIME_LABELS[regime]),
     ]
@@ -145,17 +136,6 @@ def _not_aggregated_table(cohort: Cohort) -> str:
     )
 
 
-def _mixed_cohort_note(cohort: Cohort) -> str:
-    if not cohort.is_mixed:
-        return ""
-    return (
-        "<p><strong>This cohort spans more than one acquisition context.</strong> "
-        "Measurements that depend on the context are reported separately for each rather "
-        "than pooled. Removing 86% of sensor variance is unremarkable for a recording made "
-        "inside a bore and alarming for one made outside it, so a single median over both "
-        "describes neither group. Where a section applies to only one context, it says so "
-        "and counts only that context's participants.</p>"
-    )
 
 
 def _reading_note(cohort: Cohort, *, gates: BandGates) -> str:
@@ -197,7 +177,6 @@ def composition_html(cohort: Cohort, *, gates: BandGates = DEFAULT_GATES) -> str
     )
     return (
         metric_table(_summary_rows(cohort, gates=gates))
-        + _mixed_cohort_note(cohort)
         + grid_table(columns, participant_rows(cohort))
         + "<p>Acquisition date indexes what changes in the recording &mdash; cap ageing, "
         "electrode wear, a replaced amplifier. It is deliberately not the processing date, "

@@ -46,7 +46,9 @@ import pandas as pd
 #: 0.14 uV over 493 beats and 2.78 uV over 59 of them. A cohort that read a version-2
 #: sidecar as though it were this one would compare two different quantities across
 #: participants, which is exactly what this version number exists to prevent.
-SCHEMA_VERSION = 3
+# Version 4 dropped the eleven scanner run columns and the acquisition-context axis.
+# A cohort is one kind of recording now, so there is nothing to refuse to pool across.
+SCHEMA_VERSION = 4
 
 #: Suffix of the report the sidecar belongs to, mirroring :mod:`build_record`.
 _REPORT_SUFFIX = "_report.h5"
@@ -61,14 +63,11 @@ CONDITIONS_SUFFIX = "_desc-qcconditions.tsv"
 #: Columns every table must carry. A sidecar missing one is raised rather than silently
 #: contributing a column of nothing to a cohort figure.
 #:
-#: The distinction that governs this list, and :data:`SCANNER_RUN_COLUMNS` below, is
-#: between a column and a value. A column is required when the recorded context implies
-#: the measurement was attempted, and its absence is therefore a fault in the writer. The
-#: value in it may still be missing, because a measurement that was attempted and did not
-#: resolve is an ordinary outcome -- ``compute_comb_residual`` declines when the frequency
-#: resolution cannot separate the comb from its background, which is a property of the
-#: volume rate rather than of the data. Missing values shrink a panel's denominator, which
-#: the panel prints. A missing column would shrink it silently.
+#: The distinction that governs this list is between a column and a value. A column is
+#: required because the measurement was attempted, and its absence is therefore a fault in
+#: the writer. The value in it may still be missing, because a measurement that was
+#: attempted and did not resolve is an ordinary outcome. Missing values shrink a panel's
+#: denominator, which the panel prints. A missing column would shrink it silently.
 RUN_COLUMNS = (
     "run",
     "n_channels",
@@ -80,51 +79,6 @@ RUN_COLUMNS = (
     "continuity_max_db",
 )
 
-#: Additionally required of an in-scanner acquisition.
-#:
-#: The context is derived from the presence of volume markers, so a sidecar that claims to
-#: be in-scanner claims that volume timing was measurable. Timing is then always present;
-#: the volume-locked amplitude may be absent in value where too few complete epochs
-#: survived, but the column proves the writer attempted it.
-#:
-#: Observed locked RMS, its estimated floor, and the signed difference in power are all
-#: retained. A negative difference is a censored measurement and cannot be reconstructed
-#: from a zero-clipped amplitude.
-SCANNER_RUN_COLUMNS = (
-    "n_volumes",
-    "repetition_time_s",
-    "volume_jitter_s",
-    "volume_locked_rms_before_uv",
-    "volume_locked_floor_before_uv",
-    "volume_locked_excess_power_before_uv2",
-    "volume_locked_resolved_before",
-    "volume_locked_rms_after_uv",
-    "volume_locked_floor_after_uv",
-    "volume_locked_excess_power_after_uv2",
-    "volume_locked_resolved_after",
-    "median_bpm",
-    "n_beats",
-    "beat_dropouts",
-    "marker_matched_fraction",
-    "marker_median_lag_s",
-    "marker_lag_iqr_s",
-    "n_markers",
-    "n_detected_beats",
-    "n_matched_beats",
-    "pulse_marker_count",
-    "beat_source",
-    "bcg_residual_uv",
-    "bcg_beat_train_coverage",
-    # Required, not optional. The residual amplitude above is an average over the beats it
-    # was given, so its floor moves with that count and the bare number is not comparable
-    # between runs; a sidecar that carried the amplitude without the floor would let a
-    # cohort rank runs by beat-detection quality and call it artifact. Same reasoning, and
-    # the same estimator, as the volume-locked gradient columns.
-    "bcg_noise_floor_uv",
-    "bcg_excess_power_uv2",
-    "bcg_resolved",
-    "bcg_n_beats",
-)
 
 #: The across-channel median and the worst channel, per run and stage.
 #:
@@ -166,17 +120,6 @@ COMB_COLUMNS = (
 CONDITION_COLUMNS = ("condition", "n_total", "n_kept")
 
 
-class AcquisitionContext(Enum):
-    """Whether the recording was made inside a scanner.
-
-    Derived per participant from its own evidence -- the presence of volume markers -- and
-    never configured, so a mixed cohort classifies itself. This is the axis the report
-    refuses to pool across: a variance-removed figure that is unremarkable inside a bore is
-    alarming outside one, and a median over both describes neither.
-    """
-
-    IN_SCANNER = "in_scanner"
-    OUT_OF_SCANNER = "out_of_scanner"
 
 
 class Paradigm(Enum):
@@ -222,7 +165,6 @@ class SubjectSidecar:
 
     subject: str
     task: str
-    context: AcquisitionContext
     paradigm: Paradigm
     #: Subject-level scalars: variance removed, component counts, rank, and the rest of
     #: what the build record already holds, copied so a cohort read needs one file.
@@ -311,11 +253,6 @@ def has_sidecar(report_path: Path | str) -> bool:
     return all(path.is_file() for path in sidecar_paths(report_path).required)
 
 
-def run_columns_for(context: AcquisitionContext) -> tuple[str, ...]:
-    """Columns the run table must carry for a participant in this context."""
-    if context is AcquisitionContext.IN_SCANNER:
-        return RUN_COLUMNS + SCANNER_RUN_COLUMNS
-    return RUN_COLUMNS
 
 
 def _require_columns(
@@ -323,20 +260,11 @@ def _require_columns(
     columns: tuple[str, ...],
     *,
     source: str,
-    context: AcquisitionContext | None = None,
 ) -> None:
     missing = [name for name in columns if name not in frame.columns]
     if not missing:
         return
-    scanner_only = [name for name in missing if name in SCANNER_RUN_COLUMNS]
-    detail = ""
-    if context is AcquisitionContext.IN_SCANNER and scanner_only:
-        detail = (
-            " These are required because the sidecar records an in-scanner acquisition, "
-            "which means volume timing was measurable and the gradient measurements were "
-            "attempted. Record the column with a missing value if one did not resolve."
-        )
-    raise ValueError(f"{source} is missing the columns {', '.join(missing)}.{detail}")
+    raise ValueError(f"{source} is missing the columns {', '.join(missing)}.")
 
 
 def _require_no_infinite_values(frame: pd.DataFrame, *, source: str) -> None:
@@ -386,14 +314,13 @@ def _read_table(
     columns: tuple[str, ...],
     *,
     required: bool,
-    context: AcquisitionContext | None = None,
 ) -> pd.DataFrame:
     if not path.is_file():
         if required:
             raise FileNotFoundError(f"The QC sidecar table {path.name} does not exist.")
         return _empty(columns)
     frame = pd.read_csv(path, sep="\t")
-    _require_columns(frame, columns, source=path.name, context=context)
+    _require_columns(frame, columns, source=path.name)
     _require_no_infinite_values(frame, source=path.name)
     return frame
 
@@ -411,9 +338,8 @@ def write_sidecar(report_path: Path | str, sidecar: SubjectSidecar) -> SidecarPa
     # stage at fault.
     _require_columns(
         sidecar.runs,
-        run_columns_for(sidecar.context),
+        RUN_COLUMNS,
         source=f"The run table for sub-{sidecar.subject}",
-        context=sidecar.context,
     )
     for frame, source in (
         (sidecar.runs, "The run table"),
@@ -429,7 +355,6 @@ def write_sidecar(report_path: Path | str, sidecar: SubjectSidecar) -> SidecarPa
         "schema_version": int(sidecar.schema_version),
         "subject": str(sidecar.subject),
         "task": str(sidecar.task),
-        "context": sidecar.context.value,
         "paradigm": sidecar.paradigm.value,
         "acquisition_date": sidecar.acquisition_date,
         "written_at": sidecar.written_at
@@ -495,13 +420,11 @@ def read_sidecar(report_path: Path | str) -> SubjectSidecar:
             f"match the {expected!r} in its own path. A sidecar has been moved or renamed."
         )
 
-    context = AcquisitionContext(document["context"])
-    runs = _read_table(paths.runs, run_columns_for(context), required=True, context=context)
+    runs = _read_table(paths.runs, RUN_COLUMNS, required=True)
     _require_locked_power_consistency(runs)
     return SubjectSidecar(
         subject=subject,
         task=str(document.get("task", "")),
-        context=context,
         paradigm=Paradigm(document["paradigm"]),
         measurements=dict(document.get("measurements") or {}),
         settings=dict(document.get("settings") or {}),
@@ -530,16 +453,13 @@ __all__ = [
     "COMB_COLUMNS",
     "CONDITION_COLUMNS",
     "RUN_COLUMNS",
-    "SCANNER_RUN_COLUMNS",
     "SCHEMA_VERSION",
     "SPECTRUM_COLUMNS",
-    "AcquisitionContext",
     "Paradigm",
     "SidecarPaths",
     "SubjectSidecar",
     "has_sidecar",
     "read_sidecar",
-    "run_columns_for",
     "sidecar_paths",
     "write_sidecar",
 ]

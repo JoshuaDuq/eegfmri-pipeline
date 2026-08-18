@@ -27,7 +27,6 @@ import mne
 import numpy as np
 from matplotlib.colors import TwoSlopeNorm
 
-from eeg_pipeline.preprocessing.report.annotations import annotation_onsets
 from eeg_pipeline.preprocessing.report.style import (
     DIVERGING_POWER_COLORMAP,
     FLAG_COLOR,
@@ -77,7 +76,6 @@ class RunContinuity:
     #:
     #: An EEG-only recording has no train to search, which is different from one that was
     #: searched and found empty.
-    has_volume_markers: bool = False
     #: Whether the channel rows were sorted down the head rather than left in file order.
     #:
     #: Carried so the axis can say which of the two it is. At a full montage most rows have
@@ -171,11 +169,6 @@ def _covered_duration(
 #: is not a trial -- a response marker in a paradigm where responses are not the event, a
 #: stimulus-computer heartbeat -- belongs in ``report.acquisition.non_event_prefixes``
 #: rather than here, where it would silently suppress another lab's events.
-# Inlined when report.acquisition.volume_marker_description left the core config. Only
-# reachable consumer is the in/out-of-scanner classification, which leaves in Task 17;
-# this literal leaves with it. A study that spells its marker differently passes it in.
-VOLUME_MARKER_DESCRIPTION = "Volume/V  1"
-
 NON_EVENT_PREFIXES = ("BAD", "EDGE", "NEW SEGMENT")
 
 
@@ -317,7 +310,6 @@ def compute_run_continuity(
     recording_id: str,
     window_seconds: float = WINDOW_SECONDS,
     edge_support_seconds: float = 0.0,
-    volume_description: str | None = None,
     pulse_description: str | None = None,
     non_event_prefixes: Sequence[str] = NON_EVENT_PREFIXES,
 ) -> RunContinuity:
@@ -362,11 +354,6 @@ def compute_run_continuity(
         raise ValueError(
             f"{recording_id}: the filter edge-support span leaves no continuity windows."
         )
-    volume_onsets = (
-        annotation_onsets(raw, volume_description)
-        if volume_description
-        else np.array([], dtype=float)
-    )
     return RunContinuity(
         recording_id=recording_id,
         window_seconds=float(window_seconds),
@@ -378,10 +365,9 @@ def compute_run_continuity(
         edge_support_s=float(edge_support_seconds),
         event_onsets=_event_onsets(
             raw,
-            marker_descriptions=(volume_description or "", pulse_description or ""),
+            marker_descriptions=(pulse_description or "",),
             non_event_prefixes=non_event_prefixes,
         ),
-        has_volume_markers=bool(volume_onsets.size),
         ordered_by_position=ordered_by_position,
     )
 
@@ -406,11 +392,7 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
         for run in runs
     ]
     why_it_matters = (
-        " and inside a scanner the second is the common case: once the participant "
-        "shifts, the gradient template stops matching and everything after that moment "
-        "is contaminated"
-        if any(run.has_volume_markers for run in runs)
-        else ", and only the second is recoverable by excluding the stretch that failed"
+        ", and only the second is recoverable by excluding the stretch that failed"
     )
     return (
         "<p>Amplitude in "

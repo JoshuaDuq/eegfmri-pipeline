@@ -138,11 +138,9 @@ def _bad_channel_count(participant: SubjectSidecar) -> float:
 #: Membership is by mechanism rather than by which section drew the number. Flagged time
 #: and bad channels are both "the sensors were not making good contact", so they converge
 #: for the same physical reason and belong together; heart rate and marker agreement are
-#: both "the beat detector was working", and are separate from the gradient metrics even
-#: though both only exist inside a scanner.
+#: both "the beat detector was working".
 CHANNEL_FAMILY = "Channel-level"
 ICA_FAMILY = "ICA-level"
-SCANNER_FAMILY = "Scanner-level"
 PHYSIOLOGY_FAMILY = "Physiology-level"
 
 METRIC_SOURCES: tuple[MetricSource, ...] = (
@@ -153,20 +151,6 @@ METRIC_SOURCES: tuple[MetricSource, ...] = (
     MetricSource("n_excluded", ICA_FAMILY, _measurement("n_excluded")),
     MetricSource("variance_removed", ICA_FAMILY, _measurement("variance_removed")),
     MetricSource("retained_dimensions", ICA_FAMILY, _measurement("retained_dimensions")),
-    MetricSource(
-        "volume_locked_excess_power_after_uv2",
-        SCANNER_FAMILY,
-        _run_median_where(
-            "volume_locked_excess_power_after_uv2",
-            "volume_locked_resolved_after",
-        ),
-    ),
-    MetricSource("volume_jitter_s", SCANNER_FAMILY, _run_median("volume_jitter_s")),
-    # Deliberately not the repetition time. It is a property of the sequence somebody
-    # chose, not of how well the recording went, so a participant scanned under a second
-    # protocol would be counted as extreme on the scanner family for having been scanned
-    # differently -- a design fact wearing the clothes of a quality finding. The gradient
-    # section reports repetition-time consistency directly, which is where that belongs.
     MetricSource("median_bpm", PHYSIOLOGY_FAMILY, _run_median("median_bpm")),
     MetricSource(
         "marker_matched_fraction",
@@ -176,7 +160,7 @@ METRIC_SOURCES: tuple[MetricSource, ...] = (
     MetricSource("beat_dropouts", PHYSIOLOGY_FAMILY, _run_median("beat_dropouts")),
 )
 
-FAMILY_ORDER = (CHANNEL_FAMILY, ICA_FAMILY, SCANNER_FAMILY, PHYSIOLOGY_FAMILY)
+FAMILY_ORDER = (CHANNEL_FAMILY, ICA_FAMILY, PHYSIOLOGY_FAMILY)
 
 
 def _numeric(value: Any) -> float:
@@ -397,7 +381,6 @@ __all__ = [
     "MULTIPLICITY_TAG",
     "MULTIPLICITY_TITLE",
     "PHYSIOLOGY_FAMILY",
-    "SCANNER_FAMILY",
     "MetricSource",
     "Multiplicity",
     "add_multiplicity_section",

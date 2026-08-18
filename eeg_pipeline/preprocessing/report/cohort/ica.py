@@ -38,7 +38,6 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.record import COMPONENT_LABEL_CLASSES
-from eeg_pipeline.preprocessing.report.cohort.sidecar import AcquisitionContext
 from eeg_pipeline.preprocessing.report.style import (
     OKABE_ITO,
     apply_report_style,
@@ -52,8 +51,6 @@ ICA_TAG = "cohort-ica"
 
 #: How each context reads in a heading.
 _CONTEXT_LABELS = {
-    AcquisitionContext.IN_SCANNER: "In scanner",
-    AcquisitionContext.OUT_OF_SCANNER: "Outside scanner",
 }
 
 #: Colour per detector class in the composition bars.
@@ -80,7 +77,6 @@ def decomposition_frame(cohort: Cohort) -> pd.DataFrame:
             continue
         row: dict[str, object] = {
             "subject": participant.subject,
-            "context": participant.context,
             "n_channels": measurements.get("n_channels"),
             "n_components": measurements.get("n_components"),
             "n_excluded": measurements.get("n_excluded"),
@@ -118,34 +114,25 @@ def rank_violations(frame: pd.DataFrame) -> list[str]:
     return offenders
 
 
-def variance_by_context(
+def variance_pooled(
     frame: pd.DataFrame, *, gates: BandGates = DEFAULT_GATES
-) -> dict[AcquisitionContext, object]:
-    """Variance removed, pooled separately within each acquisition context.
-
-    Never across them. A value ordinary inside a scanner is alarming outside one, so a
-    pooled median would describe neither population and would move with the mix of the two
-    rather than with anything about the recordings.
-    """
-    pooled: dict[AcquisitionContext, object] = {}
-    for context in AcquisitionContext:
-        selected = frame[
-            (frame["context"] == context) & frame["variance_removed"].notna()
-        ]
-        if selected.empty:
-            continue
-        pooled[context] = pool_participants_scalar(
-            [
-                Contribution(
-                    subject=str(row["subject"]),
-                    value=np.asarray([float(row["variance_removed"])]),
-                    n_runs=1,
-                )
-                for _, row in selected.iterrows()
-            ],
-            gates=gates,
-        )
-    return pooled
+) -> object | None:
+    # One population now: the acquisition-context axis this used to refuse to pool across
+    # left with the scanner columns in schema version 4.
+    selected = frame[frame["variance_removed"].notna()]
+    if selected.empty:
+        return None
+    return pool_participants_scalar(
+        [
+            Contribution(
+                subject=str(row["subject"]),
+                value=np.asarray([float(row["variance_removed"])]),
+                n_runs=1,
+            )
+            for _, row in selected.iterrows()
+        ],
+        gates=gates,
+    )
 
 
 def plot_label_composition(frame: pd.DataFrame) -> plt.Figure:
@@ -259,39 +246,23 @@ def _decimal(value: object, *, places: int = 2) -> str | None:
     return f"{float(value):.{places}f}"
 
 
-def variance_summary_html(
-    pooled: dict[AcquisitionContext, object],
-    *,
-    stratified: bool,
-) -> str:
-    """Variance removed per context, with the reason it is not pooled across them."""
-    if not pooled:
+def variance_summary_html(pooled: object | None) -> str:
+    """Variance removed across the cohort."""
+    if pooled is None:
         return ""
-    rows = []
-    for context, statistic in pooled.items():
-        label = _CONTEXT_LABELS[context]
-        denominator = statistic.denominator
-        if statistic.regime is BandRegime.INDIVIDUALS:
-            values = ", ".join(
-                f"{subject} {value:.1%}" for subject, value in statistic.per_subject.items()
-            )
-            rows.append((f"{label} (n={denominator.n_subjects})", values))
-            continue
-        quartiles = statistic.quartiles
-        spread = "" if quartiles is None else f" [{quartiles[0]:.1%}–{quartiles[1]:.1%}]"
-        rows.append(
-            (f"{label} (n={denominator.n_subjects})", f"{statistic.median:.1%}{spread}")
+    denominator = pooled.denominator
+    if pooled.regime is BandRegime.INDIVIDUALS:
+        values = ", ".join(
+            f"{subject} {value:.1%}" for subject, value in pooled.per_subject.items()
         )
-    note = ""
-    if stratified:
-        note = (
-            "<p>Reported per acquisition context and never pooled across them. Removing "
-            "86% of sensor variance is unremarkable for a recording made inside a bore and "
-            "alarming for one made outside it, so a median over both would describe "
-            "neither group and would move with the mix of the two rather than with the "
-            "recordings.</p>"
-        )
-    return "<h4>Variance removed</h4>" + metric_table(rows) + note
+        rows = [(f"Variance removed (n={denominator.n_subjects})", values)]
+    else:
+        quartiles = pooled.quartiles
+        spread = "" if quartiles is None else f" [{quartiles[0]:.1%}\u2013{quartiles[1]:.1%}]"
+        rows = [
+            (f"Variance removed (n={denominator.n_subjects})", f"{pooled.median:.1%}{spread}")
+        ]
+    return "<h4>Variance removed</h4>" + metric_table(rows)
 
 
 def add_ica_section(
@@ -324,10 +295,7 @@ def add_ica_section(
         )
 
     parts.append(
-        variance_summary_html(
-            variance_by_context(frame, gates=gates),
-            stratified=cohort.is_mixed,
-        )
+        variance_summary_html(variance_pooled(frame, gates=gates))
     )
     parts.append(decomposition_table(frame))
 
@@ -371,6 +339,6 @@ __all__: Sequence[str] = [
     "decomposition_table",
     "plot_label_composition",
     "rank_violations",
-    "variance_by_context",
+    "variance_pooled",
     "variance_summary_html",
 ]

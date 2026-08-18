@@ -44,7 +44,6 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.record import AFTER, BEFORE
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     SubjectSidecar,
 )
 from eeg_pipeline.preprocessing.report.filtering import (
@@ -460,7 +459,6 @@ def aperiodic_frame(cohort: Cohort) -> pd.DataFrame:
         runs = participant.runs
         row: dict[str, object] = {
             "subject": participant.subject,
-            "context": participant.context,
         }
         found = False
         for stage in (BEFORE, AFTER):
@@ -498,24 +496,16 @@ def plot_aperiodic_shift(frame: pd.DataFrame) -> plt.Figure:
     label_traces = len(frame) <= MAX_LABELLED_PAIRED
 
     endpoints: list[tuple[float, str]] = []
-    contexts: set = set()
     for _, participant in frame.iterrows():
         before = participant.get(f"exponent_{BEFORE}")
         after = participant.get(f"exponent_{AFTER}")
         if not (np.isfinite(before) and np.isfinite(after)):
             continue
-        # Dashed inside a scanner, solid outside it. A downward shift means opposite things
-        # in the two, so a reader must be able to tell which lines are which without
-        # cross-referencing the composition table.
-        context = participant.get("context")
-        contexts.add(context)
-        in_scanner = context is AcquisitionContext.IN_SCANNER
         axis.plot(
             [0, 1],
             [before, after],
             color=GUIDE_COLOR,
             linewidth=1.0,
-            linestyle="--" if in_scanner else "-",
             zorder=1,
         )
         axis.plot([0], [before], marker="o", markersize=4.0, color=BEFORE_COLOR, zorder=2)
@@ -525,18 +515,7 @@ def plot_aperiodic_shift(frame: pd.DataFrame) -> plt.Figure:
     axis.set_xticks([0, 1], ["Before ICA", "After ICA"])
     axis.set_xlim(-0.25, 1.4)
     axis.set_ylabel("1/f exponent")
-    if len(contexts) > 1:
-        axis.plot([], [], color=GUIDE_COLOR, linestyle="--", label="In scanner")
-        axis.plot([], [], color=GUIDE_COLOR, linestyle="-", label="Outside scanner")
-        axis.legend(frameon=False, fontsize=8, loc="lower left")
-    scanner_note = (
-        " \u00b7 in scanner"
-        if contexts == {AcquisitionContext.IN_SCANNER}
-        else (" \u00b7 outside scanner" if contexts == {AcquisitionContext.OUT_OF_SCANNER} else "")
-    )
-    axis.set_title(
-        f"Aperiodic background \u00b7 {len(endpoints)} participant(s){scanner_note}"
-    )
+    axis.set_title(f"Aperiodic background \u00b7 {len(endpoints)} participant(s)")
     _widen_to_minimum_span(axis, MINIMUM_EXPONENT_SPAN)
     if label_traces and endpoints:
         low, high = axis.get_ylim()
@@ -607,50 +586,23 @@ def aperiodic_table(frame: pd.DataFrame) -> str:
 
 
 def _exponent_reading(frame: pd.DataFrame) -> str:
-    """State what an exponent shift means for the acquisitions that produced it.
+    """How to read a shift in the aperiodic exponent across the ICA exclusions.
 
-    The same shift means opposite things in and out of a scanner, and the report already
-    refuses to pool across that axis for variance removed for the same reason. Inside a
-    bore the pre-ICA spectrum is dominated at low frequency by the ballistocardiogram, and
-    removing it *must* take more power out of the bottom of the band than the top -- which
-    flattens the slope and lowers the exponent. That is the arithmetic of a correction
-    working, not evidence of signal lost, and a panel that reads it the other way sends a
-    reader to look for a problem their cleaning does not have.
-
-    Outside a scanner there is no such dominant low-frequency artifact, so the alarming
-    reading is the ordinary one. Both are stated; which applies is decided by the recorded
-    context, never asserted about a participant.
+    A downward shift is what removing a dominant low-frequency artifact looks like: it
+    takes more power out of the bottom of the fit range than the top and flattens the
+    slope by arithmetic. That is a correction working, not signal lost. The removal
+    columns below are how to tell the two apart.
     """
-    contexts = {row["context"] for _, row in frame.iterrows() if "context" in row}
-    in_scanner = AcquisitionContext.IN_SCANNER in contexts
-    out_of_scanner = AcquisitionContext.OUT_OF_SCANNER in contexts
-
-    parts = []
-    if in_scanner:
-        parts.append(
-            "<p><strong>For the in-scanner participants</strong>, a downward shift is what "
-            "removing the ballistocardiogram looks like. That artifact dominates the "
-            "spectrum at low frequency, so taking it out removes more power from the "
-            "bottom of the fit range than the top and flattens the slope by arithmetic. "
-            "The removal columns below are how to tell the two apart: removal concentrated "
-            "at low frequency is a cardiac correction doing its job, while removal of "
-            "similar depth across the whole range that still moves the exponent is the "
-            "case worth looking into.</p>"
-        )
-    if out_of_scanner:
-        parts.append(
-            "<p><strong>For the participants recorded outside a scanner</strong>, there is "
-            "no dominant low-frequency artifact for cleaning to remove, so an exponent that "
-            "shifted in one direction across participants is harder to explain as anything "
-            "but broadband signal having gone with it &mdash; and nothing else in this "
-            "report would show it.</p>"
-        )
-    if in_scanner and out_of_scanner:
-        parts.append(
-            "<p>This cohort spans both, so the panel above is marked by context and the two "
-            "groups are not read against each other.</p>"
-        )
-    return "".join(parts)
+    return (
+        "<p>A downward shift in the exponent is what removing a dominant low-frequency "
+        "artifact looks like. Such an artifact carries most of its power at the bottom of "
+        "the fit range, so taking it out flattens the slope by arithmetic rather than by "
+        "anything having happened to the neural background. The removal columns below are "
+        "how to tell the two apart: removal concentrated at low frequency is a correction "
+        "doing its job, while removal of similar depth across the whole range that still "
+        "moves the exponent is the case worth looking into &mdash; broadband signal may "
+        "have gone with it, and nothing else in this report would show that.</p>"
+    )
 
 
 def _decimal(value: object, *, places: int = 2) -> str | None:

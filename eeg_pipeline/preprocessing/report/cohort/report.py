@@ -166,7 +166,6 @@ def _log(cohort: Cohort, *, task: str | None, gates: BandGates, audit: Sequence[
         "n_participants": cohort.n_participants,
         "participants": list(cohort.subjects),
         "n_runs": sum(participant.n_runs for participant in cohort.participants),
-        "contexts": [context.value for context in cohort.contexts],
         "paradigms": [paradigm.value for paradigm in cohort.paradigms],
         "not_aggregated": [
             {"subject": entry.subject, "reason": entry.reason}
