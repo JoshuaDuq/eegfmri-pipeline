@@ -26,6 +26,12 @@ namespaces = true
 "studies.pain_study.scripts.cardiac_gaps" = ["config.yaml", "README.md"]
 "studies.pain_study.scripts.conversion" = ["README.md"]
 "studies.pain_study.scripts.t1" = ["README.md"]
+"studies.pain_study.fieldtrip_tfr" = ["config/*.yaml", "matlab/*.m", "README.md"]
+"studies.pain_study.gradient_trough_ica" = [
+    "*.yaml",
+    "matlab/*.m",
+    "README.md",
+]
 "studies.pain_study.scripts.study_support" = ["README.md", "*.sh"]
 "studies.pain_study.analysis" = ["README.md"]
 "studies.pain_study.analysis.line_comb" = ["README.md"]
