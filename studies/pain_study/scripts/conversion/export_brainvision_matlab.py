@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy.io import savemat
 
-from eeg_pipeline.preprocessing.brainvision_markers import validate_unambiguous_vas_markers
+from studies.pain_study.scripts.conversion.brainvision_markers import validate_unambiguous_vas_markers
 
 SUBJECT = "sub-0015"
 TASK = "thermalactive"

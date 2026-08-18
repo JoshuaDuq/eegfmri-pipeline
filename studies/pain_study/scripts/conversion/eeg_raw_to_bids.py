@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import List, Literal, Optional
 
@@ -17,16 +18,49 @@ from eeg_pipeline.utils.data.preprocessing import (
     filter_annotations,
     find_brainvision_vhdrs,
     get_run_index,
+    normalize_string,
     parse_subject_id,
     set_channel_types,
     set_montage,
-    trim_to_volume_bounds,
 )
 
 logger = logging.getLogger(__name__)
 
 SourceFormat = Literal["brainvision", "native-fif"]
 
+
+
+# Moved from eeg_pipeline/utils/data/preprocessing.py: it trims to a scanner's volume
+# markers, which only a study with a scanner has.
+def trim_to_volume_bounds(raw: mne.io.BaseRaw) -> bool:
+    if len(raw.annotations) == 0:
+        return False
+
+    volume_pattern = re.compile(r"(^|[/,])V\s*1(\D|$)")
+    volume_indices = [
+        idx
+        for idx, description in enumerate(raw.annotations.description)
+        if normalize_string(description).startswith("Volume/V")
+        or volume_pattern.search(normalize_string(description)) is not None
+    ]
+
+    if not volume_indices:
+        return False
+
+    onsets = [raw.annotations.onset[idx] for idx in volume_indices]
+    first_onset = min(onsets)
+    last_onset = max(onsets)
+
+    if not isinstance(first_onset, (int, float)) or first_onset <= 0:
+        return False
+
+    logger.info(
+        "Trimming raw to volume bounds: %.3fs to %.3fs relative to recording start.",
+        first_onset,
+        last_onset,
+    )
+    raw.crop(tmin=float(first_onset), tmax=float(last_onset))
+    return True
 
 def _find_native_corrected_fifs(source_root: Path, task: str) -> list[Path]:
     pattern = f"sub-*/eeg/sub-*_task-{task}_run-*_desc-mriartifactclean_raw.fif"

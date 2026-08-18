@@ -274,35 +274,6 @@ def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 ###################################################################
 
 
-def trim_to_volume_bounds(raw: mne.io.BaseRaw) -> bool:
-    if len(raw.annotations) == 0:
-        return False
-
-    volume_pattern = re.compile(r"(^|[/,])V\s*1(\D|$)")
-    volume_indices = [
-        idx
-        for idx, description in enumerate(raw.annotations.description)
-        if normalize_string(description).startswith("Volume/V")
-        or volume_pattern.search(normalize_string(description)) is not None
-    ]
-
-    if not volume_indices:
-        return False
-
-    onsets = [raw.annotations.onset[idx] for idx in volume_indices]
-    first_onset = min(onsets)
-    last_onset = max(onsets)
-
-    if not isinstance(first_onset, (int, float)) or first_onset <= 0:
-        return False
-
-    logger.info(
-        "Trimming raw to volume bounds: %.3fs to %.3fs relative to recording start.",
-        first_onset,
-        last_onset,
-    )
-    raw.crop(tmin=float(first_onset), tmax=float(last_onset))
-    return True
 
 
 def filter_annotations(
@@ -1005,7 +976,6 @@ __all__ = [
     "update_sample_indices",
     "get_sort_columns",
     "combine_runs_for_subject",
-    "trim_to_volume_bounds",
     "filter_annotations",
     "set_channel_types",
     "set_montage",

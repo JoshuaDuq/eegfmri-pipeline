@@ -16,7 +16,7 @@ from typing import Mapping, Sequence
 import mne
 import numpy as np
 
-from eeg_pipeline.preprocessing.brainvision_markers import sanitize_vas_marker_text
+from studies.pain_study.scripts.conversion.brainvision_markers import sanitize_vas_marker_text
 
 RUN_PATTERN = re.compile(r"^ThermalPainEEGFMRI_run(?P<run>\d+)_sub(?P<subject>[^_]+)_")
 DEFAULT_RECORDING_OVERRIDES_PATH = (

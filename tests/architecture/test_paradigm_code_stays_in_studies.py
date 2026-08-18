@@ -127,3 +127,10 @@ def test_the_harmonics_subsystem_left_core() -> None:
         "eeg_pipeline/cli/commands/harmonics_orchestrator.py",
     ):
         assert not (REPO_ROOT / relative_path).exists(), f"{relative_path} is scanner code"
+
+
+def test_the_marker_sanitation_left_core() -> None:
+    assert not (REPO_ROOT / "eeg_pipeline/preprocessing/brainvision_markers.py").exists()
+    assert (
+        REPO_ROOT / "studies/pain_study/scripts/conversion/brainvision_markers.py"
+    ).exists()

@@ -4,7 +4,7 @@ import mne
 import numpy as np
 import pytest
 
-from eeg_pipeline.preprocessing.brainvision_markers import (
+from studies.pain_study.scripts.conversion.brainvision_markers import (
     sanitize_vas_marker_text,
     validate_unambiguous_vas_markers,
 )
