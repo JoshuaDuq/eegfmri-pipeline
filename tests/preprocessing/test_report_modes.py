@@ -9,9 +9,6 @@ import pytest
 
 matplotlib.use("Agg")
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (  # noqa: E402
-    add_analyzer_correction_review,
-)
 from eeg_pipeline.preprocessing.report.coverage import add_coverage_review  # noqa: E402
 from eeg_pipeline.preprocessing.report.provenance import add_provenance_review  # noqa: E402
 from eeg_pipeline.preprocessing.report.run_evidence import (  # noqa: E402
@@ -34,12 +31,9 @@ def _raw(tmp_path, name="sub-0001_task-rest_run-1_proc-filt_raw.fif", sfreq=250.
 
 
 def test_scanner_sections_are_absent_without_scanner_data(tmp_path) -> None:
-    """An EEG-only dataset gets no Analyzer or coverage section, not an empty one."""
+    """An EEG-only dataset gets no coverage section, not an empty one."""
     report = mne.Report(title="eeg-only", verbose="ERROR")
 
-    analyzer = add_analyzer_correction_review(
-        report=report, qc_dir=tmp_path, task="rest", subject="0001"
-    )
     coverage = add_coverage_review(
         report=report,
         deriv_eeg_root=tmp_path,
@@ -48,7 +42,6 @@ def test_scanner_sections_are_absent_without_scanner_data(tmp_path) -> None:
         settings=ReportSettings(),
     )
 
-    assert analyzer is None
     assert coverage is None
     assert report._content == []
 

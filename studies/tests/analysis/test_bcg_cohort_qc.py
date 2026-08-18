@@ -6,7 +6,7 @@ import pytest
 
 matplotlib.use("Agg")
 
-from eeg_pipeline.preprocessing.report.cohort_qc import (  # noqa: E402
+from studies.pain_study.analysis.bcg.cohort_qc import (  # noqa: E402
     MINIMUM_R_MARKERS_PER_VOLUME,
     cohort_marker_html,
     plot_cohort_markers,

@@ -15,7 +15,7 @@ import pandas as pd
 
 matplotlib.use("Agg")
 
-from eeg_pipeline.preprocessing.report.cohort.analyzer import (  # noqa: E402
+from studies.pain_study.analysis.bcg.cohort import (  # noqa: E402
     PLAUSIBLE_BPM,
     analyzer_cohort,
     analyzer_table,
@@ -218,7 +218,7 @@ def test_the_section_carries_no_figure_because_it_would_restate_the_table() -> N
     A strip plot of one number per participant is the sorted table drawn with dots, and it
     carries less: the table also holds the worst run, the dropout rate and the run count.
     """
-    from eeg_pipeline.preprocessing.report.cohort import analyzer as module
+    from studies.pain_study.analysis.bcg import cohort as module
 
     assert not hasattr(module, "plot_analyzer")
 
@@ -263,7 +263,7 @@ def _residual_participant(subject: str, runs: dict[int, tuple[int, float | None]
 
 def test_runs_without_a_marker_train_are_listed_for_re_export() -> None:
     """No markers means no subtraction was possible, whatever the residual came out at."""
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import uncorrected_runs
+    from studies.pain_study.analysis.bcg.cohort import uncorrected_runs
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 
     cohort = Cohort(
@@ -282,7 +282,7 @@ def test_runs_without_a_marker_train_are_listed_for_re_export() -> None:
 
 def test_a_run_whose_residual_could_not_be_measured_is_still_listed() -> None:
     """sub-0000 r5: no markers and no beat train. It needs re-export most of all."""
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import uncorrected_runs
+    from studies.pain_study.analysis.bcg.cohort import uncorrected_runs
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 
     cohort = Cohort(
@@ -298,7 +298,7 @@ def test_a_run_whose_residual_could_not_be_measured_is_still_listed() -> None:
 def test_consecutive_affected_runs_read_as_a_range() -> None:
     """A lead that came off at run 2 and stayed off is a different story from three
     scattered dropouts, and the compact range is what carries that in a table."""
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import participant_correction_rows
+    from studies.pain_study.analysis.bcg.cohort import participant_correction_rows
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 
     cohort = Cohort(
@@ -321,7 +321,7 @@ def test_consecutive_affected_runs_read_as_a_range() -> None:
 
 
 def test_a_fully_corrected_cohort_has_no_worklist() -> None:
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import uncorrected_runs
+    from studies.pain_study.analysis.bcg.cohort import uncorrected_runs
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 
     cohort = Cohort(participants=(_residual_participant("0005", {1: (457, 0.8)}),))
@@ -338,7 +338,7 @@ def test_a_cohort_with_no_markers_anywhere_still_gets_its_worklist() -> None:
     """
     import mne
 
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import add_analyzer_section
+    from studies.pain_study.analysis.bcg.cohort import add_analyzer_section
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 
     cohort = Cohort(
@@ -394,7 +394,7 @@ def _rest_participant(subject: str, *, marker_count: int, residual_uv: float | N
 
 def test_an_in_scanner_resting_state_recording_is_listed_for_re_export() -> None:
     """Rest in the bore has the same ballistocardiogram and the same failure mode."""
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import uncorrected_runs
+    from studies.pain_study.analysis.bcg.cohort import uncorrected_runs
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 
     cohort = Cohort(
@@ -415,7 +415,7 @@ def test_an_in_scanner_resting_state_recording_is_listed_for_re_export() -> None
 
 def test_an_out_of_scanner_participant_is_not_listed() -> None:
     """There is no ballistocardiogram outside a bore and no pulse correction to check."""
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import (
+    from studies.pain_study.analysis.bcg.cohort import (
         participant_correction_rows,
         uncorrected_runs,
     )

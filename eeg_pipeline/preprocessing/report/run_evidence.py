@@ -18,10 +18,6 @@ from typing import Sequence
 import mne
 import numpy as np
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (
-    CardiacResidual,
-    compute_cardiac_residual,
-)
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     RrIntervals,
     add_rr_interval_section,
@@ -60,12 +56,6 @@ class RunEvidence:
     #: never acquired, and the two have opposite implications for the pulse correction.
     rr_missing: list[str] = field(default_factory=list)
     #: Analyzer's marker train measured against R peaks detected from the ECG signal.
-    #: Beat-locked EEG residual per run, measured before the ICA exclusions.
-    #:
-    #: What the *upstream* pulse correction left behind. A run whose Analyzer R detection
-    #: failed carries no marker train, so no subtraction was possible and the
-    #: ballistocardiogram is still there; this is the measurement that says how much.
-    cardiac_residuals: list[CardiacResidual] = field(default_factory=list)
     #: Where each EEG sensor sat, in head coordinates, taken from the recording itself.
     #:
     #: Captured here because this is the one place the montage is already in memory. A
@@ -169,16 +159,6 @@ def measure_runs(
         # pulse correction left, and measuring after the exclusions would credit Analyzer
         # for whatever MNE's decomposition removed. Costs one epoching pass over a
         # recording already in memory.
-        evidence.cardiac_residuals.append(
-            compute_cardiac_residual(
-                raw,
-                recording_id=recording_id,
-                marker_description=settings.pulse_marker_description,
-                window_s=settings.bcg_residual_window_s,
-                baseline_s=settings.bcg_residual_baseline_s,
-                measurement_s=settings.bcg_residual_measurement_s,
-            )
-        )
 
         # Both stages, on the same run, by the same estimator: the only paired measurement
         # of the rhythm the pipeline can make. A stage that measured nothing contributes

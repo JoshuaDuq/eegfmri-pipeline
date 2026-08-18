@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from eeg_pipeline.preprocessing.report.cohort.noise_floor import (
+from studies.pain_study.analysis.noise_floor import (
     LockedAverage,
     measure_locked_average,
 )

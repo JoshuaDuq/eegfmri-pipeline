@@ -34,7 +34,7 @@ from eeg_pipeline.preprocessing.report.rr_intervals import (
     add_rr_interval_section,
     compute_rr_intervals,
 )
-from eeg_pipeline.preprocessing.report.cohort.noise_floor import measure_locked_average
+from studies.pain_study.analysis.noise_floor import measure_locked_average
 from eeg_pipeline.preprocessing.report.style import (
     AFTER_COLOR,
     BEFORE_COLOR,

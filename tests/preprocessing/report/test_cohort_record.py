@@ -13,9 +13,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (
+from eeg_pipeline.preprocessing.report.rr_intervals import RrIntervals
+from studies.pain_study.analysis.bcg.report import (
     MarkerAgreement,
-    RrIntervals,
     compute_marker_agreement,
 )
 from eeg_pipeline.preprocessing.report.cohort.record import (
@@ -173,7 +173,7 @@ def test_the_residual_column_is_accompanied_by_the_coverage_it_was_measured_over
     correction found and none of the 443 it missed -- and reads as one of the cleanest runs
     in the cohort.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import CardiacResidual
+    from studies.pain_study.analysis.bcg.report import CardiacResidual
 
     frame = run_table(
         spectra=[_spectra()],

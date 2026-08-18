@@ -44,7 +44,7 @@ def test_the_interval_range_is_derived_from_the_rate_rather_than_stored() -> Non
 
 def test_one_configured_rate_moves_both_the_subject_and_the_cohort_reading() -> None:
     """A paediatric cohort raises the ceiling once and both documents follow."""
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import _participant_row
+    from studies.pain_study.analysis.bcg.cohort import _participant_row
 
     settings = _settings(thresholds={"plausible_heart_rate_bpm": [30.0, 260.0]})
     runs = pd.DataFrame({"median_bpm": [240.0], "n_beats": [500.0], "beat_dropouts": [1.0]})
@@ -80,7 +80,7 @@ def test_every_fallback_default_derives_from_the_one_heart_rate_statement() -> N
         DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
         PLAUSIBLE_RR_RANGE_S,
     )
-    from eeg_pipeline.preprocessing.report.cohort.analyzer import PLAUSIBLE_BPM
+    from studies.pain_study.analysis.bcg.cohort import PLAUSIBLE_BPM
 
     settings = ReportSettings()
     assert tuple(PLAUSIBLE_BPM) == tuple(DEFAULT_PLAUSIBLE_HEART_RATE_BPM)
@@ -116,7 +116,7 @@ def test_the_same_tolerance_becomes_admissible_under_a_slower_ceiling() -> None:
 
 def test_the_agreement_prose_quotes_the_tolerance_that_was_applied() -> None:
     """A configured tolerance must not be applied while the prose quotes the default."""
-    from eeg_pipeline.preprocessing.report.analyzer_qc import (
+    from studies.pain_study.analysis.bcg.report import (
         compute_marker_agreement,
         marker_agreement_html,
     )

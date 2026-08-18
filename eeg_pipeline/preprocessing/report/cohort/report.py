@@ -31,9 +31,6 @@ import mne
 import pandas as pd
 
 from eeg_pipeline.preprocessing.report.cohort.aggregate import DEFAULT_GATES, BandGates
-from eeg_pipeline.preprocessing.report.cohort.analyzer import (
-    uncorrected_audit,
-)
 from eeg_pipeline.preprocessing.report.cohort.at_a_glance import (
     add_at_a_glance_section,
     glance_frame,
@@ -144,7 +141,6 @@ def _audit_tables(cohort: Cohort, *, gates: BandGates) -> dict[str, pd.DataFrame
         ("rejection", lambda: _optional(cohort_rejection(cohort), rejection_audit)),
         # The re-export worklist, as its own file: it is the one audit table a reader works
         # *through* rather than checks a figure against.
-        ("uncorrected", lambda: uncorrected_audit(cohort)),
         ("flagged", lambda: _optional(cohort_continuity(cohort), flagged_audit)),
         ("events", lambda: _optional(cohort_events(cohort), events_audit)),
         ("multiplicity", lambda: multiplicity_frame(cohort, gates=gates)),

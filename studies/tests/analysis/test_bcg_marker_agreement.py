@@ -16,7 +16,7 @@ import pytest
 
 matplotlib.use("Agg")
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (  # noqa: E402
+from studies.pain_study.analysis.bcg.report import (  # noqa: E402
     add_marker_agreement_section,
     compute_marker_agreement,
     compute_run_marker_agreement,

@@ -22,12 +22,12 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (
-    MARKER_AGREEMENT_TOLERANCE_S,
-    RESIDUAL_BASELINE_S,
-    RESIDUAL_MEASUREMENT_S,
-    RESIDUAL_WINDOW_S,
-)
+# Inlined when the BCG modules moved to the study, because core cannot import them
+# back. Task 12 deletes the fields these feed, and these constants with them.
+MARKER_AGREEMENT_TOLERANCE_S = 0.1
+RESIDUAL_WINDOW_S = (-0.2, 0.6)
+RESIDUAL_BASELINE_S = (-0.2, -0.1)
+RESIDUAL_MEASUREMENT_S = (0.0, 0.5)
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     DEFAULT_BEAT_MARKER_DESCRIPTION,
     DEFAULT_PLAUSIBLE_HEART_RATE_BPM,

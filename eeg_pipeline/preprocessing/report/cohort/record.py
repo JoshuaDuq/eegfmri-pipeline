@@ -28,10 +28,6 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (
-    CardiacResidual,
-    MarkerAgreement,
-)
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     RrIntervals,
 )
@@ -103,8 +99,8 @@ def run_table(
     timings: Mapping[str, Any],
     locked_averages: Sequence[Any] = (),
     rr_intervals: Sequence[RrIntervals] = (),
-    marker_agreements: Sequence[MarkerAgreement] = (),
-    cardiac_residuals: Sequence[CardiacResidual] = (),
+    marker_agreements: Sequence[Any] = (),
+    cardiac_residuals: Sequence[Any] = (),
     context: AcquisitionContext,
 ) -> pd.DataFrame:
     """One row per run, holding every run-level scalar a cohort panel reads.
@@ -539,8 +535,8 @@ def build_subject_sidecar(
     locked_averages: Sequence[Any] = (),
     combs: Sequence[Any] = (),
     rr_intervals: Sequence[RrIntervals] = (),
-    marker_agreements: Sequence[MarkerAgreement] = (),
-    cardiac_residuals: Sequence[CardiacResidual] = (),
+    marker_agreements: Sequence[Any] = (),
+    cardiac_residuals: Sequence[Any] = (),
     alpha: Mapping[str, PosteriorAlpha] | None = None,
     components: pd.DataFrame | None = None,
     channel_positions: Mapping[str, Sequence[float]] | None = None,

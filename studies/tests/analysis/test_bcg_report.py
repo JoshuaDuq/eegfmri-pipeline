@@ -6,7 +6,7 @@ import pytest
 
 matplotlib.use("Agg")
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (  # noqa: E402
+from studies.pain_study.analysis.bcg.report import (  # noqa: E402
     analyzer_qc_html,
     load_analyzer_qc,
     plot_analyzer_qc,
@@ -191,7 +191,7 @@ def _injected_rms_uv(amplitude_uv: float, *, sigma_s: float = 0.03, window_s: fl
 
 def test_the_residual_recovers_an_injected_beat_locked_deflection() -> None:
     """The panel's whole claim is that it measures how much artifact is left."""
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-1")
 
@@ -208,7 +208,7 @@ def test_the_excess_power_scales_as_the_square_of_the_injected_amplitude() -> No
     Pins the scale the worklist is now ordered by, which an amplitude-shaped statistic
     would fail.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     single = compute_cardiac_residual(_cardiac_raw(residual_uv=10.0), recording_id="run-1")
     double = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-2")
@@ -222,7 +222,7 @@ def test_the_residual_reports_the_beat_count_its_floor_depends_on() -> None:
     Averaging N beats suppresses everything not locked to them by sqrt(N). Measured on
     sub-0008 run-1, the same data read 0.14 uV over 493 beats and 2.78 uV over 59 of them.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-1")
 
@@ -238,7 +238,7 @@ def test_an_unresolved_residual_is_reported_as_unresolved_not_as_zero() -> None:
     """
     import numpy as np
 
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     raw = _cardiac_raw(residual_uv=0.0)
     rng = np.random.default_rng(0)
@@ -255,7 +255,7 @@ def test_an_unresolved_residual_is_reported_as_unresolved_not_as_zero() -> None:
 
 def test_a_corrected_run_measures_far_less_than_an_uncorrected_one() -> None:
     """The comparison the worklist is ordered by has to survive the estimator."""
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     corrected = compute_cardiac_residual(_cardiac_raw(residual_uv=1.0), recording_id="run-1")
     uncorrected = compute_cardiac_residual(_cardiac_raw(residual_uv=20.0), recording_id="run-2")
@@ -264,7 +264,7 @@ def test_a_corrected_run_measures_far_less_than_an_uncorrected_one() -> None:
 
 
 def test_the_marker_train_is_recorded_as_the_beat_source() -> None:
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(_cardiac_raw(residual_uv=10.0), recording_id="run-1")
 
@@ -279,7 +279,7 @@ def test_a_partially_covered_beat_train_reports_the_share_of_the_run_it_covers()
     beat train: the correction worked at the beats it found and nowhere else. Read without
     the coverage beside it, the first number says the run is clean.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(
         _cardiac_raw(residual_uv=1.0, marked_until_s=35.0), recording_id="run-1"
@@ -291,7 +291,7 @@ def test_a_partially_covered_beat_train_reports_the_share_of_the_run_it_covers()
 
 def test_a_fully_covered_beat_train_reports_near_complete_coverage() -> None:
     """Otherwise a low coverage would say nothing -- every run would carry one."""
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(_cardiac_raw(residual_uv=1.0), recording_id="run-1")
 
@@ -304,7 +304,7 @@ def test_coverage_is_reported_even_when_the_train_is_too_short_to_average() -> N
     Below ``MINIMUM_RESIDUAL_BEATS`` the residual is withheld, and if coverage went with it
     the worklist would show a run with neither a number nor a reason.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(
         _cardiac_raw(residual_uv=20.0, marked_until_s=6.0), recording_id="run-1"
@@ -317,7 +317,7 @@ def test_coverage_is_reported_even_when_the_train_is_too_short_to_average() -> N
 
 def test_a_run_without_markers_falls_back_to_the_channel_and_says_so() -> None:
     """33 of 90 runs in this dataset have no markers; they still get a residual."""
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(
         _cardiac_raw(residual_uv=20.0, with_markers=False), recording_id="run-1"
@@ -334,7 +334,7 @@ def test_a_run_with_no_beat_train_at_all_measures_nothing_and_does_not_raise() -
     Reported as a run with no measurement rather than as a run with no residual: an
     unmeasurable artifact and an absent one are not the same finding.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import compute_cardiac_residual
+    from studies.pain_study.analysis.bcg.report import compute_cardiac_residual
 
     measured = compute_cardiac_residual(
         _cardiac_raw(residual_uv=0.0, with_markers=False, with_qrs=False),

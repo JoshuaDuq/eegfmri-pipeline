@@ -1964,9 +1964,6 @@ class PreprocessingPipeline(PipelineBase):
         Every section is optional and absent when its inputs are: a dataset recorded
         outside a scanner simply has no Analyzer section, rather than an empty one.
         """
-        from eeg_pipeline.preprocessing.report.analyzer_qc import (
-            add_analyzer_correction_review,
-        )
         from eeg_pipeline.preprocessing.report.coverage import add_coverage_review
         from eeg_pipeline.preprocessing.report.filtering import (
             add_filter_review,
@@ -2024,12 +2021,6 @@ class PreprocessingPipeline(PipelineBase):
                             ),
                             subject=subject,
                         )
-                analyzer = add_analyzer_correction_review(
-                    report=report,
-                    qc_dir=deriv_eeg_root / "qc",
-                    task=task,
-                    subject=subject,
-                )
                 coverage = add_coverage_review(
                     report=report,
                     deriv_eeg_root=deriv_eeg_root,
@@ -2071,9 +2062,8 @@ class PreprocessingPipeline(PipelineBase):
                     settings=report_settings,
                 )
                 self.logger.info(
-                    "sub-%s report sections: analyzer=%s coverage=%s runs=%d",
+                    "sub-%s report sections: coverage=%s runs=%d",
                     subject,
-                    "present" if analyzer is not None else "absent",
                     "present" if coverage is not None else "absent",
                     0 if evidence is None else len(evidence.spectra),
                 )
@@ -2128,8 +2118,6 @@ class PreprocessingPipeline(PipelineBase):
             # recording already produced here.
             timings={},
             rr_intervals=evidence.rr_intervals,
-            marker_agreements=evidence.marker_agreements,
-            cardiac_residuals=evidence.cardiac_residuals,
             # Both sides come from the measuring pass, which is the only place the same
             # data exists before and after the exclusions. The epochs-based measurement
             # in ``alpha`` stays on the subject panel under its own unsuffixed key: it is
