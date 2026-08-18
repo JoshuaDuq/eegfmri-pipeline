@@ -1267,7 +1267,19 @@ workflow code through `workflow_config.py` and remain the right home for setting
 workflows use.
 
 Delete each from `eeg_config.yaml`, moving its value and its comment to whichever of those
-two destinations reads it. `preprocessing.eeg_fmri` and `alignment.trim_to_volume_bounds` are deleted outright — nothing reads either after Phase 3, and `trim_to_volume_bounds` was never read at all.
+two destinations reads it.
+
+**Also settle the fate of the dead template.** `studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml`
+is loaded by nothing, yet it sits in `SHIPPED_CONFIGS` and is therefore parsed and
+validated by the test suite — authoritative-looking, test-covered, inert. It cost this plan
+a whole detour: Task 3 wrote its windows there in good faith and they had no effect. Now
+that `pain_study.yaml` exists and is real, that file is a trap with a live duplicate.
+
+Decide explicitly and say why in the commit message. Deleting it is the honest option if
+nothing reads it. Keeping it requires a reason that survives the question "what reads
+this?". Check the sibling templates in the same directory
+(`thermal_pain_fmri_overrides.yaml`, the two `t1_*.yaml`) the same way — `workflow_config.py`
+may genuinely read some of them, in which case they stay and only the unread ones go. `preprocessing.eeg_fmri` and `alignment.trim_to_volume_bounds` are deleted outright — nothing reads either after Phase 3, and `trim_to_volume_bounds` was never read at all.
 
 Change `paths.decomb_manifest`'s default to `null` with a comment saying a study configures it; the key itself **stays**, because `pipelines/features.py:1089` reads it and the mechanism is general.
 
