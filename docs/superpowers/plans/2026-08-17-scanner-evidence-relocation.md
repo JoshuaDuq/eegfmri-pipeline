@@ -264,6 +264,7 @@ Leave the existing docstring alone. Explain the new parameter with a comment whe
     # decomb manifest reports unavailable. For a persistent narrowband feature that is
     # instrumental rather than neural -- an equipment line, a residual comb -- which a
     # robust fit would otherwise tilt toward. Empty unless a study names a reason.
+```
 
 
 Extend the `excluded` tuple:
