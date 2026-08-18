@@ -32,9 +32,6 @@ import pandas as pd
 
 from eeg_pipeline.preprocessing.report.cohort.aggregate import DEFAULT_GATES, BandGates
 from eeg_pipeline.preprocessing.report.cohort.analyzer import (
-    add_analyzer_section,
-    analyzer_audit,
-    analyzer_cohort,
     uncorrected_audit,
 )
 from eeg_pipeline.preprocessing.report.cohort.at_a_glance import (
@@ -145,7 +142,6 @@ def _audit_tables(cohort: Cohort, *, gates: BandGates) -> dict[str, pd.DataFrame
         ("cleaning", lambda: cleaning_versus_signal(cohort)),
         ("channels", lambda: _optional(cohort_coverage(cohort), lambda c: c.channels)),
         ("rejection", lambda: _optional(cohort_rejection(cohort), rejection_audit)),
-        ("analyzer", lambda: _optional(analyzer_cohort(cohort), analyzer_audit)),
         # The re-export worklist, as its own file: it is the one audit table a reader works
         # *through* rather than checks a figure against.
         ("uncorrected", lambda: uncorrected_audit(cohort)),
@@ -225,7 +221,6 @@ def build_cohort_report(
     add_coverage_section(report=report, cohort=cohort)
     add_rejection_section(report=report, cohort=cohort, gates=gates)
     add_ica_section(report=report, cohort=cohort, gates=gates)
-    add_analyzer_section(report=report, cohort=cohort, gates=gates)
     add_spectra_section(report=report, cohort=cohort, gates=gates)
     add_preservation_section(report=report, cohort=cohort, gates=gates)
     add_continuity_section(report=report, cohort=cohort, gates=gates)

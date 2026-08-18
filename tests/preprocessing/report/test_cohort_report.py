@@ -351,7 +351,6 @@ def test_the_document_carries_the_sections_the_cohort_supports(tmp_path) -> None
         "Channel and region coverage",
         "Epoch rejection",
         "ICA decomposition quality",
-        "Scanner artifact correction (Analyzer)",
         "Sensor spectra",
         "Signal preservation",
         "Data quality over time",

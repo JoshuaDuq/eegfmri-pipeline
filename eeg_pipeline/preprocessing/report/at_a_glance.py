@@ -106,33 +106,6 @@ HEADLINES: tuple[Headline, ...] = (
     Headline(
         "variance_removed", "Sensor variance removed", _percentage, "ICA decomposition quality"
     ),
-    Headline(
-        "worst_marker_agreement",
-        "Lowest per-run beat-marker agreement",
-        _percentage,
-        "Scanner artifact correction (Analyzer)",
-    ),
-    # Paired with the share above, and the pairing is the point.
-    #
-    # A share near zero reads as the beat markers being wrong. In the bore it usually is
-    # not: an ordinary QRS detector locks onto the magnetohydrodynamic deflection, which
-    # is larger than the R wave and follows it by a few hundred milliseconds, so two
-    # perfectly good trains match at 0%. The lag separates the two readings — tight means
-    # a fixed detector offset, broad means genuine disagreement — and the Analyzer section
-    # has always shown it. Quoting the share alone up here was the one place in this
-    # document where a bare number asserted a conclusion the pipeline refuses to draw.
-    Headline(
-        "worst_marker_agreement_lag_ms",
-        "Marker-to-beat lag on that run (ms)",
-        _signed_milliseconds,
-        "Scanner artifact correction (Analyzer)",
-    ),
-    Headline(
-        "worst_marker_agreement_lag_iqr_ms",
-        "Spread of that lag (ms, IQR)",
-        _milliseconds,
-        "Scanner artifact correction (Analyzer)",
-    ),
     # "Epoch rejection", not "Trial retention": the latter is the title of a figure inside
     # this section, and a reader following it as a section name finds nothing. The cohort
     # panel reuses this list to point at its own sections, so the wrong name is a dead

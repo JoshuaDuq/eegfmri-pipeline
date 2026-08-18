@@ -58,13 +58,13 @@ def test_each_row_counts_only_who_recorded_it() -> None:
     """One count in the heading would misstate every row but one."""
     rows = glance_rows(
         _cohort(
-            _participant("0014", n_runs=4, worst_marker_agreement=0.97),
+            _participant("0014", n_runs=4, variance_removed=0.86),
             _participant("0015", n_runs=3),
         )
     )
 
     assert _row(rows, "n_runs").n_subjects == 2
-    assert _row(rows, "worst_marker_agreement").n_subjects == 1
+    assert _row(rows, "variance_removed").n_subjects == 1
 
 
 def test_a_headline_nobody_recorded_produces_no_row() -> None:

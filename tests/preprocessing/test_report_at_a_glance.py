@@ -191,36 +191,6 @@ def test_every_headline_points_at_a_section_the_document_has() -> None:
     assert "Epoch rejection" in sections
 
 
-def test_the_beat_marker_share_is_never_headlined_without_its_lag() -> None:
-    """A share near zero reads as the markers being wrong. In the bore it usually is not:
-    an ordinary QRS detector locks onto the magnetohydrodynamic deflection, which follows
-    the R wave by a few hundred milliseconds, so two good trains match at 0%. The Analyzer
-    section has always shown the lag that separates a detector offset from real
-    disagreement; the landing panel quoted the share alone."""
-    from eeg_pipeline.preprocessing.report.at_a_glance import HEADLINES, at_a_glance_html
-
-    keys = [headline.key for headline in HEADLINES]
-    share = keys.index("worst_marker_agreement")
-    assert keys[share + 1] == "worst_marker_agreement_lag_ms"
-    assert keys[share + 2] == "worst_marker_agreement_lag_iqr_ms"
-
-    rendered = at_a_glance_html(
-        _record(
-            _stage(
-                "report-review",
-                "2026-08-15T12:53:04+00:00",
-                worst_marker_agreement=0.005,
-                worst_marker_agreement_lag_ms=303.0,
-                worst_marker_agreement_lag_iqr_ms=19.0,
-            )
-        )
-    )
-
-    assert "0.5%" in rendered
-    assert "+303" in rendered
-    assert "19" in rendered
-
-
 def test_the_alpha_prominence_is_never_headlined_without_the_bar_it_had_to_clear() -> None:
     """The prominence is the largest excess over the fitted background anywhere in the
     band, and the largest of many noisy residuals is above zero whether or not a rhythm is
@@ -260,3 +230,10 @@ def test_a_flag_given_a_numeric_formatter_fails_rather_than_printing_one() -> No
     assert _yes_no(False) == "no"
     with pytest.raises(TypeError):
         _yes_no(1.0)
+
+
+def test_headlines_point_at_no_scanner_section():
+    from eeg_pipeline.preprocessing.report.at_a_glance import HEADLINES
+
+    assert all("Analyzer" not in headline.section for headline in HEADLINES)
+    assert len(HEADLINES) == 14

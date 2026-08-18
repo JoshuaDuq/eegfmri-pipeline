@@ -20,10 +20,7 @@ import numpy as np
 
 from eeg_pipeline.preprocessing.report.analyzer_qc import (
     CardiacResidual,
-    MarkerAgreement,
-    add_marker_agreement_section,
     compute_cardiac_residual,
-    compute_run_marker_agreement,
 )
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     RrIntervals,
@@ -63,11 +60,6 @@ class RunEvidence:
     #: never acquired, and the two have opposite implications for the pulse correction.
     rr_missing: list[str] = field(default_factory=list)
     #: Analyzer's marker train measured against R peaks detected from the ECG signal.
-    #:
-    #: Empty when no run carried an ECG channel, which is the case for a montage that
-    #: recorded none: there is then one beat detector rather than two, and nothing to
-    #: reconcile.
-    marker_agreements: list[MarkerAgreement] = field(default_factory=list)
     #: Beat-locked EEG residual per run, measured before the ICA exclusions.
     #:
     #: What the *upstream* pulse correction left behind. A run whose Analyzer R detection
@@ -173,15 +165,6 @@ def measure_runs(
         else:
             evidence.rr_missing.append(recording_id)
 
-        agreement = compute_run_marker_agreement(
-            raw,
-            recording_id=recording_id,
-            description=settings.pulse_marker_description,
-            tolerance_s=settings.marker_agreement_tolerance_s,
-        )
-        if agreement is not None:
-            evidence.marker_agreements.append(agreement)
-
         # Measured on ``raw`` rather than ``cleaned``: the question is what the upstream
         # pulse correction left, and measuring after the exclusions would credit Analyzer
         # for whatever MNE's decomposition removed. Costs one epoching pass over a
@@ -278,11 +261,6 @@ def add_run_evidence_sections(
             series=evidence.rr_intervals,
             missing=evidence.rr_missing,
             plausible_rr_range_s=settings.plausible_rr_range_s,
-        )
-    if evidence.marker_agreements:
-        add_marker_agreement_section(
-            report=report,
-            agreements=evidence.marker_agreements,
         )
 
 

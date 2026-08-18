@@ -296,7 +296,6 @@ SECTION_ORDER = (
     "Configuration",
     "Filter response",
     # What came in.
-    "Scanner artifact correction (Analyzer)",
     "Channel and region coverage",
     "Data quality over time",
     "Raw (original)",
