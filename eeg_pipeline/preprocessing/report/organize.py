@@ -295,10 +295,9 @@ SECTION_ORDER = (
     "At a glance",
     "Configuration",
     "Filter response",
-    # What came in, and what the upstream correction left in it.
+    # What came in.
     "Scanner artifact correction (Analyzer)",
     "Channel and region coverage",
-    "Residual scanner gradient",
     "Data quality over time",
     "Raw (original)",
     "Raw (filtered)",

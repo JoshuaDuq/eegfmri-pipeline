@@ -42,10 +42,6 @@ from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 #: seconds, long enough that the RMS of a single window is a stable estimate.
 WINDOW_SECONDS = 1.0
 
-#: Multiple of the median volume interval above which a gap in the marker train is
-#: treated as an interruption rather than jitter.
-VOLUME_GAP_FACTOR = 1.5
-
 #: Annotation prefix MNE uses for spans excluded from processing.
 BAD_ANNOTATION_PREFIX = "BAD"
 
@@ -62,8 +58,6 @@ class RunContinuity:
     relative_db: np.ndarray
     #: ``(onset, duration)`` of every BAD_* annotation.
     bad_spans: tuple[tuple[float, float], ...]
-    #: ``(onset, duration)`` of every interruption in the volume-marker train.
-    volume_gaps: tuple[tuple[float, float], ...]
     duration_s: float
     #: Realised filter's one-sided support at the run edge, excluded from the excursion
     #: statistic but retained in the trace. Zero when no filter description was supplied.
@@ -81,9 +75,8 @@ class RunContinuity:
     event_onsets: tuple[float, ...] = ()
     #: Whether this run was searched for a volume-marker train at all.
     #:
-    #: Distinct from ``volume_gaps`` being empty, which means the train was searched and
-    #: found continuous. An EEG-only recording has no train to search, and reporting "0
-    #: gaps" for it states a measurement that was never made.
+    #: An EEG-only recording has no train to search, which is different from one that was
+    #: searched and found empty.
     has_volume_markers: bool = False
     #: Whether the channel rows were sorted down the head rather than left in file order.
     #:
@@ -164,27 +157,6 @@ def _covered_duration(
         covered += current_stop - current_start
         current_start, current_stop = start, end
     return covered + current_stop - current_start
-
-
-def _volume_gaps(
-    onsets: np.ndarray,
-    *,
-    factor: float = VOLUME_GAP_FACTOR,
-) -> tuple[tuple[float, float], ...]:
-    """Find interruptions in the volume-marker train.
-
-    A gap means the scanner stopped, or the markers were lost. Either way the gradient
-    correction on both sides of it was built from different conditions, so the boundary
-    is worth seeing next to the amplitude.
-    """
-    if onsets.size < 3:
-        return ()
-    intervals = np.diff(onsets)
-    threshold = float(np.median(intervals)) * factor
-    return tuple(
-        (float(onsets[index]), float(intervals[index]))
-        for index in np.flatnonzero(intervals > threshold)
-    )
 
 
 #: Annotation descriptions that are not task events.
@@ -397,7 +369,6 @@ def compute_run_continuity(
         channel_names=tuple(raw.ch_names[index] for index in picks),
         relative_db=relative_db,
         bad_spans=_bad_spans(raw),
-        volume_gaps=_volume_gaps(volume_onsets),
         duration_s=float(raw.n_times / sfreq),
         edge_support_s=float(edge_support_seconds),
         event_onsets=_event_onsets(
@@ -414,15 +385,10 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
     """Render when each run departed from its own baseline."""
     if not runs:
         raise ValueError("The continuity summary requires at least one run.")
-    # A column that can only ever read zero is not a measurement. Outside a scanner there
-    # is no volume-marker train to interrupt, so the column and the paragraphs explaining
-    # it are dropped rather than left to answer a question about absent equipment.
-    scanner = any(run.has_volume_markers for run in runs)
     columns = [
         Column("Run", align=Align.TEXT),
         Column("Duration (min)"),
         Column("Marked bad"),
-        *([Column("Volume-marker gaps")] if scanner else []),
         Column("Largest excursion", align=Align.TEXT),
     ]
     rows = [
@@ -430,7 +396,6 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
             run_label(run.recording_id),
             f"{run.duration_s / 60.0:.1f}",
             f"{run.bad_fraction:.1%}",
-            *([len(run.volume_gaps)] if scanner else []),
             f"{run.worst_excursion_db:+.1f} dB at {run.worst_window_s / 60.0:.1f} min",
         ]
         for run in runs
@@ -439,15 +404,8 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
         " and inside a scanner the second is the common case: once the participant "
         "shifts, the gradient template stops matching and everything after that moment "
         "is contaminated"
-        if scanner
+        if any(run.has_volume_markers for run in runs)
         else ", and only the second is recoverable by excluding the stretch that failed"
-    )
-    gap_note = (
-        " A gap in the volume-marker train means the scanner stopped or markers were "
-        "lost, which leaves the correction either side of it built under different "
-        "conditions."
-        if scanner
-        else ""
     )
     return (
         "<p>Amplitude in "
@@ -457,8 +415,8 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
         f"{why_it_matters}.</p>"
         + grid_table(columns, rows)
         + "<p>The excursion is the across-channel median, so it responds to the whole "
-        "montage moving together rather than to one sensor misbehaving."
-        f"{gap_note}</p>" + _edge_support_note(runs)
+        "montage moving together rather than to one sensor misbehaving.</p>"
+        + _edge_support_note(runs)
     )
 
 
@@ -631,21 +589,9 @@ def plot_run_continuity(run: RunContinuity) -> plt.Figure:
                 alpha=0.18,
                 linewidth=0,
             )
-        for onset, duration in run.volume_gaps:
-            axis.axvspan(
-                onset / 60.0,
-                (onset + duration) / 60.0,
-                facecolor="none",
-                edgecolor="black",
-                hatch="///",
-                linewidth=0.6,
-                alpha=0.8,
-            )
     labels = []
     if run.bad_spans:
         labels.append(f"{len(run.bad_spans)} BAD_* span(s), shaded")
-    if run.volume_gaps:
-        labels.append(f"{len(run.volume_gaps)} volume-marker gap(s), hatched")
     if labels:
         # Appended to the title rather than annotated just above the axis, which is the
         # same space the title occupies: on any run with a BAD span the two overlapped
@@ -701,7 +647,6 @@ def add_continuity_section(
 
 __all__ = [
     "BAD_ANNOTATION_PREFIX",
-    "VOLUME_GAP_FACTOR",
     "WINDOW_SECONDS",
     "RunContinuity",
     "add_continuity_section",

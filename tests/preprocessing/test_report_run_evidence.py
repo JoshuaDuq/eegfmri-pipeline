@@ -10,7 +10,6 @@ import pytest
 matplotlib.use("Agg")
 
 from eeg_pipeline.preprocessing.report.run_evidence import (  # noqa: E402
-    MARKED_GRADIENT_HARMONICS,
     add_run_evidence_review,
     measure_runs,
 )
@@ -73,11 +72,8 @@ def test_every_per_run_measurement_is_gathered(tmp_path) -> None:
     evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
 
     assert len(evidence.spectra) == 1
-    assert len(evidence.combs) == 1
-    assert len(evidence.locked_averages) == 1
     assert len(evidence.continuity) == 1
     assert len(evidence.rr_intervals) == 1
-    assert evidence.has_scanner_evidence
     assert evidence.spectra[0].recording_id == "sub-0001_task-x_run-1"
 
 
@@ -95,7 +91,6 @@ def test_configured_annotation_descriptions_drive_every_marker_measurement(tmp_p
 
     evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=settings)
 
-    assert evidence.has_scanner_evidence
     assert len(evidence.rr_intervals) == 1
     assert evidence.cardiac_residuals[0].marker_count > 0
 
@@ -134,8 +129,6 @@ def test_a_recording_without_scanner_markers_keeps_the_other_sections(tmp_path) 
 
     evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
 
-    assert not evidence.has_scanner_evidence
-    assert evidence.combs == []
     assert len(evidence.spectra) == 1
     assert len(evidence.continuity) == 1
     assert not evidence.continuity[0].has_volume_markers
@@ -147,7 +140,6 @@ def test_a_recording_without_beats_keeps_the_other_sections(tmp_path) -> None:
     evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
 
     assert evidence.rr_intervals == []
-    assert evidence.has_scanner_evidence
 
 
 def test_the_report_gains_every_available_section(tmp_path) -> None:
@@ -164,7 +156,6 @@ def test_the_report_gains_every_available_section(tmp_path) -> None:
     sections = {element.section for element in report._content}
     assert sections == {
         "Sensor spectra before and after ICA",
-        "Residual scanner gradient",
         "Data quality over time",
         "Scanner artifact correction (Analyzer)",
     }
@@ -184,26 +175,6 @@ def test_rebuilding_replaces_rather_than_accumulates(tmp_path) -> None:
     )
 
     assert len(report._content) == first
-
-
-def test_only_a_few_gradient_harmonics_are_marked_on_the_spectra(tmp_path) -> None:
-    """The comb has tens of teeth; drawing all of them would bury the spectrum."""
-    path, raw = _write_run(tmp_path, "sub-0001_task-x_run-1_proc-filt_raw.fif")
-    evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
-
-    marks = evidence.gradient_marks_hz
-
-    assert len(marks) == MARKED_GRADIENT_HARMONICS
-    assert marks[0] == pytest.approx(1.0 / TR, abs=1e-3)
-
-
-def test_a_recording_without_markers_has_no_gradient_marks(tmp_path) -> None:
-    path, raw = _write_run(
-        tmp_path, "sub-0001_task-rest_run-1_proc-filt_raw.fif", with_markers=False
-    )
-    evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
-
-    assert evidence.gradient_marks_hz == ()
 
 
 def test_no_runs_is_a_programming_error() -> None:

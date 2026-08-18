@@ -177,31 +177,6 @@ def test_overlapping_bad_annotations_count_their_union_once() -> None:
     assert run.bad_fraction == pytest.approx(15.0 / DURATION)
 
 
-def test_an_interruption_in_the_volume_train_is_found() -> None:
-    onsets = list(np.arange(0.0, 50.0, TR)) + list(np.arange(70.0, 110.0, TR))
-
-    run = compute_run_continuity(
-        _raw(volume_onsets=onsets),
-        recording_id="run-1",
-        volume_description="Volume/V  1",
-    )
-
-    assert len(run.volume_gaps) == 1
-    gap_onset, gap_duration = run.volume_gaps[0]
-    assert gap_onset == pytest.approx(49.5, abs=1.0)
-    assert gap_duration == pytest.approx(20.0, abs=1.0)
-
-
-def test_an_uninterrupted_volume_train_has_no_gaps() -> None:
-    run = compute_run_continuity(
-        _raw(volume_onsets=list(np.arange(0.0, 110.0, TR))),
-        recording_id="run-1",
-        volume_description="Volume/V  1",
-    )
-
-    assert run.volume_gaps == ()
-
-
 def test_bad_channels_are_excluded_from_the_map() -> None:
     raw = _raw()
     raw.info["bads"] = ["C1"]
@@ -434,56 +409,6 @@ def test_the_section_sits_with_the_other_raw_input_evidence() -> None:
     sections = [element.section for element in report._content]
     assert sections.index("Data quality over time") < sections.index("Raw (original)")
     assert sections.index("Raw (original)") < sections.index("ICA decomposition quality")
-
-
-def _run_continuity(*, volume_markers, gaps=()):
-    """Build a RunContinuity directly, so the scanner-dependence can be varied."""
-    from eeg_pipeline.preprocessing.report.continuity import RunContinuity
-
-    return RunContinuity(
-        recording_id="sub-01_task-x_run-1",
-        window_seconds=1.0,
-        times_s=np.arange(60.0),
-        channel_names=("C0", "C1"),
-        relative_db=np.zeros((2, 60)),
-        bad_spans=(),
-        volume_gaps=tuple(gaps),
-        duration_s=60.0,
-        has_volume_markers=volume_markers,
-    )
-
-
-def test_the_volume_marker_column_is_absent_without_a_scanner() -> None:
-    """An EEG-only recording has no volume markers, so the column is structurally zero.
-
-    A column that can only ever read 0 is not evidence; it invites the reader to wonder
-    what would have made it non-zero, and answers a question about equipment they do not
-    have.
-    """
-    from eeg_pipeline.preprocessing.report.continuity import continuity_html
-
-    document = continuity_html([_run_continuity(volume_markers=False)])
-
-    assert "Volume-marker gaps" not in document
-    assert "scanner" not in document.lower()
-
-
-def test_the_volume_marker_column_is_present_with_a_scanner() -> None:
-    from eeg_pipeline.preprocessing.report.continuity import continuity_html
-
-    document = continuity_html([_run_continuity(volume_markers=True)])
-
-    assert "Volume-marker gaps" in document
-    assert "scanner" in document.lower()
-
-
-def test_a_scanner_run_with_no_gaps_still_gets_the_column() -> None:
-    """Zero gaps is a measurement when markers exist; absent markers are not."""
-    from eeg_pipeline.preprocessing.report.continuity import continuity_html
-
-    document = continuity_html([_run_continuity(volume_markers=True, gaps=())])
-
-    assert "Volume-marker gaps" in document
 
 
 def test_volume_markers_are_recorded_only_when_the_run_contains_them() -> None:

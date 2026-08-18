@@ -1,9 +1,8 @@
 """Single-pass per-run evidence for the subject report.
 
-Four panels describe each continuous run: the sensor spectra, the gradient comb, the
-volume-locked residual, and the time-resolved amplitude. Each one needs the run both
-before and after the ICA exclusions, and ``ICA.apply`` on a full-length run is the most
-expensive operation in the report by a wide margin.
+The sensor spectra and the time-resolved amplitude both describe each continuous run, and
+the spectra need it both before and after the ICA exclusions -- ``ICA.apply`` on a
+full-length run is the most expensive operation in the report by a wide margin.
 
 This module exists so that cost is paid once per run instead of once per panel. Each run
 is read, cleaned, measured for everything, and released before the next is read, so peak
@@ -34,16 +33,6 @@ from eeg_pipeline.preprocessing.report.continuity import (
     add_continuity_section,
     compute_run_continuity,
 )
-from eeg_pipeline.preprocessing.report.scanner import (
-    CombResidual,
-    VolumeLockedAverage,
-    VolumeTiming,
-    CombNotMeasured,
-    add_scanner_residual_section,
-    compute_comb_residual,
-    compute_volume_locked_average,
-    measure_volume_timing,
-)
 from eeg_pipeline.preprocessing.report.preservation import (
     PosteriorAlpha,
     compute_posterior_alpha,
@@ -55,12 +44,6 @@ from eeg_pipeline.preprocessing.report.spectra import (
     compute_run_spectra,
 )
 
-#: Gradient harmonics marked on the sensor-spectra figure. The comb has tens of teeth in
-#: the plotted range, and drawing all of them would bury the spectrum under vertical
-#: lines. The dedicated comb panel measures every harmonic properly; these few are here
-#: only so a reviewer can see where the comb sits relative to everything else.
-MARKED_GRADIENT_HARMONICS = 3
-
 _FINITE_CHECK_SECONDS = 10.0
 
 
@@ -69,16 +52,6 @@ class RunEvidence:
     """Everything measured about the continuous runs of one report."""
 
     spectra: list[RunSpectra] = field(default_factory=list)
-    combs: list[CombResidual] = field(default_factory=list)
-    #: Runs carrying volume markers that the comb measurement declined, with the reason.
-    #: Reported rather than dropped: a run absent from the comb table has not been
-    #: measured and found clean, it has not been measured.
-    declined_combs: list[CombNotMeasured] = field(default_factory=list)
-    locked_averages: list[VolumeLockedAverage] = field(default_factory=list)
-    #: Volume timing per run, keyed by recording. Kept per run rather than pooled because
-    #: the repetition time sets the frequency of every comb harmonic, and a cohort that
-    #: mixed repetition times would otherwise pool different harmonics into one bin.
-    timings: dict[str, VolumeTiming] = field(default_factory=dict)
     continuity: list[RunContinuity] = field(default_factory=list)
     rr_intervals: list[RrIntervals] = field(default_factory=list)
     #: Runs whose R-marker train was too short to build an interval series from.
@@ -99,7 +72,6 @@ class RunEvidence:
     #: failed carries no marker train, so no subtraction was possible and the
     #: ballistocardiogram is still there; this is the measurement that says how much.
     cardiac_residuals: list[CardiacResidual] = field(default_factory=list)
-    gradient_fundamentals_hz: list[float] = field(default_factory=list)
     #: Where each EEG sensor sat, in head coordinates, taken from the recording itself.
     #:
     #: Captured here because this is the one place the montage is already in memory. A
@@ -127,10 +99,6 @@ class RunEvidence:
     posterior_alpha_after: list[PosteriorAlpha] = field(default_factory=list)
 
     @property
-    def has_scanner_evidence(self) -> bool:
-        return bool(self.combs or self.locked_averages)
-
-    @property
     def acquisition_date(self) -> str | None:
         """The earliest date any run was recorded on, or ``None`` for an anonymised set.
 
@@ -138,57 +106,6 @@ class RunEvidence:
         session and the date a study means by it is the day it started.
         """
         return min(self.measurement_dates) if self.measurement_dates else None
-
-    @property
-    def gradient_marks_hz(self) -> tuple[float, ...]:
-        """The few gradient harmonics worth drawing on the sensor-spectra figure."""
-        if not self.gradient_fundamentals_hz:
-            return ()
-        fundamental = min(self.gradient_fundamentals_hz)
-        return tuple(fundamental * order for order in range(1, MARKED_GRADIENT_HARMONICS + 1))
-
-
-def _measure_gradient(
-    raw: mne.io.BaseRaw,
-    cleaned: mne.io.BaseRaw,
-    *,
-    recording_id: str,
-    settings: ReportSettings,
-    volume_description: str,
-    evidence: RunEvidence,
-    timing: VolumeTiming | None,
-) -> None:
-    """Add whichever gradient measurements this run's volume markers support."""
-    if timing is None:
-        return
-    evidence.gradient_fundamentals_hz.append(timing.fundamental_hz)
-    evidence.timings[recording_id] = timing
-
-    comb = compute_comb_residual(
-        raw,
-        cleaned,
-        timing=timing,
-        recording_id=recording_id,
-        band_hz=settings.comb_frequency_range_hz,
-        welch_seconds=settings.comb_welch_seconds,
-        line_frequency=settings.spectra_line_frequency,
-        notch_half_width_hz=settings.notch_exclusion_half_width_hz,
-        unavailable_intervals=settings.unavailable_intervals_by_recording.get(recording_id),
-    )
-    if isinstance(comb, CombNotMeasured):
-        evidence.declined_combs.append(comb)
-    else:
-        evidence.combs.append(comb)
-
-    locked = compute_volume_locked_average(
-        raw,
-        cleaned,
-        timing=timing,
-        recording_id=recording_id,
-        description=volume_description,
-    )
-    if locked is not None:
-        evidence.locked_averages.append(locked)
 
 
 def _validate_finite(raw: mne.io.BaseRaw, *, recording_id: str) -> None:
@@ -217,11 +134,6 @@ def measure_runs(
         raw = mne.io.read_raw_fif(path, preload=True, verbose="ERROR")
         cleaned = ica.apply(raw.copy(), exclude=ica.exclude, verbose="ERROR")
         _validate_finite(cleaned, recording_id=recording_id)
-
-        timing = measure_volume_timing(
-            raw,
-            description=settings.volume_marker_description,
-        )
 
         evidence.spectra.append(
             compute_run_spectra(
@@ -283,15 +195,6 @@ def measure_runs(
             )
         )
 
-        _measure_gradient(
-            raw,
-            cleaned,
-            recording_id=recording_id,
-            settings=settings,
-            volume_description=settings.volume_marker_description,
-            evidence=evidence,
-            timing=timing,
-        )
         # Both stages, on the same run, by the same estimator: the only paired measurement
         # of the rhythm the pipeline can make. A stage that measured nothing contributes
         # nothing rather than a zero, and the pair is only used where both sides exist.
@@ -361,18 +264,9 @@ def add_run_evidence_sections(
             report=report,
             spectra=evidence.spectra,
             line_frequency=settings.spectra_line_frequency,
-            marked_frequencies=(
-                tuple(settings.spectra_marked_frequencies) + evidence.gradient_marks_hz
-            ),
+            marked_frequencies=tuple(settings.spectra_marked_frequencies),
             notch_half_width_hz=settings.notch_exclusion_half_width_hz,
             unavailable_intervals_by_recording=settings.unavailable_intervals_by_recording,
-        )
-    if evidence.has_scanner_evidence:
-        add_scanner_residual_section(
-            report=report,
-            combs=evidence.combs,
-            averages=evidence.locked_averages,
-            declined=evidence.declined_combs,
         )
     if evidence.continuity:
         add_continuity_section(report=report, runs=evidence.continuity)
@@ -410,7 +304,6 @@ def add_run_evidence_review(
 
 
 __all__ = [
-    "MARKED_GRADIENT_HARMONICS",
     "RunEvidence",
     "add_run_evidence_review",
     "add_run_evidence_sections",

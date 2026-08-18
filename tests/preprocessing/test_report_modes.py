@@ -80,9 +80,8 @@ def test_spectra_build_for_continuous_resting_state_data(tmp_path) -> None:
 
     assert len(evidence.spectra) == 1
     assert evidence.spectra[0].frequencies[-1] < raw.info["sfreq"] / 2
-    # A recording made outside a scanner has no gradient or beat evidence, and the
-    # sections that depend on them must be absent rather than empty.
-    assert not evidence.has_scanner_evidence
+    # A recording made outside a scanner has no beat evidence, and the sections that
+    # depend on it must be absent rather than empty.
     assert evidence.rr_intervals == []
     assert {element.section for element in report._content} == {
         "Sensor spectra before and after ICA",
@@ -229,8 +228,6 @@ def test_a_runless_recording_needs_no_run_entity_to_be_measured(tmp_path) -> Non
     evidence = measure_runs(filtered_raw_paths=[path], ica=ica, settings=ReportSettings())
 
     assert len(evidence.spectra) == 1
-    assert not evidence.has_scanner_evidence
-    assert evidence.declined_combs == []
 
 
 def test_a_runless_table_is_not_keyed_by_the_subject(tmp_path) -> None:
@@ -261,26 +258,6 @@ def test_a_runless_table_is_not_keyed_by_the_subject(tmp_path) -> None:
     assert cells, "the run evidence should have rendered at least one table"
     assert not [cell for cell in cells if "sub-0001" in cell]
     assert run_label("sub-0001_task-baseline") in cells
-
-
-def test_the_gradient_section_declines_nothing_without_volume_markers(tmp_path) -> None:
-    """The declined-comb table exists to explain a run the comb could not be measured on.
-
-    Out of a scanner there is no comb to measure and no run to explain, so the table must
-    be absent rather than listing every run under a reason that does not apply.
-    """
-    from eeg_pipeline.preprocessing.report.scanner import scanner_residual_html
-
-    path, raw = _runless_raw(tmp_path)
-    ica = mne.preprocessing.ICA(n_components=5, random_state=0, max_iter=200)
-    ica.fit(raw, verbose="ERROR")
-
-    evidence = measure_runs(filtered_raw_paths=[path], ica=ica, settings=ReportSettings())
-
-    assert evidence.combs == []
-    assert evidence.declined_combs == []
-    with pytest.raises(ValueError, match="at least one measured run"):
-        scanner_residual_html([], [], declined=[])
 
 
 def test_the_filter_section_claims_no_upstream_removal_without_a_manifest() -> None:

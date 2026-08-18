@@ -276,25 +276,10 @@ def test_every_plotted_value_is_written_beside_the_document(tmp_path) -> None:
     )
 
     names = {path.name for path in paths.audit}
-    assert any("comb" in name for name in names)
     assert any("spectra" in name for name in names)
     assert any("cleaning" in name for name in names)
     for path in paths.audit:
         assert not pd.read_csv(path, sep="\t").empty
-
-
-def test_a_section_with_nothing_to_show_writes_no_audit_file(tmp_path) -> None:
-    """An empty file and an absent measurement must not look the same on disk."""
-    paths = build_cohort_report(
-        _cohort(
-            _participant("0014", in_scanner=False),
-            _participant("0015", in_scanner=False),
-        ),
-        output_dir=tmp_path,
-        task="rest",
-    )
-
-    assert not any("comb" in path.name for path in paths.audit)
 
 
 def test_the_log_records_who_contributed_and_who_did_not(tmp_path) -> None:
@@ -367,7 +352,6 @@ def test_the_document_carries_the_sections_the_cohort_supports(tmp_path) -> None
         "Epoch rejection",
         "ICA decomposition quality",
         "Scanner artifact correction (Analyzer)",
-        "Residual scanner gradient",
         "Sensor spectra",
         "Signal preservation",
         "Data quality over time",
@@ -416,22 +400,6 @@ def test_a_resting_state_cohort_drops_the_trial_sections(tmp_path) -> None:
     # The sections a resting-state cohort does support are still there.
     assert "Sensor spectra" in html
     assert "Data quality over time" in html
-
-
-def test_an_eeg_only_cohort_has_no_gradient_section(tmp_path) -> None:
-    """A section is absent, not empty, when the acquisition never supported it."""
-    paths = build_cohort_report(
-        _cohort(
-            _participant("0014", in_scanner=False),
-            _participant("0015", in_scanner=False),
-        ),
-        output_dir=tmp_path,
-        task="rest",
-    )
-
-    html = paths.html.read_text(encoding="utf-8")
-    assert "Residual scanner gradient" not in html
-    assert "Sensor spectra" in html
 
 
 def test_a_rebuild_replaces_rather_than_appends(tmp_path) -> None:

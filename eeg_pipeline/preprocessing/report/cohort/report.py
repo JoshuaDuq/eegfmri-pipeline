@@ -58,10 +58,6 @@ from eeg_pipeline.preprocessing.report.cohort.events import (
     cohort_events,
     events_audit,
 )
-from eeg_pipeline.preprocessing.report.cohort.gradient import (
-    add_gradient_section,
-    comb_audit,
-)
 from eeg_pipeline.preprocessing.report.cohort.homogeneity import add_homogeneity_section
 from eeg_pipeline.preprocessing.report.cohort.ica import add_ica_section
 from eeg_pipeline.preprocessing.report.cohort.multiplicity import (
@@ -135,14 +131,12 @@ def _audit_tables(cohort: Cohort, *, gates: BandGates) -> dict[str, pd.DataFrame
     it cannot disagree. A section that produced nothing contributes no file rather than an
     empty one, matching how the document itself behaves.
     """
-    from eeg_pipeline.preprocessing.report.cohort.gradient import cohort_comb
     from eeg_pipeline.preprocessing.report.cohort.ica import decomposition_frame
     from eeg_pipeline.preprocessing.report.cohort.spectra import cohort_spectra
 
     tables: dict[str, pd.DataFrame] = {}
     builders: tuple[tuple[str, Callable[[], pd.DataFrame | None]], ...] = (
         ("glance", lambda: glance_frame(glance_rows(cohort, gates=gates))),
-        ("comb", lambda: _optional(cohort_comb(cohort, gates=gates), comb_audit)),
         ("spectra", lambda: _optional(cohort_spectra(cohort, gates=gates), spectra_audit)),
         ("aperiodic", lambda: aperiodic_frame(cohort)),
         ("decomposition", lambda: decomposition_frame(cohort)),
@@ -232,7 +226,6 @@ def build_cohort_report(
     add_rejection_section(report=report, cohort=cohort, gates=gates)
     add_ica_section(report=report, cohort=cohort, gates=gates)
     add_analyzer_section(report=report, cohort=cohort, gates=gates)
-    add_gradient_section(report=report, cohort=cohort, gates=gates)
     add_spectra_section(report=report, cohort=cohort, gates=gates)
     add_preservation_section(report=report, cohort=cohort, gates=gates)
     add_continuity_section(report=report, cohort=cohort, gates=gates)

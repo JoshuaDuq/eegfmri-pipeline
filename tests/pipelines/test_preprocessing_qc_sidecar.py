@@ -64,7 +64,6 @@ def _evidence(*, events=(1.0, 2.0), positions=None, dates=None) -> SimpleNamespa
                 channel_names=("Cz",),
                 relative_db=np.zeros((1, 10)) + 3.0,
                 bad_spans=((0.0, 30.0),),
-                volume_gaps=(),
                 duration_s=600.0,
                 event_onsets=tuple(events),
             )

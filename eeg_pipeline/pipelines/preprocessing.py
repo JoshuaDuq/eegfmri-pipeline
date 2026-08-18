@@ -2071,15 +2071,10 @@ class PreprocessingPipeline(PipelineBase):
                     settings=report_settings,
                 )
                 self.logger.info(
-                    "sub-%s report sections: analyzer=%s coverage=%s gradient=%s runs=%d",
+                    "sub-%s report sections: analyzer=%s coverage=%s runs=%d",
                     subject,
                     "present" if analyzer is not None else "absent",
                     "present" if coverage is not None else "absent",
-                    (
-                        "present"
-                        if evidence is not None and evidence.has_scanner_evidence
-                        else "absent"
-                    ),
                     0 if evidence is None else len(evidence.spectra),
                 )
 
@@ -2128,9 +2123,10 @@ class PreprocessingPipeline(PipelineBase):
             task=task,
             spectra=evidence.spectra,
             continuity=evidence.continuity,
-            timings=evidence.timings,
-            locked_averages=evidence.locked_averages,
-            combs=evidence.combs,
+            # run_evidence.py no longer measures volume timing, comb residual, or the
+            # volume-locked average; an empty mapping is what every non-scanner
+            # recording already produced here.
+            timings={},
             rr_intervals=evidence.rr_intervals,
             marker_agreements=evidence.marker_agreements,
             cardiac_residuals=evidence.cardiac_residuals,

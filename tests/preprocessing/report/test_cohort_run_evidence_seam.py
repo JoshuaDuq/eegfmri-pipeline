@@ -2,12 +2,9 @@
 
 ``measure_runs`` reads each run once, applies the ICA and measures everything. Anything a
 cohort needs that is not captured there has to be bought again from a gigabyte of filtered
-raw per participant, so this file pins that the volume timing and the floor-corrected
-locked amplitude come out of that pass -- and that an EEG-only recording produces neither
-rather than producing zeros.
-
-Neither costs an extra pass over the data: the timing is already measured to find the comb,
-and the amplitude is measured from the epochs the average is built from.
+raw per participant, so this file pins that the sensor positions, the bad-channel record,
+the acquisition date, and the posterior rhythm either side of the exclusions all come out
+of that one pass.
 """
 
 from __future__ import annotations
@@ -67,54 +64,6 @@ class _NullIca:
 
 def _write_run(tmp_path, name: str, raw) -> None:
     raw.save(tmp_path / f"{name}_proc-filt_raw.fif", overwrite=True, verbose="ERROR")
-
-
-def test_the_measuring_pass_records_volume_timing_per_run(tmp_path) -> None:
-    """Kept per run because the repetition time sets every harmonic frequency."""
-    _write_run(tmp_path, "sub-0014_task-x_run-1", _raw(with_markers=True))
-
-    evidence = measure_runs(
-        filtered_raw_paths=sorted(tmp_path.glob("*_proc-filt_raw.fif")),
-        ica=_NullIca(),
-        settings=ReportSettings(),
-    )
-
-    assert set(evidence.timings) == {"sub-0014_task-x_run-1"}
-    timing = evidence.timings["sub-0014_task-x_run-1"]
-    assert timing.repetition_time_s == np.float64(TR)
-
-
-def test_the_measuring_pass_records_a_resolved_locked_amplitude(tmp_path) -> None:
-    """It rides on the average the panel already draws, so it costs no extra pass."""
-    _write_run(tmp_path, "sub-0014_task-x_run-1", _raw(with_markers=True))
-
-    evidence = measure_runs(
-        filtered_raw_paths=sorted(tmp_path.glob("*_proc-filt_raw.fif")),
-        ica=_NullIca(),
-        settings=ReportSettings(),
-    )
-
-    average = evidence.locked_averages[0]
-    truth_uv = 4e-6 / np.sqrt(2.0) * 1e6
-    assert average.before_resolved_amplitude_uv == pytest.approx(truth_uv, rel=0.3)
-    assert average.before_noise_floor_uv > 0.0
-    # This ICA excludes nothing, so the two stages must agree exactly.
-    assert average.after_resolved_amplitude_uv == average.before_resolved_amplitude_uv
-
-
-def test_the_resolved_amplitude_sits_below_the_observed_locked_rms(tmp_path) -> None:
-    """The floor is subtracted in power, so the resolved amplitude can only be smaller."""
-    _write_run(tmp_path, "sub-0014_task-x_run-1", _raw(with_markers=True))
-
-    evidence = measure_runs(
-        filtered_raw_paths=sorted(tmp_path.glob("*_proc-filt_raw.fif")),
-        ica=_NullIca(),
-        settings=ReportSettings(),
-    )
-
-    average = evidence.locked_averages[0]
-    raw_rms_uv = float(np.sqrt(np.mean(np.asarray(average.before_rms_uv) ** 2)))
-    assert average.before_resolved_amplitude_uv < raw_rms_uv
 
 
 def test_the_measuring_pass_records_where_the_sensors_were(tmp_path) -> None:
@@ -249,21 +198,3 @@ def test_a_recording_with_no_rhythm_is_not_credited_with_one(tmp_path) -> None:
     )
 
     assert not evidence.posterior_alpha_before[0].is_resolvable()
-
-
-def test_an_eeg_only_run_records_neither(tmp_path) -> None:
-    """An absent measurement must not arrive in the cohort as a zero."""
-    _write_run(tmp_path, "sub-0014_task-x_run-1", _raw(with_markers=False))
-
-    evidence = measure_runs(
-        filtered_raw_paths=sorted(tmp_path.glob("*_proc-filt_raw.fif")),
-        ica=_NullIca(),
-        settings=ReportSettings(),
-    )
-
-    assert evidence.timings == {}
-    assert evidence.locked_averages == []
-    assert not evidence.has_scanner_evidence
-    # The run was still measured for everything an EEG-only recording supports.
-    assert len(evidence.spectra) == 1
-    assert len(evidence.continuity) == 1

@@ -660,71 +660,6 @@ def _decimal(value: object, *, places: int = 2) -> str | None:
     return None if not np.isfinite(number) else f"{number:.{places}f}"
 
 
-#: Gradient harmonics drawn on the sensor spectrum.
-#:
-#: A handful, not the comb. The comb has tens of teeth inside the plotted range and drawing
-#: all of them would bury the spectrum under vertical lines; the dedicated comb panel
-#: measures every harmonic properly. These are here only so a reader can see where the comb
-#: sits relative to everything else.
-MARKED_GRADIENT_HARMONICS = 3
-
-#: Band the comb is searched in when no participant recorded the setting.
-DEFAULT_COMB_RANGE_HZ = (15.0, 90.0)
-
-
-def gradient_marks(cohort: Cohort) -> tuple[float, ...]:
-    """A few gradient harmonics from the band where the comb is actually measured.
-
-    Derived here rather than asked of the caller, because the cohort is what knows its own
-    volume rates. Withheld where participants were scanned at different repetition times: a
-    mark then sits on one participant's harmonic and between another's, which is worse than
-    no mark because it is read as applying to every trace on the panel.
-
-    The harmonics chosen are the lowest few *inside the comb's own search band*, not the
-    first three of the series. At a 0.9 s repetition time the series starts at 1.11 Hz, so
-    the first three sit at 1, 2 and 3 Hz -- below anything the comb measures, drawn straight
-    across the alpha band, and marking a gradient artifact where none of the visible comb
-    is. A reader takes three dotted lines under the alpha peak to mean the gradient lives
-    there. The teeth actually visible on this figure run from about 25 Hz up.
-    """
-    rates: set[float] = set()
-    for participant in cohort.participants:
-        if "repetition_time_s" not in participant.runs.columns:
-            continue
-        measured = pd.to_numeric(
-            participant.runs["repetition_time_s"], errors="coerce"
-        ).dropna()
-        rates.update(round(float(value), 4) for value in measured)
-    if len(rates) != 1:
-        return ()
-    repetition_time = next(iter(rates))
-    if repetition_time <= 0.0:
-        return ()
-
-    fundamental = 1.0 / repetition_time
-    band = _agreed_range(cohort, "comb_frequency_range_hz") or DEFAULT_COMB_RANGE_HZ
-    lowest = max(1, int(np.ceil(band[0] / fundamental)))
-    orders = range(lowest, lowest + MARKED_GRADIENT_HARMONICS)
-    return tuple(
-        fundamental * order for order in orders if fundamental * order <= band[1]
-    )
-
-
-def _agreed_range(cohort: Cohort, key: str) -> tuple[float, float] | None:
-    """A two-valued setting where every participant recorded the same pair."""
-    found: set[tuple[float, float]] = set()
-    for participant in cohort.participants:
-        value = participant.settings.get(key)
-        if value is None:
-            continue
-        try:
-            low, high = (float(value[0]), float(value[1]))
-        except (TypeError, ValueError, IndexError, KeyError):
-            continue
-        found.add((low, high))
-    return next(iter(found)) if len(found) == 1 else None
-
-
 def add_spectra_section(
     *,
     report: mne.Report,
@@ -741,7 +676,7 @@ def add_spectra_section(
     # not, the cohort has no single answer for how wide the filtered band is, so the
     # packaged width draws the axis and the homogeneity panel reports the disagreement.
     notch_half_width_hz = _agreed_setting(cohort, "notch_exclusion_half_width_hz")
-    marks = tuple(marked_frequencies) or gradient_marks(cohort)
+    marks = tuple(marked_frequencies)
 
     report.add_figure(
         fig=plot_cohort_spectra(

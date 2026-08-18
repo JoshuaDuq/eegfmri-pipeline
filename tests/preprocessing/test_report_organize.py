@@ -763,3 +763,9 @@ def test_the_drop_logs_survive_without_the_section_that_replaces_them() -> None:
     drop_replaced_epoch_drop_logs(report)
 
     assert [e.name for e in report._content] == ["Drop log"]
+
+
+def test_section_order_names_no_scanner_section():
+    from eeg_pipeline.preprocessing.report.organize import SECTION_ORDER
+
+    assert "Residual scanner gradient" not in SECTION_ORDER

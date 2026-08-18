@@ -66,7 +66,6 @@ def _run_evidence(subject: str, run_index: int, *, level: float, flagged_s: floa
         channel_names=("Cz",),
         relative_db=np.zeros((1, 10)),
         bad_spans=((0.0, flagged_s),),
-        volume_gaps=(),
         duration_s=600.0,
         event_onsets=(1.0, 2.0),
         has_volume_markers=True,
