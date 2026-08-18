@@ -76,7 +76,7 @@ def test_every_fallback_default_derives_from_the_one_heart_rate_statement() -> N
     seconds are derived from the bpm and the cohort module imports the same constant.
     Anything that reintroduces a second literal fails here.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import (
+    from eeg_pipeline.preprocessing.report.rr_intervals import (
         DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
         PLAUSIBLE_RR_RANGE_S,
     )
