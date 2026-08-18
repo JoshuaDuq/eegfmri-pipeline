@@ -74,3 +74,15 @@ def data_chain_command():
         run=run_data_chain,
         requires_subjects=False,
     )
+
+
+def gradient_command():
+    from eeg_pipeline.cli.commands import Command
+    from studies.pain_study.cli.gradient import run_gradient, setup_gradient
+
+    return Command(
+        name="gradient",
+        setup=setup_gradient,
+        run=run_gradient,
+        requires_subjects=False,
+    )

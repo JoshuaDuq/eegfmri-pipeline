@@ -7,6 +7,7 @@ dependencies = ["eeg-pipeline"]
 [project.entry-points."eeg_pipeline.cli_commands"]
 coupling = "studies.pain_study.cli.command_registry:coupling_command"
 line-comb = "studies.pain_study.cli.command_registry:line_comb_command"
+gradient = "studies.pain_study.cli.command_registry:gradient_command"
 cardiac-gaps = "studies.pain_study.cli.command_registry:cardiac_gaps_command"
 data-chain = "studies.pain_study.cli.command_registry:data_chain_command"
 signature-prediction = "studies.pain_study.cli.command_registry:signature_prediction_command"
@@ -21,6 +22,7 @@ namespaces = true
 "studies.pain_study" = ["scripts/config/*.yaml"]
 "studies.pain_study.scripts" = ["README.md"]
 "studies.pain_study.scripts.line_comb" = ["config.yaml", "README.md"]
+"studies.pain_study.scripts.gradient" = ["config.yaml", "README.md"]
 "studies.pain_study.scripts.cardiac_gaps" = ["config.yaml", "README.md"]
 "studies.pain_study.scripts.conversion" = ["README.md"]
 "studies.pain_study.scripts.t1" = ["README.md"]

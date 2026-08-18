@@ -1,0 +1,42 @@
+# Residual scanner gradient, for THIS study's fMRI-concurrent recordings.
+#
+# These keys describe a scanner and its marker train, so they live with the study rather
+# than in the shared EEG pipeline. The measurement asks what survived the upstream
+# gradient correction: whatever does repeats once per volume, so it appears as a comb of
+# narrow lines at multiples of the volume rate. The volume rate is measured from the
+# markers in each run, never read from here.
+
+paths:
+  # null inherits the core eeg_config.yaml paths.* value.
+  bids_root: null
+  deriv_root: null
+  # Where the tables and figures go. Bulk outputs belong on the external drive.
+  output_dir: null
+
+gradient:
+  # Band the comb is scored in. Matches the harmonic QC range below so the per-subject
+  # and cohort views describe the same frequencies.
+  comb_frequency_range_hz: [15.0, 90.0]
+
+  # Welch window for the comb, in seconds. Longer than the sensor-spectra window because
+  # each harmonic is scored against the background *between* it and its neighbours, which
+  # a coarse resolution cannot resolve. At TR = 0.9 s the harmonics sit 1.11 Hz apart, so
+  # 8 s (0.125 Hz bins) leaves ~9 bins per spacing. If the resolution cannot separate the
+  # comb, the measurement reports itself absent rather than returning a number set by the
+  # window.
+  comb_welch_seconds: 8.0
+
+  # Repetition times within this of each other are one sequence, so that ordinary scatter
+  # in the marker train does not force the cohort comb onto a harmonic-index axis when
+  # every participant was scanned identically.
+  repetition_time_tolerance_s: 0.001
+
+  # Exact annotation description written by the scanner.
+  volume_marker_description: "Volume/V  1"
+
+  scanner_harmonic_qc:
+    frequency_range_hz: [15.0, 90.0]
+    welch_duration_seconds: 4.0
+    frequency_resolution_hz: 0.25
+    bootstrap_resamples: 10000
+    confidence_level: 0.95
