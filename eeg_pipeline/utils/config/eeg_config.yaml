@@ -273,8 +273,6 @@ event_columns:
 alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
-  # EEG↔fMRI: recommended for simultaneous acquisition
-  trim_to_volume_bounds: true         # EEG raw_to_bids: trim to first volume marker
   fmri_onset_reference: "first_iti_start"  # fMRI raw_to_bids: event onsets relative to first ITI
 
 eeg:
@@ -380,19 +378,6 @@ preprocessing:
       channels: ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"]
       band: [30.0, 45.0]
       window: *active_window
-  # Were these recordings acquired inside an MR scanner?
-  #
-  # This is the gate for every stage whose inputs only exist for EEG-fMRI: the
-  # scanner-harmonic QC, the pulse-marker and cardiac-attenuation QC, and the ECG-based
-  # ICA cardiac review. Set false for EEG recorded outside a scanner and the pipeline runs
-  # the ordinary path — filtering, PyPREP, ICA with ICLabel, the ocular review, epoching —
-  # without asking for an ECG channel, volume markers or Analyzer output it will not find.
-  #
-  # Kept separate from brainvision_analyzer.enabled below, which answers a different
-  # question: whether an Analyzer correction ran upstream. A dataset can be EEG-fMRI
-  # without it (corrected here, or not yet corrected), and the scanner-harmonic
-  # measurement needs the scanner but not the correction.
-  eeg_fmri: true
   brainvision_analyzer:
     # Enable only when BrainVision Analyzer scanner/pulse correction precedes MNE.
     # Has no effect unless eeg_fmri is also true.
@@ -413,12 +398,6 @@ preprocessing:
       ctps_epoch_window: [-0.25, 0.5]
       baseline: [-0.25, -0.05]
       measurement_window: [-0.05, 0.4]
-  scanner_harmonic_qc:
-    frequency_range_hz: [15.0, 90.0]
-    welch_duration_seconds: 4.0
-    frequency_resolution_hz: 0.25
-    bootstrap_resamples: 10000
-    confidence_level: 0.95
 
 pyprep:
   # Low-pass applied before bad-channel detection only. null = none, which is the right

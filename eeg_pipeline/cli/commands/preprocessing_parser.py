@@ -287,12 +287,6 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="Minimum aligned sample count required after trimming",
     )
     prep_group.add_argument(
-        "--trim-to-volume-bounds",
-        action="store_true",
-        default=False,
-        help="Trim EEG events to first fMRI volume start when aligning",
-    )
-    prep_group.add_argument(
         "--fmri-onset-reference",
         choices=["as_is", "first_volume", "scanner_trigger"],
         default=None,

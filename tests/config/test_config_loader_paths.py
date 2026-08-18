@@ -180,20 +180,11 @@ def test_resolve_paths_recursive_skips_non_path_scalar_keys(tmp_path) -> None:
 
 
 def test_resolve_paths_recursive_preserves_annotation_descriptions(tmp_path) -> None:
-    config = {
-        "report": {
-            "acquisition": {
-                "volume_marker_description": "Volume/V  1",
-                "pulse_marker_description": "Pulse Artifact/R",
-            }
-        }
-    }
+    config = {"ica": {"cardiac_review": {"marker_description": "Pulse Artifact/R"}}}
 
     loader._resolve_paths_recursive(config, tmp_path / "config", tmp_path / "project")
 
-    acquisition = config["report"]["acquisition"]
-    assert acquisition["volume_marker_description"] == "Volume/V  1"
-    assert acquisition["pulse_marker_description"] == "Pulse Artifact/R"
+    assert config["ica"]["cardiac_review"]["marker_description"] == "Pulse Artifact/R"
 
 
 def test_resolve_single_path_uses_project_root_for_known_prefixes(tmp_path) -> None:

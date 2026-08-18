@@ -40,10 +40,7 @@ STEP_BAD_CHANNELS = "bad-channels"
 STEP_ICA_FIT = "ica-fit"
 STEP_EPOCHS = "epochs"
 STEP_STATS = "stats"
-STEP_SCANNER_HARMONIC_QC = "scanner-harmonic-qc"
-STEP_PULSE_MARKER_QC = "pulse-marker-qc"
 STEP_ICA_CARDIAC_QC = "ica-cardiac-qc"
-STEP_CARDIAC_ATTENUATION_QC = "cardiac-attenuation-qc"
 
 
 @lru_cache(maxsize=1)
@@ -554,35 +551,14 @@ class PreprocessingPipeline(PipelineBase):
         """
         steps = self._get_steps_for_mode(mode)
 
-        # Two independent facts about a dataset, previously decided by one switch.
-        #
-        # ``eeg_fmri`` says the recordings were made inside a scanner, which is what makes
-        # the gradient, ballistocardiogram and scanner-harmonic stages meaningful at all.
         # ``brainvision_analyzer`` says an Analyzer correction ran upstream and left pulse
-        # markers behind for those stages to read. EEG recorded outside a scanner has
-        # neither; EEG recorded inside one and corrected elsewhere has the first only.
-        #
-        # Conflating them meant a plain EEG dataset either ran scanner QC against inputs
-        # it does not have, or lost the scanner-harmonic measurement — which needs no
-        # Analyzer output — merely by not having used Analyzer.
-        eeg_fmri = self._is_eeg_fmri()
-        analyzer_enabled = eeg_fmri and bool(
-            self.config.get("preprocessing.brainvision_analyzer.enabled", False)
-        )
-
-        if analyzer_enabled:
-            steps.insert(0, STEP_PULSE_MARKER_QC)
+        # markers behind. It is the only remaining acquisition fact this selection reads:
+        # the scanner declaration and the stages that depended on it now live in the study.
+        if bool(self.config.get("preprocessing.brainvision_analyzer.enabled", False)):
             if STEP_ICA_FIT in steps:
                 steps.append(STEP_ICA_CARDIAC_QC)
-            if STEP_EPOCHS in steps:
-                steps.append(STEP_CARDIAC_ATTENUATION_QC)
-        if eeg_fmri and STEP_EPOCHS in steps and not task_is_rest:
-            # Measured from the EEG spectrum against the sequence timing, so it needs the
-            # scanner but not the Analyzer correction.
-            steps.append(STEP_SCANNER_HARMONIC_QC)
 
         if subjects is not None:
-            self._validate_eeg_fmri_declaration()
             self._validate_bad_channel_sync_policy_for_steps(steps, subjects, task)
         return steps
 
@@ -603,16 +579,6 @@ class PreprocessingPipeline(PipelineBase):
         report.log_warnings(self.logger)
         report.raise_if_errors()
 
-    def _is_eeg_fmri(self) -> bool:
-        """Whether these recordings were acquired inside an MR scanner.
-
-        Delegates to :func:`eeg_pipeline.utils.config.acquisition.is_eeg_fmri` so that the
-        stages selected here and the QC metrics resolved in
-        ``eeg_pipeline.utils.data.preprocessing`` cannot answer this differently.
-        """
-        from eeg_pipeline.utils.config.acquisition import is_eeg_fmri
-
-        return is_eeg_fmri(self.config)
 
     def _validate_bad_channel_sync_policy_for_steps(
         self,
@@ -686,43 +652,6 @@ class PreprocessingPipeline(PipelineBase):
             )
         return bads_by_run
 
-    def _validate_eeg_fmri_declaration(self) -> None:
-        """Reject a scanner declaration the recordings cannot support.
-
-        ``preprocessing.eeg_fmri`` turns on stages that read an ECG channel and scanner
-        volume markers. Declaring it for a dataset that has neither would fail later, deep
-        inside a review, with an error about a missing channel rather than about the
-        declaration that asked for it.
-
-        Only the ECG channel is checked here. Volume markers are named differently across
-        conversion paths, so their absence is not reliable evidence, whereas an ECG
-        channel typed in ``channels.tsv`` is unambiguous and is what every cardiac stage
-        actually opens.
-        """
-        if not self._is_eeg_fmri():
-            return
-        if not bool(self.config.get("ica.cardiac_review.enabled", False)) and not bool(
-            self.config.get("preprocessing.brainvision_analyzer.enabled", False)
-        ):
-            return
-
-        for path in sorted(self.bids_root.rglob("*_channels.tsv")):
-            if path.name.startswith("._") or "eeg" not in path.parts:
-                continue
-            with path.open("r", encoding="utf-8-sig", newline="") as handle:
-                for row in csv.DictReader(handle, delimiter="\t"):
-                    if str(row.get("type", "")).lower() == "ecg":
-                        return
-            # One recording is enough to settle it; reading the rest costs time and
-            # changes nothing.
-            break
-        raise ValueError(
-            "preprocessing.eeg_fmri is true, but no channel is typed ECG in the "
-            f"channels.tsv files under {self.bids_root}. The cardiac stages this enables "
-            "measure the ballistocardiogram against a recorded ECG and cannot run without "
-            "one. Set preprocessing.eeg_fmri=false for EEG recorded outside a scanner, or "
-            "correct the channel types if an ECG was recorded."
-        )
 
     def _bids_eog_channel_names(self) -> set[str]:
         """Return every channel any run types as EOG in its channels.tsv."""
@@ -793,25 +722,12 @@ class PreprocessingPipeline(PipelineBase):
             progress.step(step, current=i, total=total_steps)
             self.logger.info("Running step: %s", step)
 
-            if step == STEP_PULSE_MARKER_QC:
-                output_path = self._run_pulse_marker_qc(
-                    subjects=subjects,
-                    task=task,
-                )
-                outputs["pulse_marker_qc_tsv"] = str(output_path)
-            elif step == STEP_ICA_CARDIAC_QC:
+            if step == STEP_ICA_CARDIAC_QC:
                 output_path = self._run_marker_ctps_qc(
                     subjects=subjects,
                     task=task,
                 )
                 outputs["marker_ctps_qc_tsv"] = str(output_path)
-            elif step == STEP_CARDIAC_ATTENUATION_QC:
-                output_path = self._run_cardiac_attenuation_qc(
-                    subjects=subjects,
-                    task=task,
-                )
-                outputs["cardiac_attenuation_qc_tsv"] = str(output_path)
-                outputs["cardiac_attenuation_qc_png"] = str(output_path.with_suffix(".png"))
             elif step == STEP_BAD_CHANNELS:
                 if not use_pyprep:
                     self.logger.info("Skipping bad channel detection (PyPREP disabled)")
@@ -837,15 +753,6 @@ class PreprocessingPipeline(PipelineBase):
                 )
             elif step == STEP_STATS:
                 self._collect_stats(task=task)
-            elif step == STEP_SCANNER_HARMONIC_QC:
-                if task is None:
-                    raise ValueError("Scanner harmonic QC requires a task name.")
-                outputs.update(
-                    self._run_scanner_harmonic_qc(
-                        subjects=subjects,
-                        task=task,
-                    )
-                )
             else:
                 raise ValueError(f"Unknown preprocessing step: {step}")
 
@@ -859,86 +766,6 @@ class PreprocessingPipeline(PipelineBase):
 
         return outputs
 
-    def _run_pulse_marker_qc(
-        self,
-        subjects: List[str],
-        task: Optional[str],
-    ) -> Path:
-        """Measure the preserved Analyzer R markers and record them per run.
-
-        Descriptive by default: the configured bounds are written beside the measurements
-        rather than used to drop runs. ``strict_pulse_qc`` turns them into a gate for a
-        caller that wants one.
-        """
-        from mne_bids import BIDSPath, read_raw_bids
-
-        from eeg_pipeline.preprocessing.pulse_artifact_qc import (
-            PulseMarkerCriteria,
-            summarize_pulse_marker_recordings,
-        )
-
-        qc_config = self.config.get("preprocessing.brainvision_analyzer.pulse_artifact_qc")
-        if not qc_config:
-            raise ValueError(
-                "Missing required config mapping: "
-                "preprocessing.brainvision_analyzer.pulse_artifact_qc"
-            )
-
-        selected_subjects = [None] if subjects == ["all"] else subjects
-        bids_paths = []
-        for subject in selected_subjects:
-            bids_paths.extend(
-                BIDSPath(
-                    root=self.bids_root,
-                    subject=subject,
-                    task=task,
-                    datatype="eeg",
-                    suffix="eeg",
-                    extension=self.config.get("pyprep.file_extension"),
-                    check=True,
-                ).match()
-            )
-        visible_paths = {
-            str(path.fpath): path
-            for path in bids_paths
-            if path.fpath.is_file() and not path.fpath.name.startswith("._")
-        }
-        bids_paths = [visible_paths[key] for key in sorted(visible_paths)]
-        if not bids_paths:
-            raise FileNotFoundError(
-                f"No BIDS EEG recordings found for pulse-marker QC under {self.bids_root}."
-            )
-
-        recordings = [
-            (
-                path.fpath.stem,
-                read_raw_bids(path, extra_params={"preload": False}, verbose=False),
-            )
-            for path in bids_paths
-        ]
-        criteria = PulseMarkerCriteria(
-            minimum_bpm=float(qc_config["minimum_bpm"]),
-            maximum_bpm=float(qc_config["maximum_bpm"]),
-            minimum_marker_fraction=float(qc_config["minimum_marker_fraction"]),
-            minimum_recording_coverage=float(qc_config["minimum_recording_coverage"]),
-        )
-        task_entity = f"task-{task}_" if task is not None else ""
-        qc_root = self.deriv_root / "preprocessed" / "eeg" / "qc"
-        output_path = qc_root / f"{task_entity}desc-pulsemarkers_qc.tsv"
-        strict_validation = self.config.get(
-            "preprocessing.brainvision_analyzer.strict_pulse_qc", False
-        )
-
-        return summarize_pulse_marker_recordings(
-            recordings,
-            criteria,
-            output_path=output_path,
-            strict=strict_validation,
-            # The stage that measures how much of each run the pulse correction covered
-            # also records the intervals it did not, so nothing downstream has to rederive
-            # them from the marker train.
-            annotations_dir=qc_root / f"{task_entity}bcg_uncorrected",
-        )
 
     def _get_analyzer_cardiac_qc_config(self) -> Any:
         config = self.config.get("preprocessing.brainvision_analyzer.cardiac_artifact_qc")
@@ -983,25 +810,6 @@ class PreprocessingPipeline(PipelineBase):
             ecg_channel=self._resolve_ecg_channel(),
         )
 
-    def _run_cardiac_attenuation_qc(
-        self,
-        subjects: List[str],
-        task: Optional[str],
-    ) -> Path:
-        """Measure marker-locked EEG attenuation after ICA application."""
-        from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
-            run_cardiac_attenuation_qc,
-        )
-
-        config = self._get_analyzer_cardiac_qc_config()
-        return run_cardiac_attenuation_qc(
-            pipeline_root=self.deriv_root / "preprocessed" / "eeg",
-            subjects=subjects,
-            task=task,
-            baseline=tuple(config["baseline"]),
-            measurement_window=tuple(config["measurement_window"]),
-            ecg_channel=self._resolve_ecg_channel(),
-        )
 
     def _run_bad_channel_detection(
         self,
@@ -1137,14 +945,7 @@ class PreprocessingPipeline(PipelineBase):
         # doing nothing while its config says it is on, is the failure mode that hid the
         # missing ocular detection for so long.
         if bool(self.config.get("ica.cardiac_review.enabled", False)):
-            if self._is_eeg_fmri():
-                self._run_ica_cardiac_review(subjects=subjects, task=task)
-            else:
-                self.logger.info(
-                    "Skipping the ICA cardiac review: preprocessing.eeg_fmri is false, so "
-                    "these recordings carry no ballistocardiogram to measure. Set "
-                    "ica.cardiac_review.enabled=false to stop requesting it."
-                )
+            self._run_ica_cardiac_review(subjects=subjects, task=task)
 
         if bool(self.config.get("ica.ocular_review.enabled", False)):
             self._run_ica_ocular_review(subjects=subjects, task=task)
@@ -2430,31 +2231,6 @@ class PreprocessingPipeline(PipelineBase):
 
         self.logger.info("Statistics collection complete")
 
-    def _run_scanner_harmonic_qc(
-        self,
-        *,
-        subjects: List[str],
-        task: str,
-    ) -> Dict[str, str]:
-        """Write the input-versus-final cohort scanner-harmonic comb."""
-        from eeg_pipeline.preprocessing.pipeline.scanner_harmonic_qc import (
-            run_scanner_harmonic_qc,
-            scanner_comb_parameters_from_config,
-        )
-
-        parameters = scanner_comb_parameters_from_config(self.config)
-        outputs = run_scanner_harmonic_qc(
-            subjects=subjects,
-            task=task,
-            bids_root=self.bids_root,
-            deriv_root=self.deriv_root,
-            input_extension=self.config.get("pyprep.file_extension"),
-            parameters=parameters,
-        )
-        return {
-            "scanner_harmonic_comb_png": str(outputs.png_path),
-            "scanner_harmonic_comb_tsv": str(outputs.tsv_path),
-        }
 
     def _run_mne_bids_pipeline(
         self,

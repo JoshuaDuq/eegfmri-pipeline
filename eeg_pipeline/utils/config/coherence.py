@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Tuple
 
-from eeg_pipeline.utils.config.acquisition import is_eeg_fmri
 from eeg_pipeline.utils.config.loader import get_config_value
 
 _MISSING = object()
@@ -192,37 +191,6 @@ def _check_task_settings(config: Any, errors: List[ConfigIssue]) -> None:
     )
 
 
-def _check_scanner_settings(config: Any, warnings: List[ConfigIssue]) -> None:
-    """Scanner-only stages left switched on for a dataset recorded outside one.
-
-    Neither stops the run — each is gated at its own call site — but a config that still
-    asks for things it will not get is a config nobody has finished adapting, and the
-    listing is how the reader finds out which.
-
-    Only what the *scanner* provides belongs here. The ECG-dependent stages were listed
-    alongside these on the reasoning that an out-of-scanner montage carries no ECG lead,
-    which is not true and is not what they depend on; see :func:`_check_ecg_settings`.
-    """
-    scanner_only = (
-        (
-            "preprocessing.brainvision_analyzer.enabled",
-            "no Analyzer correction precedes an out-of-scanner recording, so the pulse "
-            "marker and cardiac attenuation QC will be skipped.",
-        ),
-        (
-            "alignment.trim_to_volume_bounds",
-            "there are no scanner volume markers to trim to, so no trimming will occur.",
-        ),
-    )
-    for key, explanation in scanner_only:
-        if bool(get_config_value(config, key, False)):
-            warnings.append(
-                ConfigIssue(
-                    key,
-                    f"is true, but preprocessing.eeg_fmri is false: {explanation} "
-                    "Set it false to say so in the config.",
-                )
-            )
 
 
 def _check_ecg_settings(config: Any, warnings: List[ConfigIssue]) -> None:
@@ -289,9 +257,6 @@ def check_config_coherence(config: Any) -> CoherenceReport:
         _check_rest_settings(config, errors)
     else:
         _check_task_settings(config, errors)
-
-    if not is_eeg_fmri(config):
-        _check_scanner_settings(config, warnings)
 
     # Unconditional: the ECG stages need a lead whether or not there was a scanner.
     _check_ecg_settings(config, warnings)

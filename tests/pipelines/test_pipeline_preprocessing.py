@@ -5,6 +5,8 @@ import sys
 import tempfile
 import types
 import unittest
+
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -308,141 +310,10 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown preprocessing mode"):
             p._get_steps_for_mode("bogus")
 
-    def test_scanner_harmonic_qc_runs_only_after_task_epoch_outputs(self):
-        from eeg_pipeline.pipelines.preprocessing import (
-            STEP_SCANNER_HARMONIC_QC,
-            PreprocessingPipeline,
-        )
 
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.config = DotConfig(
-            {
-                "preprocessing": {"brainvision_analyzer": {"enabled": True}},
-                "ica": {
-                    "require_manual_review": True,
-                    "manual_review_complete": True,
-                },
-            }
-        )
 
-        epoch_steps = pipeline._get_steps_for_run("epochs", task_is_rest=False)
 
-        self.assertEqual(epoch_steps[-1], STEP_SCANNER_HARMONIC_QC)
-        self.assertNotIn(
-            STEP_SCANNER_HARMONIC_QC,
-            pipeline._get_steps_for_run("ica", task_is_rest=False),
-        )
 
-        pipeline.config["ica"]["manual_review_complete"] = False
-        with self.assertRaisesRegex(ValueError, "manual ICA review"):
-            pipeline._get_steps_for_run("epochs", task_is_rest=False)
-
-    def test_pulse_marker_qc_runs_before_preprocessing(self):
-        from eeg_pipeline.pipelines.preprocessing import (
-            STEP_CARDIAC_ATTENUATION_QC,
-            STEP_ICA_CARDIAC_QC,
-            STEP_PULSE_MARKER_QC,
-            PreprocessingPipeline,
-        )
-
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.config = DotConfig({"preprocessing": {"brainvision_analyzer": {"enabled": True}}})
-
-        for mode in ("bad-channels", "ica", "epochs"):
-            self.assertEqual(
-                pipeline._get_steps_for_run(mode, task_is_rest=False)[0],
-                STEP_PULSE_MARKER_QC,
-            )
-        self.assertIn(
-            STEP_ICA_CARDIAC_QC,
-            pipeline._get_steps_for_run("ica", task_is_rest=False),
-        )
-        self.assertIn(
-            STEP_CARDIAC_ATTENUATION_QC,
-            pipeline._get_steps_for_run("epochs", task_is_rest=False),
-        )
-
-    def test_analyzer_qc_steps_are_omitted_for_standard_eeg(self):
-        from eeg_pipeline.pipelines.preprocessing import (
-            STEP_CARDIAC_ATTENUATION_QC,
-            STEP_ICA_CARDIAC_QC,
-            STEP_PULSE_MARKER_QC,
-            STEP_SCANNER_HARMONIC_QC,
-            PreprocessingPipeline,
-        )
-
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.config = DotConfig({"preprocessing": {"brainvision_analyzer": {"enabled": False}}})
-
-        steps = pipeline._get_steps_for_run("epochs", task_is_rest=False)
-
-        self.assertNotIn(STEP_PULSE_MARKER_QC, steps)
-        self.assertNotIn(STEP_ICA_CARDIAC_QC, steps)
-        self.assertNotIn(STEP_CARDIAC_ATTENUATION_QC, steps)
-        self.assertNotIn(STEP_SCANNER_HARMONIC_QC, steps)
-
-    def test_execute_steps_records_pulse_marker_qc_output(self):
-        from eeg_pipeline.pipelines.preprocessing import (
-            STEP_PULSE_MARKER_QC,
-            PreprocessingPipeline,
-        )
-
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.logger = Mock()
-        pipeline._run_pulse_marker_qc = Mock(return_value=Path("/tmp/pulse-marker-qc.tsv"))
-
-        outputs = pipeline._execute_steps(
-            steps=[STEP_PULSE_MARKER_QC],
-            subjects=["0001"],
-            task="thermalactive",
-            use_pyprep=True,
-            task_is_rest=False,
-            n_jobs=1,
-            progress=_NoopProgress(),
-        )
-
-        self.assertEqual(
-            outputs,
-            {"pulse_marker_qc_tsv": "/tmp/pulse-marker-qc.tsv"},
-        )
-        pipeline._run_pulse_marker_qc.assert_called_once_with(
-            subjects=["0001"],
-            task="thermalactive",
-        )
-
-    def test_execute_steps_records_analyzer_cardiac_qc_outputs(self):
-        from eeg_pipeline.pipelines.preprocessing import (
-            STEP_CARDIAC_ATTENUATION_QC,
-            STEP_ICA_CARDIAC_QC,
-            PreprocessingPipeline,
-        )
-
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.logger = Mock()
-        pipeline._run_marker_ctps_qc = Mock(return_value=Path("/tmp/ctps.tsv"))
-        pipeline._run_cardiac_attenuation_qc = Mock(return_value=Path("/tmp/attenuation.tsv"))
-        # The report review sections append to subject reports; this test covers the
-        # recorded output paths only.
-        pipeline._append_report_review_sections = Mock()
-
-        outputs = pipeline._execute_steps(
-            steps=[STEP_ICA_CARDIAC_QC, STEP_CARDIAC_ATTENUATION_QC],
-            subjects=["0001"],
-            task="thermalactive",
-            use_pyprep=True,
-            task_is_rest=False,
-            n_jobs=1,
-            progress=_NoopProgress(),
-        )
-
-        self.assertEqual(
-            outputs,
-            {
-                "marker_ctps_qc_tsv": "/tmp/ctps.tsv",
-                "cardiac_attenuation_qc_tsv": "/tmp/attenuation.tsv",
-                "cardiac_attenuation_qc_png": "/tmp/attenuation.png",
-            },
-        )
 
     def test_report_review_sections_do_not_depend_on_the_analyzer_steps(self):
         """An EEG-only run must still get provenance, spectra, coverage, and continuity.
@@ -497,57 +368,6 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
 
         pipeline._append_report_review_sections.assert_not_called()
 
-    def test_analyzer_cardiac_qc_methods_use_dedicated_config(self):
-        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
-
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.deriv_root = Path("/tmp/deriv")
-        pipeline.config = DotConfig(
-            {
-                "eeg": {"ecg_channels": ["ECG"]},
-                "preprocessing": {
-                    "brainvision_analyzer": {
-                        "cardiac_artifact_qc": {
-                            "ctps_threshold": 0.1,
-                            "ctps_epoch_window": [-0.25, 0.5],
-                            "baseline": [-0.25, -0.05],
-                            "measurement_window": [-0.05, 0.4],
-                        }
-                    }
-                },
-            }
-        )
-        marker_ctps = Mock(return_value=Path("/tmp/ctps.tsv"))
-        attenuation = Mock(return_value=Path("/tmp/attenuation.tsv"))
-        qc_module = _make_module(
-            "eeg_pipeline.preprocessing.cardiac_artifact_qc",
-            run_marker_ctps_qc=marker_ctps,
-            run_cardiac_attenuation_qc=attenuation,
-        )
-
-        with patch.dict(
-            sys.modules,
-            {"eeg_pipeline.preprocessing.cardiac_artifact_qc": qc_module},
-        ):
-            pipeline._run_marker_ctps_qc(["0001"], "thermalactive")
-            pipeline._run_cardiac_attenuation_qc(["0001"], "thermalactive")
-
-        marker_ctps.assert_called_once_with(
-            pipeline_root=Path("/tmp/deriv/preprocessed/eeg"),
-            subjects=["0001"],
-            task="thermalactive",
-            threshold=0.1,
-            epoch_window=(-0.25, 0.5),
-            ecg_channel="ECG",
-        )
-        attenuation.assert_called_once_with(
-            pipeline_root=Path("/tmp/deriv/preprocessed/eeg"),
-            subjects=["0001"],
-            task="thermalactive",
-            baseline=(-0.25, -0.05),
-            measurement_window=(-0.05, 0.4),
-            ecg_channel="ECG",
-        )
 
     def test_detect_conditions_from_bids(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -2103,39 +1923,6 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
             p._execute_steps(["bad-channels"], ["0001"], "t", False, False, 1, _NoopProgress())
         m1.assert_not_called()
 
-    def test_execute_steps_returns_scanner_harmonic_qc_outputs(self):
-        from eeg_pipeline.pipelines.preprocessing import (
-            STEP_SCANNER_HARMONIC_QC,
-            PreprocessingPipeline,
-        )
-
-        pipeline = object.__new__(PreprocessingPipeline)
-        pipeline.logger = Mock()
-        expected = {
-            "scanner_harmonic_comb_png": "/tmp/comb.png",
-            "scanner_harmonic_comb_tsv": "/tmp/comb.tsv",
-        }
-
-        with patch.object(
-            PreprocessingPipeline,
-            "_run_scanner_harmonic_qc",
-            return_value=expected,
-        ) as run_qc:
-            observed = pipeline._execute_steps(
-                [STEP_SCANNER_HARMONIC_QC],
-                ["0001", "0002"],
-                "thermalactive",
-                True,
-                False,
-                1,
-                _NoopProgress(),
-            )
-
-        self.assertEqual(observed, expected)
-        run_qc.assert_called_once_with(
-            subjects=["0001", "0002"],
-            task="thermalactive",
-        )
 
     def test_run_epoch_creation_and_collect_stats(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -2450,24 +2237,28 @@ class TestPreprocessingStepSelection(_PreprocessingImportMixin, unittest.TestCas
             "epochs", task_is_rest=False
         )
 
-        for qc_step in ("ica-cardiac-qc", "cardiac-attenuation-qc", "scanner-harmonic-qc"):
-            self.assertIn(qc_step, full, f"full mode dropped {qc_step}")
-            self.assertIn(qc_step, split)
-
-    def test_resting_state_full_mode_omits_the_task_only_harmonic_qc(self):
-        p = self._pipeline()
-
-        steps = p._get_steps_for_run("full", task_is_rest=True)
-
-        self.assertIn("cardiac-attenuation-qc", steps)
-        self.assertNotIn("scanner-harmonic-qc", steps)
+        # One QC step survives the scanner relocation, and it is attached to ICA fitting.
+        self.assertIn("ica-cardiac-qc", full, "full mode dropped ica-cardiac-qc")
+        self.assertIn("ica-cardiac-qc", split)
 
     def test_bad_channel_mode_gets_no_ica_or_epoch_qc(self):
+        """QC attaches to the derivative it measures, so a mode producing neither gets none."""
         p = self._pipeline()
 
         steps = p._get_steps_for_run("bad-channels", task_is_rest=False)
 
-        self.assertEqual(steps, ["pulse-marker-qc", "bad-channels"])
+        self.assertNotIn("ica-cardiac-qc", steps)
+
+    def test_the_cardiac_qc_step_needs_the_analyzer_switch(self):
+        """It reads the marker train an upstream Analyzer correction left behind."""
+        p = self._pipeline(analyzer_enabled=False)
+
+        steps = p._get_steps_for_run("full", task_is_rest=False)
+
+        self.assertNotIn("ica-cardiac-qc", steps)
+
+
+
 
     def test_per_run_policy_fails_before_any_recording_is_opened(self):
         """The mismatch is visible in channels.tsv, so it must not wait for filtering."""
@@ -2654,3 +2445,52 @@ class TestPreprocessingParallelism(_PreprocessingImportMixin, unittest.TestCase)
         resolved = p._extract_preprocessing_params("pain", {"n_jobs": -1})
 
         self.assertEqual(resolved[4], -1)
+
+
+# Moved from tests/pipelines/test_eeg_only_gating.py when preprocessing.eeg_fmri was
+# deleted. That file existed to prove eeg_fmri and brainvision_analyzer were two switches
+# rather than one; the distinction stopped existing with the first key. These cases are
+# the part that outlived it: what they assert is now the only path, not the EEG-only one.
+
+
+def test_the_ecg_coupling_metric_is_gated_on_the_recorded_lead() -> None:
+    # Issue #14: a dataset with a recorded ECG lead used to have this metric switched off
+    # underneath it by a scanner declaration. It runs wherever the lead is named.
+    from eeg_pipeline.utils.config.loader import load_config
+    from eeg_pipeline.utils.data.preprocessing import CleanEventsQCConfig
+
+    config = load_config()
+    config["preprocessing.clean_events_qc.enabled"] = True
+    config["preprocessing.clean_events_qc.ecg_coupling.enabled"] = True
+    config["eeg.ecg_channels"] = ["ECG"]
+
+    assert CleanEventsQCConfig.from_config(config).ecg_coupling.enabled is True
+
+
+def test_cardiac_only_qc_switches_itself_off_rather_than_raising() -> None:
+    # Asking for QC and naming no metric is a config mistake worth raising on. Asking for
+    # the cardiac metric alone with no ECG lead named is not: nothing is left to compute
+    # and the user got nothing wrong.
+    from eeg_pipeline.utils.config.loader import load_config
+    from eeg_pipeline.utils.data.preprocessing import CleanEventsQCConfig
+
+    config = load_config()
+    config["preprocessing.clean_events_qc.enabled"] = True
+    config["preprocessing.clean_events_qc.ecg_coupling.enabled"] = True
+    config["preprocessing.clean_events_qc.peripheral_low_gamma.enabled"] = False
+    config["eeg.ecg_channels"] = []
+
+    assert CleanEventsQCConfig.from_config(config).enabled is False
+
+
+def test_naming_no_metric_at_all_still_raises() -> None:
+    from eeg_pipeline.utils.config.loader import load_config
+    from eeg_pipeline.utils.data.preprocessing import CleanEventsQCConfig
+
+    config = load_config()
+    config["preprocessing.clean_events_qc.enabled"] = True
+    config["preprocessing.clean_events_qc.ecg_coupling.enabled"] = False
+    config["preprocessing.clean_events_qc.peripheral_low_gamma.enabled"] = False
+
+    with pytest.raises(ValueError, match="at least one QC metric"):
+        CleanEventsQCConfig.from_config(config)

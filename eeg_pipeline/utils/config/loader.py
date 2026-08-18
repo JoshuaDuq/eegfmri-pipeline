@@ -52,8 +52,6 @@ _NON_PATH_KEYS = {
     "task",
     "random_state",
     "picks",
-    "volume_marker_description",
-    "pulse_marker_description",
     "marker_description",
 }
 _PROJECT_ROOT_PREFIXES = ("data/", "eeg_pipeline/")

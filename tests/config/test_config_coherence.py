@@ -149,22 +149,6 @@ def test_disagreeing_rest_flags_are_reported_not_raised_from_inside() -> None:
     assert "project.paradigm" in _keys(check_config_coherence(config).errors)
 
 
-def test_scanner_keys_left_on_for_an_eeg_only_dataset_are_listed_as_warnings() -> None:
-    """None of these stops the run — each is gated at its own call site — but a config
-    still asking for things it will not get is one nobody has finished adapting."""
-    config = _config(
-        preprocessing__eeg_fmri=False,
-        preprocessing__brainvision_analyzer__enabled=True,
-        alignment__trim_to_volume_bounds=True,
-    )
-
-    report = check_config_coherence(config)
-
-    assert report.errors == ()
-    assert _keys(report.warnings) == {
-        "preprocessing.brainvision_analyzer.enabled",
-        "alignment.trim_to_volume_bounds",
-    }
 
 
 def test_an_eeg_fmri_dataset_gets_no_scanner_warnings() -> None:

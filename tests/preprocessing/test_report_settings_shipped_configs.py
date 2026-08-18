@@ -142,3 +142,12 @@ def test_core_config_names_no_scanner_key():
         "bcg_residual_window_s:",
     ):
         assert key not in text, f"{key} is still in the core config"
+
+
+def test_the_acquisition_module_is_gone():
+    import importlib
+
+    import pytest
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("eeg_pipeline.utils.config.acquisition")
