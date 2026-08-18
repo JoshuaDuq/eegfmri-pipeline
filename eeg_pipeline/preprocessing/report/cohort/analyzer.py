@@ -38,7 +38,7 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.sidecar import AcquisitionContext
-from eeg_pipeline.preprocessing.report.analyzer_qc import (
+from eeg_pipeline.preprocessing.report.rr_intervals import (
     DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
 )
 from eeg_pipeline.preprocessing.report.tables import MISSING, Align, Column, grid_table

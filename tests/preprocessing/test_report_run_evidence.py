@@ -157,7 +157,7 @@ def test_the_report_gains_every_available_section(tmp_path) -> None:
     assert sections == {
         "Sensor spectra before and after ICA",
         "Data quality over time",
-        "Scanner artifact correction (Analyzer)",
+        "Cardiac rhythm",
     }
 
 

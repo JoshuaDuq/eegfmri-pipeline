@@ -305,6 +305,7 @@ SECTION_ORDER = (
     "ICA: epochs for fitting",
     "ICA decomposition quality",
     "ICA cardiac artifact review",
+    "Cardiac rhythm",
     "ICA ocular artifact review",
     "ICA component review",
     "ICA: components",

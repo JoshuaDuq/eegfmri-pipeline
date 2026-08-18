@@ -9,7 +9,7 @@ import pytest
 
 matplotlib.use("Agg")
 
-from eeg_pipeline.preprocessing.report.analyzer_qc import (  # noqa: E402
+from eeg_pipeline.preprocessing.report.rr_intervals import (  # noqa: E402
     add_rr_interval_section,
     compute_rr_intervals,
     plot_rr_intervals,
@@ -152,7 +152,7 @@ def test_a_collapsed_run_does_not_flatten_the_readable_ones() -> None:
     is a fixed plausible range instead, so what the panels resolve does not depend on
     which runs happen to share the figure.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import DRAWN_RR_RANGE_S
+    from eeg_pipeline.preprocessing.report.rr_intervals import DRAWN_RR_RANGE_S
 
     series = _series_for(3)
     collapsed = compute_rr_intervals(
@@ -179,7 +179,7 @@ def test_a_long_interval_is_drawn_where_it_falls_rather_than_on_the_rail() -> No
     -- 0.3-2 s still occupies more than half the height -- while putting a collapsed
     detector's intervals at a readable position instead of against the rail.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import DRAWN_RR_RANGE_S
+    from eeg_pipeline.preprocessing.report.rr_intervals import DRAWN_RR_RANGE_S
 
     # Intervals of 5 s: far above any plausible rhythm, well inside the drawn window.
     lapsed = compute_rr_intervals(
@@ -206,7 +206,7 @@ def test_the_physiological_band_stays_visible_on_the_widened_axis() -> None:
     On a log axis the plausible band still has to own most of the panel, or the change
     has traded one censoring for another.
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import (
+    from eeg_pipeline.preprocessing.report.rr_intervals import (
         DRAWN_RR_RANGE_S,
         PLAUSIBLE_RR_RANGE_S,
     )
@@ -246,7 +246,7 @@ def test_the_poincare_plot_separates_missed_from_double_detections() -> None:
     the 0.5x line. Neither is distinguishable from ordinary variability in the time
     series, where both are simply "a tall point".
     """
-    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+    from eeg_pipeline.preprocessing.report.rr_intervals import plot_rr_poincare
 
     figure = plot_rr_poincare(_series_for(2))
 
@@ -267,7 +267,7 @@ def test_a_poincare_reference_line_never_wears_a_run_colour() -> None:
     when nothing had flagged it."""
     from matplotlib.colors import to_hex
 
-    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+    from eeg_pipeline.preprocessing.report.rr_intervals import plot_rr_poincare
 
     axis = plot_rr_poincare(_series_for(4)).axes[0]
 
@@ -280,7 +280,7 @@ def test_the_two_poincare_failure_modes_are_told_apart_without_the_legend_text()
     """Both dotted guides shared one colour and one dash pattern, so the only thing
     separating "one beat missed" from "one beat counted twice" was reading which of two
     identical entries sat higher in the legend."""
-    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+    from eeg_pipeline.preprocessing.report.rr_intervals import plot_rr_poincare
 
     axis = plot_rr_poincare(_series_for(2)).axes[0]
 
@@ -293,7 +293,7 @@ def test_the_two_poincare_failure_modes_are_told_apart_without_the_legend_text()
 
 
 def test_the_poincare_plot_needs_at_least_one_run() -> None:
-    from eeg_pipeline.preprocessing.report.analyzer_qc import plot_rr_poincare
+    from eeg_pipeline.preprocessing.report.rr_intervals import plot_rr_poincare
 
     with pytest.raises(ValueError):
         plot_rr_poincare([])
@@ -329,3 +329,9 @@ def test_the_caption_fits_inside_the_figure() -> None:
     title = figure._suptitle.get_window_extent()
     assert title.x0 >= 0.0
     assert title.x1 <= figure.get_window_extent().x1
+
+
+def test_rr_section_lives_outside_the_analyzer_module():
+    from eeg_pipeline.preprocessing.report import rr_intervals
+
+    assert hasattr(rr_intervals, "add_rr_interval_section")

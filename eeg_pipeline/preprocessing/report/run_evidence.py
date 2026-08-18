@@ -21,12 +21,14 @@ import numpy as np
 from eeg_pipeline.preprocessing.report.analyzer_qc import (
     CardiacResidual,
     MarkerAgreement,
-    RrIntervals,
     add_marker_agreement_section,
-    add_rr_interval_section,
     compute_cardiac_residual,
-    compute_rr_intervals,
     compute_run_marker_agreement,
+)
+from eeg_pipeline.preprocessing.report.rr_intervals import (
+    RrIntervals,
+    add_rr_interval_section,
+    compute_rr_intervals,
 )
 from eeg_pipeline.preprocessing.report.continuity import (
     RunContinuity,

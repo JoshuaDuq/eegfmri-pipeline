@@ -23,11 +23,13 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from eeg_pipeline.preprocessing.report.analyzer_qc import (
-    DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
     MARKER_AGREEMENT_TOLERANCE_S,
     RESIDUAL_BASELINE_S,
     RESIDUAL_MEASUREMENT_S,
     RESIDUAL_WINDOW_S,
+)
+from eeg_pipeline.preprocessing.report.rr_intervals import (
+    DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
 )
 from eeg_pipeline.preprocessing.report.aperiodic import DEFAULT_FIT_RANGE_HZ
 from eeg_pipeline.preprocessing.report.continuity import NON_EVENT_PREFIXES

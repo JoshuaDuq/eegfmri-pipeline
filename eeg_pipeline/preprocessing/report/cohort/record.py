@@ -31,6 +31,8 @@ import pandas as pd
 from eeg_pipeline.preprocessing.report.analyzer_qc import (
     CardiacResidual,
     MarkerAgreement,
+)
+from eeg_pipeline.preprocessing.report.rr_intervals import (
     RrIntervals,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
