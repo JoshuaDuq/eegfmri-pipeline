@@ -22,6 +22,9 @@ SHIPPED_CONFIGS = (
     "eeg_pipeline/utils/config/presets/eeg_only.yaml",
     "eeg_pipeline/utils/config/presets/rest.yaml",
     "studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml",
+    # The config the loader actually reads for this study, as distinct from the override
+    # template above, which is a copy-paste source and is loaded by nothing.
+    "studies/pain_study/config/pain_study.yaml",
 )
 
 

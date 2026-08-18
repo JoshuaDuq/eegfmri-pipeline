@@ -32,3 +32,110 @@ paths:
   decomb_manifest: "../../../data/bids_output/eeg_decombed_auto_staged/line_notch_manifest.tsv"
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
+
+report:
+  analysis:
+    # The residual gradient comb, withheld from the aperiodic fit. The report used to
+    # derive these windows from each run's volume markers; they are named here now that
+    # core does not read a volume rate. Each one is a k/TR harmonic widened by 1.5 bins
+    # either side of the tooth, on the 0.25 Hz Welch grid the sensor spectra are fitted
+    # on. Copied from the derivation's own output rather than recomputed by hand, so the
+    # windows are the windows it produced. One list covers the cohort: all 90 runs share
+    # a 500 Hz sampling rate, a 100 Hz low-pass, and a volume rate identical to the bit.
+    #
+    # The fundamental behind these numbers is 1.1111185 Hz, not 1/0.9 = 1.1111111. The
+    # scanner's TR is exactly 0.9 s -- the source markers sit every 900 samples at 1000 Hz
+    # with no jitter -- but the derivation took the median marker interval from the
+    # filtered recording, whose annotation onsets carry microsecond-scale noise. The two
+    # differ by at most 0.0007 Hz at the top harmonic, a thousandth of a window width, and
+    # withhold the same bins everywhere in the 2-45 Hz fit range.
+    aperiodic_exclude_hz:
+      - [0.7361, 1.4861]
+      - [1.8472, 2.5972]
+      - [2.9584, 3.7084]
+      - [4.0695, 4.8195]
+      - [5.1806, 5.9306]
+      - [6.2917, 7.0417]
+      - [7.4028, 8.1528]
+      - [8.5139, 9.2639]
+      - [9.6251, 10.3751]
+      - [10.7362, 11.4862]
+      - [11.8473, 12.5973]
+      - [12.9584, 13.7084]
+      - [14.0695, 14.8195]
+      - [15.1807, 15.9307]
+      - [16.2918, 17.0418]
+      - [17.4029, 18.1529]
+      - [18.5140, 19.2640]
+      - [19.6251, 20.3751]
+      - [20.7363, 21.4863]
+      - [21.8474, 22.5974]
+      - [22.9585, 23.7085]
+      - [24.0696, 24.8196]
+      - [25.1807, 25.9307]
+      - [26.2918, 27.0418]
+      - [27.4030, 28.1530]
+      - [28.5141, 29.2641]
+      - [29.6252, 30.3752]
+      - [30.7363, 31.4863]
+      - [31.8474, 32.5974]
+      - [32.9586, 33.7086]
+      - [34.0697, 34.8197]
+      - [35.1808, 35.9308]
+      - [36.2919, 37.0419]
+      - [37.4030, 38.1530]
+      - [38.5141, 39.2641]
+      - [39.6253, 40.3753]
+      - [40.7364, 41.4864]
+      - [41.8475, 42.5975]
+      - [42.9586, 43.7086]
+      - [44.0697, 44.8197]
+      - [45.1809, 45.9309]
+      - [46.2920, 47.0420]
+      - [47.4031, 48.1531]
+      - [48.5142, 49.2642]
+      - [49.6253, 50.3753]
+      - [50.7365, 51.4865]
+      - [51.8476, 52.5976]
+      - [52.9587, 53.7087]
+      - [54.0698, 54.8198]
+      - [55.1809, 55.9309]
+      - [56.2920, 57.0420]
+      - [57.4032, 58.1532]
+      - [58.5143, 59.2643]
+      - [59.6254, 60.3754]
+      - [60.7365, 61.4865]
+      - [61.8476, 62.5976]
+      - [62.9588, 63.7088]
+      - [64.0699, 64.8199]
+      - [65.1810, 65.9310]
+      - [66.2921, 67.0421]
+      - [67.4032, 68.1532]
+      - [68.5143, 69.2643]
+      - [69.6255, 70.3755]
+      - [70.7366, 71.4866]
+      - [71.8477, 72.5977]
+      - [72.9588, 73.7088]
+      - [74.0699, 74.8199]
+      - [75.1811, 75.9311]
+      - [76.2922, 77.0422]
+      - [77.4033, 78.1533]
+      - [78.5144, 79.2644]
+      - [79.6255, 80.3755]
+      - [80.7367, 81.4867]
+      - [81.8478, 82.5978]
+      - [82.9589, 83.7089]
+      - [84.0700, 84.8200]
+      - [85.1811, 85.9311]
+      - [86.2922, 87.0422]
+      - [87.4034, 88.1534]
+      - [88.5145, 89.2645]
+      - [89.6256, 90.3756]
+      - [90.7367, 91.4867]
+      - [91.8478, 92.5978]
+      - [92.9590, 93.7090]
+      - [94.0701, 94.8201]
+      - [95.1812, 95.9312]
+      - [96.2923, 97.0423]
+      - [97.4034, 98.1534]
+      - [98.5145, 99.2645]
