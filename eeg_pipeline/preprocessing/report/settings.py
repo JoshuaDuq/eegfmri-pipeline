@@ -29,6 +29,7 @@ from eeg_pipeline.preprocessing.report.analyzer_qc import (
     RESIDUAL_WINDOW_S,
 )
 from eeg_pipeline.preprocessing.report.rr_intervals import (
+    DEFAULT_BEAT_MARKER_DESCRIPTION,
     DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
 )
 from eeg_pipeline.preprocessing.report.aperiodic import DEFAULT_FIT_RANGE_HZ
@@ -40,7 +41,6 @@ from eeg_pipeline.preprocessing.report.preservation import (
     DEFAULT_RESPONSE_WINDOW_S,
     POSTERIOR_PATTERN,
 )
-from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 
 #: Participant counts at which each cohort band becomes drawable, and the montage and
 #: sequence tolerances the cohort panels pool across. Stated here rather than imported
@@ -351,7 +351,7 @@ class ReportSettings:
     #: has none, simply gets no gradient section.
     volume_marker_description: str = "Volume/V  1"
     #: Annotation marking each detected heartbeat.
-    pulse_marker_description: str = PULSE_MARKER_DESCRIPTION
+    pulse_marker_description: str = DEFAULT_BEAT_MARKER_DESCRIPTION
     #: Window the evoked split halves are correlated over, in seconds from onset. A
     #: paradigm whose response falls outside it reports a reliability near zero for a
     #: sound recording, so this must match the paradigm rather than the other way round.

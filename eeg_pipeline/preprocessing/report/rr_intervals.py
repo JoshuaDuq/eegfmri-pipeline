@@ -16,7 +16,6 @@ from matplotlib.ticker import NullFormatter, ScalarFormatter
 import mne
 import numpy as np
 
-from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets
 from eeg_pipeline.preprocessing.report.style import (
     FLAG_COLOR,
@@ -32,6 +31,12 @@ from eeg_pipeline.preprocessing.report.tables import (
     SpanningRow,
     grid_table,
 )
+
+# Fallback beat annotation, used only where a caller names none. A study that spells its
+# marker differently sets ica.cardiac_review.marker_description; this is the default the
+# tachogram falls back to, and it lives here because this module stays in core while the
+# vendor-specific pulse QC moves to the study.
+DEFAULT_BEAT_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
 RR_SECTION = "Cardiac rhythm"
 RR_TAG = "rr-intervals"
@@ -133,7 +138,7 @@ def compute_rr_intervals(
     marker count and a median rate. Neither shows a detector that worked for four
     minutes and then lost the trace, which is what the interval series makes visible.
     """
-    onsets = annotation_onsets(raw, description or PULSE_MARKER_DESCRIPTION)
+    onsets = annotation_onsets(raw, description or DEFAULT_BEAT_MARKER_DESCRIPTION)
     if onsets.size < MINIMUM_BEATS:
         return None
     intervals = np.diff(onsets)
@@ -447,6 +452,7 @@ def add_rr_interval_section(
 
 
 __all__ = [
+    "DEFAULT_BEAT_MARKER_DESCRIPTION",
     "DEFAULT_PLAUSIBLE_HEART_RATE_BPM",
     "DRAWN_RR_RANGE_S",
     "MINIMUM_BEATS",
