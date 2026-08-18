@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from eeg_pipeline.analysis.qc.scanner_harmonics import DEFAULT_HARMONIC_WINDOWS
+from studies.pain_study.analysis.gradient.scanner_harmonics import DEFAULT_HARMONIC_WINDOWS
 from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
 from studies.pain_study.study1.figures.cohort_power_spectral_density import (

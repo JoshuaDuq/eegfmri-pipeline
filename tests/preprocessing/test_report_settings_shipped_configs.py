@@ -128,10 +128,12 @@ def test_core_config_names_no_scanner_key():
     from pathlib import Path
 
     text = Path("eeg_pipeline/utils/config/eeg_config.yaml").read_text(encoding="utf-8")
-    # eeg_fmri, brainvision_analyzer, scanner_harmonic_qc and trim_to_volume_bounds are
-    # NOT here: pipelines/preprocessing.py still runs the stages that read them, and
-    # Task 13 is what deletes those stages. Task 13 extends this list.
+    # brainvision_analyzer stays: it is the last acquisition fact core reads, and it
+    # gates the one surviving cardiac QC step.
     for key in (
+        "eeg_fmri:",
+        "scanner_harmonic_qc:",
+        "trim_to_volume_bounds:",
         "comb_frequency_range_hz:",
         "comb_welch_seconds:",
         "repetition_time_tolerance_s:",

@@ -86,3 +86,15 @@ def gradient_command():
         run=run_gradient,
         requires_subjects=False,
     )
+
+
+def harmonics_command():
+    from eeg_pipeline.cli.commands import Command
+    from studies.pain_study.cli.harmonics import run_harmonics, setup_harmonics
+
+    return Command(
+        name="harmonics",
+        setup=setup_harmonics,
+        run=run_harmonics,
+        requires_subjects=False,
+    )

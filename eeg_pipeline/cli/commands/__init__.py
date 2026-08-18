@@ -95,7 +95,6 @@ _BUILTIN_COMMAND_SPECS: tuple[tuple[str, str, str, bool], ...] = (
     ("component-tfr", f"{_EEG}.component_tfr", "component_tfr", True),
     ("features", f"{_EEG}.features", "features", True),
     ("info", f"{_EEG}.info", "info", False),
-    ("harmonics", f"{_EEG}.harmonics", "harmonics", False),
     ("ml", f"{_EEG}.machine_learning", "ml", True),
     # Reports the shape of the dataset rather than acting on named subjects, and
     # which subjects are present is one of the things it reports.

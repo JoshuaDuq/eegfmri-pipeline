@@ -9,8 +9,8 @@ from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.analysis.qc.scanner_harmonic_comb import ScannerCombSummary
-from eeg_pipeline.analysis.qc.scanner_harmonics import DEFAULT_HARMONIC_WINDOWS
+from studies.pain_study.analysis.gradient.scanner_harmonic_comb import ScannerCombSummary
+from studies.pain_study.analysis.gradient.scanner_harmonics import DEFAULT_HARMONIC_WINDOWS
 
 FIGURE_DPI = 300
 INPUT_COLOR = "#6B6B6B"

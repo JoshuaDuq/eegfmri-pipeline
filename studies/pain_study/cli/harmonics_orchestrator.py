@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, Sequence
 
-from eeg_pipeline.analysis.qc.scanner_harmonics import (
+from studies.pain_study.analysis.gradient.scanner_harmonics import (
     DEFAULT_GAMMA_EXCLUSIONS,
     DEFAULT_HARMONIC_WINDOWS,
     DEFAULT_QC_CHANNELS,

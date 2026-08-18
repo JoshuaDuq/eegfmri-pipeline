@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from eeg_pipeline.analysis.qc.scanner_harmonic_comb import ScannerCombSummary
-from eeg_pipeline.plotting.scanner_harmonic_comb import (
+from studies.pain_study.analysis.gradient.scanner_harmonic_comb import ScannerCombSummary
+from studies.pain_study.scripts.gradient.scanner_harmonic_comb_plot import (
     SCANNER_COMB_COLUMNS,
     build_scanner_harmonic_comb_figure,
     write_scanner_harmonic_comb,

@@ -8,7 +8,7 @@ from typing import Sequence
 import mne
 import numpy as np
 
-from eeg_pipeline.analysis.qc.scanner_harmonics import (
+from studies.pain_study.analysis.gradient.scanner_harmonics import (
     DEFAULT_HARMONIC_WINDOWS,
     select_harmonic_peak,
 )

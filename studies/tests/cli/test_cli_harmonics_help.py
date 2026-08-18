@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from eeg_pipeline.cli.commands.harmonics import setup_harmonics
+from studies.pain_study.cli.harmonics import setup_harmonics
 
 
 def test_harmonics_help_renders() -> None:

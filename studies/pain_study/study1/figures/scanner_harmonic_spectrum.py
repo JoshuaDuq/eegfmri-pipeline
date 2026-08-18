@@ -15,7 +15,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from scipy.signal import find_peaks
 
-from eeg_pipeline.analysis.qc.scanner_harmonics import (
+from studies.pain_study.analysis.gradient.scanner_harmonics import (
     DEFAULT_HARMONIC_WINDOWS,
     FrequencyWindow,
 )

@@ -9,7 +9,11 @@ from tests import REPO_ROOT
 os.environ["MNE_DONTWRITE_HOME"] = "true"
 
 
-PROTECTED_PLOTS = ("eeg_pipeline/plotting/scanner_harmonic_comb.py",)
+# There is no PROTECTED_PLOTS list any more, and its emptiness is the record of a
+# reversed decision rather than an oversight. scanner_harmonic_comb.py was deliberately
+# kept in core when the rest of the plotting tree was removed. It has now MOVED to
+# studies/pain_study/scripts/gradient/scanner_harmonic_comb_plot.py -- not been deleted --
+# because it draws a scanner measurement, and core describes EEG alone.
 
 REMOVED_ENTRY_POINTS = (
     "eeg_pipeline/plotting/plot_catalog.json",
@@ -50,11 +54,6 @@ def test_top_level_plotting_command_is_removed() -> None:
 @pytest.mark.parametrize("relative_path", REMOVED_ENTRY_POINTS)
 def test_dedicated_plotting_entry_point_is_removed(relative_path: str) -> None:
     assert not (REPO_ROOT / relative_path).exists()
-
-
-@pytest.mark.parametrize("relative_path", PROTECTED_PLOTS)
-def test_protected_plotting_root_remains(relative_path: str) -> None:
-    assert (REPO_ROOT / relative_path).is_file()
 
 
 def test_behavior_visualize_is_rejected_by_parser() -> None:

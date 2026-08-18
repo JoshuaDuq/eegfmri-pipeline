@@ -10,7 +10,7 @@ from typing import Any, Sequence
 import mne
 from mne_bids import find_matching_paths, read_raw_bids
 
-from eeg_pipeline.analysis.qc.scanner_harmonic_comb import (
+from studies.pain_study.analysis.gradient.scanner_harmonic_comb import (
     ParticipantSpectrum,
     ScannerCombParameters,
     combine_participant_runs,
@@ -19,7 +19,7 @@ from eeg_pipeline.analysis.qc.scanner_harmonic_comb import (
     summarize_scanner_comb,
 )
 from eeg_pipeline.infra.paths import find_clean_epochs_path
-from eeg_pipeline.plotting.scanner_harmonic_comb import write_scanner_harmonic_comb
+from studies.pain_study.scripts.gradient.scanner_harmonic_comb_plot import write_scanner_harmonic_comb
 
 
 @dataclass(frozen=True)

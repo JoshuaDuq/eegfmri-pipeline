@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from eeg_pipeline.analysis.qc.scanner_harmonic_comb import (
+from studies.pain_study.analysis.gradient.scanner_harmonic_comb import (
     ParticipantSpectrum,
     ScannerCombParameters,
     Spectrum,

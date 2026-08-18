@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from eeg_pipeline.analysis.qc.scanner_harmonics import (
+from studies.pain_study.analysis.gradient.scanner_harmonics import (
     DEFAULT_GAMMA_EXCLUSIONS,
     DEFAULT_GAMMA_WINDOW,
     FrequencyWindow,

@@ -115,3 +115,15 @@ def test_the_workflow_scripts_do_not_pin_a_drive() -> None:
                 offenders.append(str(path.relative_to(REPO_ROOT)))
 
     assert not offenders, f"drive paths hardcoded in {offenders}"
+
+
+def test_the_harmonics_subsystem_left_core() -> None:
+    for relative_path in (
+        "eeg_pipeline/analysis/qc",
+        "eeg_pipeline/plotting/scanner_harmonic_comb.py",
+        "eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py",
+        "eeg_pipeline/cli/commands/harmonics.py",
+        "eeg_pipeline/cli/commands/harmonics_parser.py",
+        "eeg_pipeline/cli/commands/harmonics_orchestrator.py",
+    ):
+        assert not (REPO_ROOT / relative_path).exists(), f"{relative_path} is scanner code"
