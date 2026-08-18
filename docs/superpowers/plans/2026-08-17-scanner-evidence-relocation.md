@@ -438,6 +438,132 @@ The windows are the same windows; core stops reading a volume rate to
 find them. Verified exponent-identical on a real subject."
 ```
 
+### Task 3A: Give the study a config the loader actually reads
+
+**Added during execution.** Task 3's review found that
+`studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml` is loaded by nothing —
+its own README says override templates are not applied automatically, `load_config()`
+resolves `report.analysis.aperiodic_exclude_hz` to `[]`, and a report built the previous day
+carried core defaults rather than the template's values. The live config for this study is
+`eeg_pipeline/utils/config/eeg_config.yaml`, which holds the study's own `bids_root`,
+`decomb_manifest`, `bids_fmri_root` and `deriv_root`.
+
+That invalidates the premise Task 12 rests on. This task builds the destination Task 12
+needs, before Task 12 runs.
+
+**Scope discipline: this task is additive.** Core's defaults keep working exactly as they do
+today, so none of the 94 test files touching `bids_root`/`deriv_root` changes. Emptying core
+is Task 12's job, once there is somewhere for the values to go.
+
+**Files:**
+- Create: `studies/pain_study/config/pain_study.yaml`
+- Create: `studies/tests/config/test_pain_study_config.py`
+- Modify: `studies/pain_study/scripts/README.md`
+
+**Interfaces:**
+- Produces: `studies/pain_study/config/pain_study.yaml`, loadable as
+  `load_config("studies/pain_study/config/pain_study.yaml")` and via
+  `eeg-pipeline --config studies/pain_study/config/pain_study.yaml <command>`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `studies/tests/config/test_pain_study_config.py`:
+
+```python
+# The study's own config must load, inherit from core, and win where it disagrees.
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from eeg_pipeline.utils.config.loader import load_config
+
+STUDY_CONFIG = Path("studies/pain_study/config/pain_study.yaml")
+
+
+def test_the_study_config_loads():
+    assert STUDY_CONFIG.exists()
+    assert load_config(STUDY_CONFIG) is not None
+
+
+def test_it_inherits_keys_it_does_not_set():
+    config = load_config(STUDY_CONFIG)
+    # Set in core, not overridden here, so inheritance is what supplies it.
+    assert config.get("report.analysis.aperiodic_fit_range_hz", None) == [2.0, 45.0]
+
+
+def test_it_names_the_study_data_roots():
+    config = load_config(STUDY_CONFIG)
+    for key in ("paths.bids_root", "paths.deriv_root", "paths.decomb_manifest"):
+        assert config.get(key, None), f"{key} must be set by the study config"
+```
+
+- [ ] **Step 2: Run it and confirm it fails**
+
+```bash
+.venv/bin/python -m pytest studies/tests/config/test_pain_study_config.py -v
+```
+
+Expected: FAIL — the file does not exist.
+
+- [ ] **Step 3: Write the study config**
+
+Model it on `eeg_pipeline/utils/config/presets/rest.yaml`, which already uses the
+inheritance machinery: an `extends:` key naming the core config by relative path, then the
+values that differ. Copy across the four path keys that are unambiguously this study's,
+with their explanatory comments: `bids_root`, `decomb_manifest`, `bids_fmri_root`,
+`deriv_root`.
+
+Head the file with a comment stating what it is — the pain study's configuration, inheriting
+everything generic from core and naming only what belongs to this study.
+
+**Verify the relative path resolves by loading, not by reading.** `rest.yaml` sits in
+`presets/` and uses `../eeg_config.yaml`; this file sits under `studies/pain_study/config/`,
+a different depth, so the path is different.
+
+- [ ] **Step 4: Confirm inheritance merges rather than replaces**
+
+A config that silently dropped every unlisted core key would satisfy Step 1's tests and
+break everything downstream:
+
+```bash
+.venv/bin/python -c "
+from eeg_pipeline.utils.config.loader import load_config
+core = load_config()
+study = load_config('studies/pain_study/config/pain_study.yaml')
+keys = ('report.analysis.aperiodic_fit_range_hz', 'ica.cardiac_review.enabled', 'preprocessing.h_freq', 'report.thresholds.min_roi_channels')
+print('changed unexpectedly:', [k for k in keys if study.get(k, None) != core.get(k, None)])
+"
+```
+
+Expected: an empty list.
+
+- [ ] **Step 5: Update the documented invocation**
+
+`studies/pain_study/scripts/README.md` shows bare `eeg-pipeline preprocessing ...` around
+line 234. Add `--config studies/pain_study/config/pain_study.yaml` to those examples, with a
+short note above the block: core's defaults are not this study's, so the study config has to
+be named.
+
+- [ ] **Step 6: Run the tests**
+
+```bash
+.venv/bin/python -m pytest studies/tests/config/ -v
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add studies/pain_study/config/pain_study.yaml studies/tests/config/test_pain_study_config.py studies/pain_study/scripts/README.md
+git commit -m "feat(config): give the pain study a config the loader actually reads
+
+The override template under scripts/config/ is loaded by nothing, so
+every study-specific value has been living in the shared core config.
+This is the destination the scanner keys move to in Task 12."
+```
+
 ### Task 4: Delete the gradient report wiring from core
 
 **Files:**
@@ -1132,7 +1258,16 @@ Expected: FAIL, listing the first key found.
 
 - [ ] **Step 3: Move the keys**
 
-Delete each from `eeg_config.yaml`, moving its value and its comment into the study workflow config named in the spec's config table. `preprocessing.eeg_fmri` and `alignment.trim_to_volume_bounds` are deleted outright — nothing reads either after Phase 3, and `trim_to_volume_bounds` was never read at all.
+**Destination corrected during execution.** Earlier drafts sent these keys to
+`studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml`. Nothing loads that file
+— Task 3's review established this — so anything the *report* reads goes to
+`studies/pain_study/config/pain_study.yaml`, created in Task 3A, which the loader does read.
+The workflow configs under `scripts/gradient/` and `scripts/bcg/` are read by their own
+workflow code through `workflow_config.py` and remain the right home for settings only those
+workflows use.
+
+Delete each from `eeg_config.yaml`, moving its value and its comment to whichever of those
+two destinations reads it. `preprocessing.eeg_fmri` and `alignment.trim_to_volume_bounds` are deleted outright — nothing reads either after Phase 3, and `trim_to_volume_bounds` was never read at all.
 
 Change `paths.decomb_manifest`'s default to `null` with a comment saying a study configures it; the key itself **stays**, because `pipelines/features.py:1089` reads it and the mechanism is general.
 
