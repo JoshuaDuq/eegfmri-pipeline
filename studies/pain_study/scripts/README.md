@@ -231,18 +231,21 @@ eeg-pipeline line-comb apply          # write the cleaned BIDS copy
 # Then point paths.bids_root at what you want the pipeline to read.
 
 # 5. Fit ICA, review component exclusions, then create epochs
-eeg-pipeline preprocessing ica --subject 0001 --subject 0002 --task task
+# Core's packaged defaults are not this study's data roots. Name the study config
+# explicitly from here on, or these commands run against whatever eeg_config.yaml
+# currently points at.
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml preprocessing ica --subject 0001 --subject 0002 --task task
 # Review the generated MNE-BIDS component tables before continuing.
-eeg-pipeline preprocessing epochs --subject 0001 --subject 0002 --task task \
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml preprocessing epochs --subject 0001 --subject 0002 --task task \
   --set ica.manual_review_complete=true
-eeg-pipeline features compute --subject 0001 --subject 0002 --task task
-eeg-pipeline behavior compute --subject 0001 --subject 0002 --task task
-eeg-pipeline fmri preprocess --subject 0001 --subject 0002 --task task
-eeg-pipeline fmri-analysis first-level --subject 0001 --subject 0002 --task task \
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml features compute --subject 0001 --subject 0002 --task task
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml behavior compute --subject 0001 --subject 0002 --task task
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml fmri preprocess --subject 0001 --subject 0002 --task task
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml fmri-analysis first-level --subject 0001 --subject 0002 --task task \
   --cond-a-value stimulation --cond-b-value fixation_rest
 
 # 6. Run EEG–BOLD coupling (integrated CLI)
-eeg-pipeline coupling compute --subject 0001 --subject 0002 --task task
+eeg-pipeline --config studies/pain_study/config/pain_study.yaml coupling compute --subject 0001 --subject 0002 --task task
 ```
 
 ---

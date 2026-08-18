@@ -1,0 +1,34 @@
+# The pain study's own configuration. Everything generic — preprocessing, ICA,
+# report thresholds, montage — is inherited from core; only what belongs to this
+# study specifically (its data roots) is named here.
+#
+# Use as:
+#
+#     eeg-pipeline --config studies/pain_study/config/pain_study.yaml preprocessing full --all-subjects
+
+extends: "../../../eeg_pipeline/utils/config/eeg_config.yaml"
+
+paths:
+  # The line-cleaned copy, because that is what the pipeline is actually run against: every
+  # delivered run passed --bids-root .../eeg_linecleaned on the command line while this said
+  # "eeg", so the data depended on a flag someone had to remember. 81 of 119 recorded
+  # preprocessing runs carried the flag and the rest did not. Producing the cleaned copy is
+  # `eeg-pipeline line-comb apply`, whose own config pins the raw root it reads.
+  # The post-Decomb tree, staged so that MNE-BIDS-Pipeline finds it: the Decomb output
+  # names its recordings desc-decomb while the sidecars stay desc-less, and preprocessing
+  # cannot read that layout until the pair is reconciled. eeg_linecleaned, which this
+  # pointed at, is the earlier line-comb copy and still carries the lines Decomb removes:
+  # on sub-0001 run-1 the 47 Hz line is untouched there and 19 dB down in the staged tree,
+  # and the delivered derivatives carry the 34 dB stopband that only the staged tree
+  # explains. The config named one input while the science was built on another.
+  bids_root: "../../../data/bids_output/eeg_decombed_auto_staged"  # BIDS-formatted EEG data
+  # Null preserves ordinary datasets. A configured Decomb manifest activates spectral
+  # exclusions and requires preprocessing.notch_freq: null.
+  #
+  # Set, because the recordings above have had per-recording lines removed and every panel
+  # that reads power at a frequency needs to know where. Without it the report treats a
+  # 30 dB stopband as data: it draws the trough unmarked, and the aperiodic fit was
+  # measuring slopes across holes it had no way to recognise.
+  decomb_manifest: "../../../data/bids_output/eeg_decombed_auto_staged/line_notch_manifest.tsv"
+  bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
+  deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
