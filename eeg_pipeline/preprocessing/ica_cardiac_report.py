@@ -56,8 +56,8 @@ def beat_source_phrase(source: str) -> str:
 
     Written out rather than printed as the internal constant, because the distinction the
     reader needs is not which code path ran but whose detection they are looking at: the
-    marker train drove the upstream pulse correction and is measured against the ECG in
-    the marker-agreement section, which is where a poor one shows up.
+    marker train drove the upstream pulse correction, and the intervals it produced are
+    drawn in the cardiac rhythm section, which is where a poor one shows up.
     """
     if source == MARKER_TRAIN_SOURCE:
         return "beat markers"
@@ -653,8 +653,8 @@ def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
     the two sources fail on different runs, so a section can hold both. The sentence has
     to be built from what the runs actually used: the panels are read to judge detection
     quality, and a claim about which detection they show is the one thing that must not be
-    guessed. Where the markers were used, the marker-agreement section measures that same
-    train against the ECG and is where a poor one becomes visible.
+    guessed. Where the markers were used, the cardiac rhythm section draws the intervals
+    that same train produced, and is where a poor one becomes visible.
     """
     if not beat_sources:
         return ""
@@ -670,9 +670,9 @@ def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
             "<p>The beats every panel here is locked to are <strong>the recording's "
             "markers</strong>, not peaks detected from the ECG signal: the marker train "
             "is preferred wherever a run carries one, because it is the detection that "
-            "drove the upstream pulse-artifact correction. That train is measured against "
-            "the recorded ECG in the marker-agreement section, and a run where the two "
-            "disagree carries every panel below on the disagreeing train.</p>"
+            "drove the upstream pulse-artifact correction. The beat-detection panel in the "
+            "cardiac rhythm section draws the intervals that train produced, and a run "
+            "where the detector lost the trace carries every panel below on it.</p>"
         )
     return (
         f"<p>The beats these panels are locked to come from <strong>the recording's markers "
@@ -680,7 +680,7 @@ def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
         "ECG signal on the rest: the marker train is preferred wherever a run carries "
         "one, because it is the detection that drove the upstream pulse-artifact "
         "correction. Each run panel names its own source in the ECG panel title, and the "
-        "marker-agreement section measures the marker train against the recorded ECG.</p>"
+        "cardiac rhythm section draws the intervals each train produced.</p>"
     )
 
 
