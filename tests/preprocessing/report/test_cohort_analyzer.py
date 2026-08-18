@@ -253,7 +253,7 @@ def _residual_participant(subject: str, runs: dict[int, tuple[int, float | None]
                 "continuity_max_db": [4.0] * len(order),
                 "pulse_marker_count": [runs[r][0] for r in order],
                 "beat_source": [
-                    "analyzer-markers" if runs[r][0] else "ecg-channel" for r in order
+                    "annotation-markers" if runs[r][0] else "ecg-channel" for r in order
                 ],
                 "bcg_residual_uv": [runs[r][1] for r in order],
             }
@@ -385,7 +385,7 @@ def _rest_participant(subject: str, *, marker_count: int, residual_uv: float | N
                 "continuity_median_db": [0.2],
                 "continuity_max_db": [4.0],
                 "pulse_marker_count": [marker_count],
-                "beat_source": ["analyzer-markers" if marker_count else "ecg-channel"],
+                "beat_source": ["annotation-markers" if marker_count else "ecg-channel"],
                 "bcg_residual_uv": [residual_uv],
             }
         ),

@@ -86,11 +86,11 @@ def test_the_ecg_panel_names_which_detector_put_the_peaks_there() -> None:
     with the ECG, under a title asserting the ECG had been used.
     """
     from eeg_pipeline.preprocessing.ica_cardiac_review import (
-        ANALYZER_MARKER_SOURCE,
+        MARKER_TRAIN_SOURCE,
         ECG_CHANNEL_SOURCE,
     )
 
-    from_markers = _run_review(beat_source=ANALYZER_MARKER_SOURCE)
+    from_markers = _run_review(beat_source=MARKER_TRAIN_SOURCE)
     from_channel = _run_review(beat_source=ECG_CHANNEL_SOURCE)
 
     marker_title = _ecg_axis(_plot_run_cardiac_review(from_markers, ica=_Ica())).get_title()

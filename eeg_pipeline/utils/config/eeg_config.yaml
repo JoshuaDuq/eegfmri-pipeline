@@ -502,11 +502,21 @@ ica:
   process_raw_clean: true
   probability_threshold: 0.8
   labels_to_keep: ["brain", "other"]
-  # Optional manual-review evidence for residual cardiac artifact. R peaks are
-  # detected from the ECG signal and do not require Analyzer R annotations.
+  # Optional manual-review evidence for residual cardiac artifact. Beat times come from
+  # a marker train where the recording carries one and beat_source allows it, otherwise
+  # from R-peak detection on the ECG channel.
   cardiac_review:
     enabled: true
     ecg_channel: "ECG"
+    # Where beat times come from.
+    #   markers  read the annotation named below; fail if it yields too few beats
+    #   detect   run find_ecg_events on the ECG channel, ignoring any markers
+    #   auto     prefer markers where present, fall back to detection
+    beat_source: auto
+    # Annotation carrying one mark per heartbeat, exactly as the recording spells it.
+    # Null means the recording carries none, which is the ordinary case: a montage with
+    # an ECG lead and no marker train detects from the channel.
+    marker_description: null
     epoch_window: [-0.4, 0.6]
     baseline: [-0.4, -0.1]
     measurement_window: [0.0, 0.4]

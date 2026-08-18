@@ -496,7 +496,15 @@ def compute_cardiac_residual(
 
     try:
         detection = detect_ecg_events(
-            raw, CardiacReviewSettings(enabled=True, ecg_channel=ecg_channel)
+            # Same marker this function was told to count. The detector used to hardcode
+            # the description; now that it is configurable, the caller's name is the one
+            # that keeps this measurement reading the train it reports coverage for.
+            raw,
+            CardiacReviewSettings(
+                enabled=True,
+                ecg_channel=ecg_channel,
+                marker_description=marker_description,
+            ),
         )
     except (UnusableEcg, ValueError):
         # ValueError as well: a recording with no ECG channel fails validation inside the

@@ -136,6 +136,7 @@ def _settings(**overrides) -> CardiacReviewSettings:
         measurement_window=(0.0, 0.4),
         ctps_threshold="auto",
         representative_window_seconds=10.0,
+        marker_description="Pulse Artifact/R",
         **overrides,
     )
 

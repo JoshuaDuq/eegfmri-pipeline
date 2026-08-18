@@ -48,6 +48,9 @@ COMPARED_SETTINGS = (
     "posterior_channel_pattern",
     "response_window_s",
     "plausible_heart_rate_bpm",
+    # Changes which beats are detected, hence every cardiac number downstream. A cohort
+    # mixing subjects processed under different values is not pooled comparably.
+    "beat_source",
     "marker_agreement_tolerance_s",
     "bcg_residual_window_s",
     "bcg_residual_baseline_s",

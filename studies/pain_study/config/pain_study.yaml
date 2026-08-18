@@ -33,6 +33,16 @@ paths:
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
 
+ica:
+  cardiac_review:
+    # These recordings carry Analyzer's R-marker train, and it is the detection that drove
+    # the upstream pulse-artifact correction. Named here rather than in core, which now
+    # defaults to null: any EEG study may carry beat markers, but only this one knows how
+    # its recordings spell them. Without this, "auto" finds no annotation and falls through
+    # to channel detection, which on these runs locks onto the magnetohydrodynamic
+    # deflection and reports 8 and 2 bpm where the markers report 61 and 60.
+    marker_description: "Pulse Artifact/R"
+
 report:
   analysis:
     # The residual gradient comb, withheld from the aperiodic fit. The report used to

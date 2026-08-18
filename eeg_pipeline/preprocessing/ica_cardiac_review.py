@@ -9,7 +9,6 @@ import mne
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 
 PULSE_EVENT_ID = 999
 
@@ -21,6 +20,25 @@ def _time_window(values: Any, *, path: str) -> tuple[float, float]:
     if window[0] >= window[1]:
         raise ValueError(f"{path} start must be earlier than its end.")
     return window
+
+
+BEAT_SOURCES = ("markers", "detect", "auto")
+
+
+def _beat_source(value: Any) -> str:
+    text = str(value).strip()
+    if text not in BEAT_SOURCES:
+        raise ValueError(
+            "ica.cardiac_review.beat_source must be one of " + ", ".join(BEAT_SOURCES)
+        )
+    return text
+
+
+def _marker_description(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _ctps_threshold(value: Any) -> str | float:
@@ -54,6 +72,14 @@ class CardiacReviewSettings:
     promote_exclusions: bool = False
     #: Fraction of usable runs that must flag a component before it is promoted.
     promotion_minimum_run_fraction: float = 0.5
+    # markers | detect | auto. "auto" is what this module did unconditionally before the
+    # choice existed: prefer a marker train, fall back to the channel. That preference was
+    # fixed because a QRS detector locks onto the magnetohydrodynamic deflection in a
+    # magnet, reporting 8 and 2 bpm where markers report 61 and 60. Elsewhere it is wrong.
+    beat_source: str = "auto"
+    # The beat annotation, spelled as the recording spells it. None means there is none,
+    # which is ordinary: a lead without a marker train is detected from the channel.
+    marker_description: str | None = None
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> CardiacReviewSettings:
@@ -69,6 +95,8 @@ class CardiacReviewSettings:
             "representative_window_seconds",
             "promote_exclusions",
             "promotion_minimum_run_fraction",
+            "beat_source",
+            "marker_description",
         }
         unsupported = sorted(set(values) - supported)
         if unsupported:
@@ -89,6 +117,10 @@ class CardiacReviewSettings:
                 path="ica.cardiac_review.measurement_window",
             ),
             ctps_threshold=_ctps_threshold(values.get("ctps_threshold", cls.ctps_threshold)),
+            beat_source=_beat_source(values.get("beat_source", cls.beat_source)),
+            marker_description=_marker_description(
+                values.get("marker_description", cls.marker_description)
+            ),
             representative_window_seconds=float(
                 values.get(
                     "representative_window_seconds",
@@ -122,7 +154,7 @@ class CardiacReviewSettings:
 
 
 #: Beat train taken from the BrainVision Analyzer markers preserved in the recording.
-ANALYZER_MARKER_SOURCE = "analyzer-markers"
+MARKER_TRAIN_SOURCE = "annotation-markers"
 #: Beat train detected from the ECG channel, independently of any annotation.
 ECG_CHANNEL_SOURCE = "ecg-channel"
 
@@ -140,7 +172,7 @@ class EcgDetection:
 
     events: np.ndarray
     average_pulse_bpm: float
-    #: :data:`ANALYZER_MARKER_SOURCE` or :data:`ECG_CHANNEL_SOURCE`. Carried so every panel
+    #: :data:`MARKER_TRAIN_SOURCE` or :data:`ECG_CHANNEL_SOURCE`. Carried so every panel
     #: can say where its beats came from: the two sources fail on different runs, so a rate
     #: is not interpretable without knowing which one produced it.
     source: str = ECG_CHANNEL_SOURCE
@@ -167,7 +199,7 @@ class RunCardiacReview:
     topography_time: float
     #: Which detector produced the beats every panel here is locked to.
     #:
-    #: :data:`ANALYZER_MARKER_SOURCE` or :data:`ECG_CHANNEL_SOURCE`, carried through from
+    #: :data:`MARKER_TRAIN_SOURCE` or :data:`ECG_CHANNEL_SOURCE`, carried through from
     #: :class:`EcgDetection`. The panels are read to judge detection quality, so the one
     #: thing they cannot leave the reader to assume is which detection they are showing --
     #: and :func:`detect_ecg_events` prefers the marker train, so the answer is usually not
@@ -213,7 +245,7 @@ def _validate_ecg_channel(raw: mne.io.BaseRaw, channel: str) -> None:
         )
 
 
-def _marker_beats(raw: mne.io.BaseRaw) -> np.ndarray:
+def _marker_beats(raw: mne.io.BaseRaw, description: str) -> np.ndarray:
     """The Analyzer R-marker train preserved in the recording, if it carries one.
 
     Returns an empty array where the export has no markers, which on this dataset is a third
@@ -223,7 +255,7 @@ def _marker_beats(raw: mne.io.BaseRaw) -> np.ndarray:
     try:
         events, _ = mne.events_from_annotations(
             raw,
-            event_id={PULSE_MARKER_DESCRIPTION: PULSE_EVENT_ID},
+            event_id={description: PULSE_EVENT_ID},
             use_rounding=True,
             verbose="ERROR",
         )
@@ -277,15 +309,27 @@ def detect_ecg_events(
     _validate_ecg_channel(raw, settings.ecg_channel)
     sfreq = float(raw.info["sfreq"])
 
-    markers = _marker_beats(raw)
-    if markers.shape[0] >= MINIMUM_BEATS:
-        rate = _rate_from_beats(markers, sfreq)
-        if np.isfinite(rate) and rate > 0:
-            return EcgDetection(
-                events=markers,
-                average_pulse_bpm=rate,
-                source=ANALYZER_MARKER_SOURCE,
+    if settings.beat_source in {"markers", "auto"} and settings.marker_description:
+        markers = _marker_beats(raw, settings.marker_description)
+        if markers.shape[0] >= MINIMUM_BEATS:
+            rate = _rate_from_beats(markers, sfreq)
+            if np.isfinite(rate) and rate > 0:
+                return EcgDetection(
+                    events=markers,
+                    average_pulse_bpm=rate,
+                    source=MARKER_TRAIN_SOURCE,
+                )
+        if settings.beat_source == "markers":
+            raise UnusableEcg(
+                f"beat_source is 'markers' and {settings.marker_description!r} yielded "
+                f"fewer than {MINIMUM_BEATS} usable beats. Set beat_source to 'auto' to "
+                "fall back to channel detection."
             )
+    if settings.beat_source == "markers":
+        raise UnusableEcg(
+            "beat_source is 'markers' but ica.cardiac_review.marker_description names no "
+            "annotation."
+        )
 
     events, _, average_pulse_bpm, _ = mne.preprocessing.find_ecg_events(
         raw,

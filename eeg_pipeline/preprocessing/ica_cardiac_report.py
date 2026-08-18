@@ -35,7 +35,7 @@ from eeg_pipeline.preprocessing.ica_exclusions import (
     read_ica_with_reviewed_exclusions,
 )
 from eeg_pipeline.preprocessing.ica_cardiac_review import (
-    ANALYZER_MARKER_SOURCE,
+    MARKER_TRAIN_SOURCE,
     CardiacReviewSettings,
     ComponentCardiacReview,
     RunCardiacReview,
@@ -59,7 +59,7 @@ def beat_source_phrase(source: str) -> str:
     marker train drove the upstream pulse correction and is measured against the ECG in
     the marker-agreement section, which is where a poor one shows up.
     """
-    if source == ANALYZER_MARKER_SOURCE:
+    if source == MARKER_TRAIN_SOURCE:
         return "Analyzer R markers"
     return "R peaks detected from the ECG signal"
 
@@ -659,7 +659,7 @@ def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
     if not beat_sources:
         return ""
     total = len(beat_sources)
-    from_markers = sum(1 for source in beat_sources if source == ANALYZER_MARKER_SOURCE)
+    from_markers = sum(1 for source in beat_sources if source == MARKER_TRAIN_SOURCE)
     if from_markers == 0:
         return (
             "<p>R peaks are detected directly from the configured ECG signal, so this "

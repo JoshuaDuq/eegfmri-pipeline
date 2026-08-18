@@ -184,7 +184,7 @@ def test_the_residual_column_is_accompanied_by_the_coverage_it_was_measured_over
             CardiacResidual(
                 recording_id=RUN,
                 marker_count=44,
-                beat_source="analyzer-markers",
+                beat_source="annotation-markers",
                 residual_uv=1.33,
                 beat_train_coverage=0.098,
             )

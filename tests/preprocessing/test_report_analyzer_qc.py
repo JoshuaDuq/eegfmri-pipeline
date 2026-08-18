@@ -268,7 +268,7 @@ def test_the_marker_train_is_recorded_as_the_beat_source() -> None:
 
     measured = compute_cardiac_residual(_cardiac_raw(residual_uv=10.0), recording_id="run-1")
 
-    assert measured.beat_source == "analyzer-markers"
+    assert measured.beat_source == "annotation-markers"
     assert measured.marker_count == 58
 
 

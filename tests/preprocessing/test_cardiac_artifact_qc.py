@@ -201,7 +201,7 @@ def test_the_guide_reports_which_detector_the_runs_actually_used() -> None:
     settings = cardiac_review.CardiacReviewSettings.from_mapping({})
 
     from_markers = cardiac_report._cardiac_review_guide_html(
-        settings, beat_sources=(cardiac_review.ANALYZER_MARKER_SOURCE,) * 3
+        settings, beat_sources=(cardiac_review.MARKER_TRAIN_SOURCE,) * 3
     )
     from_channel = cardiac_report._cardiac_review_guide_html(
         settings, beat_sources=(cardiac_review.ECG_CHANNEL_SOURCE,) * 3
@@ -219,7 +219,7 @@ def test_the_guide_names_a_split_between_the_two_detectors() -> None:
     html = cardiac_report._cardiac_review_guide_html(
         settings,
         beat_sources=(
-            cardiac_review.ANALYZER_MARKER_SOURCE,
+            cardiac_review.MARKER_TRAIN_SOURCE,
             cardiac_review.ECG_CHANNEL_SOURCE,
             cardiac_review.ECG_CHANNEL_SOURCE,
         ),
@@ -769,12 +769,14 @@ def test_the_analyzer_marker_train_is_preferred_over_channel_detection() -> None
     reporting 8 bpm where the markers report 61 -- so the review must not take the channel
     detector's word where a marker train exists.
     """
-    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
+    settings = cardiac_review.CardiacReviewSettings.from_mapping(
+        {"enabled": True, "marker_description": "Pulse Artifact/R"}
+    )
     raw = _raw_with_markers(marker_interval_s=1.2, qrs_interval_s=1.0)
 
     detection = cardiac_review.detect_ecg_events(raw, settings)
 
-    assert detection.source == "analyzer-markers"
+    assert detection.source == "annotation-markers"
     # 1.2 s between markers is 50 bpm; the QRS train would have given 60.
     assert detection.average_pulse_bpm == pytest.approx(50.0, abs=3.0)
 

@@ -31,6 +31,8 @@ PROVENANCE_KEYS = (
     ("ica.use_icalabel", "ICLabel used"),
     ("ica.probability_threshold", "ICLabel exclusion threshold"),
     ("ica.labels_to_keep", "ICLabel classes kept"),
+    ("ica.cardiac_review.beat_source", "ECG beat source"),
+    ("ica.cardiac_review.marker_description", "ECG beat marker"),
     ("epochs.tmin", "Epoch start (s)"),
     ("epochs.tmax", "Epoch end (s)"),
     ("epochs.baseline", "Epoch baseline (s)"),
