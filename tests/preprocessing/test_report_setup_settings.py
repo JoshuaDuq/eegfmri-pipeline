@@ -114,31 +114,6 @@ def test_the_same_tolerance_becomes_admissible_under_a_slower_ceiling() -> None:
     assert settings.marker_agreement_tolerance_s == 0.14
 
 
-def test_the_agreement_prose_quotes_the_tolerance_that_was_applied() -> None:
-    """A configured tolerance must not be applied while the prose quotes the default."""
-    from studies.pain_study.analysis.bcg.report import (
-        compute_marker_agreement,
-        marker_agreement_html,
-    )
-
-    beats = np.arange(1.0, 21.0, 1.0)
-    agreement = compute_marker_agreement(
-        recording_id="sub-0001_run-1",
-        marker_onsets_s=beats,
-        detected_onsets_s=beats + 0.01,
-        tolerance_s=0.25,
-    )
-
-    html = marker_agreement_html([agreement])
-    assert "250 ms" in html
-    assert "100 ms" not in html
-
-
-# --------------------------------------------------------------------------------------
-# Beat-locked residual windows
-# --------------------------------------------------------------------------------------
-
-
 def test_the_residual_windows_default_to_the_constants_they_replaced() -> None:
     settings = ReportSettings()
     assert settings.bcg_residual_window_s == (-0.2, 0.6)

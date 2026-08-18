@@ -1,0 +1,32 @@
+# Ballistocardiogram evidence, for THIS study's fMRI-concurrent recordings.
+#
+# Gradient and pulse-artifact correction were performed in BrainVision Analyzer before
+# this pipeline ran, so their quality is an input rather than something the MNE stages can
+# fix. These keys describe that upstream correction and the marker train it was driven by,
+# so they live with the study rather than in the shared EEG pipeline.
+
+paths:
+  bids_root: null
+  deriv_root: null
+  output_dir: null
+
+bcg:
+  # Exact annotation description Analyzer writes for each detected R peak.
+  pulse_marker_description: "Pulse Artifact/R"
+
+  # Beat-locked window the residual is measured in, its baseline, and the interval the
+  # amplitude is taken over. Measured before and after the pipeline's own ICA: a large
+  # "before" value means residual pulse artifact reached this pipeline.
+  residual_window_s: [-0.2, 0.6]
+  residual_baseline_s: [-0.2, -0.1]
+  residual_measurement_s: [0.0, 0.5]
+
+  # A detected beat counts as matched when a marker falls within this of it, and each
+  # marker is spent on at most one beat.
+  marker_agreement_tolerance_s: 0.1
+
+  analyzer:
+    # Reference values recorded beside the measurements, NOT thresholds anything is
+    # excluded by. A run outside them is named in the unmeasured list with its numbers
+    # intact, so the reader decides what it means.
+    min_r_markers_per_volume: 0.5

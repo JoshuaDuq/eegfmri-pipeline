@@ -16,12 +16,12 @@ import pytest
 
 matplotlib.use("Agg")
 
+from studies.pain_study.scripts.bcg.plot import (
+    plot_marker_agreement,
+)
 from studies.pain_study.analysis.bcg.report import (  # noqa: E402
-    add_marker_agreement_section,
     compute_marker_agreement,
     compute_run_marker_agreement,
-    marker_agreement_html,
-    plot_marker_agreement,
 )
 
 
@@ -94,15 +94,6 @@ def test_one_marker_cannot_account_for_several_detected_beats() -> None:
     assert agreement.matched_fraction == pytest.approx(1.0 / 3.0)
 
 
-def test_sensitivity_and_precision_keep_their_distinct_denominators() -> None:
-    agreement = _agreement([10.0, 20.0, 20.02], [10.0, 20.0], tolerance_s=0.05)
-
-    assert agreement.matched_fraction == 1.0
-    assert agreement.marker_precision == pytest.approx(2.0 / 3.0)
-
-    document = marker_agreement_html([agreement])
-    assert "Beat sensitivity" in document
-    assert "Marker precision" in document
 
 
 def _healthy_and_collapsed():
@@ -173,36 +164,10 @@ def test_a_run_with_nothing_to_compare_reports_no_lag() -> None:
     assert empty.lag_iqr_s is None
 
 
-def test_the_table_puts_both_detectors_counts_side_by_side() -> None:
-    document = marker_agreement_html(_healthy_and_collapsed())
-
-    assert "run-1" in document and "run-2" in document
-    # The collapsed run's two counts are the comparison the panel exists to make.
-    assert "71" in document and "1" in document
 
 
-def test_the_table_reports_the_disagreement_without_grading_it() -> None:
-    """Analyzer's own status is Analyzer's to give; this panel measures, it does not judge."""
-    document = marker_agreement_html(_healthy_and_collapsed())
-
-    for verdict in ("fail", "pass", "&#9888;", "unusable", "invalid"):
-        assert verdict not in document.lower()
 
 
-def test_an_undefined_fraction_is_not_drawn_as_zero_agreement() -> None:
-    """No detected beats means nothing to compare, which is not total disagreement."""
-    nothing_detected = compute_marker_agreement(
-        recording_id="sub-01_run-3",
-        marker_onsets_s=np.arange(0.0, 60.0, 0.85),
-        detected_onsets_s=np.array([]),
-    )
-
-    document = marker_agreement_html([nothing_detected])
-
-    # Sensitivity is undefined without detected beats; precision is zero because none of
-    # the recorded Analyzer markers can be supported by a detected beat.
-    assert document.count("0.0%") == 1
-    assert "&mdash;" in document
 
 
 def test_the_figure_draws_both_trains_for_every_run() -> None:
@@ -366,15 +331,6 @@ def test_the_figure_refuses_an_empty_set_rather_than_drawing_a_blank() -> None:
         plot_marker_agreement([])
 
 
-def test_the_section_is_added_when_a_marker_train_exists_to_reconcile() -> None:
-    import mne
-
-    report = mne.Report(title="subject", verbose="ERROR")
-
-    add_marker_agreement_section(report=report, agreements=_healthy_and_collapsed())
-
-    assert report._content
-    assert all("marker-agreement" in element.tags for element in report._content)
 
 
 def _raw_with_ecg(beat_onsets, *, marker_onsets, sfreq=250.0, duration=60.0):
@@ -428,22 +384,3 @@ def test_a_run_without_an_ecg_channel_is_not_reconciled_against_a_synthesized_on
     assert compute_run_marker_agreement(raw, recording_id="sub-01_run-1") is None
 
 
-def test_a_dataset_with_no_analyzer_markers_gets_no_reconciliation_section() -> None:
-    """An EEG-only lab has no Analyzer stage, so there is no second detector to compare."""
-    import mne
-
-    beats = np.arange(0.0, 60.0, 0.85)
-    report = mne.Report(title="subject", verbose="ERROR")
-
-    add_marker_agreement_section(
-        report=report,
-        agreements=[
-            compute_marker_agreement(
-                recording_id="sub-01_run-1",
-                marker_onsets_s=np.array([]),
-                detected_onsets_s=beats,
-            )
-        ],
-    )
-
-    assert report._content == []

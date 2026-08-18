@@ -6,10 +6,11 @@ import pytest
 
 matplotlib.use("Agg")
 
-from studies.pain_study.analysis.bcg.report import (  # noqa: E402
-    analyzer_qc_html,
-    load_analyzer_qc,
+from studies.pain_study.scripts.bcg.plot import (
     plot_analyzer_qc,
+)
+from studies.pain_study.analysis.bcg.report import (  # noqa: E402
+    load_analyzer_qc,
 )
 
 
@@ -90,22 +91,6 @@ def test_only_one_table_present_still_loads(tmp_path) -> None:
     assert "attenuation_db" not in qc.runs.columns
 
 
-def test_html_states_which_runs_are_affected_without_grading_them(tmp_path) -> None:
-    """The report names the affected runs; judging them is the reviewer's job."""
-    _write_qc(tmp_path)
-    qc = load_analyzer_qc(qc_dir=tmp_path, task="pain", subject="0001")
-
-    document = analyzer_qc_html(qc)
-
-    assert "run(s) 2" in document.lower()
-    assert "automated detection" in document
-    for verdict in ("probably never", "very likely", "not trustworthy", "&#9888;"):
-        assert verdict not in document
-    # The bounds are reference values recorded beside the measurements. Wording that
-    # grades a run against them ("did not pass") invites the reader to skip the number,
-    # which is the whole failure mode this section exists to avoid.
-    for grade in ("did not pass", "failed", "invalid", "unacceptable"):
-        assert grade not in document.lower()
 
 
 def test_figure_uses_a_log_amplitude_axis(tmp_path) -> None:
