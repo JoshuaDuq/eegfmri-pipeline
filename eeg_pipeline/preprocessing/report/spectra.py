@@ -225,41 +225,6 @@ def _resolve_ceiling(sfreq: float, fmax: float | None) -> tuple[float, str]:
     return float(fmax), f"configured low-pass ({fmax:g} Hz)"
 
 
-#: Half-width of a withheld harmonic, in frequency bins either side of the tooth.
-#:
-#: One bin is not enough: a tooth leaks into its neighbours through the Welch window, so
-#: the bins beside it are part of the peak rather than part of the background. Three is not
-#: better: at a short repetition time the harmonics are close together and a wide skirt
-#: would withhold the whole range, leaving the fit nothing to sit on.
-_HARMONIC_SKIRT_BINS = 1.5
-
-
-def gradient_windows(
-    fundamental_hz: float | None,
-    *,
-    frequencies: np.ndarray,
-) -> tuple[tuple[float, float], ...]:
-    """Frequency windows covering the gradient comb, for exclusion from a fit.
-
-    Empty where there is no volume rate, which is the ordinary case outside a scanner.
-
-    Withheld rather than trimmed, because the peak-residual trim inside
-    :func:`fit_aperiodic` finds outliers against a line that the comb has already tilted.
-    Naming the harmonics is possible here and guessing is not: the volume rate is measured.
-    """
-    if not fundamental_hz or fundamental_hz <= 0.0:
-        return ()
-    grid = np.asarray(frequencies, dtype=float)
-    if grid.size < 2:
-        return ()
-    skirt = _HARMONIC_SKIRT_BINS * float(np.median(np.diff(grid)))
-    highest = float(grid[-1])
-    orders = range(1, int(highest / fundamental_hz) + 1)
-    return tuple(
-        (order * fundamental_hz - skirt, order * fundamental_hz + skirt) for order in orders
-    )
-
-
 def compute_run_spectra(
     raw: mne.io.BaseRaw,
     cleaned: mne.io.BaseRaw,
@@ -268,7 +233,6 @@ def compute_run_spectra(
     fmin: float = 1.0,
     fmax: float | None = None,
     line_frequency: float | None = None,
-    gradient_fundamental_hz: float | None = None,
     aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ,
     notch_half_width_hz: float = NOTCH_EXCLUSION_HALF_WIDTH_HZ,
     aperiodic_exclude_hz: Sequence[tuple[float, float]] = (),
@@ -282,11 +246,6 @@ def compute_run_spectra(
 
     ``fmax`` should be the configured low-pass. Above it the filter, not the recording,
     determines the trace, so plotting further presents roll-off as data.
-
-    ``gradient_fundamental_hz`` is the volume rate of an in-scanner recording. Its
-    harmonics are withheld from the aperiodic fit: the comb runs straight through the fit
-    range, and a line fitted across a forest of narrow peaks is a line fitted partly to the
-    scanner. Absent for a recording made outside a bore, which has no comb.
     """
     upper, reason = _resolve_ceiling(float(raw.info["sfreq"]), fmax)
     if upper <= fmin:
@@ -307,7 +266,6 @@ def compute_run_spectra(
                 unavailable_intervals=unavailable_intervals,
             )
         )
-        + gradient_windows(gradient_fundamental_hz, frequencies=frequencies)
         + tuple((float(low), float(high)) for low, high in aperiodic_exclude_hz)
     )
     return RunSpectra(
@@ -450,8 +408,8 @@ def plot_run_spectra(
     notes = []
     if marks:
         notes.append(
-            "dotted vertical lines mark line-noise harmonics, gradient harmonics, "
-            "and configured frequencies of interest"
+            "dotted vertical lines mark line-noise harmonics and configured "
+            "frequencies of interest"
         )
     # The power axis is bounded excluding the notch bands, so the trace dives off the
     # bottom of the panel at each one. Undeclared, a trace leaving the axis is

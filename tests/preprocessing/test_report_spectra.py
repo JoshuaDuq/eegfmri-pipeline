@@ -12,7 +12,6 @@ matplotlib.use("Agg")
 from eeg_pipeline.preprocessing.report.spectra import (  # noqa: E402
     SPREAD_PERCENTILES,
     compute_run_spectra,
-    gradient_windows,
     plot_run_spectra,
     spectra_summary_html,
 )
@@ -255,48 +254,25 @@ def test_a_notch_does_not_set_the_power_axis() -> None:
 
 
 def test_the_marker_note_names_every_kind_of_line_it_draws() -> None:
-    """Gradient harmonics are passed in as marks too, and the note omitted them."""
     raw = _raw()
     spectra = compute_run_spectra(raw, raw.copy(), recording_id="run-1")
 
     figure = plot_run_spectra(spectra, line_frequency=60.0, marked_frequencies=(1.111, 2.222))
 
     notes = " ".join(text.get_text() for axis in figure.axes for text in axis.texts)
-    assert "gradient" in notes.lower()
+    assert "line-noise harmonics" in notes
+    assert "configured frequencies of interest" in notes
+    # Core draws marks from a line frequency and a configured list, and knows of no other
+    # kind. Naming one it cannot produce sends a reader looking for a mark that is absent.
+    assert "gradient" not in notes.lower()
 
 
 # --------------------------------------------------------------------------------------
-# The aperiodic fit must not be fitted to the scanner
+# A named comb must not be fitted through
 # --------------------------------------------------------------------------------------
 
 
-def test_the_gradient_comb_is_withheld_from_the_aperiodic_fit() -> None:
-    """The comb runs through the fit range, so a line fitted across it is partly the scanner.
-
-    ``fit_aperiodic`` trims peak residuals, but it trims them against a line the comb has
-    already tilted. The volume rate is measured rather than guessed, so the harmonics can
-    be named instead of hunted for.
-    """
-    frequencies = np.arange(1.0, 60.0, 0.125)
-
-    windows = gradient_windows(1.111, frequencies=frequencies)
-
-    assert len(windows) > 40
-    # Every window brackets a harmonic, with a skirt for the leakage either side of it.
-    for index, (low, high) in enumerate(windows[:5], start=1):
-        assert low < index * 1.111 < high
-        assert high - low == pytest.approx(3.0 * 0.125, rel=0.05)
-
-
-def test_a_recording_outside_a_scanner_withholds_nothing() -> None:
-    """No volume rate means no comb, and an empty exclusion is the honest answer."""
-    frequencies = np.arange(1.0, 60.0, 0.125)
-
-    assert gradient_windows(None, frequencies=frequencies) == ()
-    assert gradient_windows(0.0, frequencies=frequencies) == ()
-
-
-def test_the_comb_exclusion_reaches_the_fit() -> None:
+def test_a_named_comb_reaches_the_fit() -> None:
     """A spectrum with teeth on it must fit the background, not the teeth."""
     sfreq, seconds, fundamental = 500.0, 60.0, 1.111
     rng = np.random.default_rng(7)
@@ -308,10 +284,14 @@ def test_the_comb_exclusion_reaches_the_fit() -> None:
         data += 6e-6 * np.sin(2 * np.pi * order * fundamental * times)
     info = mne.create_info(["C1", "C2", "C3", "C4"], sfreq, "eeg")
     raw = mne.io.RawArray(data, info, verbose="ERROR")
+    # A tooth plus the 1.5-bin skirt either side, on this run's 0.25 Hz Welch grid.
+    comb = tuple(
+        (order * fundamental - 0.375, order * fundamental + 0.375) for order in range(1, 54)
+    )
 
     without = compute_run_spectra(raw, raw, recording_id="r", fmax=60.0)
     with_comb = compute_run_spectra(
-        raw, raw, recording_id="r", fmax=60.0, gradient_fundamental_hz=fundamental
+        raw, raw, recording_id="r", fmax=60.0, aperiodic_exclude_hz=comb
     )
 
     assert without.before.aperiodic is not None
@@ -340,6 +320,17 @@ def test_aperiodic_exclude_hz_empty_leaves_the_fit_untouched():
         raw, raw, recording_id="sub-01_run-1", fmax=100.0, aperiodic_exclude_hz=()
     )
     assert empty.before.aperiodic.exponent == baseline.before.aperiodic.exponent
+
+
+def test_compute_run_spectra_no_longer_takes_a_volume_rate():
+    import inspect
+
+    from eeg_pipeline.preprocessing.report import spectra
+
+    assert "gradient_fundamental_hz" not in inspect.signature(
+        spectra.compute_run_spectra
+    ).parameters
+    assert not hasattr(spectra, "gradient_windows")
 
 
 def test_aperiodic_exclude_hz_composes_with_notch_windows():

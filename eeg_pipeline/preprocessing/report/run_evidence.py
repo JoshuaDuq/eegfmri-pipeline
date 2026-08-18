@@ -158,12 +158,7 @@ def _measure_gradient(
     evidence: RunEvidence,
     timing: VolumeTiming | None,
 ) -> None:
-    """Add whichever gradient measurements this run's volume markers support.
-
-    ``timing`` is measured by the caller and passed in, because the aperiodic fit in the
-    spectra needs it too and measuring the marker train twice would be two chances to
-    disagree about where the comb is.
-    """
+    """Add whichever gradient measurements this run's volume markers support."""
     if timing is None:
         return
     evidence.gradient_fundamentals_hz.append(timing.fundamental_hz)
@@ -223,10 +218,6 @@ def measure_runs(
         cleaned = ica.apply(raw.copy(), exclude=ica.exclude, verbose="ERROR")
         _validate_finite(cleaned, recording_id=recording_id)
 
-        # Measured before the spectra, because the aperiodic fit inside them has to know
-        # where the comb is: the harmonics run through the fit range, and a line fitted
-        # across them is fitted partly to the scanner. Costs nothing extra -- the timing is
-        # measured from the marker train, which the gradient section needs anyway.
         timing = measure_volume_timing(
             raw,
             description=settings.volume_marker_description,
@@ -239,7 +230,6 @@ def measure_runs(
                 recording_id=recording_id,
                 fmax=settings.spectra_fmax,
                 line_frequency=settings.spectra_line_frequency,
-                gradient_fundamental_hz=None if timing is None else timing.fundamental_hz,
                 aperiodic_fit_range_hz=settings.aperiodic_fit_range_hz,
                 notch_half_width_hz=settings.notch_exclusion_half_width_hz,
                 aperiodic_exclude_hz=settings.aperiodic_exclude_hz,
