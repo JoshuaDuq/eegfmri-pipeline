@@ -19,7 +19,6 @@ CONFIG_ROOT = Path(__file__).resolve().parents[2]
 
 SHIPPED_CONFIGS = (
     "eeg_pipeline/utils/config/eeg_config.yaml",
-    "eeg_pipeline/utils/config/presets/eeg_only.yaml",
     "eeg_pipeline/utils/config/presets/rest.yaml",
     # The config the loader actually reads for this study. The override template that
     # used to sit beside it was deleted: nothing loaded it, and once this file existed it
@@ -151,3 +150,9 @@ def test_the_acquisition_module_is_gone():
 
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("eeg_pipeline.utils.config.acquisition")
+
+
+def test_the_eeg_only_preset_is_gone():
+    from pathlib import Path
+
+    assert not Path("eeg_pipeline/utils/config/presets/eeg_only.yaml").exists()

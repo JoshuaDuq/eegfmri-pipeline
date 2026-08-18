@@ -1,23 +1,8 @@
-# Resting-state acquisition recorded INSIDE an MR scanner.
+# Resting-state acquisition: no events to epoch around.
 #
-# This preset inherits the scanner assumptions of the packaged eeg_config.yaml —
-# preprocessing.eeg_fmri, BrainVision Analyzer gradient/pulse correction, a recorded ECG
-# lead, and trimming to scanner volume markers. That is what makes it the in-scanner
-# preset rather than the resting-state one.
-#
-# FOR RESTING-STATE EEG RECORDED OUTSIDE A SCANNER, USE eeg_only INSTEAD:
-#
-#     # my_baseline.yaml
-#     extends: "eeg_only"
-#     project:
-#       paradigm: "rest"
-#       task: "rest"
-#     paths:
-#       bids_root: "/data/my_study/bids"
-#       deriv_root: "/data/my_study/derivatives"
-#
-# That is the whole configuration. Two knobs: eeg_only says "no scanner", paradigm says
-# "no events". Nothing else has to be restated.
+# This preset says "no events", nothing more. The scanner declaration it used to inherit
+# no longer exists — the packaged eeg_config.yaml describes EEG alone, and anything a
+# scanner adds is configured by the study that has one.
 #
 # Use this preset as:
 #

@@ -11,7 +11,7 @@
 # your own YAML that extends a preset:
 #
 #     # my_study.yaml
-#     extends: "eeg_only"     # or "rest", or "../path/to/another.yaml"
+#     extends: "rest"     # or "../path/to/another.yaml"
 #     project:
 #       task: "oddball"
 #     paths:
@@ -26,6 +26,9 @@
 # contradictions without processing anything.
 ###################################################################
 project:
+  # Deliberately unset when inherited: the BIDS task label selects which
+  # recordings are read, and taking another study's would quietly process
+  # nothing. validate --config-only names this key until it is set.
   task: "thermalactive"  # STUDY-SPECIFIC: BIDS task label used in paths and file naming
   # "task" (event-related) or "rest" (fixed-length segments). Sets preprocessing,
   # feature_engineering and both fMRI task_is_rest flags together, overriding whatever
@@ -289,6 +292,27 @@ eeg:
   # correlation is partly circular. That is the same caveat ica.ocular_review already
   # states and reports; it is a weaker detector than a true EOG lead, not an absent one.
   eog_channels: ["Fp1", "Fp2"]
+  # ---------------------------------------------------------------------------
+  # DO YOU HAVE AN ECG LEAD?
+  # ---------------------------------------------------------------------------
+  # Recording ECG is ordinary and useful, and nothing here depends on a scanner. Name the
+  # channel exactly as channels.tsv names it, and switch the two stages that read it on:
+  #
+  #     eeg:
+  #       ecg_channels: ["ECG"]        # exactly as the channel is named in channels.tsv
+  #     ica:
+  #       cardiac_review:
+  #         enabled: true              # detects R peaks in the lead; reviews ICA components
+  #     preprocessing:
+  #       clean_events_qc:
+  #         ecg_coupling:
+  #           enabled: true            # correlates EEG against the lead
+  #
+  # Leave ecg_channels empty for a montage without one: naming a channel that does not
+  # exist fails at the recording rather than in the config. The cardiac review reads a
+  # beat-marker train where ica.cardiac_review.marker_description names one and otherwise
+  # detects R peaks from the channel directly. ICLabel labels cardiac components either
+  # way, and the ocular review is unaffected by all of this.
   ecg_channels: ["ECG"]
 
 preprocessing:

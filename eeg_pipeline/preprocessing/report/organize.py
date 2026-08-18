@@ -364,8 +364,8 @@ def drop_superseded_mne_ica_panels(report: mne.Report) -> None:
     code adding the replacements, and that is what let the duplicates survive: MNE-BIDS-
     Pipeline rewrites these panels every time ``_08a_apply_ica`` runs, while the last
     stage that dropped them was reached only when ``ica.band_specific_report.comparisons``
-    was configured. A dataset with no condition contrasts -- which is most of them, and is
-    what the shipped ``eeg_only`` preset sets -- therefore kept both copies forever, and
+    was configured. A dataset with no condition contrasts -- which is most of them --
+    therefore kept both copies forever, and
     turning the expensive review *off* produced the more duplicated document of the two.
 
     Keying the guard to the replacement rather than to configuration also preserves the
