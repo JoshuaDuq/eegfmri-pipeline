@@ -30,11 +30,9 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
     write_sidecar,
 )
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
-from eeg_pipeline.preprocessing.report.scanner import (
-    VolumeLockedAverage,
-    VolumeTiming,
-)
 from eeg_pipeline.preprocessing.report.spectra import RunSpectra, StageSpectrum
+from studies.pain_study.analysis.gradient.comb import VolumeTiming
+from studies.pain_study.analysis.gradient.locked import VolumeLockedAverage
 
 FREQUENCIES = np.arange(1.0, 41.0, 1.0)
 

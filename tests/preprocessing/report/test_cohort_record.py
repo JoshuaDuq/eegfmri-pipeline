@@ -34,12 +34,9 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
 )
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
 from eeg_pipeline.preprocessing.report.preservation import PosteriorAlpha
-from eeg_pipeline.preprocessing.report.scanner import (
-    CombResidual,
-    VolumeLockedAverage,
-    VolumeTiming,
-)
 from eeg_pipeline.preprocessing.report.spectra import RunSpectra, StageSpectrum
+from studies.pain_study.analysis.gradient.comb import CombResidual, VolumeTiming
+from studies.pain_study.analysis.gradient.locked import VolumeLockedAverage
 
 FREQUENCIES = np.asarray([1.0, 2.0, 3.0])
 RUN = "sub-0014_task-x_run-1"

@@ -17,15 +17,14 @@ import pytest
 matplotlib.use("Agg")
 
 from eeg_pipeline.preprocessing.report.run_evidence import measure_runs  # noqa: E402
-from eeg_pipeline.preprocessing.report.scanner import (  # noqa: E402
-    VOLUME_MARKER_DESCRIPTION,
-)
 from eeg_pipeline.preprocessing.report.settings import ReportSettings  # noqa: E402
 
 SFREQ = 200.0
 TR = 1.0
 DURATION = 120.0
 N_CHANNELS = 8
+# Matches ReportSettings.volume_marker_description's default.
+VOLUME_MARKER_DESCRIPTION = "Volume/V  1"
 
 
 def _raw(*, with_markers: bool, locked_amplitude=4e-6, seed=0):

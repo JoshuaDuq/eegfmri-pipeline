@@ -38,7 +38,6 @@ from eeg_pipeline.preprocessing.report.preservation import (
     DEFAULT_RESPONSE_WINDOW_S,
     POSTERIOR_PATTERN,
 )
-from eeg_pipeline.preprocessing.report.scanner import VOLUME_MARKER_DESCRIPTION
 from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 
 #: Participant counts at which each cohort band becomes drawable, and the montage and
@@ -348,7 +347,7 @@ class ReportSettings:
     aperiodic_exclude_hz: tuple[tuple[float, float], ...] = ()
     #: Annotation marking each scanner volume. A dataset that spells it differently, or
     #: has none, simply gets no gradient section.
-    volume_marker_description: str = VOLUME_MARKER_DESCRIPTION
+    volume_marker_description: str = "Volume/V  1"
     #: Annotation marking each detected heartbeat.
     pulse_marker_description: str = PULSE_MARKER_DESCRIPTION
     #: Window the evoked split halves are correlated over, in seconds from onset. A

@@ -48,7 +48,6 @@ from eeg_pipeline.preprocessing.report.settings import (
     DEFAULT_COMPONENT_LABEL_PATTERNS,
 )
 from eeg_pipeline.preprocessing.report.preservation import PosteriorAlpha
-from eeg_pipeline.preprocessing.report.scanner import CombResidual, VolumeLockedAverage
 from eeg_pipeline.preprocessing.report.spectra import RunSpectra
 
 #: Stage labels used in every curve table, so one filter works across all of them.
@@ -100,7 +99,7 @@ def run_table(
     spectra: Sequence[RunSpectra],
     continuity: Sequence[RunContinuity],
     timings: Mapping[str, Any],
-    locked_averages: Sequence[VolumeLockedAverage] = (),
+    locked_averages: Sequence[Any] = (),
     rr_intervals: Sequence[RrIntervals] = (),
     marker_agreements: Sequence[MarkerAgreement] = (),
     cardiac_residuals: Sequence[CardiacResidual] = (),
@@ -267,7 +266,7 @@ def spectrum_curves(spectra: Sequence[RunSpectra]) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True)
 
 
-def comb_curves(combs: Sequence[CombResidual]) -> pd.DataFrame:
+def comb_curves(combs: Sequence[Any]) -> pd.DataFrame:
     """Comb excess per harmonic, reduced across channels, before and after ICA.
 
     Carries the harmonic *index* as well as its frequency. Harmonics sit at multiples of
@@ -535,8 +534,8 @@ def build_subject_sidecar(
     spectra: Sequence[RunSpectra],
     continuity: Sequence[RunContinuity],
     timings: Mapping[str, Any],
-    locked_averages: Sequence[VolumeLockedAverage] = (),
-    combs: Sequence[CombResidual] = (),
+    locked_averages: Sequence[Any] = (),
+    combs: Sequence[Any] = (),
     rr_intervals: Sequence[RrIntervals] = (),
     marker_agreements: Sequence[MarkerAgreement] = (),
     cardiac_residuals: Sequence[CardiacResidual] = (),

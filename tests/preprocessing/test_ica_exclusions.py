@@ -115,7 +115,6 @@ def test_run_evidence_cleans_each_run_with_the_reviewed_exclusions(monkeypatch, 
     monkeypatch.setattr(run_evidence, "compute_run_spectra", lambda *_a, **_k: "spectra")
     monkeypatch.setattr(run_evidence, "compute_run_continuity", lambda *_a, **_k: "continuity")
     monkeypatch.setattr(run_evidence, "compute_rr_intervals", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_evidence, "measure_volume_timing", lambda *_a, **_k: None)
 
     run_path = tmp_path / "sub-0001_task-pain_run-1_proc-filt_raw.fif"
     evidence = run_evidence.measure_runs(
