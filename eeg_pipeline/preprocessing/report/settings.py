@@ -29,7 +29,6 @@ RESIDUAL_WINDOW_S = (-0.2, 0.6)
 RESIDUAL_BASELINE_S = (-0.2, -0.1)
 RESIDUAL_MEASUREMENT_S = (0.0, 0.5)
 from eeg_pipeline.preprocessing.report.rr_intervals import (
-    DEFAULT_BEAT_MARKER_DESCRIPTION,
     DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
 )
 from eeg_pipeline.preprocessing.report.aperiodic import DEFAULT_FIT_RANGE_HZ
@@ -48,7 +47,6 @@ from eeg_pipeline.preprocessing.report.preservation import (
 #: module that reads a setting; the cohort modules import these back.
 DEFAULT_MIN_SUBJECTS_FOR_MEDIAN = 5
 DEFAULT_MIN_SUBJECTS_FOR_OUTER_BAND = 10
-DEFAULT_REPETITION_TIME_TOLERANCE_S = 1e-3
 DEFAULT_CHANNEL_POSITION_TOLERANCE_M = 5e-3
 
 
@@ -86,12 +84,9 @@ _THRESHOLD_KEYS = frozenset(
         "low_variance_exclusion_floor",
         "max_group_levels",
         "min_runs_for_quantile_band",
-        "comb_frequency_range_hz",
-        "comb_welch_seconds",
         "plausible_heart_rate_bpm",
         "marker_agreement_tolerance_s",
         "notch_exclusion_half_width_hz",
-        "repetition_time_tolerance_s",
         "channel_position_tolerance_m",
         "min_subjects_for_median",
         "min_subjects_for_outer_band",
@@ -114,15 +109,10 @@ _ANALYSIS_KEYS = frozenset(
         "response_window_s",
         "alpha_band_hz",
         "alpha_reference_band_hz",
-        "bcg_residual_window_s",
-        "bcg_residual_baseline_s",
-        "bcg_residual_measurement_s",
     }
 )
 _ACQUISITION_KEYS = frozenset(
     {
-        "volume_marker_description",
-        "pulse_marker_description",
         "posterior_channel_pattern",
         "non_event_prefixes",
         "component_label_patterns",
@@ -333,12 +323,6 @@ class ReportSettings:
     #: not the recording, sets the trace, so leave unset to inherit
     #: ``preprocessing.h_freq`` rather than plotting roll-off as if it were data.
     spectra_fmax: float | None = None
-    #: Band searched for the gradient comb. Defaults match the cohort scanner-harmonic
-    #: QC so the per-subject and cohort views describe the same frequencies.
-    comb_frequency_range_hz: tuple[float, float] = (15.0, 90.0)
-    #: Welch window for the comb. Longer than the sensor-spectra window because the comb
-    #: must be resolved between its teeth, not merely detected.
-    comb_welch_seconds: float = 8.0
     #: Window over which time-resolved amplitude is pooled.
     continuity_window_seconds: float = 1.0
     #: Band the aperiodic background is fitted over. Keep it below the line-noise
@@ -347,11 +331,6 @@ class ReportSettings:
     # Withheld from the aperiodic fit, on top of the notch stopbands and the
     # decomb-unavailable intervals.
     aperiodic_exclude_hz: tuple[tuple[float, float], ...] = ()
-    #: Annotation marking each scanner volume. A dataset that spells it differently, or
-    #: has none, simply gets no gradient section.
-    volume_marker_description: str = "Volume/V  1"
-    #: Annotation marking each detected heartbeat.
-    pulse_marker_description: str = DEFAULT_BEAT_MARKER_DESCRIPTION
     #: Window the evoked split halves are correlated over, in seconds from onset. A
     #: paradigm whose response falls outside it reports a reliability near zero for a
     #: sound recording, so this must match the paradigm rather than the other way round.
@@ -374,13 +353,6 @@ class ReportSettings:
     #: below the shortest interval ``plausible_heart_rate_bpm`` allows, or one beat can
     #: match its neighbour.
     marker_agreement_tolerance_s: float = MARKER_AGREEMENT_TOLERANCE_S
-    #: Epoch the beat-locked residual is cut over, the baseline removed from it, and the
-    #: window the residual is read in. All three are properties of the artifact's timing:
-    #: the ballistocardiogram follows the R peak by roughly a fifth of a second, which is
-    #: a statement about this population and this field strength.
-    bcg_residual_window_s: tuple[float, float] = RESIDUAL_WINDOW_S
-    bcg_residual_baseline_s: tuple[float, float] = RESIDUAL_BASELINE_S
-    bcg_residual_measurement_s: tuple[float, float] = RESIDUAL_MEASUREMENT_S
     #: Half-width of the band a notch is treated as having removed. Sized for the notch
     #: the pipeline applies: a wider filter, or a different line-removal method, leaves a
     #: different span of bins that are the filter rather than the data.
@@ -392,8 +364,6 @@ class ReportSettings:
     unavailable_intervals_by_recording: Mapping[str, tuple[tuple[float, float], ...]] = field(
         default_factory=dict
     )
-    #: Repetition times within this of each other are one sequence rather than two.
-    repetition_time_tolerance_s: float = DEFAULT_REPETITION_TIME_TOLERANCE_S
     #: Electrode positions within this of each other are the same site on the head.
     channel_position_tolerance_m: float = DEFAULT_CHANNEL_POSITION_TOLERANCE_M
     #: Participants required before a cohort median, and before the outer band, is drawn.
@@ -468,13 +438,6 @@ class ReportSettings:
                 display.get("component_overview_columns", cls.component_overview_columns)
             ),
             spectra_fmax=_optional_float(display, "spectra_fmax"),
-            comb_frequency_range_hz=_pair(
-                thresholds,
-                "comb_frequency_range_hz",
-                default=cls.comb_frequency_range_hz,
-                setting="report.thresholds.comb_frequency_range_hz",
-            ),
-            comb_welch_seconds=float(thresholds.get("comb_welch_seconds", cls.comb_welch_seconds)),
             continuity_window_seconds=float(
                 display.get("continuity_window_seconds", cls.continuity_window_seconds)
             ),
@@ -502,16 +465,6 @@ class ReportSettings:
                 default=cls.alpha_band_hz,
                 setting="report.analysis.alpha_band_hz",
             ),
-            volume_marker_description=_string(
-                acquisition,
-                "volume_marker_description",
-                cls.volume_marker_description,
-            ),
-            pulse_marker_description=_string(
-                acquisition,
-                "pulse_marker_description",
-                cls.pulse_marker_description,
-            ),
             posterior_channel_pattern=_string(
                 acquisition,
                 "posterior_channel_pattern",
@@ -534,31 +487,10 @@ class ReportSettings:
                     "marker_agreement_tolerance_s", cls.marker_agreement_tolerance_s
                 )
             ),
-            bcg_residual_window_s=_pair(
-                analysis,
-                "bcg_residual_window_s",
-                default=cls.bcg_residual_window_s,
-                setting="report.analysis.bcg_residual_window_s",
-            ),
-            bcg_residual_baseline_s=_pair(
-                analysis,
-                "bcg_residual_baseline_s",
-                default=cls.bcg_residual_baseline_s,
-                setting="report.analysis.bcg_residual_baseline_s",
-            ),
-            bcg_residual_measurement_s=_pair(
-                analysis,
-                "bcg_residual_measurement_s",
-                default=cls.bcg_residual_measurement_s,
-                setting="report.analysis.bcg_residual_measurement_s",
-            ),
             notch_exclusion_half_width_hz=float(
                 thresholds.get(
                     "notch_exclusion_half_width_hz", cls.notch_exclusion_half_width_hz
                 )
-            ),
-            repetition_time_tolerance_s=float(
-                thresholds.get("repetition_time_tolerance_s", cls.repetition_time_tolerance_s)
             ),
             channel_position_tolerance_m=float(
                 thresholds.get("channel_position_tolerance_m", cls.channel_position_tolerance_m)
@@ -613,17 +545,6 @@ class ReportSettings:
             raise ValueError("report.display.component_overview_columns must be at least 1.")
         if self.spectra_fmax is not None and self.spectra_fmax <= 0:
             raise ValueError("report.display.spectra_fmax must be positive when set.")
-        low, high = self.comb_frequency_range_hz
-        if not 0 < low < high:
-            raise ValueError(
-                "report.thresholds.comb_frequency_range_hz must satisfy 0 < low < high."
-            )
-        # The comb is measured by contrasting each harmonic with the spectrum between it
-        # and its neighbours, so the window has to resolve that gap. Whether it does
-        # depends on the volume rate, which is only known once a run is read, so
-        # compute_comb_residual reports the section as absent rather than failing here.
-        if self.comb_welch_seconds <= 0:
-            raise ValueError("report.thresholds.comb_welch_seconds must be positive.")
         if self.continuity_window_seconds <= 0:
             raise ValueError("report.display.continuity_window_seconds must be positive.")
         aperiodic_low, aperiodic_high = self.aperiodic_fit_range_hz
@@ -672,34 +593,10 @@ class ReportSettings:
                 f"shortest plausible interval ({shortest_interval_s / 2:.3f} s at "
                 f"{bpm_high:g} bpm), or one beat can match its neighbour."
             )
-        window_start, window_stop = self.bcg_residual_window_s
-        if window_stop <= window_start:
-            raise ValueError(
-                "report.analysis.bcg_residual_window_s must have a stop after its start."
-            )
-        for key, span in (
-            ("bcg_residual_baseline_s", self.bcg_residual_baseline_s),
-            ("bcg_residual_measurement_s", self.bcg_residual_measurement_s),
-        ):
-            start, stop = span
-            if stop <= start:
-                raise ValueError(
-                    f"report.analysis.{key} must have a stop after its start."
-                )
-            # Silently no baseline, and silently no measurement, are the two ways this
-            # panel can report a number that describes nothing.
-            if start < window_start or stop > window_stop:
-                raise ValueError(
-                    f"report.analysis.{key} must lie inside "
-                    f"report.analysis.bcg_residual_window_s {self.bcg_residual_window_s}; "
-                    f"{span} does not."
-                )
         if self.notch_exclusion_half_width_hz <= 0:
             raise ValueError(
                 "report.thresholds.notch_exclusion_half_width_hz must be positive."
             )
-        if self.repetition_time_tolerance_s <= 0:
-            raise ValueError("report.thresholds.repetition_time_tolerance_s must be positive.")
         if self.channel_position_tolerance_m <= 0:
             raise ValueError("report.thresholds.channel_position_tolerance_m must be positive.")
         self._validate_subject_gates()
@@ -710,8 +607,6 @@ class ReportSettings:
                 "as trials."
             )
         for key, value in (
-            ("volume_marker_description", self.volume_marker_description),
-            ("pulse_marker_description", self.pulse_marker_description),
             ("posterior_channel_pattern", self.posterior_channel_pattern),
         ):
             if not value.strip():

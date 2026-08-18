@@ -31,15 +31,11 @@ class _Config:
 NEW_KEYS = (
     "report.analysis.aperiodic_exclude_hz",
     "report.analysis.alpha_reference_band_hz",
-    "report.analysis.bcg_residual_window_s",
-    "report.analysis.bcg_residual_baseline_s",
-    "report.analysis.bcg_residual_measurement_s",
     "report.acquisition.non_event_prefixes",
     "report.acquisition.component_label_patterns",
     "report.thresholds.notch_exclusion_half_width_hz",
     "report.thresholds.plausible_heart_rate_bpm",
     "report.thresholds.marker_agreement_tolerance_s",
-    "report.thresholds.repetition_time_tolerance_s",
     "report.thresholds.channel_position_tolerance_m",
     "report.thresholds.min_subjects_for_median",
     "report.thresholds.min_subjects_for_outer_band",
@@ -71,9 +67,6 @@ COMPARED_NEW_KEYS = (
     "plausible_heart_rate_bpm",
     "marker_agreement_tolerance_s",
     "notch_exclusion_half_width_hz",
-    "bcg_residual_window_s",
-    "bcg_residual_baseline_s",
-    "bcg_residual_measurement_s",
 )
 
 

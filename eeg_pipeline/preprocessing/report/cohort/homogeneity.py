@@ -32,8 +32,6 @@ HOMOGENEITY_TAG = "cohort-homogeneity"
 #: is a disagreement about what the figures mean. Others are display choices and are left
 #: out: a site that changed a colour limit did not change a measurement.
 COMPARED_SETTINGS = (
-    "comb_frequency_range_hz",
-    "comb_welch_seconds",
     "continuity_window_seconds",
     "spectra_fmax",
     "spectra_line_frequency",
@@ -49,9 +47,6 @@ COMPARED_SETTINGS = (
     "response_window_s",
     "plausible_heart_rate_bpm",
     "marker_agreement_tolerance_s",
-    "bcg_residual_window_s",
-    "bcg_residual_baseline_s",
-    "bcg_residual_measurement_s",
 )
 
 

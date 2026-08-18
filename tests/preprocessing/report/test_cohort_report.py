@@ -231,11 +231,11 @@ def test_a_version_disagreement_names_who_differs() -> None:
 
 def test_a_settings_disagreement_is_reported_as_one_about_the_figures() -> None:
     cohort = _cohort(
-        _participant("0014", settings={"comb_welch_seconds": 8.0}),
-        _participant("0015", settings={"comb_welch_seconds": 4.0}),
+        _participant("0014", settings={"continuity_window_seconds": 8.0}),
+        _participant("0015", settings={"continuity_window_seconds": 4.0}),
     )
 
-    assert set(setting_disagreements(cohort)) == {"comb_welch_seconds"}
+    assert set(setting_disagreements(cohort)) == {"continuity_window_seconds"}
     assert "disagreement about the figures" in homogeneity_html(cohort)
 
 

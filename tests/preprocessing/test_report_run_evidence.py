@@ -77,21 +77,6 @@ def test_every_per_run_measurement_is_gathered(tmp_path) -> None:
     assert evidence.spectra[0].recording_id == "sub-0001_task-x_run-1"
 
 
-def test_configured_annotation_descriptions_drive_every_marker_measurement(tmp_path) -> None:
-    path, raw = _write_run(
-        tmp_path,
-        "sub-0001_task-x_run-1_proc-filt_raw.fif",
-        volume_description="Scanner/Volume",
-        pulse_description="Cardiac/R",
-    )
-    settings = ReportSettings(
-        volume_marker_description="Scanner/Volume",
-        pulse_marker_description="Cardiac/R",
-    )
-
-    evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=settings)
-
-    assert len(evidence.rr_intervals) == 1
 
 
 def test_configured_aperiodic_range_reaches_the_spectral_fit(tmp_path) -> None:

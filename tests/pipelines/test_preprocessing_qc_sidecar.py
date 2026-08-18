@@ -170,10 +170,10 @@ def test_the_sidecar_carries_the_settings_that_shape_the_numbers(pipeline, repor
         subject="0014",
         task="thermalactive",
         evidence=_evidence(),
-        settings=ReportSettings(comb_welch_seconds=4.0),
+        settings=ReportSettings(continuity_window_seconds=4.0),
     )
 
-    assert read_sidecar(report_path).settings["comb_welch_seconds"] == 4.0
+    assert read_sidecar(report_path).settings["continuity_window_seconds"] == 4.0
 
 
 def test_the_sidecar_carries_the_versions_that_measured(pipeline, report_path) -> None:

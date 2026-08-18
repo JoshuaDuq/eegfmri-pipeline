@@ -52,11 +52,12 @@ paths:
   # Null preserves ordinary datasets. A configured Decomb manifest activates spectral
   # exclusions and requires preprocessing.notch_freq: null.
   #
-  # Set, because the recordings above have had per-recording lines removed and every panel
-  # that reads power at a frequency needs to know where. Without it the report treats a
-  # 30 dB stopband as data: it draws the trough unmarked, and the aperiodic fit was
-  # measuring slopes across holes it had no way to recognise.
-  decomb_manifest: "../../../data/bids_output/eeg_decombed_auto_staged/line_notch_manifest.tsv"
+  # Where a study's line-removal stage recorded which frequencies it took out. The
+  # mechanism is general -- every panel that reads power at a frequency needs to know
+  # where the holes are, or it treats a 30 dB stopband as data and fits slopes across
+  # gaps it cannot recognise. null because only a study knows whether its recordings
+  # were cleaned that way; this study sets it in studies/pain_study/config/pain_study.yaml.
+  decomb_manifest: null
   bids_rest_root: null  # Optional resting-state EEG BIDS directory used when task_is_rest is enabled
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
@@ -682,12 +683,6 @@ time_frequency_analysis:
 report:
   enabled: true
   thresholds:
-    # Reference ratio of Analyzer R markers to scanner volumes used to group runs in
-    # the cohort figure. Analyzer writes one R marker per heartbeat and one per volume,
-    # so a complete set sits near one per volume at a short repetition time. This is a
-    # reporting reference, not a pass/fail rule; datasets recorded outside a scanner
-    # have no such section.
-    min_r_markers_per_volume: 0.5
     # Reference line drawn on the region-coverage figure, and the count below which a
     # region is listed in the coverage text. Interpreting the shortfall is left to the
     # reviewer.
@@ -704,17 +699,6 @@ report:
     # Runs needed before a quantile band is drawn across runs; below this a band would
     # only redraw the min-max envelope.
     min_runs_for_quantile_band: 5
-    # Band searched for the residual gradient comb in the per-subject report. Matches
-    # preprocessing.scanner_harmonic_qc.frequency_range_hz so the per-subject and cohort
-    # views describe the same frequencies.
-    comb_frequency_range_hz: [15.0, 90.0]
-    # Welch window for the comb, in seconds. Longer than the sensor-spectra window
-    # because each harmonic is scored against the background *between* it and its
-    # neighbours, which a coarse resolution cannot resolve. At TR = 0.9 s the harmonics
-    # sit 1.11 Hz apart, so 8 s (0.125 Hz bins) leaves ~9 bins per spacing. If the
-    # resolution cannot separate the comb, the section reports itself absent rather than
-    # returning a number set by the window.
-    comb_welch_seconds: 8.0
     # Physiologically possible heart rate. One statement, two readers: the subject
     # tachogram shades the interval range it implies and the cohort panel counts
     # participants whose median falls outside it. Neither rejects anybody — the count is
@@ -735,10 +719,6 @@ report:
     # pipeline applies (0.97 Hz wide); a wider filter, or a different line-removal
     # method, owns a different span of bins.
     notch_exclusion_half_width_hz: 2.0
-    # Repetition times within this of each other are one sequence, so that ordinary
-    # scatter in the marker train does not force the cohort comb onto a harmonic-index
-    # axis when every participant was scanned identically.
-    repetition_time_tolerance_s: 0.001
     # Electrode positions within this of each other are the same site on the head.
     # Positions come from digitisation or a montage lookup, so nominally identical
     # electrodes differ by rounding rather than by millimetres.
@@ -795,19 +775,7 @@ report:
     # needs its reference window shifted too, or the peak is scored against a background
     # fitted where the peak now is.
     alpha_reference_band_hz: [3.0, 25.0]
-    # Beat-locked residual: the epoch cut around each R peak, the baseline removed from
-    # it, and the window the residual amplitude is read in. All three describe the
-    # artifact's timing rather than the estimator — the ballistocardiogram follows the R
-    # peak by roughly a fifth of a second at 3 T, which is a property of the field and
-    # the population. The baseline and the measurement window must both lie inside the
-    # epoch; a baseline outside it is silently no baseline.
-    bcg_residual_window_s: [-0.2, 0.6]
-    bcg_residual_baseline_s: [-0.2, -0.1]
-    bcg_residual_measurement_s: [0.0, 0.5]
   acquisition:
-    # Exact annotation descriptions written by the scanner and Analyzer acquisition.
-    volume_marker_description: "Volume/V  1"
-    pulse_marker_description: "Pulse Artifact/R"
     # Electrode names eligible for the posterior-rhythm measurement.
     posterior_channel_pattern: '^(P[0-9z]|PO[0-9z]|O[0-9z]|Oz|POz|Pz)'
     # Annotation prefixes that are not task events, so the event rug under the "Data

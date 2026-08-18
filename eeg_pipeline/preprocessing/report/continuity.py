@@ -171,6 +171,11 @@ def _covered_duration(
 #: is not a trial -- a response marker in a paradigm where responses are not the event, a
 #: stimulus-computer heartbeat -- belongs in ``report.acquisition.non_event_prefixes``
 #: rather than here, where it would silently suppress another lab's events.
+# Inlined when report.acquisition.volume_marker_description left the core config. Only
+# reachable consumer is the in/out-of-scanner classification, which leaves in Task 17;
+# this literal leaves with it. A study that spells its marker differently passes it in.
+VOLUME_MARKER_DESCRIPTION = "Volume/V  1"
+
 NON_EVENT_PREFIXES = ("BAD", "EDGE", "NEW SEGMENT")
 
 

@@ -30,13 +30,13 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.sidecar import SubjectSidecar
-from eeg_pipeline.preprocessing.report.settings import (
-    DEFAULT_REPETITION_TIME_TOLERANCE_S,
-)
 
 #: Repetition times within this of each other are treated as one rate, so that ordinary
 #: measurement scatter in the marker train does not force a cohort onto the index axis.
-REPETITION_TIME_TOLERANCE_S = DEFAULT_REPETITION_TIME_TOLERANCE_S
+# Was report.thresholds.repetition_time_tolerance_s in the core config. It describes a
+# scanner's marker train, so it moved here with the rest of the gradient settings;
+# scripts/gradient/config.yaml carries the same value for the workflow side.
+REPETITION_TIME_TOLERANCE_S = 1e-3
 
 
 @dataclass(frozen=True)

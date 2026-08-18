@@ -21,9 +21,9 @@ SHIPPED_CONFIGS = (
     "eeg_pipeline/utils/config/eeg_config.yaml",
     "eeg_pipeline/utils/config/presets/eeg_only.yaml",
     "eeg_pipeline/utils/config/presets/rest.yaml",
-    "studies/pain_study/scripts/config/thermal_pain_eeg_overrides.yaml",
-    # The config the loader actually reads for this study, as distinct from the override
-    # template above, which is a copy-paste source and is loaded by nothing.
+    # The config the loader actually reads for this study. The override template that
+    # used to sit beside it was deleted: nothing loaded it, and once this file existed it
+    # was a test-covered, authoritative-looking duplicate of live settings.
     "studies/pain_study/config/pain_study.yaml",
 )
 
@@ -55,14 +55,10 @@ def test_the_packaged_defaults_match_the_dataclass_defaults() -> None:
         "plausible_heart_rate_bpm",
         "marker_agreement_tolerance_s",
         "notch_exclusion_half_width_hz",
-        "repetition_time_tolerance_s",
         "channel_position_tolerance_m",
         "min_subjects_for_median",
         "min_subjects_for_outer_band",
         "alpha_reference_band_hz",
-        "bcg_residual_window_s",
-        "bcg_residual_baseline_s",
-        "bcg_residual_measurement_s",
         "non_event_prefixes",
         "component_label_patterns",
     ):
@@ -127,3 +123,22 @@ def test_a_configured_manifest_that_is_absent_is_still_an_error() -> None:
 
     with pytest.raises(FileNotFoundError, match="Decomb manifest"):
         ReportSettings.from_config(_Config())
+
+
+def test_core_config_names_no_scanner_key():
+    from pathlib import Path
+
+    text = Path("eeg_pipeline/utils/config/eeg_config.yaml").read_text(encoding="utf-8")
+    # eeg_fmri, brainvision_analyzer, scanner_harmonic_qc and trim_to_volume_bounds are
+    # NOT here: pipelines/preprocessing.py still runs the stages that read them, and
+    # Task 13 is what deletes those stages. Task 13 extends this list.
+    for key in (
+        "comb_frequency_range_hz:",
+        "comb_welch_seconds:",
+        "repetition_time_tolerance_s:",
+        "volume_marker_description:",
+        "pulse_marker_description:",
+        "min_r_markers_per_volume:",
+        "bcg_residual_window_s:",
+    ):
+        assert key not in text, f"{key} is still in the core config"

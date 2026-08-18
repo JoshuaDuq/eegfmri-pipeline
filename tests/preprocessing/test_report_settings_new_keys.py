@@ -7,47 +7,12 @@ import pytest
 from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
 
-def test_defaults_match_the_cohort_scanner_harmonic_band() -> None:
-    """The per-subject and cohort views must describe the same frequencies."""
-    assert ReportSettings().comb_frequency_range_hz == (15.0, 90.0)
-    assert ReportSettings().comb_welch_seconds == 8.0
 
 
 def test_the_spectra_ceiling_is_unset_so_it_can_inherit_the_low_pass() -> None:
     assert ReportSettings().spectra_fmax is None
 
 
-def test_configured_values_are_read() -> None:
-    settings = ReportSettings.from_mapping(
-        {
-            "thresholds": {
-                "comb_frequency_range_hz": [10.0, 80.0],
-                "comb_welch_seconds": 4.0,
-            },
-            "display": {"spectra_fmax": 90.0, "continuity_window_seconds": 2.0},
-            "analysis": {
-                "aperiodic_fit_range_hz": [3.0, 35.0],
-                "response_window_s": [0.1, 0.8],
-                "alpha_band_hz": [7.5, 12.5],
-            },
-            "acquisition": {
-                "volume_marker_description": "Scanner/Volume",
-                "pulse_marker_description": "Cardiac/R",
-                "posterior_channel_pattern": "^(O|PO)",
-            },
-        }
-    )
-
-    assert settings.comb_frequency_range_hz == (10.0, 80.0)
-    assert settings.comb_welch_seconds == 4.0
-    assert settings.spectra_fmax == 90.0
-    assert settings.continuity_window_seconds == 2.0
-    assert settings.aperiodic_fit_range_hz == (3.0, 35.0)
-    assert settings.response_window_s == (0.1, 0.8)
-    assert settings.alpha_band_hz == (7.5, 12.5)
-    assert settings.volume_marker_description == "Scanner/Volume"
-    assert settings.pulse_marker_description == "Cardiac/R"
-    assert settings.posterior_channel_pattern == "^(O|PO)"
 
 
 def test_an_explicit_null_ceiling_stays_unset() -> None:
@@ -56,20 +21,13 @@ def test_an_explicit_null_ceiling_stays_unset() -> None:
     assert settings.spectra_fmax is None
 
 
-def test_a_reversed_comb_band_is_rejected() -> None:
-    with pytest.raises(ValueError, match="0 < low < high"):
-        ReportSettings.from_mapping({"thresholds": {"comb_frequency_range_hz": [90.0, 15.0]}})
 
 
-def test_a_malformed_comb_band_is_rejected() -> None:
-    with pytest.raises(TypeError, match="exactly two values"):
-        ReportSettings.from_mapping({"thresholds": {"comb_frequency_range_hz": [15.0]}})
 
 
 @pytest.mark.parametrize(
     ("block", "key", "value", "match"),
     [
-        ("thresholds", "comb_welch_seconds", 0.0, "comb_welch_seconds must be positive"),
         ("display", "spectra_fmax", -1.0, "spectra_fmax must be positive"),
         (
             "display",
@@ -113,13 +71,6 @@ def test_unknown_report_keys_are_rejected(values) -> None:
         ReportSettings.from_mapping(values)
 
 
-@pytest.mark.parametrize(
-    "key",
-    ["volume_marker_description", "pulse_marker_description", "posterior_channel_pattern"],
-)
-def test_null_acquisition_identifiers_are_rejected(key) -> None:
-    with pytest.raises(TypeError, match=key):
-        ReportSettings.from_mapping({"acquisition": {key: None}})
 
 
 def test_enabled_must_be_a_boolean_not_a_truthy_string() -> None:
@@ -147,7 +98,6 @@ def test_the_shipped_config_block_validates() -> None:
 
     settings = ReportSettings.from_mapping(values["report"])
 
-    assert settings.comb_frequency_range_hz == (15.0, 90.0)
     assert settings.continuity_window_seconds == 1.0
 
 

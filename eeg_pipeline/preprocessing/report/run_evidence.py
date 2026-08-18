@@ -24,6 +24,7 @@ from eeg_pipeline.preprocessing.report.rr_intervals import (
     compute_rr_intervals,
 )
 from eeg_pipeline.preprocessing.report.continuity import (
+    VOLUME_MARKER_DESCRIPTION,
     RunContinuity,
     add_continuity_section,
     compute_run_continuity,
@@ -138,17 +139,18 @@ def measure_runs(
             compute_run_continuity(
                 raw,
                 recording_id=recording_id,
+                # Passed explicitly: continuity treats a label as a search instruction,
+                # so omitting it means 'do not search'. The in/out-of-scanner
+                # classification still needs the search until Task 17 retires it.
+                volume_description=VOLUME_MARKER_DESCRIPTION,
                 window_seconds=settings.continuity_window_seconds,
                 edge_support_seconds=edge_support_seconds,
-                volume_description=settings.volume_marker_description,
-                pulse_description=settings.pulse_marker_description,
                 non_event_prefixes=settings.non_event_prefixes,
             )
         )
         intervals = compute_rr_intervals(
             raw,
             recording_id=recording_id,
-            description=settings.pulse_marker_description,
         )
         if intervals is not None:
             evidence.rr_intervals.append(intervals)

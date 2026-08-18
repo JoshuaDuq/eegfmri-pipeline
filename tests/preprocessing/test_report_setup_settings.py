@@ -114,18 +114,11 @@ def test_the_same_tolerance_becomes_admissible_under_a_slower_ceiling() -> None:
     assert settings.marker_agreement_tolerance_s == 0.14
 
 
-def test_the_residual_windows_default_to_the_constants_they_replaced() -> None:
-    settings = ReportSettings()
-    assert settings.bcg_residual_window_s == (-0.2, 0.6)
-    assert settings.bcg_residual_baseline_s == (-0.2, -0.1)
-    assert settings.bcg_residual_measurement_s == (0.0, 0.5)
 
 
 @pytest.mark.parametrize(
     "key, span",
     [
-        ("bcg_residual_baseline_s", [-0.5, -0.4]),
-        ("bcg_residual_measurement_s", [0.0, 0.9]),
     ],
 )
 def test_a_residual_window_outside_the_epoch_is_rejected(key: str, span: list) -> None:
@@ -134,16 +127,6 @@ def test_a_residual_window_outside_the_epoch_is_rejected(key: str, span: list) -
         _settings(analysis={key: span})
 
 
-def test_the_residual_windows_can_move_together_for_a_different_field_strength() -> None:
-    settings = _settings(
-        analysis={
-            "bcg_residual_window_s": [-0.3, 0.8],
-            "bcg_residual_baseline_s": [-0.3, -0.15],
-            "bcg_residual_measurement_s": [0.0, 0.7],
-        }
-    )
-    assert settings.bcg_residual_window_s == (-0.3, 0.8)
-    assert settings.bcg_residual_measurement_s == (0.0, 0.7)
 
 
 # --------------------------------------------------------------------------------------
@@ -343,11 +326,6 @@ def test_a_malformed_pattern_entry_is_rejected() -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_the_tolerances_default_to_the_constants_they_replaced() -> None:
-    settings = ReportSettings()
-    assert settings.notch_exclusion_half_width_hz == 2.0
-    assert settings.repetition_time_tolerance_s == 1e-3
-    assert settings.channel_position_tolerance_m == 5e-3
 
 
 @pytest.mark.parametrize(
