@@ -21,7 +21,9 @@ from eeg_pipeline.preprocessing.ica_exclusions import (
     read_component_statuses,
     reviewed_exclusions,
 )
-from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
+from eeg_pipeline.preprocessing.report.rr_intervals import (
+    DEFAULT_BEAT_MARKER_DESCRIPTION as PULSE_MARKER_DESCRIPTION,
+)
 
 SFREQ = 250.0
 DURATION_S = 120.0

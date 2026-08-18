@@ -22,7 +22,9 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.preprocessing.cardiac_artifact_qc import PULSE_EVENT_ID
-from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
+from eeg_pipeline.preprocessing.report.rr_intervals import (
+    DEFAULT_BEAT_MARKER_DESCRIPTION as PULSE_MARKER_DESCRIPTION,
+)
 from eeg_pipeline.preprocessing.report.annotations import annotation_onsets
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     MISSED_BEAT_FACTOR,

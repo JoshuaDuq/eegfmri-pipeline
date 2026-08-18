@@ -21,7 +21,9 @@ from eeg_pipeline.preprocessing.derivatives import (
     runs_for_prefix,
 )
 from eeg_pipeline.preprocessing.ica_exclusions import components_path_for_ica
-from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
+from eeg_pipeline.preprocessing.report.rr_intervals import (
+    DEFAULT_BEAT_MARKER_DESCRIPTION as PULSE_MARKER_DESCRIPTION,
+)
 
 PULSE_EVENT_ID = 999
 

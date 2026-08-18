@@ -4,7 +4,7 @@ import mne
 import numpy as np
 import pytest
 
-from eeg_pipeline.preprocessing.pulse_artifact_qc import (
+from studies.pain_study.analysis.bcg.pulse_markers import (
     UNCORRECTED_PULSE_DESCRIPTION,
     PulseMarkerCriteria,
     measure_pulse_markers,
