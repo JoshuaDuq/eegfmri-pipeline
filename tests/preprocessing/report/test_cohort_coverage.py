@@ -23,7 +23,6 @@ from eeg_pipeline.preprocessing.report.cohort.coverage import (  # noqa: E402
 )
 from eeg_pipeline.preprocessing.report.cohort.record import channel_table  # noqa: E402
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -62,7 +61,6 @@ def _participant(subject: str, channels: pd.DataFrame) -> SubjectSidecar:
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
         channels=channels,
     )
@@ -142,7 +140,6 @@ def test_a_cohort_with_no_channel_tables_has_no_section() -> None:
     bare = SubjectSidecar(
         subject="0014",
         task="rest",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
     )
 
@@ -238,7 +235,6 @@ def test_a_participant_without_a_channel_table_is_absent_from_the_list() -> None
     bare = SubjectSidecar(
         subject="0016",
         task="rest",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
     )
 

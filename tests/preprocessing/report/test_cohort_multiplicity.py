@@ -18,12 +18,12 @@ from eeg_pipeline.preprocessing.report.cohort.multiplicity import (
     CHANNEL_FAMILY,
     ICA_FAMILY,
     METRIC_SOURCES,
+    PHYSIOLOGY_FAMILY,
     _outer_members,
     multiplicity,
     multiplicity_table,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -35,8 +35,7 @@ def _participant(
     variance: float,
     components: float = 62.0,
     flagged: float = 0.02,
-    in_scanner: bool = False,
-    locked: float | None = None,
+    bpm: float | None = None,
 ) -> SubjectSidecar:
     runs = pd.DataFrame(
         {
@@ -48,24 +47,13 @@ def _participant(
             "continuity_max_db": [5.0 + flagged],
         }
     )
-    if in_scanner:
-        runs["n_volumes"] = [300]
-        runs["repetition_time_s"] = [2.0]
-        after_amplitude = locked if locked is not None else 0.7
-        runs["volume_locked_rms_before_uv"] = [1.2]
-        runs["volume_locked_floor_before_uv"] = [0.4]
-        runs["volume_locked_excess_power_before_uv2"] = [1.28]
-        runs["volume_locked_resolved_before"] = [True]
-        runs["volume_locked_rms_after_uv"] = [(after_amplitude**2 + 0.09) ** 0.5]
-        runs["volume_locked_floor_after_uv"] = [0.3]
-        runs["volume_locked_excess_power_after_uv2"] = [after_amplitude**2]
-        runs["volume_locked_resolved_after"] = [True]
+    # A participant with no ECG lead has no physiology metric to be scored on, which is
+    # the case the counting has to distinguish from having been measured and passed.
+    if bpm is not None:
+        runs["median_bpm"] = [bpm]
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=(
-            AcquisitionContext.IN_SCANNER if in_scanner else AcquisitionContext.OUT_OF_SCANNER
-        ),
         paradigm=Paradigm.TASK,
         measurements={
             "variance_removed": variance,
@@ -148,17 +136,16 @@ def test_a_participant_is_not_scored_on_a_metric_it_never_had() -> None:
                 variance=0.5 + index * 0.02,
                 components=60.0 + index,
                 flagged=0.01 + index * 0.005,
-                in_scanner=index < 10,
-                locked=0.4 + index * 0.05,
+                bpm=None if index >= 10 else 55.0 + index * 2.0,
             )
             for index in range(12)
         )
     )
 
     result = multiplicity(mixed)
-    scanner_rows = result.counts[result.counts["family"] == "Scanner-level"]
+    physiology_rows = result.counts[result.counts["family"] == PHYSIOLOGY_FAMILY]
 
-    assert set(scanner_rows["subject"]) == {f"{index:04d}" for index in range(10)}
+    assert set(physiology_rows["subject"]) == {f"{index:04d}" for index in range(10)}
 
 
 def test_the_table_reads_as_a_count_over_a_denominator() -> None:
@@ -219,7 +206,6 @@ def test_marker_agreement_pools_primitive_counts_across_runs() -> None:
     participant = SubjectSidecar(
         subject="0001",
         task="x",
-        context=AcquisitionContext.IN_SCANNER,
         paradigm=Paradigm.TASK,
         runs=pd.DataFrame(
             {
@@ -231,25 +217,3 @@ def test_marker_agreement_pools_primitive_counts_across_runs() -> None:
     )
 
     assert source.read(participant) == 51 / 101
-
-
-def test_unresolved_locked_power_is_not_ranked_as_a_quantitative_extreme() -> None:
-    source = next(
-        source
-        for source in METRIC_SOURCES
-        if source.key == "volume_locked_excess_power_after_uv2"
-    )
-    participant = SubjectSidecar(
-        subject="0001",
-        task="x",
-        context=AcquisitionContext.IN_SCANNER,
-        paradigm=Paradigm.TASK,
-        runs=pd.DataFrame(
-            {
-                "volume_locked_excess_power_after_uv2": [-0.1, -0.4],
-                "volume_locked_resolved_after": [False, False],
-            }
-        ),
-    )
-
-    assert np.isnan(source.read(participant))

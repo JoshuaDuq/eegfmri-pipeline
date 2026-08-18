@@ -185,11 +185,11 @@ def drop_replaced_filtered_spectrum(report: mne.Report) -> None:
     spends four fifths of the axis on filter roll-off falling into the noise floor, and
     compresses the band anyone is reading into the left fifth. The sensor-spectra section
     draws the same band per run over 1-100 Hz, with across-channel percentile bands, the
-    aperiodic fit, and markers on the line-noise and gradient harmonics.
+    aperiodic fit, and markers on the line-noise harmonics.
 
     Only the filtered one. The original raw spectrum is the report's single view of the
     data before filtering, and there the full bandwidth is the point: it is where the
-    anti-alias corner and the gradient harmonics above the low-pass are visible.
+    anti-alias corner and whatever sits above the low-pass are visible.
     """
     drop_replaced_panels(
         report,
@@ -238,7 +238,7 @@ def drop_replaced_ica_eog_panels(report: mne.Report) -> None:
 #:
 #: The spectrum is handled here rather than by ``drop_replaced_filtered_spectrum``, which
 #: deliberately keeps the *original* raw spectrum: the full bandwidth before filtering is
-#: the report's one view of the anti-alias corner and the gradient harmonics above the
+#: the report's one view of the anti-alias corner and whatever sits above the
 #: low-pass. After cleaning, nothing is left on that axis that the sensor-spectra section
 #: does not draw over the band a reader is actually reading.
 _REPLACED_CLEAN_RAW_PANELS = (
@@ -285,8 +285,8 @@ def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
 #:
 #: The document previously had no declared order at all. Each stage moved its own content
 #: relative to whatever happened to exist when it ran, so the shape of the report depended
-#: on which stages ran and in what sequence -- visible in the archive as the Analyzer and
-#: Configuration sections occupying two separate positions each, and as the events panel
+#: on which stages ran and in what sequence -- visible in the archive as sections
+#: occupying two separate positions each, and as the events panel
 #: rendering behind the trial counts it describes because it was placed last.
 #:
 #: The sequence: what the run was, what came in, what the decomposition did, what survived.
@@ -300,7 +300,8 @@ SECTION_ORDER = (
     "Data quality over time",
     "Raw (original)",
     "Raw (filtered)",
-    # The decomposition: the whole of it, then each detector, then each component.
+    # The decomposition: the whole of it, then each detector with the evidence behind
+    # it, then each component.
     "ICA: epochs for fitting",
     "ICA decomposition quality",
     "ICA cardiac artifact review",

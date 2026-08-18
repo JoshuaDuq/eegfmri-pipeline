@@ -13,9 +13,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from eeg_pipeline.preprocessing.report.rr_intervals import (
-    DEFAULT_BEAT_MARKER_DESCRIPTION as PULSE_MARKER_DESCRIPTION,
-)
+PULSE_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
 #: Marks a stretch the pulse correction never ran on. ``BAD_`` so that MNE excludes it
 #: from epoching by default.

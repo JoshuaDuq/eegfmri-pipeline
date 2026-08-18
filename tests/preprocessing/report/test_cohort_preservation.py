@@ -27,7 +27,6 @@ from eeg_pipeline.preprocessing.report.cohort.preservation import (  # noqa: E40
     reliability_table,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -78,7 +77,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=paradigm,
         measurements=measurements,
         runs=_runs(),

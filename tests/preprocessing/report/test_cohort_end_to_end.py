@@ -25,7 +25,6 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
 from eeg_pipeline.preprocessing.report.cohort.collect import collect_cohort
 from eeg_pipeline.preprocessing.report.cohort.record import build_subject_sidecar
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     write_sidecar,
 )
@@ -66,7 +65,6 @@ def _run_evidence(subject: str, run_index: int, *, level: float, flagged_s: floa
         bad_spans=((0.0, flagged_s),),
         duration_s=600.0,
         event_onsets=(1.0, 2.0),
-        has_volume_markers=True,
     )
     locked = VolumeLockedAverage(
         recording_id=recording_id,
@@ -95,8 +93,6 @@ def _write_participant(root, subject: str, *, level: float, n_runs: int, flagged
         task="thermalactive",
         spectra=[item[0] for item in evidence],
         continuity=[item[1] for item in evidence],
-        timings={item[0].recording_id: timing for item in evidence},
-        locked_averages=[item[2] for item in evidence],
         measurements={"variance_removed": 0.80 + float(subject[-1]) / 100.0},
         versions={"mne": "1.12.1"},
     )
@@ -119,19 +115,16 @@ def test_the_whole_chain_produces_a_readable_cohort(cohort_root) -> None:
 
     assert cohort.subjects == ("0014", "0015")
     assert cohort.not_aggregated == ()
-    assert cohort.contexts == (AcquisitionContext.IN_SCANNER,)
     assert cohort.paradigms == (Paradigm.TASK,)
-    assert not cohort.is_mixed
 
 
-def test_the_context_derived_at_write_time_survives_the_round_trip(cohort_root) -> None:
+def test_the_paradigm_derived_at_write_time_survives_the_round_trip(cohort_root) -> None:
     """Derived once from the evidence, then read, never re-derived."""
     cohort = collect_cohort(cohort_root)
 
     for participant in cohort.participants:
-        assert participant.context is AcquisitionContext.IN_SCANNER
+        assert participant.paradigm is Paradigm.TASK
         assert participant.has_comb_evidence is False  # no comb resolved in this fixture
-        assert "volume_locked_excess_power_after_uv2" in participant.runs.columns
 
 
 def test_two_participants_are_below_the_gate_and_get_no_summary(cohort_root) -> None:

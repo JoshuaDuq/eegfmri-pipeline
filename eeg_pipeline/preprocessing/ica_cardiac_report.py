@@ -60,7 +60,7 @@ def beat_source_phrase(source: str) -> str:
     the marker-agreement section, which is where a poor one shows up.
     """
     if source == MARKER_TRAIN_SOURCE:
-        return "Analyzer R markers"
+        return "beat markers"
     return "R peaks detected from the ECG signal"
 
 CARDIAC_REPORT_TITLES = (
@@ -649,7 +649,7 @@ def _clear_cardiac_review(report: mne.Report) -> None:
 def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
     """State where this section's beats came from, reading the runs rather than asserting.
 
-    ``detect_ecg_events`` prefers Analyzer's marker train wherever a run carries one, and
+    ``detect_ecg_events`` prefers an annotated beat train wherever a run carries one, and
     the two sources fail on different runs, so a section can hold both. The sentence has
     to be built from what the runs actually used: the panels are read to judge detection
     quality, and a claim about which detection they show is the one thing that must not be
@@ -663,11 +663,11 @@ def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
     if from_markers == 0:
         return (
             "<p>R peaks are detected directly from the configured ECG signal, so this "
-            "review does not depend on BrainVision Analyzer R markers.</p>"
+            "review does not depend on an annotated beat train.</p>"
         )
     if from_markers == total:
         return (
-            "<p>The beats every panel here is locked to are <strong>Analyzer's R "
+            "<p>The beats every panel here is locked to are <strong>the recording's "
             "markers</strong>, not peaks detected from the ECG signal: the marker train "
             "is preferred wherever a run carries one, because it is the detection that "
             "drove the upstream pulse-artifact correction. That train is measured against "
@@ -675,7 +675,7 @@ def _beat_source_sentence(beat_sources: Sequence[str]) -> str:
             "disagree carries every panel below on the disagreeing train.</p>"
         )
     return (
-        f"<p>The beats these panels are locked to come from <strong>Analyzer's R markers "
+        f"<p>The beats these panels are locked to come from <strong>the recording's markers "
         f"on {from_markers} of {total} run(s)</strong> and from R peaks detected in the "
         "ECG signal on the rest: the marker train is preferred wherever a run carries "
         "one, because it is the detection that drove the upstream pulse-artifact "

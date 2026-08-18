@@ -27,7 +27,6 @@ from eeg_pipeline.preprocessing.report.cohort.rejection import (  # noqa: E402
     reason_totals,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -61,7 +60,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=paradigm,
         measurements=measurements,
         conditions=_conditions(conditions) if conditions else pd.DataFrame(),

@@ -16,10 +16,8 @@ from pandas.testing import assert_frame_equal
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
     COMB_COLUMNS,
     RUN_COLUMNS,
-    SCANNER_RUN_COLUMNS,
     SCHEMA_VERSION,
     SPECTRUM_COLUMNS,
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
     has_sidecar,
@@ -107,7 +105,6 @@ def _sidecar(**overrides) -> SubjectSidecar:
     defaults = dict(
         subject="0014",
         task="thermalactive",
-        context=AcquisitionContext.IN_SCANNER,
         paradigm=Paradigm.TASK,
         measurements={"variance_removed": 0.856, "n_excluded": 29},
         settings={"comb_welch_seconds": 8.0},
@@ -134,7 +131,6 @@ def test_a_sidecar_survives_a_round_trip(tmp_path) -> None:
 
     assert restored.subject == "0014"
     assert restored.task == "thermalactive"
-    assert restored.context is AcquisitionContext.IN_SCANNER
     assert restored.paradigm is Paradigm.TASK
     assert restored.measurements["variance_removed"] == pytest.approx(0.856)
     assert restored.versions == {"mne": "1.12.1"}
@@ -160,7 +156,6 @@ def test_an_eeg_only_participant_writes_no_gradient_tables(tmp_path) -> None:
     paths = write_sidecar(
         report,
         _sidecar(
-            context=AcquisitionContext.OUT_OF_SCANNER,
             runs=_runs(in_scanner=False),
             comb_curves=_empty_comb(),
         ),
@@ -256,44 +251,21 @@ def test_required_columns_are_the_documented_ones() -> None:
     assert RUN_COLUMNS[:3] == ("run", "n_channels", "duration_s")
     assert "flagged_fraction" in RUN_COLUMNS
     assert SPECTRUM_COLUMNS[:3] == ("run", "stage", "freq_hz")
-    assert "volume_locked_excess_power_after_uv2" in SCANNER_RUN_COLUMNS
 
 
-def test_an_in_scanner_sidecar_must_carry_the_gradient_columns(tmp_path) -> None:
+def test_a_required_continuity_column_must_survive_the_round_trip(tmp_path) -> None:
     """The silent failure this guard exists for.
 
-    A writer that omitted the gradient scalars would produce a sidecar that reads back
-    without complaint and quietly removes its participant from the gradient panels, which
-    the panel reports only as a smaller denominator that nobody has reason to question.
+    A writer that omitted a required reduction would produce a sidecar that reads back
+    without complaint and quietly removes its participant from the panels built on it,
+    which they report only as a smaller denominator nobody has reason to question.
     """
     report = _report(tmp_path)
     paths = write_sidecar(report, _sidecar())
-    _runs().drop(columns=["volume_locked_excess_power_after_uv2"]).to_csv(
-        paths.runs, sep="\t", index=False
-    )
+    _runs().drop(columns=["continuity_median_db"]).to_csv(paths.runs, sep="\t", index=False)
 
-    with pytest.raises(ValueError, match="volume_locked_excess_power_after_uv2"):
+    with pytest.raises(ValueError, match="continuity_median_db"):
         read_sidecar(report)
-
-
-@pytest.mark.parametrize("column", ["volume_jitter_s", "n_matched_beats"])
-def test_scanner_denominator_columns_are_required(tmp_path, column) -> None:
-    report = _report(tmp_path)
-    runs = _runs().drop(columns=[column])
-
-    with pytest.raises(ValueError, match=column):
-        write_sidecar(report, _sidecar(runs=runs))
-
-
-def test_the_gradient_columns_may_hold_missing_values(tmp_path) -> None:
-    """A measurement that was attempted and did not resolve is an ordinary outcome."""
-    report = _report(tmp_path)
-    runs = _runs()
-    runs["volume_locked_excess_power_after_uv2"] = float("nan")
-
-    write_sidecar(report, _sidecar(runs=runs))
-
-    assert read_sidecar(report).runs["volume_locked_excess_power_after_uv2"].isna().all()
 
 
 def test_an_infinite_table_value_is_rejected_before_writing(tmp_path) -> None:
@@ -319,22 +291,11 @@ def test_nonstandard_json_numbers_are_rejected_before_writing(tmp_path) -> None:
     assert not sidecar_paths(report).subject_json.exists()
 
 
-def test_locked_resolved_flag_must_match_the_signed_power(tmp_path) -> None:
-    report = _report(tmp_path)
-    runs = _runs()
-    runs.loc[0, "volume_locked_resolved_after"] = True
-
-    with pytest.raises(ValueError, match="volume_locked_resolved_after"):
-        write_sidecar(report, _sidecar(runs=runs))
-
-
-def test_an_eeg_only_sidecar_is_not_asked_for_gradient_columns(tmp_path) -> None:
+def test_a_sidecar_carrying_only_the_required_columns_is_accepted(tmp_path) -> None:
+    """The contract is the required columns; extra acquisition scalars are optional."""
     report = _report(tmp_path)
 
-    write_sidecar(
-        report,
-        _sidecar(context=AcquisitionContext.OUT_OF_SCANNER, runs=_runs(in_scanner=False)),
-    )
+    write_sidecar(report, _sidecar(runs=_runs(in_scanner=False)))
 
     assert read_sidecar(report).n_runs == 2
 
@@ -343,8 +304,8 @@ def test_a_writer_omitting_a_required_column_fails_before_touching_disk(tmp_path
     """Named at the stage that is wrong, rather than weeks later at a cohort run."""
     report = _report(tmp_path)
 
-    with pytest.raises(ValueError, match="n_volumes"):
-        write_sidecar(report, _sidecar(runs=_runs(in_scanner=False)))
+    with pytest.raises(ValueError, match="continuity_max_db"):
+        write_sidecar(report, _sidecar(runs=_runs().drop(columns=["continuity_max_db"])))
 
     assert not sidecar_paths(report).runs.exists()
 

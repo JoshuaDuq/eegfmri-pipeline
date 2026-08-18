@@ -1,15 +1,15 @@
 """Time-resolved data quality across each continuous run.
 
 Every other panel in the report summarises a run into one number per channel, per
-component, or per epoch. None of them answer *when*. That matters most inside a scanner,
-where the dominant failure is not a uniformly poor recording but a good recording with a
-bad stretch in it: the participant shifts in the bore, the gradient correction template
-stops matching, and from that moment the run is contaminated while its run-level
-averages stay unremarkable.
+component, or per epoch. None of them answer *when*. That matters wherever the dominant
+failure is not a uniformly poor recording but a good recording with a bad stretch in it:
+the participant shifts, an electrode lifts, an upstream correction template stops matching,
+and from that moment the run is contaminated while its run-level averages stay
+unremarkable.
 
 The epoch-rejection panel comes closest, but it is indexed by epoch position and only
 covers time that was epoched at all. Breaks, pre-task segments, and the gaps between
-trials are invisible to it, and those are exactly where a scanner run goes wrong.
+trials are invisible to it, and those are exactly where a run goes wrong.
 
 Amplitude is shown relative to each channel's own median over the run, so the panel
 reads as change over time rather than as a map of which channels are loud. A channel
@@ -69,13 +69,9 @@ class RunContinuity:
     #: else in the report puts the two on one axis.
     #:
     #: Empty for a resting-state recording, which has no events, and for a run whose
-    #: annotations are all scanner and artifact marks. The rug is then not drawn at all,
+    #: annotations are all bookkeeping and artifact marks. The rug is then not drawn at all,
     #: rather than drawn empty.
     event_onsets: tuple[float, ...] = ()
-    #: Whether this run was searched for a volume-marker train at all.
-    #:
-    #: An EEG-only recording has no train to search, which is different from one that was
-    #: searched and found empty.
     #: Whether the channel rows were sorted down the head rather than left in file order.
     #:
     #: Carried so the axis can say which of the two it is. At a full montage most rows have
@@ -287,7 +283,7 @@ def _anterior_to_posterior(raw: mne.io.BaseRaw, picks: np.ndarray) -> np.ndarray
 
     Only that axis. A full spatial ordering of a 2-D montage onto one axis does not exist,
     and anterior-posterior is the one that matters here: it is the axis ocular artifact,
-    neck muscle, and the gradient's own topography are organised along.
+    and neck muscle are organised along.
 
     Positions are optional. A montage that was never set leaves every location at the
     origin, and sorting on that would impose an arbitrary order while looking principled,

@@ -11,7 +11,7 @@ from studies.pain_study.analysis.gradient.scanner_harmonic_comb import (
     ScannerCombParameters,
     Spectrum,
 )
-from eeg_pipeline.preprocessing.pipeline import scanner_harmonic_qc as module
+from studies.pain_study.scripts.gradient import scanner_harmonic_qc as module
 from tests.utils.pipelines_test_utils import DotConfig
 
 

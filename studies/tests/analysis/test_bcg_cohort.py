@@ -23,7 +23,6 @@ from studies.pain_study.analysis.bcg.cohort import (  # noqa: E402
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort  # noqa: E402
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -32,7 +31,7 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
 def _participant(
     subject: str,
     *,
-    in_scanner: bool = True,
+    marker_scored: bool = True,
     matched: list[float] | None = None,
     markers: list[float] | None = None,
     detected: list[float] | None = None,
@@ -58,32 +57,22 @@ def _participant(
             "flagged_fraction": [0.02] * n_runs,
             "continuity_median_db": [0.2] * n_runs,
             "continuity_max_db": [5.0] * n_runs,
-            "marker_matched_fraction": matched,
-            "n_markers": markers,
-            "n_detected_beats": detected,
-            "n_matched_beats": matched_counts,
             "median_bpm": bpm if bpm is not None else [62.0] * n_runs,
             "n_beats": beats if beats is not None else [600.0] * n_runs,
             "beat_dropouts": dropouts if dropouts is not None else [3.0] * n_runs,
         }
     )
-    if in_scanner:
-        frame["n_volumes"] = [300] * n_runs
-        frame["repetition_time_s"] = [2.0] * n_runs
-        frame["volume_locked_rms_before_uv"] = [1.2] * n_runs
-        frame["volume_locked_floor_before_uv"] = [0.4] * n_runs
-        frame["volume_locked_excess_power_before_uv2"] = [1.28] * n_runs
-        frame["volume_locked_resolved_before"] = [True] * n_runs
-        frame["volume_locked_rms_after_uv"] = [0.76] * n_runs
-        frame["volume_locked_floor_after_uv"] = [0.3] * n_runs
-        frame["volume_locked_excess_power_after_uv2"] = [0.49] * n_runs
-        frame["volume_locked_resolved_after"] = [True] * n_runs
+    # Absent columns, not missing values: a participant whose runs were never scored
+    # against a marker train is a different case from one scored and found empty, and
+    # the selection distinguishes them by presence.
+    if marker_scored:
+        frame["marker_matched_fraction"] = matched
+        frame["n_markers"] = markers
+        frame["n_detected_beats"] = detected
+        frame["n_matched_beats"] = matched_counts
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=(
-            AcquisitionContext.IN_SCANNER if in_scanner else AcquisitionContext.OUT_OF_SCANNER
-        ),
         paradigm=Paradigm.TASK,
         runs=frame,
     )
@@ -141,18 +130,18 @@ def test_the_worst_run_travels_beside_the_pooled_figure() -> None:
     assert row["worst_run_agreement"] == 0.4
 
 
-def test_a_participant_outside_a_scanner_is_not_in_the_denominator() -> None:
-    """A recording made outside a bore has no pulse correction to describe."""
+def test_a_participant_never_scored_against_markers_is_not_in_the_denominator() -> None:
+    """A recording with no marker train has no pulse correction to describe."""
     analyzer = analyzer_cohort(
-        _cohort(_participant("0014"), _participant("0015", in_scanner=False))
+        _cohort(_participant("0014"), _participant("0015", marker_scored=False))
     )
 
     assert list(analyzer.frame["subject"]) == ["0014"]
     assert analyzer.n_participants == 1
 
 
-def test_a_cohort_entirely_outside_a_scanner_has_no_section() -> None:
-    assert analyzer_cohort(_cohort(_participant("0014", in_scanner=False))) is None
+def test_a_cohort_with_no_marker_train_anywhere_has_no_section() -> None:
+    assert analyzer_cohort(_cohort(_participant("0014", marker_scored=False))) is None
 
 
 def test_a_participant_without_an_ecg_channel_carries_no_agreement() -> None:
@@ -232,7 +221,6 @@ def _residual_participant(subject: str, runs: dict[int, tuple[int, float | None]
     """One in-scanner participant, ``run -> (marker_count, residual_uv)``."""
     import pandas as pd
     from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-        AcquisitionContext,
         Paradigm,
         SubjectSidecar,
     )
@@ -241,7 +229,6 @@ def _residual_participant(subject: str, runs: dict[int, tuple[int, float | None]
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.IN_SCANNER,
         paradigm=Paradigm.TASK,
         runs=pd.DataFrame(
             {
@@ -365,7 +352,6 @@ def _rest_participant(subject: str, *, marker_count: int, residual_uv: float | N
     """
     import pandas as pd
     from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-        AcquisitionContext,
         Paradigm,
         SubjectSidecar,
     )
@@ -374,7 +360,6 @@ def _rest_participant(subject: str, *, marker_count: int, residual_uv: float | N
     return SubjectSidecar(
         subject=subject,
         task="rest",
-        context=AcquisitionContext.IN_SCANNER,
         paradigm=Paradigm.REST,
         runs=pd.DataFrame(
             {
@@ -421,7 +406,6 @@ def test_an_out_of_scanner_participant_is_not_listed() -> None:
     )
     from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
     from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-        AcquisitionContext,
         Paradigm,
         SubjectSidecar,
     )
@@ -430,7 +414,6 @@ def test_an_out_of_scanner_participant_is_not_listed() -> None:
     outside = SubjectSidecar(
         subject="0099",
         task="rest",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
         runs=pd.DataFrame(
             {

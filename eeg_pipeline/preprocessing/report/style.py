@@ -227,7 +227,7 @@ def draw_figure_footnote(figure, text: str) -> None:
 
     ``figure.text`` places an artist in figure coordinates, which ``constrained_layout``
     never consults. Two panels wrote their footnote at y=0.005 and the layout engine then
-    put something else there: the gradient comb's outside legend, and the ICA variance
+    put something else there: an outside legend, and the ICA variance
     panel's own axis label. Both printed through the note and neither could be read.
 
     ``supxlabel`` is the same statement made where the layout engine can see it. It is

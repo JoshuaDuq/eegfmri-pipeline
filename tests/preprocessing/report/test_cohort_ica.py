@@ -1,9 +1,9 @@
 """Decomposition quality, and the one place this report is allowed to say "violation".
 
-Variance removed is the pipeline's headline number and the easiest thing in the report to
-pool wrongly: unremarkable inside a scanner, alarming outside one, and meaningless when a
-median is taken over both. The rank check is the opposite case -- an algebraic fact that
-holds whatever the recording, and therefore the only thing here stated as a fault.
+Variance removed is the pipeline's headline number, pooled over the whole cohort now that
+the acquisition-context axis is gone. The rank check is the opposite case -- an algebraic
+fact that holds whatever the recording, and therefore the only thing here stated as a
+fault.
 """
 
 from __future__ import annotations
@@ -20,12 +20,11 @@ from eeg_pipeline.preprocessing.report.cohort.ica import (  # noqa: E402
     decomposition_table,
     plot_label_composition,
     rank_violations,
-    variance_by_context,
+    variance_pooled,
     variance_summary_html,
 )
 from eeg_pipeline.preprocessing.report.cohort.record import component_label_counts  # noqa: E402
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -47,7 +46,6 @@ def _runs() -> pd.DataFrame:
 def _participant(
     subject: str,
     *,
-    context: AcquisitionContext = AcquisitionContext.IN_SCANNER,
     n_components: int = 62,
     data_rank: int = 62,
     variance_removed: float = 0.86,
@@ -69,7 +67,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=context,
         paradigm=Paradigm.TASK,
         measurements=measurements,
         runs=_runs(),
@@ -183,18 +180,17 @@ def test_a_participant_without_a_recorded_rank_is_not_accused() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# Variance removed, per context
+# Variance removed
 # --------------------------------------------------------------------------------------
 
 
-def test_variance_removed_is_pooled_within_a_context_never_across() -> None:
-    """A median over both populations would move with the mix rather than the recordings."""
+def test_variance_removed_is_pooled_across_the_whole_cohort() -> None:
+    """Every participant with a measurement contributes to one denominator."""
     frame = decomposition_frame(
         _cohort(
             *(
                 _participant(
                     f"{index:04d}",
-                    context=AcquisitionContext.IN_SCANNER,
                     variance_removed=0.86,
                 )
                 for index in range(6)
@@ -202,7 +198,6 @@ def test_variance_removed_is_pooled_within_a_context_never_across() -> None:
             *(
                 _participant(
                     f"{index:04d}",
-                    context=AcquisitionContext.OUT_OF_SCANNER,
                     variance_removed=0.30,
                 )
                 for index in range(10, 16)
@@ -210,35 +205,19 @@ def test_variance_removed_is_pooled_within_a_context_never_across() -> None:
         )
     )
 
-    pooled = variance_by_context(frame)
+    pooled = variance_pooled(frame)
 
-    assert set(pooled) == {AcquisitionContext.IN_SCANNER, AcquisitionContext.OUT_OF_SCANNER}
-    assert pooled[AcquisitionContext.IN_SCANNER].median == pytest.approx(0.86)
-    assert pooled[AcquisitionContext.OUT_OF_SCANNER].median == pytest.approx(0.30)
-    # Each denominator counts only its own context.
-    assert pooled[AcquisitionContext.IN_SCANNER].denominator.n_subjects == 6
+    # One population: every participant contributes to the same denominator.
+    assert pooled.denominator.n_subjects == 12
 
 
-def test_a_single_context_cohort_pools_only_that_one() -> None:
-    frame = decomposition_frame(_cohort(_participant("0014"), _participant("0015")))
-
-    pooled = variance_by_context(frame)
-
-    assert set(pooled) == {AcquisitionContext.IN_SCANNER}
-
-
-def test_a_mixed_cohort_states_why_it_did_not_pool() -> None:
+def test_a_cohort_with_no_measured_variance_pools_nothing() -> None:
+    """An absent measurement must not read as a measured zero."""
     frame = decomposition_frame(
-        _cohort(
-            _participant("0014", context=AcquisitionContext.IN_SCANNER),
-            _participant("0015", context=AcquisitionContext.OUT_OF_SCANNER),
-        )
+        _cohort(_participant("0014", variance_removed=float("nan")))
     )
 
-    html = variance_summary_html(variance_by_context(frame), stratified=True)
-
-    assert "never pooled across them" in html
-    assert "In scanner" in html and "Outside scanner" in html
+    assert variance_pooled(frame) is None
 
 
 def test_below_the_gate_the_participants_are_listed_instead_of_summarised() -> None:
@@ -249,7 +228,7 @@ def test_below_the_gate_the_participants_are_listed_instead_of_summarised() -> N
         )
     )
 
-    html = variance_summary_html(variance_by_context(frame), stratified=False)
+    html = variance_summary_html(variance_pooled(frame))
 
     assert "0014 86.0%" in html
     assert "0015 91.0%" in html
@@ -312,7 +291,6 @@ def test_a_cohort_without_decomposition_measurements_has_no_frame() -> None:
     bare = SubjectSidecar(
         subject="0014",
         task="rest",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
     )
 

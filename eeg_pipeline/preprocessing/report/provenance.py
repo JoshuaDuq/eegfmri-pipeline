@@ -44,7 +44,6 @@ PROVENANCE_KEYS = (
     ("pyprep.bad_channel_sync_policy", "Bad-channel sync policy"),
     ("time_windows.baseline_tfr_morlet", "TFR baseline, Morlet (s)"),
     ("time_windows.baseline_tfr_multitaper", "TFR baseline, multitaper (s)"),
-    ("preprocessing.brainvision_analyzer.enabled", "Analyzer correction upstream"),
     ("report.analysis.aperiodic_fit_range_hz", "Aperiodic fit range (Hz)"),
     ("report.analysis.aperiodic_exclude_hz", "Aperiodic exclusion windows (Hz)"),
     ("report.analysis.response_window_s", "Split-half response window (s)"),
@@ -92,7 +91,7 @@ def provenance_html(
 
     A key the configuration does not contain is omitted rather than listed as "not set".
     The list below spans every paradigm this pipeline supports, so an EEG-only dataset
-    would otherwise carry a row about scanner correction and a resting-state dataset rows
+    would otherwise carry a row about a stage it never ran and a resting-state dataset rows
     about epoch baselines — settings that influenced nothing, occupying the table that
     exists to record what did. A key that is present and false is a recorded decision and
     stays, because reproducing the report needs it.

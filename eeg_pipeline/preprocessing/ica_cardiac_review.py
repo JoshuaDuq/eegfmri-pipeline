@@ -153,7 +153,7 @@ class CardiacReviewSettings:
         return settings
 
 
-#: Beat train taken from the BrainVision Analyzer markers preserved in the recording.
+#: Beat train read from an annotation the recording carries, one mark per heartbeat.
 MARKER_TRAIN_SOURCE = "annotation-markers"
 #: Beat train detected from the ECG channel, independently of any annotation.
 ECG_CHANNEL_SOURCE = "ecg-channel"
@@ -246,11 +246,11 @@ def _validate_ecg_channel(raw: mne.io.BaseRaw, channel: str) -> None:
 
 
 def _marker_beats(raw: mne.io.BaseRaw, description: str) -> np.ndarray:
-    """The Analyzer R-marker train preserved in the recording, if it carries one.
+    """The beat-marker train the recording carries, if it carries one.
 
-    Returns an empty array where the export has no markers, which on this dataset is a third
-    of runs: Analyzer's R detection failed, so it could not compute the R-to-artifact delay,
-    accepted its 0.21 s default and marked nothing. Absence here is an ordinary outcome.
+    Returns an empty array where the recording has no such annotation, which is an ordinary
+    outcome rather than a fault: an upstream detector that failed to find R peaks marks
+    nothing, and a montage with an ECG lead and no marker train never had any to begin with.
     """
     try:
         events, _ = mne.events_from_annotations(
@@ -288,23 +288,24 @@ def detect_ecg_events(
     raw: mne.io.BaseRaw,
     settings: CardiacReviewSettings,
 ) -> EcgDetection:
-    """The run's beat train, preferring Analyzer's markers over channel detection.
+    """The run's beat train, from whichever source ``beat_source`` selects.
 
-    Analyzer's marker train is preferred where the export carries one, because it is the
-    detection that actually drove the upstream pulse-artifact correction and it was
-    validated against the recording. ``find_ecg_events`` on the ECG channel is used only
-    where no marker train survives.
+    Why the source is configurable at all: a marker train and a QRS detector can disagree
+    sharply on the same recording, and which one to trust is a property of the acquisition
+    rather than something this function can infer. Where an upstream stage already detected
+    beats and left them annotated, that train is usually the validated one and the detector
+    is the fallback. Where no annotation exists, the channel is the only source there is.
 
-    The preference is not circular. This review compares the EEG either side of *MNE's* ICA
-    exclusions; Analyzer's correction is already baked into ``raw`` and is not what is being
-    judged, so taking the beat reference from Analyzer's markers does not let the correction
-    grade itself.
+    ``auto`` encodes the first arrangement: prefer the annotation, fall back to the channel.
+    It is the default because a marker train that exists is evidence someone already solved
+    this, and because a QRS detector can lock onto a larger non-R deflection and report a
+    rate an order of magnitude wrong while raising nothing -- on one dataset, 8 and 2 bpm
+    where the markers read 61 and 60, on different runs than the ones the markers failed on.
+    ``markers`` refuses the fallback; ``detect`` ignores annotations entirely.
 
-    The order matters on real data. On this dataset the channel detector disagrees sharply
-    with the marker train on the same runs -- reporting 8 bpm and 2 bpm where the markers
-    report 61 and 60 -- and the two sources fail on *different* runs, so neither alone
-    characterises a subject. :func:`pulse_marker_events` makes the same choice for the
-    cardiac attenuation QC.
+    Taking the beat reference from an annotation is not circular here. This review compares
+    the EEG either side of *MNE's* ICA exclusions, and whatever produced the annotation is
+    already in ``raw`` and is not what is being judged.
     """
     _validate_ecg_channel(raw, settings.ecg_channel)
     sfreq = float(raw.info["sfreq"])
@@ -340,7 +341,7 @@ def detect_ecg_events(
     )
     if len(events) < MINIMUM_BEATS:
         raise UnusableEcg(
-            f"No Analyzer R markers, and direct ECG detection found only {len(events)} "
+            f"No usable beat markers, and direct ECG detection found only {len(events)} "
             f"R peaks; at least {MINIMUM_BEATS} are required."
         )
     if not np.isfinite(average_pulse_bpm) or average_pulse_bpm <= 0:
@@ -440,8 +441,8 @@ def ctps_promotions(
     detections are what that step was meant to produce.
 
     A component has to clear ``minimum_run_fraction`` of the runs that yielded a usable
-    beat train. A single-run flag is not enough on its own: BCG topography moves with head
-    position, so one run disagreeing with five is as likely to be a threshold crossing as
+    beat train. A single-run flag is not enough on its own: cardiac topography moves with
+    head position, so one run disagreeing with five is as likely to be a threshold crossing as
     a cardiac component. The description names the runs so the reviewer can check the call
     rather than take it.
     """

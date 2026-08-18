@@ -1921,7 +1921,7 @@ _DECOMPOSITION_SECTION = "ICA decomposition quality"
 #:
 #: Deliberately *not* ``ica-component-review``. The condition-TFR stage reopens the
 #: report, clears that tag, and rebuilds the per-component dossiers from clean epochs —
-#: but it has no filtered run files and no Analyzer-marker fallback state, so rebuilding
+#: but it has no filtered run files, so rebuilding
 #: the decomposition section from it produced a strictly poorer version: "Component
 #: variance by run" and the fallback warning were cleared and never re-added. Keying the
 #: two bodies of content to different tags makes that failure unrepresentable rather than
@@ -1929,7 +1929,6 @@ _DECOMPOSITION_SECTION = "ICA decomposition quality"
 _DECOMPOSITION_TAG = "ica-decomposition"
 _DECOMPOSITION_TAGS = ("ica", _DECOMPOSITION_TAG)
 
-#: Panel carrying the Analyzer-marker fallback warning, when one applies.
 #:
 #: Its own panel rather than a banner prepended to the review guide. The guide explains
 #: how to read the dossiers and is rebuilt whenever those change; this is a statement

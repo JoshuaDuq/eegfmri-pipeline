@@ -148,20 +148,19 @@ def test_settings_the_dataset_never_configured_are_omitted() -> None:
         )
     )
 
-    assert "Analyzer correction upstream" not in document
     assert "not set" not in document
     assert "EEG reference" in document
     # Present and false: a recorded decision, so it stays.
     assert "ICLabel used" in document
 
 
-def test_a_configured_scanner_setting_is_reported_even_when_off() -> None:
+def test_a_beat_marker_setting_is_reported_even_when_empty() -> None:
+    """A named beat label is what decides whether the cardiac panels searched at all."""
     from eeg_pipeline.preprocessing.report.provenance import provenance_html
 
-    document = provenance_html(_Config({"preprocessing.brainvision_analyzer.enabled": False}))
+    document = provenance_html(_Config({"ica.cardiac_review.beat_source": "ecg"}))
 
-    assert "Analyzer correction upstream" in document
-    assert ">no<" in document
+    assert "ECG beat source" in document
 
 
 def test_a_report_whose_settings_are_all_absent_says_so() -> None:

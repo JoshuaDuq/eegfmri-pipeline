@@ -32,10 +32,15 @@ def _raw_with_beats(beat_onsets):
             mne.Annotations(
                 onset=beat_onsets,
                 duration=0.0,
-                description=["Pulse Artifact/R"] * len(beat_onsets),
+                description=[BEAT_MARKER] * len(beat_onsets),
             )
         )
     return raw
+
+
+#: The label this file's fixtures write. Core defaults to none, so a caller that wants an
+#: interval series must name it, the way a study config does.
+BEAT_MARKER = "Pulse Artifact/R"
 
 
 def _regular_beats(period=0.85, jitter=0.0, seed=0):
@@ -46,7 +51,7 @@ def _regular_beats(period=0.85, jitter=0.0, seed=0):
 
 def test_the_median_rate_is_recovered() -> None:
     series = compute_rr_intervals(
-        _raw_with_beats(_regular_beats(period=0.75)), recording_id="run-1"
+        _raw_with_beats(_regular_beats(period=0.75)), recording_id="run-1", description=BEAT_MARKER
     )
 
     assert series is not None
@@ -56,7 +61,7 @@ def test_the_median_rate_is_recovered() -> None:
 def test_variability_alone_is_not_counted_as_dropout() -> None:
     """A participant with a variable rate must not be reported as a failing detector."""
     series = compute_rr_intervals(
-        _raw_with_beats(_regular_beats(jitter=0.08)), recording_id="run-1"
+        _raw_with_beats(_regular_beats(jitter=0.08)), recording_id="run-1", description=BEAT_MARKER
     )
 
     assert series.dropout_count == 0
@@ -67,7 +72,7 @@ def test_a_missed_beat_is_counted() -> None:
     # Drop every twentieth beat, which doubles the interval that spans it.
     kept = np.array([beat for index, beat in enumerate(beats) if index % 20 != 0])
 
-    series = compute_rr_intervals(_raw_with_beats(kept), recording_id="run-1")
+    series = compute_rr_intervals(_raw_with_beats(kept), recording_id="run-1", description=BEAT_MARKER)
 
     assert series.dropout_count >= 8
 
@@ -76,7 +81,7 @@ def test_a_detector_that_fails_partway_shows_in_the_interval_series() -> None:
     beats = _regular_beats()
     survived = np.concatenate([beats[beats < 90.0], beats[beats >= 90.0][::3]])
 
-    series = compute_rr_intervals(_raw_with_beats(survived), recording_id="run-1")
+    series = compute_rr_intervals(_raw_with_beats(survived), recording_id="run-1", description=BEAT_MARKER)
 
     late = series.intervals_s[series.beat_times_s >= 90.0]
     early = series.intervals_s[series.beat_times_s < 90.0]
@@ -85,15 +90,15 @@ def test_a_detector_that_fails_partway_shows_in_the_interval_series() -> None:
 
 
 def test_a_run_without_markers_yields_no_series() -> None:
-    assert compute_rr_intervals(_raw_with_beats([]), recording_id="run-1") is None
+    assert compute_rr_intervals(_raw_with_beats([]), recording_id="run-1", description=BEAT_MARKER) is None
 
 
 def test_too_few_markers_yield_no_series() -> None:
-    assert compute_rr_intervals(_raw_with_beats([1.0, 2.0]), recording_id="run-1") is None
+    assert compute_rr_intervals(_raw_with_beats([1.0, 2.0]), recording_id="run-1", description=BEAT_MARKER) is None
 
 
 def test_the_section_renders_and_replaces_on_rebuild() -> None:
-    series = compute_rr_intervals(_raw_with_beats(_regular_beats()), recording_id="run-1")
+    series = compute_rr_intervals(_raw_with_beats(_regular_beats()), recording_id="run-1", description=BEAT_MARKER)
     report = mne.Report(title="analyzer", verbose="ERROR")
 
     add_rr_interval_section(report=report, series=[series])
@@ -119,7 +124,7 @@ def _series_for(count: int, *, period=0.85):
     return [
         compute_rr_intervals(
             _raw_with_beats(_regular_beats(period=period, seed=index)),
-            recording_id=f"sub-01_task-x_run-{index + 1}",
+            recording_id=f"sub-01_task-x_run-{index + 1}", description=BEAT_MARKER,
         )
         for index in range(count)
     ]
@@ -135,7 +140,7 @@ def test_the_panels_share_one_interval_scale() -> None:
     series = _series_for(3)
     collapsed = compute_rr_intervals(
         _raw_with_beats(np.array([1.0, 30.0, 95.0, 160.0])),
-        recording_id="sub-01_task-x_run-4",
+        recording_id="sub-01_task-x_run-4", description=BEAT_MARKER,
     )
 
     figure = plot_rr_intervals([*series, collapsed])
@@ -157,7 +162,7 @@ def test_a_collapsed_run_does_not_flatten_the_readable_ones() -> None:
     series = _series_for(3)
     collapsed = compute_rr_intervals(
         _raw_with_beats(np.array([1.0, 30.0, 95.0, 160.0])),
-        recording_id="sub-01_task-x_run-4",
+        recording_id="sub-01_task-x_run-4", description=BEAT_MARKER,
     )
 
     with_collapsed = plot_rr_intervals([*series, collapsed])
@@ -184,7 +189,7 @@ def test_a_long_interval_is_drawn_where_it_falls_rather_than_on_the_rail() -> No
     # Intervals of 5 s: far above any plausible rhythm, well inside the drawn window.
     lapsed = compute_rr_intervals(
         _raw_with_beats(np.array([1.0, 6.0, 11.0, 16.0])),
-        recording_id="sub-01_task-x_run-1",
+        recording_id="sub-01_task-x_run-1", description=BEAT_MARKER,
     )
 
     figure = plot_rr_intervals([lapsed])
@@ -221,7 +226,7 @@ def test_intervals_outside_the_window_are_counted_on_the_panel() -> None:
     """Clipping without saying so would turn a failed detector into a tidy panel."""
     collapsed = compute_rr_intervals(
         _raw_with_beats(np.array([1.0, 30.0, 95.0, 160.0])),
-        recording_id="sub-01_task-x_run-4",
+        recording_id="sub-01_task-x_run-4", description=BEAT_MARKER,
     )
 
     figure = plot_rr_intervals([collapsed])

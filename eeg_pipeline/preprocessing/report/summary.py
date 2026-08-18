@@ -346,7 +346,7 @@ def decomposition_summary_html(
             "they carry. This is worth reading beside the variance figures rather than "
             "after them: a criterion that selects components by variance stops early "
             "when artifact holds most of the variance, which is the usual case inside a "
-            "scanner, so the components it did fit can explain almost all of the "
+            "recording, so the components it did fit can explain almost all of the "
             "variance while leaving most of the dimensions untouched.</p>"
             if summary.unfitted_dimensions
             else ""
@@ -354,7 +354,7 @@ def decomposition_summary_html(
         + "<p>Variance figures describe how much of the recorded sensor variance the "
         "current exclusion set removes. A high value is not wrong on its own &mdash; "
         "ocular and cardiac artifact genuinely dominate variance, especially inside the "
-        "scanner &mdash; but it is the number that most needs to be defensible.</p>"
+        "recording &mdash; but it is the number that most needs to be defensible.</p>"
         "<p>Sensor variance removed is measured for the exclusion set as a whole, "
         "against the data. It is <strong>not</strong> the sum of the per-component "
         "shares plotted below: ICA components are not orthogonal, so their individual "

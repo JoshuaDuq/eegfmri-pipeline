@@ -37,7 +37,6 @@ from eeg_pipeline.preprocessing.report.cohort.aggregate import (
     pool_runs_rate,
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
-from eeg_pipeline.preprocessing.report.cohort.sidecar import AcquisitionContext
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
 )
@@ -93,6 +92,11 @@ def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame.columns:
         return pd.Series(np.full(len(frame), np.nan), index=frame.index, dtype=float)
     return pd.to_numeric(frame[column], errors="coerce").astype(float)
+
+
+#: What a run must carry to have been scored against a marker train at all. Absence is
+#: the replacement for the acquisition context this used to select on.
+_MARKER_COLUMNS = frozenset({"n_matched_beats", "n_detected_beats", "n_markers"})
 
 
 def _participant_row(
@@ -164,18 +168,17 @@ def analyzer_cohort(
     *,
     plausible_bpm: tuple[float, float] = PLAUSIBLE_BPM,
 ) -> AnalyzerCohort | None:
-    """Assemble the per-participant frame, or nothing outside a scanner.
+    """Assemble the per-participant frame, or nothing where no marker train was measured.
 
-    Restricted to in-scanner participants by the recorded context rather than by whether a
-    number happens to be present. A recording made outside a bore has no pulse correction
-    to describe, and a row of missing values for it would put it in a denominator it does
-    not belong to.
+    Restricted by the evidence the sidecar carries rather than by an acquisition label:
+    schema 4 dropped the recorded context, and a participant whose runs were never scored
+    against a marker train has no correction to describe. Including it would add a row of
+    missing values to a denominator it does not belong to.
     """
-    in_scanner = cohort.select(context=AcquisitionContext.IN_SCANNER)
     rows = [
         _participant_row(participant.subject, participant.runs, plausible_bpm=plausible_bpm)
-        for participant in in_scanner.participants
-        if not participant.runs.empty
+        for participant in cohort.participants
+        if not participant.runs.empty and _MARKER_COLUMNS <= set(participant.runs.columns)
     ]
     if not rows:
         return None

@@ -19,7 +19,6 @@ from eeg_pipeline.preprocessing.report.cohort.collect import (
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
     SCHEMA_VERSION,
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
     sidecar_paths,
@@ -27,8 +26,9 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
 )
 
 
-def _runs(*, in_scanner: bool) -> pd.DataFrame:
-    frame = pd.DataFrame(
+def _runs() -> pd.DataFrame:
+    """The required run columns, and the cardiac scalars a cohort panel reads."""
+    return pd.DataFrame(
         {
             "run": ["run-1"],
             "n_channels": [63],
@@ -36,38 +36,11 @@ def _runs(*, in_scanner: bool) -> pd.DataFrame:
             "flagged_fraction": [0.04],
             "continuity_median_db": [0.5],
             "continuity_max_db": [6.0],
+            "median_bpm": [62.0],
+            "n_beats": [700.0],
+            "beat_dropouts": [2.0],
         }
     )
-    if in_scanner:
-        frame["n_volumes"] = [360]
-        frame["repetition_time_s"] = [2.0]
-        frame["volume_jitter_s"] = [0.003]
-        frame["volume_locked_rms_before_uv"] = [2.1]
-        frame["volume_locked_floor_before_uv"] = [0.5]
-        frame["volume_locked_excess_power_before_uv2"] = [4.16]
-        frame["volume_locked_resolved_before"] = [True]
-        frame["volume_locked_rms_after_uv"] = [1.26]
-        frame["volume_locked_floor_after_uv"] = [0.4]
-        frame["volume_locked_excess_power_after_uv2"] = [1.44]
-        frame["volume_locked_resolved_after"] = [True]
-        frame["median_bpm"] = [62.0]
-        frame["n_beats"] = [700.0]
-        frame["beat_dropouts"] = [2.0]
-        frame["marker_matched_fraction"] = [0.96]
-        frame["marker_median_lag_s"] = [0.004]
-        frame["marker_lag_iqr_s"] = [0.010]
-        frame["n_markers"] = [704.0]
-        frame["n_detected_beats"] = [700.0]
-        frame["n_matched_beats"] = [672.0]
-        frame["pulse_marker_count"] = [704.0]
-        frame["beat_source"] = ["ECG"]
-        frame["bcg_residual_uv"] = [0.8]
-        frame["bcg_beat_train_coverage"] = [0.98]
-        frame["bcg_noise_floor_uv"] = [0.5]
-        frame["bcg_excess_power_uv2"] = [0.39]
-        frame["bcg_resolved"] = [True]
-        frame["bcg_n_beats"] = [700.0]
-    return frame
 
 
 def _spectra() -> pd.DataFrame:
@@ -87,7 +60,6 @@ def _write(
     subject: str,
     *,
     task: str = "thermalactive",
-    context: AcquisitionContext = AcquisitionContext.IN_SCANNER,
     paradigm: Paradigm = Paradigm.TASK,
 ):
     report = root / f"sub-{subject}" / "eeg" / f"sub-{subject}_report.h5"
@@ -98,9 +70,8 @@ def _write(
         SubjectSidecar(
             subject=subject,
             task=task,
-            context=context,
             paradigm=paradigm,
-            runs=_runs(in_scanner=context is AcquisitionContext.IN_SCANNER),
+            runs=_runs(),
             spectrum_curves=_spectra(),
         ),
     )
@@ -192,29 +163,6 @@ def test_a_participant_recorded_under_another_task_is_listed_with_the_reason(tmp
 # --------------------------------------------------------------------------------------
 
 
-def test_a_single_context_cohort_is_not_mixed(tmp_path) -> None:
-    _write(tmp_path, "0014")
-    _write(tmp_path, "0015")
-
-    cohort = collect_cohort(tmp_path)
-
-    assert not cohort.is_mixed
-    assert cohort.contexts == (AcquisitionContext.IN_SCANNER,)
-
-
-def test_a_mixed_cohort_is_detected_and_splits_along_the_context(tmp_path) -> None:
-    """The axis the report refuses to pool across."""
-    _write(tmp_path, "0014", context=AcquisitionContext.IN_SCANNER)
-    _write(tmp_path, "0015", context=AcquisitionContext.OUT_OF_SCANNER)
-
-    cohort = collect_cohort(tmp_path)
-
-    assert cohort.is_mixed
-    strata = dict(cohort.stratified())
-    assert strata[AcquisitionContext.IN_SCANNER].subjects == ("0014",)
-    assert strata[AcquisitionContext.OUT_OF_SCANNER].subjects == ("0015",)
-
-
 def test_selecting_a_paradigm_narrows_the_cohort(tmp_path) -> None:
     _write(tmp_path, "0014", paradigm=Paradigm.TASK)
     _write(tmp_path, "0015", paradigm=Paradigm.REST, task="thermalactive")
@@ -231,7 +179,7 @@ def test_a_selection_keeps_the_record_of_who_was_skipped(tmp_path) -> None:
     _report_without_sidecar(tmp_path, "0015")
 
     cohort = collect_cohort(tmp_path)
-    narrowed = cohort.select(context=AcquisitionContext.IN_SCANNER)
+    narrowed = cohort.select(paradigm=Paradigm.TASK)
 
     assert narrowed.not_aggregated == cohort.not_aggregated
 
@@ -240,7 +188,6 @@ def test_a_cohort_cannot_hold_a_participant_twice(tmp_path) -> None:
     participant = SubjectSidecar(
         subject="0014",
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.TASK,
     )
 

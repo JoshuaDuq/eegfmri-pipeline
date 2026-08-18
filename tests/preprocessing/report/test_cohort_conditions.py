@@ -70,7 +70,6 @@ def _sidecar(**kwargs):
         task="thermalactive",
         spectra=[_spectra()],
         continuity=[_continuity()],
-        timings={},
         **kwargs,
     )
 
@@ -148,7 +147,6 @@ def test_a_resting_state_participant_carries_none(tmp_path) -> None:
         task="rest",
         spectra=[_spectra("sub-0014_task-rest_run-1")],
         continuity=[_continuity("sub-0014_task-rest_run-1", events=())],
-        timings={},
         trials_by_condition={"painful": 60},
     )
 

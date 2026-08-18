@@ -10,7 +10,6 @@ import pytest
 
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -89,7 +88,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.IN_SCANNER,
         paradigm=Paradigm.TASK,
         runs=_runs(n_runs=n_runs, repetition_time_s=repetition_time_s, jitter_s=jitter_s),
         comb_curves=(

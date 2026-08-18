@@ -8,7 +8,7 @@ a different pipeline.
 
 Alignment is declared per column rather than inferred. A "right-align everything but
 the first column" rule reads the component ledger's ``Marked by`` column and the
-scanner section's ``Largest surviving line`` as numbers, and both are prose.
+spectra section's narrowband summaries as numbers, and both are prose.
 
 Run labels are not rewritten here. A call site that has a recording id passes it
 through :func:`~eeg_pipeline.preprocessing.report.style.run_label` itself, because a

@@ -21,9 +21,9 @@ from eeg_pipeline.preprocessing.ica_exclusions import (
     read_component_statuses,
     reviewed_exclusions,
 )
-from eeg_pipeline.preprocessing.report.rr_intervals import (
-    DEFAULT_BEAT_MARKER_DESCRIPTION as PULSE_MARKER_DESCRIPTION,
-)
+#: The label these fixtures write, matching what ``_settings`` configures. Core defaults
+#: to none, so the fixture and the settings have to agree on it explicitly.
+PULSE_MARKER_DESCRIPTION = "Pulse Artifact/R"
 
 SFREQ = 250.0
 DURATION_S = 120.0

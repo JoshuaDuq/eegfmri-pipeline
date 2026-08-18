@@ -1,8 +1,8 @@
 """The per-subject QC sidecar: what one participant contributes to a cohort.
 
 The measurements a cohort needs already exist. ``run_evidence`` reads each run once,
-applies the ICA exclusions, and measures the spectra, the gradient comb, the volume-locked
-residual, the time-resolved quality and the beat detection in a single pass -- by a wide
+applies the ICA exclusions, and measures the spectra, the time-resolved quality and the
+beat detection in a single pass -- by a wide
 margin the most expensive thing the pipeline does. Today those results are plotted and
 dropped, so a cohort document could only be built by paying that cost again, per
 participant, from a gigabyte of filtered raw each.
@@ -46,8 +46,9 @@ import pandas as pd
 #: 0.14 uV over 493 beats and 2.78 uV over 59 of them. A cohort that read a version-2
 #: sidecar as though it were this one would compare two different quantities across
 #: participants, which is exactly what this version number exists to prevent.
-# Version 4 dropped the eleven scanner run columns and the acquisition-context axis.
-# A cohort is one kind of recording now, so there is nothing to refuse to pool across.
+# Version 4 dropped eleven acquisition-specific run columns and the context axis they
+# were keyed on. A cohort is one kind of recording now, so there is nothing to refuse
+# to pool across.
 SCHEMA_VERSION = 4
 
 #: Suffix of the report the sidecar belongs to, mirroring :mod:`build_record`.
@@ -84,7 +85,7 @@ RUN_COLUMNS = (
 #:
 #: The spread quantiles the subject panel draws are a within-participant quantity that no
 #: cohort panel pools, and a required column nothing reads is dead weight in a contract.
-#: The worst channel is kept because gradient residual is focal: a montage median can sit
+#: The worst channel is kept because interference is often focal: a montage median can sit
 #: near zero while individual sensors are unusable.
 SPECTRUM_COLUMNS = ("run", "stage", "freq_hz", "median_db", "max_db")
 #: One row per EEG channel: where it sat on the head, and how many runs it was bad in.
@@ -202,15 +203,12 @@ class SubjectSidecar:
 
     @property
     def has_comb_evidence(self) -> bool:
-        """Whether this participant can contribute to the harmonic-comb panel.
+        """Whether this participant carries curves a comb panel could pool.
 
-        Narrower than :attr:`context`, and deliberately so. ``compute_comb_residual``
-        declines when the frequency resolution cannot separate the comb from its
-        background, which is a property of the volume rate and the run length rather than
-        of the data quality. A participant can therefore be in a scanner, contribute a
-        volume-locked amplitude, and still have no comb to pool -- so "was this in a
-        scanner" and "can this join the comb figure" are two questions and get two
-        answers.
+        A measurement can be attempted and decline to resolve -- a frequency resolution
+        that cannot separate a comb from its background is a property of the run, not of
+        the data quality -- so contributing other measurements and contributing here are
+        two different questions and get two answers.
         """
         return not self.comb_curves.empty
 
@@ -218,9 +216,9 @@ class SubjectSidecar:
 def _empty(columns: tuple[str, ...]) -> pd.DataFrame:
     """An absent table with its columns, so a reader need not special-case it.
 
-    An acquisition that produced no gradient evidence is not a malformed sidecar, it is an
-    EEG-only recording. Returning the shape rather than ``None`` means every consumer
-    filters an empty frame instead of testing for one.
+    A recording that produced no evidence of some kind is not a malformed sidecar.
+    Returning the shape rather than ``None`` means every consumer filters an empty frame
+    instead of testing for one.
     """
     return pd.DataFrame({name: pd.Series(dtype="object") for name in columns})
 
@@ -288,25 +286,6 @@ def _resolved_value(value: Any, *, column: str) -> bool | None:
     raise ValueError(f"The run table has an invalid boolean in {column}: {value!r}.")
 
 
-def _require_locked_power_consistency(frame: pd.DataFrame) -> None:
-    """Ensure resolution flags preserve the signed-power meaning."""
-    for stage in ("before", "after"):
-        power_column = f"volume_locked_excess_power_{stage}_uv2"
-        resolved_column = f"volume_locked_resolved_{stage}"
-        if power_column not in frame or resolved_column not in frame:
-            continue
-        powers = pd.to_numeric(frame[power_column], errors="coerce")
-        for index, (power, resolved) in enumerate(
-            zip(powers, frame[resolved_column], strict=True)
-        ):
-            flag = _resolved_value(resolved, column=resolved_column)
-            if pd.isna(power) or flag is None:
-                continue
-            if flag is not bool(power > 0.0):
-                raise ValueError(
-                    f"The run table row {index} has {resolved_column}={flag}, but "
-                    f"{power_column}={power:g}. The flag must equal signed power > 0."
-                )
 
 
 def _read_table(
@@ -328,12 +307,12 @@ def _read_table(
 def write_sidecar(report_path: Path | str, sidecar: SubjectSidecar) -> SidecarPaths:
     """Write one participant's sidecar beside its report.
 
-    Tables that hold nothing are not written. An EEG-only recording has no gradient comb,
-    and a zero-row file claiming the column names of one would be indistinguishable on disk
-    from a scanner recording whose measurement failed.
+    Tables that hold nothing are not written. A zero-row file claiming a measurement's
+    column names would be indistinguishable on disk from a recording whose measurement was
+    attempted and failed.
     """
-    # Validated before anything reaches disk. A writer that omits a column its own context
-    # requires would otherwise produce a sidecar that reads back fine on the machine that
+    # Validated before anything reaches disk. A writer that omits a required column
+    # would otherwise produce a sidecar that reads back fine on the machine that
     # wrote it and fails weeks later, in a cohort run, naming a participant rather than the
     # stage at fault.
     _require_columns(
@@ -349,7 +328,6 @@ def write_sidecar(report_path: Path | str, sidecar: SubjectSidecar) -> SidecarPa
         (sidecar.conditions, "The condition table"),
     ):
         _require_no_infinite_values(frame, source=source)
-    _require_locked_power_consistency(sidecar.runs)
 
     document = {
         "schema_version": int(sidecar.schema_version),
@@ -421,7 +399,6 @@ def read_sidecar(report_path: Path | str) -> SubjectSidecar:
         )
 
     runs = _read_table(paths.runs, RUN_COLUMNS, required=True)
-    _require_locked_power_consistency(runs)
     return SubjectSidecar(
         subject=subject,
         task=str(document.get("task", "")),

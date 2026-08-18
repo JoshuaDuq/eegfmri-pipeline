@@ -16,7 +16,7 @@ Nothing here is graded. Reference values, the reasoning about what a number mean
 the caveats that come with it stay in the owning section, where there is room to state
 them properly. A landing panel that said "variance removed: 93.9% ⚠" would be asserting
 something this pipeline deliberately refuses to assert, because a high value is ordinary
-inside a scanner and alarming outside one, and the panel does not know which it is
+ordinary for one acquisition and alarming for another, and the panel does not know which
 looking at.
 """
 
@@ -94,7 +94,7 @@ class Headline:
 #: measurements do not clear that bar.
 #:
 #: A key absent from the record is a section that did not run: an EEG-only dataset has no
-#: scanner stage and a resting-state one has no trial retention. The row is dropped rather
+#: cardiac stage and a resting-state one has no trial retention. The row is dropped rather
 #: than rendered empty, so the panel shrinks to what was actually measured.
 HEADLINES: tuple[Headline, ...] = (
     Headline("n_runs", "Runs", _count, "Data quality over time"),
@@ -228,7 +228,7 @@ def at_a_glance_html(record: Mapping[str, Any]) -> str:
         "unusual one &mdash; is stated in that section.</p>"
         + grid_table(columns, rows)
         + "<p>A measurement no stage recorded has no row: a dataset recorded outside a "
-        "scanner has no marker agreement, and a resting-state recording has no trial "
+        "beat-marker train has no marker agreement, and a resting-state recording has no trial "
         "retention.</p>"
     )
 

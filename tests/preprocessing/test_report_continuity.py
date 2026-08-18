@@ -411,42 +411,46 @@ def test_the_section_sits_with_the_other_raw_input_evidence() -> None:
     assert sections.index("Raw (original)") < sections.index("ICA decomposition quality")
 
 
-def test_volume_markers_are_recorded_only_when_the_run_contains_them() -> None:
-    """A configured label is a search instruction, not evidence of a scanner."""
-    from eeg_pipeline.preprocessing.report.continuity import compute_run_continuity
+def test_a_beat_label_is_a_search_instruction_not_an_assumption() -> None:
+    """Naming the beat label excludes that train from the rug; naming none searches for none.
 
-    raw = _raw(volume_onsets=np.arange(0.0, DURATION, 0.9))
-
-    with_markers = compute_run_continuity(
-        raw, recording_id="run-1", volume_description="Volume/V  1"
+    The rug exists to show the trials a bad stretch covers. A beat train is roughly one
+    marker per second, so drawing it as events buries exactly what the panel is read for.
+    """
+    beats = np.arange(0.5, DURATION, 0.9)
+    raw = _raw()
+    raw.set_annotations(
+        mne.Annotations(
+            onset=[*beats, 20.0],
+            duration=[0.0] * (len(beats) + 1),
+            description=["Cardiac/R"] * len(beats) + ["stimulus/heat"],
+        )
     )
-    without_markers = compute_run_continuity(raw, recording_id="run-1")
-    absent = compute_run_continuity(
-        _raw(),
-        recording_id="run-2",
-        volume_description="Volume/V  1",
-    )
 
-    assert with_markers.has_volume_markers
-    assert not without_markers.has_volume_markers
-    assert not absent.has_volume_markers
+    named = compute_run_continuity(raw, recording_id="run-1", pulse_description="Cardiac/R")
+    unnamed = compute_run_continuity(raw, recording_id="run-1")
+
+    assert named.event_onsets == (20.0,)
+    # Unnamed, the beats are indistinguishable from trials and the rug is unreadable.
+    assert len(unnamed.event_onsets) == len(beats) + 1
 
 
 def test_acquisition_markers_are_not_drawn_as_task_events() -> None:
+    """Bookkeeping a site writes is excluded by prefix, which is the configurable route."""
     raw = _raw()
     raw.set_annotations(
         mne.Annotations(
             onset=[5.0, 10.0, 20.0],
             duration=[0.0, 0.0, 0.0],
-            description=["Scanner/Volume", "Cardiac/R", "stimulus/heat"],
+            description=["Acq/Trigger", "Cardiac/R", "stimulus/heat"],
         )
     )
 
     run = compute_run_continuity(
         raw,
         recording_id="run-1",
-        volume_description="Scanner/Volume",
         pulse_description="Cardiac/R",
+        non_event_prefixes=("BAD", "EDGE", "NEW SEGMENT", "Acq/"),
     )
 
     assert run.event_onsets == (20.0,)

@@ -47,7 +47,7 @@ CUTOFF_DB = -6.0
 #: A notch cuts a narrow trough to the numerical floor. Every measurement that reads
 #: power at a frequency has to know which bins are the filter rather than the data, or it
 #: reports the filter as a finding: the aperiodic fit tilts on the trough, the spectral
-#: axis stretches 40 dB to contain it, and the gradient comb scores its deepest line
+#: axis stretches 40 dB to contain it, and a narrowband measurement scores its deepest line
 #: where the notch happens to fall on a harmonic.
 NOTCH_EXCLUSION_HALF_WIDTH_HZ = 2.0
 
@@ -271,7 +271,7 @@ def _upstream_stopband_html(
         + "<p>Bandwidth removed is the total width of the stopbands, which is not the "
         "same as the span they fall between: a comb of narrow notches and one wide one "
         "can remove the same bandwidth over very different ranges. These are the "
-        "intervals the gradient comb measurement excludes its harmonics with, so the two "
+        "intervals a narrowband measurement excludes its own lines with, so the two "
         "sections describe one set of removals.</p>"
     )
 

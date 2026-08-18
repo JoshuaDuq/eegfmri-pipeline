@@ -9,14 +9,10 @@ and they can disagree the moment this file starts recomputing.
 Two derivations are made here rather than configured, both from the participant's own
 evidence, so that a mixed cohort classifies itself:
 
-* volume markers were observed in at least one run, so the recording was made in a
-  scanner, even when too few survived to estimate timing;
 * at least one run carried task events, so the paradigm has trials to retain.
 
-What is deliberately *not* carried is as considered as what is. The volume-locked
-waveform is a subject-level diagnostic that no cohort can pool -- each participant's copy
-carries its own averaging noise floor at every point, and with differing repetition times
-there is no shared time axis to pool them on. Quantities derived from other stored
+What is deliberately *not* carried is as considered as what is. Quantities derived from
+other stored
 quantities are not carried either, because two copies of one measurement can drift apart
 and only one of them can then be right.
 """
@@ -84,11 +80,8 @@ def run_table(
     *,
     spectra: Sequence[RunSpectra],
     continuity: Sequence[RunContinuity],
-    timings: Mapping[str, Any],
-    locked_averages: Sequence[Any] = (),
     rr_intervals: Sequence[RrIntervals] = (),
     marker_agreements: Sequence[Any] = (),
-    cardiac_residuals: Sequence[Any] = (),
 ) -> pd.DataFrame:
     """One row per run, holding every run-level scalar a cohort panel reads.
 
@@ -145,7 +138,7 @@ def run_table(
         row["n_matched_beats"] = _finite(None if agreement is None else agreement.n_matched)
         # The pair that says what a low matched fraction is made of. A train that sits a
         # fixed distance from the beats the detector found is a delay between two
-        # detectors, and the in-scanner ECG produces one routinely: the magnetohydrodynamic
+        # detectors, and some acquisitions produce one routinely: a larger non-R
         # deflection is larger than the R wave, so the detector locks onto it a few hundred
         # milliseconds late and reports a marker train that drove a working correction as
         # complete disagreement. A tight lag says that; a broad one says the markers really
@@ -166,7 +159,7 @@ def run_table(
 def spectrum_curves(spectra: Sequence[RunSpectra]) -> pd.DataFrame:
     """The across-channel median and worst channel per run, stage and frequency.
 
-    The worst channel travels beside the median because gradient residual is focal: it
+    The worst channel travels beside the median because interference is often focal: it
     concentrates in the sensors with the largest lead loops, so a montage median can sit
     near zero while individual sensors are unusable.
     """
@@ -457,12 +450,9 @@ def build_subject_sidecar(
     task: str,
     spectra: Sequence[RunSpectra],
     continuity: Sequence[RunContinuity],
-    timings: Mapping[str, Any],
-    locked_averages: Sequence[Any] = (),
     combs: Sequence[Any] = (),
     rr_intervals: Sequence[RrIntervals] = (),
     marker_agreements: Sequence[Any] = (),
-    cardiac_residuals: Sequence[Any] = (),
     alpha: Mapping[str, PosteriorAlpha] | None = None,
     components: pd.DataFrame | None = None,
     channel_positions: Mapping[str, Sequence[float]] | None = None,
@@ -501,12 +491,9 @@ def build_subject_sidecar(
         runs=run_table(
             spectra=spectra,
             continuity=continuity,
-            timings=timings,
-            locked_averages=locked_averages,
             rr_intervals=rr_intervals,
             marker_agreements=marker_agreements,
-            cardiac_residuals=cardiac_residuals,
-            ),
+        ),
         spectrum_curves=spectrum_curves(spectra),
         comb_curves=comb_curves(combs),
         channels=channel_table(

@@ -295,7 +295,8 @@ eeg:
   # ---------------------------------------------------------------------------
   # DO YOU HAVE AN ECG LEAD?
   # ---------------------------------------------------------------------------
-  # Recording ECG is ordinary and useful, and nothing here depends on a scanner. Name the
+  # Recording ECG is ordinary and useful, and nothing here depends on how it was
+  # acquired. Name the
   # channel exactly as channels.tsv names it, and switch the two stages that read it on:
   #
   #     eeg:
@@ -319,27 +320,22 @@ preprocessing:
   resample_freq: 500
   l_freq: 0.1
   h_freq: 100
-  # Mains is taken here, by this FIR notch, and NOT by the line-comb pass
-  # (studies/pain_study/scripts/line_comb/config.yaml, exclude_mains: true). Setting this
-  # to null without also setting exclude_mains false leaves 60 Hz in the data.
+  # Set this to your mains frequency to have the pipeline remove it with a wide FIR
+  # notch. Leave it null only when something upstream has already removed the lines and
+  # says so through paths.decomb_manifest: a fixed notch on top of per-recording removal
+  # adds a stopband the manifest does not describe, and check_config_coherence requires
+  # the manifest to be the single authoritative account of which frequencies are gone.
+  # Null here because the dataset this repository was developed on is in that state.
   #
-  # The notch is 0.97 Hz wide (59.537-60.463 Hz) against 0.133 Hz for spectrum_fit, and
-  # the spec proposed trading it for the narrow pass to recover 0.84 Hz. Measured, that
-  # trade left 60 Hz at +8.04 dB median over background across 13 of 15 participants,
-  # because mains here is not one line: 59-61 Hz carries 32-38 distinct peaks above 3 dB
-  # at 0.002 Hz resolution. Removing the tallest surfaces the next. On sub-0008, as a
-  # change in absolute 59.5-60.5 Hz power, spectrum_fit took 2.77 dB and ZapLine 1.65 dB
-  # against 56.66 dB here -- and this notch measured 0.00 dB collateral in both 45-58 and
-  # 62-95 Hz, because its whole footprint lies inside the unanalysed 58-62 gap.
-  # Null, because paths.decomb_manifest is configured and the manifest is then the
-  # authoritative account of which frequencies were removed -- which is what
-  # check_config_coherence requires, and what lets every panel that reads power at a
-  # frequency know where the holes are instead of inferring one notch at 60 Hz.
-  #
-  # The reasoning below is why this notch was chosen over spectrum_fit and ZapLine when
-  # the pipeline removed mains itself, and it stands for a dataset that does. Decomb
-  # removes lines per recording ahead of preprocessing, so a second fixed notch here adds
-  # a stopband the manifest does not describe.
+  # Why a wide notch rather than spectrum_fit or ZapLine, for a dataset where the
+  # pipeline does remove mains itself: mains is often not one line. Measured on this
+  # cohort, 59-61 Hz carried 32-38 distinct peaks above 3 dB at 0.002 Hz resolution, and
+  # removing the tallest only surfaces the next -- the narrow pass left 60 Hz at
+  # +8.04 dB median over background in 13 of 15 participants. On one subject, as a change
+  # in absolute 59.5-60.5 Hz power, spectrum_fit took 2.77 dB and ZapLine 1.65 dB against
+  # 56.66 dB for the 0.97 Hz notch (59.537-60.463 Hz), which measured 0.00 dB collateral
+  # in both 45-58 and 62-95 Hz because its whole footprint lies inside the unanalysed
+  # 58-62 gap. A cohort whose mains really is a single line can afford the narrow pass.
   #
   # NOTE: the derivatives currently on disk were produced with this set to 60, so they
   # carry a 56.5-61.0 Hz hole that is partly this notch. Preprocessing has to be re-run
@@ -347,7 +343,7 @@ preprocessing:
   notch_freq: null
   line_freq: 60
 
-  # The scanner room's line comb is removed before this pipeline reads the data, by
+  # The acquisition room's line comb is removed before this pipeline reads the data, by
   # `eeg-pipeline line-comb apply`. Its settings describe one room and are therefore
   # paradigm-specific: they live with the code that applies them, in
   # studies/pain_study/scripts/line_comb/config.yaml.
@@ -402,26 +398,6 @@ preprocessing:
       channels: ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"]
       band: [30.0, 45.0]
       window: *active_window
-  brainvision_analyzer:
-    # Enable only when BrainVision Analyzer scanner/pulse correction precedes MNE.
-    # Has no effect unless eeg_fmri is also true.
-    enabled: true
-    strict_pulse_qc: false
-    pulse_artifact_qc:
-      # Physiological plausibility bounds on the median marker-derived heart rate.
-      # These reject implausible marker sets, not unusual participants, so they must
-      # span the normal human range: sinus rhythm is 60-100 bpm, trained athletes
-      # reach ~40 bpm at rest, and noxious stimulation raises rate well above 80.
-      # A narrower bound rejects valid recordings with a hard error.
-      minimum_bpm: 40.0
-      maximum_bpm: 100.0
-      minimum_marker_fraction: 0.8
-      minimum_recording_coverage: 0.8
-    cardiac_artifact_qc:
-      ctps_threshold: 0.1
-      ctps_epoch_window: [-0.25, 0.5]
-      baseline: [-0.25, -0.05]
-      measurement_window: [-0.05, 0.4]
 
 pyprep:
   # Low-pass applied before bad-channel detection only. null = none, which is the right
@@ -474,7 +450,7 @@ ica:
   # be, which is exactly what this setting wanted.
   #
   # A lower fraction does not do the same job. It is a *variance* criterion, and it stops
-  # early precisely when artifact owns the variance — the usual case inside a scanner.
+  # early precisely when artifact owns the variance — the usual case on noisy recordings.
   # With 0.99 on sub-0015, blink and cardiac held 85% of the variance, 22 components were
   # fitted from a rank-62 recording, and 16 of those 22 were excluded, leaving six
   # components to carry everything neural. The 40 dimensions outside the fit are restored
@@ -486,8 +462,8 @@ ica:
   h_freq: 100.0
   reject: "autoreject_local"
   use_icalabel: true
-  # ICLabel was trained on scalp EEG recorded outside a scanner, where it never saw
-  # ballistocardiogram components; it under-calls them as "heart beat" and they land in
+  # ICLabel was trained on scalp EEG carrying no strong cardiac field artifact, where it
+  # never saw pulse-artifact components; it under-calls them as "heart beat" and they land in
   # its "other" catch-all, which this config retains. CTPS scoring against the recorded
   # ECG is the detector that does transfer, so it provides the automated baseline and the
   # manual review adjusts it rather than being the only line of defence.
@@ -521,6 +497,13 @@ ica:
     # Null means the recording carries none, which is the ordinary case: a montage with
     # an ECG lead and no marker train detects from the channel.
     marker_description: null
+    # Coupling between the beat train and each ICA component, by cross-trial phase
+    # statistics. Runs when this review is enabled and a beat source resolves.
+    marker_ctps_qc:
+      ctps_threshold: 0.1
+      ctps_epoch_window: [-0.25, 0.5]
+      baseline: [-0.25, -0.05]
+      measurement_window: [-0.05, 0.4]
     epoch_window: [-0.4, 0.6]
     baseline: [-0.4, -0.1]
     measurement_window: [0.0, 0.4]
@@ -531,7 +514,7 @@ ica:
     # MNE-BIDS-Pipeline's own ECG step builds its heartbeat epochs from the first run
     # only, cropped to 5 minutes / n_runs around that run's midpoint: on this cohort that
     # is ~50 s of run 1, roughly sixty beats, scoring a decomposition fitted across six
-    # runs and ~46 minutes. BCG topography moves with head position, so components that
+    # runs and ~46 minutes. Cardiac artifact topography moves with head position, so components that
     # are cardiac in runs 3-6 are never scored at all. This review already runs the same
     # CTPS test per run over every beat in every recording, so turning this on replaces a
     # sample with the full measurement.
@@ -681,8 +664,8 @@ time_frequency_analysis:
 # These settings control what the report flags and how its figures are scaled. They do
 # not change any derivative: turning a threshold up or down alters the warnings a
 # reviewer sees, never the data. Sections whose inputs are absent are omitted rather
-# than rendered empty, so an EEG-only dataset simply has no scanner-correction section
-# and a resting-state run has no per-condition retention panel.
+# than rendered empty, so a recording with no ECG lead simply has no cardiac-rhythm
+# section and a resting-state run has no per-condition retention panel.
 report:
   enabled: true
   thresholds:
@@ -717,8 +700,8 @@ report:
     marker_agreement_tolerance_s: 0.1
     # Half-width of the band a notch filter is treated as having removed, in hertz.
     # Every measurement that reads power at a frequency uses it to tell filter from
-    # data: the aperiodic fit excludes it, the spectral axis ignores it, and a gradient
-    # harmonic landing inside it is drawn but not scored. Sized for the FIR notch this
+    # data: the aperiodic fit excludes it, the spectral axis ignores it, and a marked
+    # frequency landing inside it is drawn but not scored. Sized for the FIR notch this
     # pipeline applies (0.97 Hz wide); a wider filter, or a different line-removal
     # method, owns a different span of bins.
     notch_exclusion_half_width_hz: 2.0
@@ -743,12 +726,10 @@ report:
     # Line-noise fundamental marked on the sensor spectra, with its harmonics. Leave
     # unset to inherit preprocessing.notch_freq; set to null to mark nothing.
     # spectra_line_frequency: 60.0
-    # Extra frequencies to mark on the sensor spectra, for example residual
-    # scanner-harmonic centres. Marks are reference lines only; the report draws no
-    # conclusion from what appears at them. The first few gradient harmonics are added
-    # automatically from the volume markers measured in each run; the full comb is
-    # measured in the "Residual scanner gradient" section rather than drawn here, because
-    # tens of vertical lines would bury the spectrum.
+    # Extra frequencies to mark on the sensor spectra, for example the centres of a
+    # known interference comb. Marks are reference lines only; the report draws no
+    # conclusion from what appears at them. Keep the list short: tens of vertical lines
+    # would bury the spectrum this axis exists to show.
     spectra_marked_frequencies: []
     # Upper edge of the sensor-spectra axis. Above the low-pass the filter, not the
     # recording, sets the trace, so leave unset to inherit preprocessing.h_freq. Set a
@@ -785,10 +766,10 @@ report:
     # quality over time" trace counts trials rather than the acquisition's bookkeeping.
     # Matched case-insensitively against the start of each annotation.
     #
-    # The default names only what this pipeline and MNE write for themselves. The volume
-    # and pulse marker descriptions above are excluded automatically and need no entry.
+    # The default names only what this pipeline and MNE write for themselves. The beat
+    # marker description above is excluded automatically and needs no entry.
     # Add whatever else your acquisition writes that is not a trial — a stimulus-computer
-    # heartbeat, a scanner trigger spelled its own way, a response marker in a paradigm
+    # heartbeat, an acquisition trigger spelled its own way, a response marker in a paradigm
     # where the response is not the event. Do NOT add a prefix your trials start with:
     # the rug would then report zero events on a run full of them.
     non_event_prefixes: ["BAD", "EDGE", "NEW SEGMENT"]

@@ -551,10 +551,8 @@ class PreprocessingPipeline(PipelineBase):
         """
         steps = self._get_steps_for_mode(mode)
 
-        # ``brainvision_analyzer`` says an Analyzer correction ran upstream and left pulse
-        # markers behind. It is the only remaining acquisition fact this selection reads:
-        # the scanner declaration and the stages that depended on it now live in the study.
-        if bool(self.config.get("preprocessing.brainvision_analyzer.enabled", False)):
+        # The marker-CTPS QC needs a beat train, which is what the cardiac review resolves.
+        if bool(self.config.get("ica.cardiac_review.enabled", False)):
             if STEP_ICA_FIT in steps:
                 steps.append(STEP_ICA_CARDIAC_QC)
 
@@ -756,23 +754,22 @@ class PreprocessingPipeline(PipelineBase):
             else:
                 raise ValueError(f"Unknown preprocessing step: {step}")
 
-        # The review sections describe what preprocessing produced, not what any scanner
-        # correction did, so they belong to every run that fitted an ICA — an EEG-only
-        # dataset gets the same evidence minus the panels whose inputs it lacks. They run
-        # after the step loop because the Analyzer panel reads QC tables that a later
-        # step writes, and each section already omits itself when its inputs are absent.
+        # The review sections describe what preprocessing produced, not what any upstream
+        # correction did, so they belong to every run that fitted an ICA — a dataset
+        # without those inputs gets the same evidence minus the panels it lacks. They run
+        # after the step loop because some sections read QC tables that a later step
+        # writes, and each section already omits itself when its inputs are absent.
         if {STEP_ICA_FIT, STEP_EPOCHS} & set(steps):
             self._append_report_review_sections(subjects=subjects, task=task)
 
         return outputs
 
 
-    def _get_analyzer_cardiac_qc_config(self) -> Any:
-        config = self.config.get("preprocessing.brainvision_analyzer.cardiac_artifact_qc")
+    def _get_marker_ctps_qc_config(self) -> Any:
+        config = self.config.get("ica.cardiac_review.marker_ctps_qc")
         if not config:
             raise ValueError(
-                "Missing required config mapping: "
-                "preprocessing.brainvision_analyzer.cardiac_artifact_qc"
+                "Missing required config mapping: ica.cardiac_review.marker_ctps_qc"
             )
         return config
 
@@ -800,7 +797,7 @@ class PreprocessingPipeline(PipelineBase):
         """Add marker-based CTPS evidence to native ICA component metadata."""
         from eeg_pipeline.preprocessing.cardiac_artifact_qc import run_marker_ctps_qc
 
-        config = self._get_analyzer_cardiac_qc_config()
+        config = self._get_marker_ctps_qc_config()
         return run_marker_ctps_qc(
             pipeline_root=self.deriv_root / "preprocessed" / "eeg",
             subjects=subjects,
@@ -808,6 +805,9 @@ class PreprocessingPipeline(PipelineBase):
             threshold=float(config["ctps_threshold"]),
             epoch_window=tuple(config["ctps_epoch_window"]),
             ecg_channel=self._resolve_ecg_channel(),
+            # Names the beat annotation to epoch on. Absent, the scoring detects R peaks
+            # from the ECG channel instead and marks the result as a fallback.
+            marker_description=self.config.get("ica.cardiac_review.marker_description"),
         )
 
 
@@ -1914,10 +1914,6 @@ class PreprocessingPipeline(PipelineBase):
             task=task,
             spectra=evidence.spectra,
             continuity=evidence.continuity,
-            # run_evidence.py no longer measures volume timing, comb residual, or the
-            # volume-locked average; an empty mapping is what every non-scanner
-            # recording already produced here.
-            timings={},
             rr_intervals=evidence.rr_intervals,
             # Both sides come from the measuring pass, which is the only place the same
             # data exists before and after the exclusions. The epochs-based measurement
@@ -2044,9 +2040,9 @@ class PreprocessingPipeline(PipelineBase):
     ):
         """Add every per-run section for the runs belonging to one report.
 
-        The sensor spectra, gradient residual, time-resolved quality, and beat detection
-        all need each run before and after the ICA exclusions, so they are measured in a
-        single pass rather than one read and one ``ICA.apply`` per section.
+        The sensor spectra, time-resolved quality, and beat detection all need each run
+        before and after the ICA exclusions, so they are measured in a single pass rather
+        than one read and one ``ICA.apply`` per section.
         """
         from eeg_pipeline.preprocessing.ica_exclusions import (
             read_ica_with_reviewed_exclusions,
@@ -2068,6 +2064,9 @@ class PreprocessingPipeline(PipelineBase):
             ica=read_ica_with_reviewed_exclusions(ica_path),
             settings=settings,
             edge_support_seconds=edge_support_seconds,
+            # The one place the beat label is configured. Absent, the interval series and
+            # the beat rug are skipped rather than searched for a guessed spelling.
+            beat_marker_description=self.config.get("ica.cardiac_review.marker_description"),
         )
 
     def _find_subject_report_path(self, epochs_path: Path) -> Optional[Path]:

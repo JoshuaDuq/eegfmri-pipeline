@@ -8,7 +8,7 @@ Three decisions shape everything here.
 
 The unit of inference is the participant. Runs are pooled within a participant first, and
 every participant then carries equal weight regardless of how many runs it contributed. A
-cohort statistic that weighted by run count would describe whoever sat in the scanner
+cohort statistic that weighted by run count would describe whoever was recorded
 longest.
 
 The rule for pooling runs depends on what kind of quantity it is, because one rule is
@@ -407,7 +407,7 @@ def align_grids(
     """Restrict participants to their shared range and require identical bins there.
 
     Restriction, never interpolation. Resampling a spectrum onto a foreign grid smears
-    exactly the narrow features -- a line-noise tooth, a gradient harmonic, an alpha peak
+    exactly the narrow features -- a line-noise tooth, a narrowband harmonic, an alpha peak
     -- that the cohort figure exists to show, and it does so invisibly. Where the bins
     genuinely differ, that is a fact about the acquisitions and is raised rather than
     smoothed over.

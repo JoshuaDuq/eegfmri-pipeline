@@ -11,7 +11,7 @@ thing in this report that is flagged as a violation rather than reported as a nu
 
 *How much was removed, in context.* Variance removed is the headline number of the whole
 pipeline and it is meaningless pooled across acquisitions: 86% is unremarkable for a
-recording made inside a bore and alarming for one made outside it, so a single median over
+recording of one kind and alarming for another, so a single median over
 both describes neither. It is reported per context, never pooled across them.
 
 *What was removed.* Twelve components taken out for eye movement and twelve taken out for
@@ -48,10 +48,6 @@ from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table, 
 ICA_SECTION = "ICA decomposition quality"
 ICA_TITLE = "Decomposition across the cohort"
 ICA_TAG = "cohort-ica"
-
-#: How each context reads in a heading.
-_CONTEXT_LABELS = {
-}
 
 #: Colour per detector class in the composition bars.
 #:
@@ -117,8 +113,8 @@ def rank_violations(frame: pd.DataFrame) -> list[str]:
 def variance_pooled(
     frame: pd.DataFrame, *, gates: BandGates = DEFAULT_GATES
 ) -> object | None:
-    # One population now: the acquisition-context axis this used to refuse to pool across
-    # left with the scanner columns in schema version 4.
+    # One population now. This used to refuse to pool across the acquisition-context
+    # axis, which left the sidecar in schema version 4.
     selected = frame[frame["variance_removed"].notna()]
     if selected.empty:
         return None
@@ -196,7 +192,6 @@ def decomposition_table(frame: pd.DataFrame) -> str:
         rows.append(
             [
                 str(participant["subject"]),
-                _CONTEXT_LABELS[participant["context"]],
                 _count(participant["n_channels"]),
                 _count(participant["n_components"]),
                 _count(participant["data_rank"]),
@@ -209,7 +204,6 @@ def decomposition_table(frame: pd.DataFrame) -> str:
         )
     columns = (
         Column("Participant", align=Align.TEXT, code=True),
-        Column("Context", align=Align.TEXT),
         Column("Channels"),
         Column("Fitted", group="Components"),
         Column("Rank", group="Components"),

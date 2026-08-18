@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-# Inlined when the BCG modules moved to the study, because core cannot import them
+# Inlined when the cardiac-residual modules moved to the study, because core cannot import them
 # back. Task 12 deletes the fields these feed, and these constants with them.
 MARKER_AGREEMENT_TOLERANCE_S = 0.1
 RESIDUAL_WINDOW_S = (-0.2, 0.6)
@@ -317,7 +317,7 @@ class ReportSettings:
     #: Line-noise fundamental marked on the sensor spectra. ``None`` marks nothing;
     #: leave unset to inherit ``preprocessing.notch_freq``.
     spectra_line_frequency: float | None = None
-    #: Extra frequencies to mark, for example residual scanner-harmonic centres.
+    #: Extra frequencies to mark, for example the centres of a known interference comb.
     spectra_marked_frequencies: tuple[float, ...] = ()
     #: Upper edge of the sensor-spectra axis. Above the configured low-pass the filter,
     #: not the recording, sets the trace, so leave unset to inherit
@@ -376,7 +376,7 @@ class ReportSettings:
     #: and pulse marker descriptions are excluded automatically and need no entry here;
     #: what belongs is whatever else a site writes that is not a trial -- a response
     #: marker in a paradigm where responses are not the event, a stimulus-computer
-    #: heartbeat, a scanner trigger spelled its own way.
+    #: heartbeat, or an acquisition trigger spelled its own way.
     non_event_prefixes: tuple[str, ...] = NON_EVENT_PREFIXES
     #: Ordered detector-prose patterns mapped to the class a cohort counts them under.
     component_label_patterns: tuple[tuple[str, str], ...] = DEFAULT_COMPONENT_LABEL_PATTERNS
@@ -522,7 +522,7 @@ class ReportSettings:
         if not 0.0 < self.min_r_markers_per_volume <= 2.0:
             raise ValueError(
                 "report.thresholds.min_r_markers_per_volume must lie in (0, 2]; a heart "
-                "rate cannot exceed a few markers per scanner volume."
+                "rate cannot exceed a few markers per acquisition volume."
             )
         if self.min_roi_channels < 2:
             raise ValueError(

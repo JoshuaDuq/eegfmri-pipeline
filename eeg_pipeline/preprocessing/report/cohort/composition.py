@@ -14,7 +14,7 @@ measurement failed.
 
 The section also carries the note on reading extremes. With this many panels, some
 participant is unusual somewhere by chance alone, and a reader who meets that fact for the
-first time in the middle of the gradient section will already have drawn a conclusion from
+first time in the middle of a later section will already have drawn a conclusion from
 it.
 """
 
@@ -158,7 +158,7 @@ def _reading_note(cohort: Cohort, *, gates: BandGates) -> str:
         "by chance alone, and a single extreme value is therefore expected rather than "
         "informative. What warrants a closer look is convergence: the same participant "
         "sitting at the edge of several measurements that share a mechanism &mdash; "
-        "channel-level, decomposition-level, scanner-level or physiological.</p>"
+        "channel-level, decomposition-level or physiological.</p>"
     )
 
 
@@ -166,7 +166,6 @@ def composition_html(cohort: Cohort, *, gates: BandGates = DEFAULT_GATES) -> str
     """Render the composition section."""
     columns = (
         Column("Participant", align=Align.TEXT, code=True),
-        Column("Context", align=Align.TEXT),
         Column("Paradigm", align=Align.TEXT),
         Column("Task", align=Align.TEXT, code=True),
         Column("Runs"),

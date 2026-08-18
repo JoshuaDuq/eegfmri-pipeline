@@ -19,6 +19,10 @@ SFREQ = 500.0
 TR = 0.9
 DURATION = 90.0
 
+#: The label these fixtures write. Core defaults to none, so a caller that wants the
+#: interval series and the beat rug must name it, the way a study config does.
+BEAT_MARKER = "Pulse Artifact/R"
+
 
 def _write_run(
     tmp_path,
@@ -69,7 +73,12 @@ def _ica(raw):
 def test_every_per_run_measurement_is_gathered(tmp_path) -> None:
     path, raw = _write_run(tmp_path, "sub-0001_task-x_run-1_proc-filt_raw.fif")
 
-    evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
+    evidence = measure_runs(
+        filtered_raw_paths=[path],
+        ica=_ica(raw),
+        settings=ReportSettings(),
+        beat_marker_description=BEAT_MARKER,
+    )
 
     assert len(evidence.spectra) == 1
     assert len(evidence.continuity) == 1
@@ -106,16 +115,20 @@ def test_the_ica_is_applied_once_per_run_not_once_per_panel(tmp_path) -> None:
     assert calls["count"] == 1
 
 
-def test_a_recording_without_scanner_markers_keeps_the_other_sections(tmp_path) -> None:
+def test_a_recording_without_acquisition_markers_keeps_the_other_sections(tmp_path) -> None:
+    """Every panel that does not need an annotation is still measured without them."""
     path, raw = _write_run(
-        tmp_path, "sub-0001_task-rest_run-1_proc-filt_raw.fif", with_markers=False
+        tmp_path,
+        "sub-0001_task-rest_run-1_proc-filt_raw.fif",
+        with_markers=False,
+        with_beats=False,
     )
 
     evidence = measure_runs(filtered_raw_paths=[path], ica=_ica(raw), settings=ReportSettings())
 
     assert len(evidence.spectra) == 1
     assert len(evidence.continuity) == 1
-    assert not evidence.continuity[0].has_volume_markers
+    assert evidence.continuity[0].event_onsets == ()
 
 
 def test_a_recording_without_beats_keeps_the_other_sections(tmp_path) -> None:
@@ -135,6 +148,7 @@ def test_the_report_gains_every_available_section(tmp_path) -> None:
         filtered_raw_paths=[path],
         ica=_ica(raw),
         settings=ReportSettings(spectra_line_frequency=60.0),
+        beat_marker_description=BEAT_MARKER,
     )
 
     sections = {element.section for element in report._content}

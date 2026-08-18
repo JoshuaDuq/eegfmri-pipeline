@@ -1,9 +1,9 @@
-# Beat-to-beat intervals: ECG physiology, and no scanner quantity is read here.
+# Beat-to-beat intervals: ECG physiology, and nothing acquisition-specific is read here.
 """Beat-to-beat interval evidence for one subject.
 
 The tachogram is what makes a detector that worked for four minutes and then lost the
 trace visible; a marker count and a median rate cannot show it. Nothing in this module
-reads a scanner, a gradient or a volume rate, so it stays in the shared pipeline.
+reads anything acquisition-specific, so it stays in the shared pipeline.
 """
 
 from __future__ import annotations
@@ -32,11 +32,10 @@ from eeg_pipeline.preprocessing.report.tables import (
     grid_table,
 )
 
-# Fallback beat annotation, used only where a caller names none. A study that spells its
-# marker differently sets ica.cardiac_review.marker_description; this is the default the
-# tachogram falls back to, and it lives here because this module stays in core while the
-# vendor-specific pulse QC moves to the study.
-DEFAULT_BEAT_MARKER_DESCRIPTION = "Pulse Artifact/R"
+# No default beat annotation. A label is a search instruction, not evidence a train
+# exists, so a caller that names none gets no interval series rather than a search for
+# somebody else's spelling. Studies set ica.cardiac_review.marker_description.
+DEFAULT_BEAT_MARKER_DESCRIPTION: str | None = None
 
 RR_SECTION = "Cardiac rhythm"
 RR_TAG = "rr-intervals"
@@ -138,7 +137,10 @@ def compute_rr_intervals(
     marker count and a median rate. Neither shows a detector that worked for four
     minutes and then lost the trace, which is what the interval series makes visible.
     """
-    onsets = annotation_onsets(raw, description or DEFAULT_BEAT_MARKER_DESCRIPTION)
+    label = description or DEFAULT_BEAT_MARKER_DESCRIPTION
+    if not label:
+        return None
+    onsets = annotation_onsets(raw, label)
     if onsets.size < MINIMUM_BEATS:
         return None
     intervals = np.diff(onsets)

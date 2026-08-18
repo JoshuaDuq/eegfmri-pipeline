@@ -7,7 +7,7 @@ guarantees.
 
 The answer is not to hide extremes but to give them their denominator. A participant who is
 extreme on one metric out of thirty-one has done nothing; a participant who is extreme on
-six of the eight scanner metrics and on nothing else has a scanner problem. That second
+six of the eight channel metrics and on nothing else has a montage problem. That second
 pattern is a finding and the first is noise, and the only thing that distinguishes them is
 convergence within a mechanistically related family.
 
@@ -177,7 +177,7 @@ def _outer_members(measured: Mapping[str, float]) -> set[str]:
     """The participants in the outer decile of one metric, by rank rather than by value.
 
     Scored against the participants that recorded this metric, not against the cohort. A
-    metric only the in-scanner participants have is a metric the others did not sit in the
+    metric only some participants have is a metric the others were never measured on in the
     outer decile of; they had no chance to, which is why they also do not count towards the
     denominator either.
 

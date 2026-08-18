@@ -17,7 +17,6 @@ from eeg_pipeline.preprocessing.report.cohort.at_a_glance import (
 )
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -27,7 +26,6 @@ def _participant(subject: str, **measurements) -> SubjectSidecar:
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.TASK,
         measurements=measurements,
     )

@@ -31,7 +31,6 @@ from eeg_pipeline.preprocessing.report.cohort.report import (  # noqa: E402
     build_cohort_report,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -141,9 +140,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=(
-            AcquisitionContext.IN_SCANNER if in_scanner else AcquisitionContext.OUT_OF_SCANNER
-        ),
         paradigm=paradigm,
         measurements={
             "n_channels": 63,

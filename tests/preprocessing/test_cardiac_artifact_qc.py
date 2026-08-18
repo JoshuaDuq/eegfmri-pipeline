@@ -20,6 +20,11 @@ from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
     write_cardiac_attenuation_qc,
 )
 
+#: The label this study's fixtures write. Core no longer defaults to it: a beat label is
+#: a search instruction, so every caller that wants the marker train must name it, and
+#: these tests name it the way a study config would.
+BEAT_MARKER = "Pulse Artifact/R"
+
 
 def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
     disabled = cardiac_review.CardiacReviewSettings.from_mapping({})
@@ -192,11 +197,11 @@ def test_cardiac_review_guide_has_no_custom_classification_language() -> None:
 
 
 def test_the_guide_reports_which_detector_the_runs_actually_used() -> None:
-    """The guide asserted the review "does not depend on BrainVision Analyzer R markers".
+    """The guide once asserted flatly that the review needed no annotated beat train.
 
-    ``detect_ecg_events`` prefers exactly those markers wherever a run carries them, so on
-    a dataset like sub-0001 the sentence was false for every run in the section. The guide
-    has to read the runs rather than assert one of the two branches.
+    ``detect_ecg_events`` prefers that train wherever a run carries one, so on a dataset
+    that has it the sentence was false for every run in the section. The guide has to read
+    the runs rather than assert one of the two branches.
     """
     settings = cardiac_review.CardiacReviewSettings.from_mapping({})
 
@@ -207,9 +212,9 @@ def test_the_guide_reports_which_detector_the_runs_actually_used() -> None:
         settings, beat_sources=(cardiac_review.ECG_CHANNEL_SOURCE,) * 3
     )
 
-    assert "Analyzer" in from_markers and "R markers" in from_markers
-    assert "does not depend on BrainVision Analyzer" not in from_markers
-    assert "does not depend on BrainVision Analyzer" in from_channel
+    assert "the recording's markers" in from_markers
+    assert "does not depend on an annotated beat train" not in from_markers
+    assert "does not depend on an annotated beat train" in from_channel
 
 
 def test_the_guide_names_a_split_between_the_two_detectors() -> None:
@@ -231,7 +236,7 @@ def test_the_guide_names_a_split_between_the_two_detectors() -> None:
 def test_pulse_marker_events_use_preserved_analyzer_annotations() -> None:
     raw = _pulse_locked_raw(artifact_scale=1.0)
 
-    events, is_fallback = pulse_marker_events(raw)
+    events, is_fallback = pulse_marker_events(raw, marker_description=BEAT_MARKER)
 
     assert events.shape == (27, 3)
     assert events[0].tolist() == [200, 0, 999]
@@ -241,7 +246,7 @@ def test_pulse_marker_events_preserve_sample_positions_after_crop() -> None:
     raw = _pulse_locked_raw(artifact_scale=1.0)
     raw.crop(tmin=1.0, tmax=29.0)
 
-    events, is_fallback = pulse_marker_events(raw)
+    events, is_fallback = pulse_marker_events(raw, marker_description=BEAT_MARKER)
 
     assert raw.first_samp == 100
     assert events[0].tolist() == [200, 0, 999]
@@ -254,6 +259,7 @@ def test_compute_cardiac_attenuation_measures_marker_locked_rms_reduction() -> N
         recording_id="sub-0001_run-1",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
+        marker_description=BEAT_MARKER,
     )
 
     assert metrics.recording_id == "sub-0001_run-1"
@@ -272,6 +278,7 @@ def test_compute_cardiac_attenuation_uses_matching_average_references() -> None:
         recording_id="sub-0001_run-1",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
+        marker_description=BEAT_MARKER,
     )
 
     assert metrics.attenuation_percent == pytest.approx(0.0, abs=1e-8)
@@ -318,6 +325,7 @@ def test_compute_marker_ctps_scores_uses_marker_locked_epochs() -> None:
         FakeIca(),
         threshold=0.1,
         epoch_window=(-0.25, 0.5),
+        marker_description=BEAT_MARKER,
     )
 
     assert scores.tolist() == [0.04, 0.2]
@@ -335,6 +343,7 @@ def test_write_cardiac_attenuation_qc_writes_run_metrics(tmp_path) -> None:
         output_path=tmp_path / "cardiac_review.tsv",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
+        marker_description=BEAT_MARKER,
     )
 
     table = pd.read_csv(output_path, sep="\t")
@@ -406,6 +415,7 @@ def test_run_cardiac_attenuation_qc_pairs_filtered_and_clean_raws(
         task="pain",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
+        marker_description=BEAT_MARKER,
     )
 
     table = pd.read_csv(output_path, sep="\t")
@@ -471,6 +481,7 @@ def test_attenuation_ignores_the_ecg_channel_ica_never_touched() -> None:
         recording_id="sub-0001_run-1",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
+        marker_description=BEAT_MARKER,
     )
 
     assert metrics.attenuation_percent == pytest.approx(75.0)
@@ -550,6 +561,7 @@ def test_attenuation_qc_reads_one_run_pair_at_a_time(monkeypatch, tmp_path) -> N
         task="pain",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
+        marker_description=BEAT_MARKER,
     )
 
     # Two runs exist. Streaming measures the first pair after reading exactly that pair;

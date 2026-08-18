@@ -17,7 +17,6 @@ matplotlib.use("Agg")
 
 from eeg_pipeline.preprocessing.report.cohort.collect import Cohort  # noqa: E402
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -91,7 +90,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
         settings=({} if line_frequency is None else {"spectra_line_frequency": line_frequency}),
         runs=_runs(n_runs, exponent_after=exponent_after),
@@ -156,7 +154,6 @@ def test_a_cohort_with_no_spectra_has_no_panel() -> None:
     bare = SubjectSidecar(
         subject="0014",
         task="rest",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
     )
 

@@ -3,7 +3,7 @@
 Every other panel in this report measures removal: variance excluded, amplitude
 attenuated, epochs dropped, components rejected. None of them can distinguish a
 recording that was cleaned from one that was emptied, because both score well on all of
-them. Inside a scanner, where removing most of the sensor variance is normal and
+them. Where removing most of the sensor variance is normal and
 expected, that asymmetry is the report's blind spot.
 
 Two measurements are made, and which one applies depends on the paradigm.

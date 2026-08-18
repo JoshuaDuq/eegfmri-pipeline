@@ -26,7 +26,6 @@ from eeg_pipeline.preprocessing.report.cohort.continuity import (  # noqa: E402
     run_position_table,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -46,7 +45,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.TASK,
         runs=pd.DataFrame(
             {
@@ -218,7 +216,6 @@ def test_a_cohort_that_measured_nothing_produces_no_grid() -> None:
     empty = SubjectSidecar(
         subject="0014",
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.TASK,
     )
 
@@ -249,7 +246,6 @@ def test_a_bare_run_label_does_not_collapse_every_run_into_one_column() -> None:
     participant = SubjectSidecar(
         subject="0014",
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.TASK,
         runs=pd.DataFrame(
             {
@@ -279,7 +275,6 @@ def _rest_participant(subject: str, recordings: dict[str, float]) -> SubjectSide
     return SubjectSidecar(
         subject=subject,
         task="rest",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
         runs=pd.DataFrame(
             {

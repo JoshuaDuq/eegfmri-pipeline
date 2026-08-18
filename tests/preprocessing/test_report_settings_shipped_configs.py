@@ -68,10 +68,10 @@ def test_the_pain_study_override_restates_its_own_bookkeeping() -> None:
     """The site marker spellings left the shipped default and must land here instead.
 
     Without this the study's continuity figure would start counting its button presses
-    and scanner markers as trials, which is a change to a delivered report rather than a
-    change to what other labs inherit.
+    and acquisition markers as trials, which is a change to a delivered report rather
+    than a change to what other labs inherit.
     """
-    settings = ReportSettings.from_mapping(_report_block(SHIPPED_CONFIGS[3]))
+    settings = ReportSettings.from_mapping(_report_block(SHIPPED_CONFIGS[2]))
 
     for prefix in ("VOLUME/", "R  ", "R/", "RESPONSE/"):
         assert prefix in settings.non_event_prefixes, prefix
@@ -90,22 +90,21 @@ def test_no_shipped_default_names_a_trial_prefix_of_this_study() -> None:
         assert not any(prefix.upper().startswith("TRIG") for prefix in prefixes), relative
 
 
-def test_the_out_of_scanner_preset_needs_no_file_only_this_study_has() -> None:
-    """``eeg_only`` is the entry point for a user with no scanner and no line removal.
+def test_the_packaged_config_needs_no_file_only_this_study_has() -> None:
+    """A new user must not inherit a path to one study's manifest.
 
-    ``paths.decomb_manifest`` is inherited from the packaged config, where it points at
-    the line-notch manifest of the study this repository was developed on. Building the
-    report settings then raised FileNotFoundError on a path the new user has never heard
-    of, before a single section was rendered — for a dataset that had no gradient comb to
-    remove in the first place.
+    ``paths.decomb_manifest`` once pointed, in the packaged config, at the line-notch
+    manifest of the study this repository was developed on. Building the report settings
+    then raised FileNotFoundError on a path the new user had never heard of, before a
+    single section was rendered — for a dataset with no removed lines to describe. The
+    retired ``eeg_only`` preset used to carry the override; the packaged default carries
+    it now, so there is nothing left to opt out of.
     """
-    preset = yaml.safe_load(
-        (CONFIG_ROOT / "eeg_pipeline/utils/config/presets/eeg_only.yaml").read_text(
-            encoding="utf-8"
-        )
+    packaged = yaml.safe_load(
+        (CONFIG_ROOT / SHIPPED_CONFIGS[0]).read_text(encoding="utf-8")
     )
 
-    assert preset["paths"]["decomb_manifest"] is None
+    assert packaged["paths"]["decomb_manifest"] is None
 
 
 def test_a_configured_manifest_that_is_absent_is_still_an_error() -> None:
@@ -128,9 +127,10 @@ def test_core_config_names_no_scanner_key():
     from pathlib import Path
 
     text = Path("eeg_pipeline/utils/config/eeg_config.yaml").read_text(encoding="utf-8")
-    # brainvision_analyzer stays: it is the last acquisition fact core reads, and it
-    # gates the one surviving cardiac QC step.
+    # brainvision_analyzer left too: the QC it gated reads a generic beat marker train,
+    # so the block moved under ica.cardiac_review as marker_ctps_qc.
     for key in (
+        "brainvision_analyzer:",
         "eeg_fmri:",
         "scanner_harmonic_qc:",
         "trim_to_volume_bounds:",

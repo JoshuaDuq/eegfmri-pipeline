@@ -20,7 +20,6 @@ from eeg_pipeline.preprocessing.report.cohort.events import (
     missing_note,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
 )
@@ -45,7 +44,6 @@ def _participant(
     return SubjectSidecar(
         subject=subject,
         task="thermalactive",
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=paradigm,
         conditions=conditions,
     )

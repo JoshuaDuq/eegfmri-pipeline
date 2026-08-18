@@ -121,6 +121,9 @@ skills-lock.json
 # Track all Sphinx documentation source files; ignore build output only
 docs/_build/
 docs/plans/
+# Implementation plans and design specs: working notes for a change, not documentation
+# of the result. They date fast and describe intent rather than what shipped.
+docs/superpowers/
 _site/
 
 ### IDEs & OS ###

@@ -24,7 +24,6 @@ from eeg_pipeline.preprocessing.report.rr_intervals import (
     compute_rr_intervals,
 )
 from eeg_pipeline.preprocessing.report.continuity import (
-    VOLUME_MARKER_DESCRIPTION,
     RunContinuity,
     add_continuity_section,
     compute_run_continuity,
@@ -56,7 +55,7 @@ class RunEvidence:
     #: that silently drops out of that figure is indistinguishable from one that was
     #: never acquired, and the two have opposite implications for the pulse correction.
     rr_missing: list[str] = field(default_factory=list)
-    #: Analyzer's marker train measured against R peaks detected from the ECG signal.
+    #: The recording's beat markers measured against R peaks detected from the ECG signal.
     #: Where each EEG sensor sat, in head coordinates, taken from the recording itself.
     #:
     #: Captured here because this is the one place the montage is already in memory. A
@@ -108,8 +107,15 @@ def measure_runs(
     ica: mne.preprocessing.ICA,
     settings: ReportSettings,
     edge_support_seconds: float = 0.0,
+    beat_marker_description: str | None = None,
 ) -> RunEvidence:
-    """Measure every per-run panel, reading and cleaning each run exactly once."""
+    """Measure every per-run panel, reading and cleaning each run exactly once.
+
+    ``beat_marker_description`` names the annotation a beat carries in this dataset, and
+    is a search instruction rather than a claim one exists: a caller that names none gets
+    no interval series and no beat rug, instead of a search for somebody else's spelling.
+    Studies supply it through ``ica.cardiac_review.marker_description``.
+    """
     if not filtered_raw_paths:
         raise ValueError("Per-run evidence requires at least one filtered run.")
 
@@ -140,9 +146,9 @@ def measure_runs(
                 raw,
                 recording_id=recording_id,
                 # Passed explicitly: continuity treats a label as a search instruction,
-                # so omitting it means 'do not search'. The in/out-of-scanner
-                # classification still needs the search until Task 17 retires it.
-                volume_description=VOLUME_MARKER_DESCRIPTION,
+                # so omitting it means 'do not search'. Beats are excluded from the event
+                # rug, where a marker per second would bury the trials it exists to show.
+                pulse_description=beat_marker_description,
                 window_seconds=settings.continuity_window_seconds,
                 edge_support_seconds=edge_support_seconds,
                 non_event_prefixes=settings.non_event_prefixes,
@@ -151,6 +157,7 @@ def measure_runs(
         intervals = compute_rr_intervals(
             raw,
             recording_id=recording_id,
+            description=beat_marker_description,
         )
         if intervals is not None:
             evidence.rr_intervals.append(intervals)
@@ -158,7 +165,7 @@ def measure_runs(
             evidence.rr_missing.append(recording_id)
 
         # Measured on ``raw`` rather than ``cleaned``: the question is what the upstream
-        # pulse correction left, and measuring after the exclusions would credit Analyzer
+        # upstream pulse correction left, and measuring after the exclusions would credit it
         # for whatever MNE's decomposition removed. Costs one epoching pass over a
         # recording already in memory.
 
@@ -253,6 +260,7 @@ def add_run_evidence_review(
     ica: mne.preprocessing.ICA,
     settings: ReportSettings,
     edge_support_seconds: float = 0.0,
+    beat_marker_description: str | None = None,
 ) -> RunEvidence:
     """Measure every run once and append all the per-run sections."""
     evidence = measure_runs(
@@ -260,6 +268,7 @@ def add_run_evidence_review(
         ica=ica,
         settings=settings,
         edge_support_seconds=edge_support_seconds,
+        beat_marker_description=beat_marker_description,
     )
     add_run_evidence_sections(report=report, evidence=evidence, settings=settings)
     return evidence

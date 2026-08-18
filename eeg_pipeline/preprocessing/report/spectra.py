@@ -1,13 +1,13 @@
 """Sensor-space power spectra before and after ICA cleaning.
 
 The spectrum is the most information-dense single view of an EEG recording: line noise,
-drift, muscle, and residual scanner harmonics each have a recognisable signature in it,
+drift, muscle, and residual narrowband interference each have a recognisable signature in it,
 and comparing the same run before and after cleaning shows what the pipeline removed
 across the whole frequency range rather than one component at a time.
 
 Three properties of this panel are deliberate.
 
-The across-channel *spread* is drawn, not only the median. Residual gradient and pulse
+The across-channel *spread* is drawn, not only the median. Residual narrowband and pulse
 artifact are spatially focal — peripheral sensors, large lead loops, the temporal
 chain — and a median across sixty channels stays clean while two channels are ruined.
 The median alone answers "is the montage typical"; the spread answers "is any channel

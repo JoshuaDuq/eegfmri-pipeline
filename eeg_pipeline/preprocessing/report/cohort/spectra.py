@@ -67,7 +67,7 @@ SPECTRA_TITLE = "Cohort spectra before and after ICA"
 SPECTRA_TAG = "cohort-spectra"
 
 #: Participants above which the spectrum's traces stop being labelled. Same reasoning as
-#: the gradient panel: below it a trace nobody can name is unusable, above it the labels
+#: the panel: below it a trace nobody can name is unusable, above it the labels
 #: collide and the cohort median carries the figure.
 MAX_LABELLED_PARTICIPANTS = 8
 
@@ -135,7 +135,7 @@ def cohort_spectra(cohort: Cohort, *, gates: BandGates = DEFAULT_GATES) -> Cohor
     """Pool both stages across participants on the frequency range they all support.
 
     The range is the intersection, never an interpolation: resampling a spectrum onto a
-    foreign grid smears exactly the narrow features -- a line-noise tooth, a gradient
+    foreign grid smears exactly the narrow features -- a line-noise tooth, a narrowband
     harmonic, an alpha peak -- that this figure exists to show, and does so invisibly.
     """
     per_stage = {
@@ -264,7 +264,7 @@ def _mark_frequencies(
     """Draw the few frequencies a reader needs to locate, and no more.
 
     Every mark is ink over the data. The line-noise fundamental is drawn because a reader
-    has to know which peak is the mains; a handful of gradient harmonics are drawn so the
+    has to know which peak is the mains; a handful of harmonics are drawn so the
     comb can be placed relative to the spectrum, with the dedicated comb panel measuring
     every harmonic properly.
     """
@@ -450,9 +450,9 @@ def aperiodic_frame(cohort: Cohort) -> pd.DataFrame:
     """Exponent and offset per participant per stage, pooled across runs.
 
     Carries the acquisition context and the band-resolved removal alongside, because the
-    exponent shift cannot be read without them: inside a scanner the pre-ICA spectrum is
-    dominated at low frequency by the ballistocardiogram, so removing it must flatten the
-    slope. The same shift means opposite things in and out of a bore.
+    exponent shift cannot be read without them: a dominant low-frequency artifact carries
+    most of its power at the bottom of the fit range, so removing it must flatten the slope
+    by arithmetic rather than by anything having happened to the neural background.
     """
     rows: list[dict[str, object]] = []
     for participant in cohort.participants:

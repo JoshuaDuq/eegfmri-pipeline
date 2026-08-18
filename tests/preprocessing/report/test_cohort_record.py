@@ -19,7 +19,6 @@ from studies.pain_study.analysis.bcg.report import (
     compute_marker_agreement,
 )
 from eeg_pipeline.preprocessing.report.cohort.record import (
-    acquisition_context_of,
     alpha_measurements,
     build_subject_sidecar,
     comb_curves,
@@ -28,9 +27,8 @@ from eeg_pipeline.preprocessing.report.cohort.record import (
     spectrum_curves,
 )
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
+    RUN_COLUMNS,
     Paradigm,
-    run_columns_for,
 )
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
 from eeg_pipeline.preprocessing.report.preservation import PosteriorAlpha
@@ -129,19 +127,6 @@ def _alpha(*, prominence: float, residual: float, peak: float = 10.0) -> Posteri
 # --------------------------------------------------------------------------------------
 
 
-def test_observed_volume_markers_mean_the_recording_was_in_a_scanner() -> None:
-    observed = replace(_continuity(), has_volume_markers=True)
-
-    assert acquisition_context_of([observed]) is AcquisitionContext.IN_SCANNER
-    assert acquisition_context_of([_continuity()]) is AcquisitionContext.OUT_OF_SCANNER
-
-
-def test_too_few_volume_markers_for_timing_still_mean_in_scanner() -> None:
-    observed = replace(_continuity(), has_volume_markers=True)
-
-    assert acquisition_context_of([observed]) is AcquisitionContext.IN_SCANNER
-
-
 def test_task_events_decide_the_paradigm() -> None:
     assert paradigm_of([_continuity()]) is Paradigm.TASK
     assert paradigm_of([_continuity(events=())]) is Paradigm.REST
@@ -152,48 +137,14 @@ def test_task_events_decide_the_paradigm() -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_the_run_table_carries_every_column_its_context_requires() -> None:
+def test_the_run_table_carries_every_required_column() -> None:
     frame = run_table(
         spectra=[_spectra()],
-        continuity=[replace(_continuity(), has_volume_markers=True)],
-        timings={RUN: _timing()},
-        locked_averages=[_locked()],
-        context=AcquisitionContext.IN_SCANNER,
+        continuity=[_continuity()],
     )
 
-    for name in run_columns_for(AcquisitionContext.IN_SCANNER):
+    for name in RUN_COLUMNS:
         assert name in frame.columns
-
-
-def test_the_residual_column_is_accompanied_by_the_coverage_it_was_measured_over() -> None:
-    """A residual averaged over a quarter of a run describes a quarter of that run.
-
-    The sidecar is what cross-run analyses read, so the qualifier has to travel in it. Left
-    to the residual alone, sub-0009 r3 records 1.33 uV -- measured on the 44 beats the
-    correction found and none of the 443 it missed -- and reads as one of the cleanest runs
-    in the cohort.
-    """
-    from studies.pain_study.analysis.bcg.report import CardiacResidual
-
-    frame = run_table(
-        spectra=[_spectra()],
-        continuity=[replace(_continuity(), has_volume_markers=True)],
-        timings={RUN: _timing()},
-        locked_averages=[_locked()],
-        cardiac_residuals=[
-            CardiacResidual(
-                recording_id=RUN,
-                marker_count=44,
-                beat_source="annotation-markers",
-                residual_uv=1.33,
-                beat_train_coverage=0.098,
-            )
-        ],
-        context=AcquisitionContext.IN_SCANNER,
-    )
-
-    assert frame.loc[0, "bcg_residual_uv"] == pytest.approx(1.33)
-    assert frame.loc[0, "bcg_beat_train_coverage"] == pytest.approx(0.098)
 
 
 def test_continuity_reductions_are_transcribed_not_recomputed() -> None:
@@ -202,8 +153,6 @@ def test_continuity_reductions_are_transcribed_not_recomputed() -> None:
     frame = run_table(
         spectra=[_spectra()],
         continuity=[quality],
-        timings={},
-        context=AcquisitionContext.OUT_OF_SCANNER,
     )
 
     assert frame.loc[0, "flagged_fraction"] == pytest.approx(quality.bad_fraction)
@@ -211,35 +160,15 @@ def test_continuity_reductions_are_transcribed_not_recomputed() -> None:
     assert frame.loc[0, "duration_s"] == pytest.approx(600.0)
 
 
-def test_the_gradient_contract_preserves_observed_floor_and_signed_excess() -> None:
+def test_the_run_table_carries_no_acquisition_columns_at_all() -> None:
+    """They left with schema 4; a writer must not quietly put them back."""
     frame = run_table(
         spectra=[_spectra()],
         continuity=[_continuity()],
-        timings={RUN: _timing()},
-        locked_averages=[_locked()],
-        context=AcquisitionContext.IN_SCANNER,
     )
 
-    assert frame.loc[0, "volume_locked_rms_before_uv"] == pytest.approx(3.0)
-    assert frame.loc[0, "volume_locked_floor_before_uv"] == pytest.approx(0.5)
-    assert frame.loc[0, "volume_locked_excess_power_before_uv2"] == pytest.approx(8.75)
-    assert frame.loc[0, "volume_locked_resolved_before"]
-    assert frame.loc[0, "volume_locked_rms_after_uv"] == pytest.approx(1.0)
-    assert frame.loc[0, "volume_locked_floor_after_uv"] == pytest.approx(0.4)
-    assert frame.loc[0, "volume_locked_excess_power_after_uv2"] == pytest.approx(-0.2)
-    assert not frame.loc[0, "volume_locked_resolved_after"]
-    assert frame.loc[0, "volume_jitter_s"] == pytest.approx(0.004)
-
-
-def test_an_eeg_only_run_has_no_gradient_columns_at_all() -> None:
-    frame = run_table(
-        spectra=[_spectra()],
-        continuity=[_continuity()],
-        timings={},
-        context=AcquisitionContext.OUT_OF_SCANNER,
-    )
-
-    assert "volume_locked_rms_after_uv" not in frame.columns
+    for name in frame.columns:
+        assert not name.startswith(("volume_", "bcg_"))
     assert "n_volumes" not in frame.columns
 
 
@@ -248,8 +177,6 @@ def test_a_run_without_beat_detection_holds_a_blank_rather_than_a_zero() -> None
     frame = run_table(
         spectra=[_spectra()],
         continuity=[_continuity()],
-        timings={},
-        context=AcquisitionContext.OUT_OF_SCANNER,
     )
 
     assert np.isnan(frame.loc[0, "median_bpm"])
@@ -274,10 +201,8 @@ def test_beat_and_marker_measurements_are_transcribed_when_present() -> None:
     frame = run_table(
         spectra=[_spectra()],
         continuity=[_continuity()],
-        timings={},
         rr_intervals=[beats],
         marker_agreements=[agreement],
-        context=AcquisitionContext.OUT_OF_SCANNER,
     )
 
     assert frame.loc[0, "median_bpm"] == pytest.approx(60.0)
@@ -303,9 +228,7 @@ def test_marker_lag_travels_with_the_matched_fraction() -> None:
     frame = run_table(
         spectra=[_spectra()],
         continuity=[_continuity()],
-        timings={},
         marker_agreements=[agreement],
-        context=AcquisitionContext.OUT_OF_SCANNER,
     )
 
     assert frame.loc[0, "marker_matched_fraction"] == pytest.approx(0.0)
@@ -387,16 +310,13 @@ def test_a_scanner_participant_assembles_a_complete_sidecar() -> None:
         subject="0014",
         task="thermalactive",
         spectra=[_spectra()],
-        continuity=[replace(_continuity(), has_volume_markers=True)],
-        timings={RUN: _timing()},
-        locked_averages=[_locked()],
+        continuity=[_continuity()],
         combs=[_comb()],
         alpha={"after": _alpha(prominence=6.0, residual=1.0)},
         measurements={"variance_removed": 0.86},
         versions={"mne": "1.12.1"},
     )
 
-    assert sidecar.context is AcquisitionContext.IN_SCANNER
     assert sidecar.paradigm is Paradigm.TASK
     assert sidecar.n_runs == 1
     assert sidecar.has_comb_evidence
@@ -410,10 +330,8 @@ def test_a_resting_eeg_only_participant_assembles_a_narrower_one() -> None:
         task="rest",
         spectra=[_spectra()],
         continuity=[_continuity(events=())],
-        timings={},
     )
 
-    assert sidecar.context is AcquisitionContext.OUT_OF_SCANNER
     assert sidecar.paradigm is Paradigm.REST
     assert not sidecar.has_comb_evidence
     assert sidecar.comb_curves.empty
@@ -421,4 +339,4 @@ def test_a_resting_eeg_only_participant_assembles_a_narrower_one() -> None:
 
 def test_a_participant_with_no_measured_runs_is_an_error() -> None:
     with pytest.raises(ValueError, match="nothing for a cohort to read"):
-        build_subject_sidecar(subject="0014", task="x", spectra=[], continuity=[], timings={})
+        build_subject_sidecar(subject="0014", task="x", spectra=[], continuity=[])

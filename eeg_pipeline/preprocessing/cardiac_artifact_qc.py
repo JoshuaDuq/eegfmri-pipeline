@@ -1,4 +1,4 @@
-"""Cardiac artifact QC driven by preserved Analyzer R markers."""
+"""Cardiac artifact QC driven by the recording's beat-marker train."""
 
 from __future__ import annotations
 
@@ -21,9 +21,12 @@ from eeg_pipeline.preprocessing.derivatives import (
     runs_for_prefix,
 )
 from eeg_pipeline.preprocessing.ica_exclusions import components_path_for_ica
-from eeg_pipeline.preprocessing.report.rr_intervals import (
-    DEFAULT_BEAT_MARKER_DESCRIPTION as PULSE_MARKER_DESCRIPTION,
-)
+
+#: No default beat annotation. A label is a search instruction, not evidence a train
+#: exists, so a caller that names none goes straight to detecting R peaks from the ECG
+#: channel rather than searching for somebody else's spelling. Studies supply the label
+#: through ``ica.cardiac_review.marker_description``.
+DEFAULT_BEAT_MARKER_DESCRIPTION: str | None = None
 
 PULSE_EVENT_ID = 999
 
@@ -52,32 +55,39 @@ def pulse_marker_events(
     raw: mne.io.BaseRaw,
     *,
     ecg_channel: str = DEFAULT_ECG_CHANNEL,
+    marker_description: str | None = DEFAULT_BEAT_MARKER_DESCRIPTION,
 ) -> tuple[np.ndarray, bool]:
-    """Create MNE events from preserved BrainVision Analyzer R annotations (or fallback)."""
-    try:
-        events, _ = mne.events_from_annotations(
-            raw,
-            event_id={PULSE_MARKER_DESCRIPTION: PULSE_EVENT_ID},
-            use_rounding=True,
-            verbose="ERROR",
-        )
-    except ValueError as exc:
-        if "Could not find any of the events" in str(exc):
-            events = []
-        else:
-            raise
+    """Create MNE events from the recording's beat annotations, or from the channel.
+
+    The second return value says which of the two produced them. It travels with every
+    measurement built on these events, because a marker train and a detection over the
+    same recording are not the same evidence and must not be read as though they were.
+    """
+    events = []
+    if marker_description:
+        try:
+            events, _ = mne.events_from_annotations(
+                raw,
+                event_id={marker_description: PULSE_EVENT_ID},
+                use_rounding=True,
+                verbose="ERROR",
+            )
+        except ValueError as exc:
+            if "Could not find any of the events" in str(exc):
+                events = []
+            else:
+                raise
     if len(events) > 0:
         return events, False
 
-    # BrainVision analyzer often uses a 0.21s static delay when R-peaks aren't found,
+    # An upstream detector that fails to find R peaks may fall back to a fixed delay,
     # and doesn't export them. We use MNE's ecg detector to approximate them for QC.
     events, _, _, _ = mne.preprocessing.find_ecg_events(
         raw, ch_name=ecg_channel, event_id=PULSE_EVENT_ID, return_ecg=True, verbose="ERROR"
     )
     if len(events) == 0:
-        raise ValueError(
-            f"Raw recording contains no {PULSE_MARKER_DESCRIPTION!r} markers and fallback failed."
-        )
+        searched = f"no {marker_description!r} markers" if marker_description else "no beat markers"
+        raise ValueError(f"Raw recording contains {searched} and fallback failed.")
     return events, True
 
 
@@ -124,6 +134,7 @@ def compute_cardiac_attenuation(
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
     ecg_channel: str = DEFAULT_ECG_CHANNEL,
+    marker_description: str | None = DEFAULT_BEAT_MARKER_DESCRIPTION,
 ) -> CardiacAttenuationMetrics:
     """Measure cardiac-locked EEG RMS before and after ICA."""
     recordings_align = (
@@ -145,7 +156,9 @@ def compute_cardiac_attenuation(
         projection=False,
         verbose=False,
     )
-    events, is_fallback = pulse_marker_events(before_referenced, ecg_channel=ecg_channel)
+    events, is_fallback = pulse_marker_events(
+        before_referenced, ecg_channel=ecg_channel, marker_description=marker_description
+    )
     before_rms = _marker_locked_rms(
         before_referenced,
         events,
@@ -204,12 +217,15 @@ def compute_marker_ctps_scores(
     threshold: float,
     epoch_window: tuple[float, float],
     ecg_channel: str = DEFAULT_ECG_CHANNEL,
+    marker_description: str | None = DEFAULT_BEAT_MARKER_DESCRIPTION,
 ) -> tuple[np.ndarray, bool]:
-    """Score ICA components using CTPS epochs anchored to Analyzer markers."""
+    """Score ICA components using CTPS epochs anchored to the beat markers."""
     marker_epochs = []
     any_fallback = False
     for raw in raws:
-        events, is_fallback = pulse_marker_events(raw, ecg_channel=ecg_channel)
+        events, is_fallback = pulse_marker_events(
+            raw, ecg_channel=ecg_channel, marker_description=marker_description
+        )
         if is_fallback:
             any_fallback = True
         marker_epochs.append(
@@ -247,6 +263,7 @@ def write_cardiac_attenuation_qc(
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
     ecg_channel: str = DEFAULT_ECG_CHANNEL,
+    marker_description: str | None = DEFAULT_BEAT_MARKER_DESCRIPTION,
 ) -> Path:
     """Write run-level marker-locked EEG attenuation before versus after ICA.
 
@@ -262,6 +279,7 @@ def write_cardiac_attenuation_qc(
             baseline=baseline,
             measurement_window=measurement_window,
             ecg_channel=ecg_channel,
+            marker_description=marker_description,
         )
         rows.append(
             {
@@ -330,8 +348,9 @@ def run_marker_ctps_qc(
     threshold: float,
     epoch_window: tuple[float, float],
     ecg_channel: str = DEFAULT_ECG_CHANNEL,
+    marker_description: str | None = DEFAULT_BEAT_MARKER_DESCRIPTION,
 ) -> Path:
-    """Add Analyzer-marker CTPS flags to native MNE-BIDS component tables.
+    """Add beat-marker CTPS flags to native MNE-BIDS component tables.
 
     One decomposition per session, scored against the runs that fed it.
     """
@@ -359,6 +378,7 @@ def run_marker_ctps_qc(
                 threshold=threshold,
                 epoch_window=epoch_window,
                 ecg_channel=ecg_channel,
+                marker_description=marker_description,
             )
             components = pd.read_csv(components_path, sep="\t")
             updated = add_marker_ctps_columns(
@@ -422,6 +442,7 @@ def run_cardiac_attenuation_qc(
     baseline: tuple[float, float],
     measurement_window: tuple[float, float],
     ecg_channel: str = DEFAULT_ECG_CHANNEL,
+    marker_description: str | None = DEFAULT_BEAT_MARKER_DESCRIPTION,
 ) -> Path:
     """Pair filtered and clean runs and write marker-locked attenuation QC."""
     return write_cardiac_attenuation_qc(
@@ -430,10 +451,12 @@ def run_cardiac_attenuation_qc(
         baseline=baseline,
         measurement_window=measurement_window,
         ecg_channel=ecg_channel,
+        marker_description=marker_description,
     )
 
 
 __all__ = [
+    "DEFAULT_BEAT_MARKER_DESCRIPTION",
     "DEFAULT_ECG_CHANNEL",
     "CardiacAttenuationMetrics",
     "add_marker_ctps_columns",
