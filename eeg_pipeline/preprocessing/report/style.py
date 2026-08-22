@@ -343,7 +343,36 @@ REPORT_JS = f"""{_REPORT_JS_SENTINEL}
     nav.dataset.phasesApplied = '1';
   }}
 
-  function apply() {{ groupContents(); }}
+  function collapseAllButFirst() {{
+    var container = document.getElementById('container');
+    if (!container || container.dataset.collapseApplied) return;
+    var items = Array.prototype.slice.call(
+      container.querySelectorAll('.accordion-item')
+    ).filter(function (item) {{
+      // Top-level sections only. A nested item keeps its state, so expanding a section
+      // shows its contents rather than a second row of closed accordions.
+      return !item.parentNode.closest('.accordion-item');
+    }});
+
+    items.forEach(function (item, index) {{
+      if (index === 0) return;
+      Array.prototype.forEach.call(
+        item.querySelectorAll(':scope > .accordion-collapse'),
+        function (panel) {{ panel.classList.remove('show'); }}
+      );
+      Array.prototype.forEach.call(
+        item.querySelectorAll(':scope > .accordion-header .accordion-button'),
+        function (button) {{
+          button.classList.add('collapsed');
+          button.setAttribute('aria-expanded', 'false');
+        }}
+      );
+    }});
+
+    container.dataset.collapseApplied = '1';
+  }}
+
+  function apply() {{ groupContents(); collapseAllButFirst(); }}
 
   if (document.readyState === 'loading') {{
     document.addEventListener('DOMContentLoaded', apply);

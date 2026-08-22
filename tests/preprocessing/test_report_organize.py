@@ -791,3 +791,12 @@ def test_reopening_a_report_applies_the_javascript(tmp_path) -> None:
     report = open_subject_report(path)
 
     assert "/* eeg-pipeline report js */" in report.include
+
+
+def test_the_collapse_script_targets_only_top_level_sections() -> None:
+    from eeg_pipeline.preprocessing.report.style import REPORT_JS
+
+    # The selector is the whole guarantee: collapsing nested items too would hide a
+    # section's contents after the reader expanded it.
+    assert "closest('.accordion-item')" in REPORT_JS
+    assert "accordion-collapse" in REPORT_JS
