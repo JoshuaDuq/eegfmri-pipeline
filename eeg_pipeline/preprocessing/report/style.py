@@ -31,6 +31,7 @@ a vector frame carries a raster interior.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 import numpy as np
@@ -289,18 +290,31 @@ table.report-table .num {{ text-align: right; font-variant-numeric: tabular-nums
 """
 
 
+def _without_block(include: str, *, tag: str, sentinel: str) -> str:
+    """``include`` with any ``tag`` block carrying ``sentinel`` removed."""
+    pattern = re.compile(
+        rf"\n?<{tag}[^>]*>\n?(?:(?!</{tag}>).)*?{re.escape(sentinel)}.*?</{tag}>",
+        re.DOTALL,
+    )
+    return pattern.sub("", include)
+
+
 def apply_report_css(report) -> None:
-    """Add :data:`REPORT_CSS` to ``report`` unless it is already there.
+    """Replace this pipeline's stylesheet in ``report`` with the current one.
 
     ``Report.add_custom_css`` appends to ``Report.include`` with no deduplication, and a
-    subject report is opened and saved once per review stage. Without the guard a
-    six-stage run embeds the same stylesheet six times.
+    subject report is opened and saved once per review stage, so a six-stage run would
+    embed the same stylesheet six times.
+
+    Replacing rather than skipping, because skipping on the sentinel also froze the
+    styling of every report already on disk: a rule added later never reached one, and
+    the phase headings shipped unstyled that way.
     """
     include = getattr(report, "include", "")
     # A real report always carries a string here. Anything else means there is nothing to
     # have found the sentinel in, so treat it as "not yet applied" rather than failing.
     if isinstance(include, str) and _REPORT_CSS_SENTINEL in include:
-        return
+        report.include = _without_block(include, tag="style", sentinel=_REPORT_CSS_SENTINEL)
     report.add_custom_css(REPORT_CSS)
 
 
@@ -386,13 +400,13 @@ REPORT_JS = f"""{_REPORT_JS_SENTINEL}
 def apply_report_js(report) -> None:
     """Add :data:`REPORT_JS` to ``report`` unless it is already there.
 
-    Guarded like :func:`apply_report_css` and for the same reason: a subject report is
-    opened and saved once per review stage, and ``Report.add_custom_js`` appends without
-    deduplication.
+    Replaced like :func:`apply_report_css` and for the same reasons: a subject report is
+    opened and saved once per review stage, and a report already carrying an older script
+    has to receive the current one.
     """
     include = getattr(report, "include", "")
     if isinstance(include, str) and _REPORT_JS_SENTINEL in include:
-        return
+        report.include = _without_block(include, tag="script", sentinel=_REPORT_JS_SENTINEL)
     report.add_custom_js(REPORT_JS)
 
 

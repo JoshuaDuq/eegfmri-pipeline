@@ -800,3 +800,35 @@ def test_the_collapse_script_targets_only_top_level_sections() -> None:
     # section's contents after the reader expanded it.
     assert "closest('.accordion-item')" in REPORT_JS
     assert "accordion-collapse" in REPORT_JS
+
+
+def test_a_report_carrying_an_older_stylesheet_receives_the_current_one() -> None:
+    """The sentinel deduplicates, and must not therefore freeze a report's styling.
+
+    Guarding on the sentinel alone meant a report created before a rule was added never
+    received it, which is every report already on disk. The phase headings shipped
+    unstyled that way.
+    """
+    from eeg_pipeline.preprocessing.report.style import apply_report_css
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    report.add_custom_css("/* eeg-pipeline report css */\n.stale-rule { color: red; }")
+
+    apply_report_css(report)
+
+    assert ".stale-rule" not in report.include
+    assert report.include.count("/* eeg-pipeline report css */") == 1
+    assert "report-phase-heading" in report.include
+
+
+def test_a_report_carrying_an_older_script_receives_the_current_one() -> None:
+    from eeg_pipeline.preprocessing.report.style import apply_report_js
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    report.add_custom_js("/* eeg-pipeline report js */\nvar staleMarker = 1;")
+
+    apply_report_js(report)
+
+    assert "staleMarker" not in report.include
+    assert report.include.count("/* eeg-pipeline report js */") == 1
+    assert "report-phase-heading" in report.include
