@@ -20,7 +20,6 @@ import numpy as np
 import pytest
 
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (
-    AcquisitionContext,
     Paradigm,
     has_sidecar,
     read_sidecar,
@@ -224,9 +223,7 @@ def test_an_acquisition_date_is_recorded_separately_from_the_processing_date(
     assert read_sidecar(report_path).acquisition_date == "2026-03-04"
 
 
-def test_an_eeg_only_recording_is_classified_from_its_own_evidence(
-    pipeline, report_path
-) -> None:
+def test_a_task_recording_classifies_itself_as_one(pipeline, report_path) -> None:
     pipeline._write_qc_sidecar(
         report_path=report_path,
         record=_record(),
@@ -238,7 +235,6 @@ def test_an_eeg_only_recording_is_classified_from_its_own_evidence(
 
     sidecar = read_sidecar(report_path)
 
-    assert sidecar.context is AcquisitionContext.OUT_OF_SCANNER
     assert sidecar.paradigm is Paradigm.TASK
 
 

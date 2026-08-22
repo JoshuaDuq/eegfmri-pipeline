@@ -194,8 +194,8 @@ class SubjectSidecar:
     def has_condition_evidence(self) -> bool:
         """Whether this participant can contribute to the per-condition panels.
 
-        Narrower than :attr:`paradigm`, for the same reason :attr:`has_comb_evidence` is
-        narrower than :attr:`context`. A task recording whose events table did not name a
+        Narrower than :attr:`paradigm`, in the same way :attr:`has_comb_evidence` is
+        narrower than carrying spectra at all. A task recording whose events table did not name a
         condition column has trials but no conditions to break them down by, so "did this
         have trials" and "can this join the per-condition figure" are two questions.
         """
