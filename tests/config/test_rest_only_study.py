@@ -16,6 +16,15 @@ from eeg_pipeline.utils.config.roots import (
     resolve_resting_state_eeg_mode,
 )
 
+from tests import REPO_ROOT
+
+#: What these studies extend. They named the ``eeg_only`` preset until it was retired:
+#: the packaged config is EEG-only by construction now, so that base *is* this file.
+#: Named by absolute path because each study is written to a tmp directory, and spelled
+#: out rather than reached by preset name because several of these set ``paradigm: task``,
+#: which the one remaining preset contradicts.
+PACKAGED_CONFIG = REPO_ROOT / "eeg_pipeline" / "utils" / "config" / "eeg_config.yaml"
+
 _REST_FLAGS = (
     "preprocessing.task_is_rest",
     "feature_engineering.task_is_rest",
@@ -71,7 +80,7 @@ def test_an_unset_root_is_reported_rather_than_becoming_the_path_None(tmp_path) 
 @pytest.mark.parametrize("paradigm,expected", [("rest", True), ("task", False)])
 def test_the_paradigm_sets_every_rest_flag_together(tmp_path, paradigm, expected) -> None:
     study = tmp_path / "study.yaml"
-    study.write_text(f'extends: "eeg_only"\nproject:\n  paradigm: "{paradigm}"\n', encoding="utf-8")
+    study.write_text(f'extends: "{PACKAGED_CONFIG}"\nproject:\n  paradigm: "{paradigm}"\n', encoding="utf-8")
 
     config = load_config(study)
 
@@ -84,7 +93,7 @@ def test_the_paradigm_overrides_the_flags_it_inherits(tmp_path) -> None:
     booleans that the base config had already set to false."""
     study = tmp_path / "study.yaml"
     study.write_text(
-        'extends: "eeg_only"\nproject:\n  paradigm: "rest"\n'
+        f'extends: "{PACKAGED_CONFIG}"\nproject:\n  paradigm: "rest"\n'
         "preprocessing:\n  task_is_rest: false\n",
         encoding="utf-8",
     )
@@ -96,7 +105,7 @@ def test_an_unknown_paradigm_names_the_two_that_exist(tmp_path) -> None:
     from eeg_pipeline.utils.config.loader import ConfigError
 
     study = tmp_path / "study.yaml"
-    study.write_text('extends: "eeg_only"\nproject:\n  paradigm: "baseline"\n', encoding="utf-8")
+    study.write_text(f'extends: "{PACKAGED_CONFIG}"\nproject:\n  paradigm: "baseline"\n', encoding="utf-8")
 
     with pytest.raises(ConfigError, match="'task' or 'rest'"):
         load_config(study)
@@ -129,11 +138,13 @@ def test_the_rest_preset_does_not_carry_another_studys_task_label(tmp_path) -> N
     assert load_config(study).get("project.task") is None
 
 
-def test_the_eeg_only_preset_asks_for_the_task_label_and_nothing_else(tmp_path) -> None:
+def test_a_study_without_a_task_label_is_told_that_and_nothing_else(tmp_path) -> None:
     from eeg_pipeline.utils.config.coherence import check_config_coherence
 
     study = tmp_path / "study.yaml"
-    study.write_text('extends: "eeg_only"\n', encoding="utf-8")
+    study.write_text(
+        f'extends: "{PACKAGED_CONFIG}"\nproject:\n  task: null\n', encoding="utf-8"
+    )
 
     report = check_config_coherence(load_config(study))
 
@@ -150,14 +161,14 @@ def test_the_eeg_only_preset_asks_for_the_task_label_and_nothing_else(tmp_path) 
 def _rest_study(tmp_path, body: str = "") -> ConfigDict:
     study = tmp_path / "study.yaml"
     study.write_text(
-        f'extends: "eeg_only"\nproject:\n  paradigm: "rest"\n  task: "rest"\n{body}',
+        f'extends: "{PACKAGED_CONFIG}"\nproject:\n  paradigm: "rest"\n  task: "rest"\n{body}',
         encoding="utf-8",
     )
     return load_config(study)
 
 
 def test_the_two_knob_route_runs_as_written(tmp_path) -> None:
-    """``eeg_only`` + ``paradigm: rest`` is the documented way to say "resting-state EEG
+    """The packaged config + ``paradigm: rest`` is the documented way to say "resting-state EEG
     outside a scanner". It reported two errors the user had to clear by hand first, both
     of them values the base config chose for task epochs."""
     from eeg_pipeline.utils.config.coherence import check_config_coherence
@@ -202,7 +213,7 @@ def test_a_rest_study_of_only_event_locked_families_names_the_keys(tmp_path) -> 
 
     base = tmp_path / "base.yaml"
     base.write_text(
-        'extends: "eeg_only"\nfeature_engineering:\n  feature_categories: ["erp", "itpc"]\n',
+        f'extends: "{PACKAGED_CONFIG}"\nfeature_engineering:\n  feature_categories: ["erp", "itpc"]\n',
         encoding="utf-8",
     )
     study = tmp_path / "study.yaml"
@@ -223,7 +234,7 @@ def test_task_mode_keeps_everything_the_base_config_asked_for(tmp_path) -> None:
     """The neutralizing runs on the rest branch only. This is the guard that says so."""
     study = tmp_path / "study.yaml"
     study.write_text(
-        'extends: "eeg_only"\nproject:\n  paradigm: "task"\n  task: "oddball"\n',
+        f'extends: "{PACKAGED_CONFIG}"\nproject:\n  paradigm: "task"\n  task: "oddball"\n',
         encoding="utf-8",
     )
 
@@ -244,7 +255,10 @@ def test_rest_mode_still_needs_the_bids_task_label(tmp_path) -> None:
     from eeg_pipeline.utils.config.coherence import check_config_coherence
 
     study = tmp_path / "study.yaml"
-    study.write_text('extends: "eeg_only"\nproject:\n  paradigm: "rest"\n', encoding="utf-8")
+    study.write_text(
+        f'extends: "{PACKAGED_CONFIG}"\nproject:\n  paradigm: "rest"\n  task: null\n',
+        encoding="utf-8",
+    )
 
     report = check_config_coherence(load_config(study))
 

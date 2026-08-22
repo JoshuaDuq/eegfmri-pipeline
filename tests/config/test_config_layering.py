@@ -67,7 +67,7 @@ def test_a_named_preset_resolves_without_a_path(tmp_path) -> None:
         tmp_path,
         "study.yaml",
         """
-        extends: "eeg_only"
+        extends: "rest"
         project:
           task: "oddball"
         """,
@@ -75,7 +75,8 @@ def test_a_named_preset_resolves_without_a_path(tmp_path) -> None:
 
     config = load_config(study)
 
-    assert config.get("preprocessing.eeg_fmri") is False
+    # A value only the preset supplies: the packaged base says "task".
+    assert config.get("project.paradigm") == "rest"
     assert config.get("project.task") == "oddball"
 
 
@@ -99,7 +100,7 @@ def test_the_environment_variable_selects_the_config(tmp_path, monkeypatch) -> N
         tmp_path,
         "study.yaml",
         """
-        extends: "eeg_only"
+        extends: "rest"
         project:
           task: "envtask"
         """,
@@ -122,7 +123,7 @@ def test_the_process_default_redirects_argument_less_loads(tmp_path) -> None:
         tmp_path,
         "study.yaml",
         """
-        extends: "eeg_only"
+        extends: "rest"
         project:
           task: "redirected"
         """,
