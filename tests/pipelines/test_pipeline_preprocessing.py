@@ -153,6 +153,14 @@ class _PreprocessingImportMixin:
         patcher = patch.dict(sys.modules, _preprocessing_import_stubs())
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The stubs above only reach the pipeline module if it is imported *after* they
+        # are installed: it binds resolve_eeg_bids_root and the rest by name at its own
+        # import time. Left in sys.modules by any test file that ran earlier, it keeps
+        # the real functions and every stub here is inert -- so these tests passed or
+        # failed according to collection order, and a single new file in this directory
+        # was enough to flip six of them. Evicting the entry makes the in-test import
+        # re-execute against the stubs; patch.dict restores it on cleanup.
+        sys.modules.pop("eeg_pipeline.pipelines.preprocessing", None)
 
 
 class _TrackingProgress:
@@ -2215,14 +2223,14 @@ class TestPreprocessingGapfill(_PreprocessingImportMixin, unittest.TestCase):
 
 
 class TestPreprocessingStepSelection(_PreprocessingImportMixin, unittest.TestCase):
-    def _pipeline(self, analyzer_enabled=True):
+    def _pipeline(self, cardiac_review_enabled=True):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         p = object.__new__(PreprocessingPipeline)
         p.logger = Mock()
         p.config = DotConfig(
             {
-                "preprocessing": {"brainvision_analyzer": {"enabled": analyzer_enabled}},
+                "ica": {"cardiac_review": {"enabled": cardiac_review_enabled}},
                 "pyprep": {"bad_channel_sync_policy": "subject_union"},
             }
         )
@@ -2249,9 +2257,10 @@ class TestPreprocessingStepSelection(_PreprocessingImportMixin, unittest.TestCas
 
         self.assertNotIn("ica-cardiac-qc", steps)
 
-    def test_the_cardiac_qc_step_needs_the_analyzer_switch(self):
-        """It reads the marker train an upstream Analyzer correction left behind."""
-        p = self._pipeline(analyzer_enabled=False)
+    def test_the_cardiac_qc_step_needs_the_cardiac_review_switch(self):
+        """The marker-CTPS QC reads a beat train, and the cardiac review is what resolves
+        one. This gate used to be the Analyzer declaration, which no longer exists."""
+        p = self._pipeline(cardiac_review_enabled=False)
 
         steps = p._get_steps_for_run("full", task_is_rest=False)
 
