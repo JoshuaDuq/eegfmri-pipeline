@@ -293,6 +293,31 @@ def apply_report_css(report) -> None:
     report.add_custom_css(REPORT_CSS)
 
 
+_REPORT_JS_SENTINEL = "/* eeg-pipeline report js */"
+
+#: Behaviour MNE's template does not provide, applied to the rendered document.
+#:
+#: Written as script rather than as a build step because MNE renders the contents list
+#: from its own template at save time, and the grouping has to describe the document that
+#: was actually produced -- which sections a report contains depends on configuration and
+#: on what was recorded.
+REPORT_JS = f"""{_REPORT_JS_SENTINEL}
+"""
+
+
+def apply_report_js(report) -> None:
+    """Add :data:`REPORT_JS` to ``report`` unless it is already there.
+
+    Guarded like :func:`apply_report_css` and for the same reason: a subject report is
+    opened and saved once per review stage, and ``Report.add_custom_js`` appends without
+    deduplication.
+    """
+    include = getattr(report, "include", "")
+    if isinstance(include, str) and _REPORT_JS_SENTINEL in include:
+        return
+    report.add_custom_js(REPORT_JS)
+
+
 #: Largest number of component ticks drawn before the labels are thinned.
 _MAX_COMPONENT_TICKS = 32
 

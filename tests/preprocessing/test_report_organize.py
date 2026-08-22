@@ -769,3 +769,25 @@ def test_section_order_names_no_scanner_section():
     from eeg_pipeline.preprocessing.report.organize import SECTION_ORDER
 
     assert "Residual scanner gradient" not in SECTION_ORDER
+
+
+def test_the_report_javascript_is_applied_once_however_often_it_is_reopened() -> None:
+    from eeg_pipeline.preprocessing.report.style import apply_report_js
+
+    report = mne.Report(title="subject", verbose="ERROR")
+    apply_report_js(report)
+    apply_report_js(report)
+    apply_report_js(report)
+
+    assert report.include.count("/* eeg-pipeline report js */") == 1
+
+
+def test_reopening_a_report_applies_the_javascript(tmp_path) -> None:
+    path = tmp_path / "sub-0001_report.h5"
+    mne.Report(title="subject", verbose="ERROR").save(
+        path, overwrite=True, open_browser=False
+    )
+
+    report = open_subject_report(path)
+
+    assert "/* eeg-pipeline report js */" in report.include

@@ -16,7 +16,7 @@ from typing import Callable
 import mne
 
 from eeg_pipeline.preprocessing.report.phases import SECTION_ORDER
-from eeg_pipeline.preprocessing.report.style import apply_report_css
+from eeg_pipeline.preprocessing.report.style import apply_report_css, apply_report_js
 
 
 #: Title MNE gives the per-epoch metadata table it renders inside an epochs section.
@@ -278,8 +278,6 @@ def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
     )
 
 
-
-
 def _section_rank(element: object) -> int:
     """Where an element's section sits in :data:`SECTION_ORDER`.
 
@@ -496,6 +494,7 @@ def open_subject_report(report_path: Path | str) -> mne.Report:
     """
     report = mne.open_report(report_path)
     apply_report_css(report)
+    apply_report_js(report)
     drop_per_epoch_metadata_tables(report)
     # Guarded on the replacement being present, so this is a document-wide policy rather
     # than a removal that depends on which stage is running. It has to be re-applied on
