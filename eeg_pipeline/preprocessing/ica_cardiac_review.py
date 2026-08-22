@@ -97,6 +97,11 @@ class CardiacReviewSettings:
             "promotion_minimum_run_fraction",
             "beat_source",
             "marker_description",
+            # Read by PreprocessingPipeline._get_marker_ctps_qc_config, not here. It is
+            # named so that this reader tolerates a sibling it does not own: the
+            # allow-list exists to catch a misspelled setting, and a key another
+            # consumer requires is not one.
+            "marker_ctps_qc",
         }
         unsupported = sorted(set(values) - supported)
         if unsupported:
