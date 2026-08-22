@@ -36,6 +36,7 @@ from collections.abc import Iterable
 import numpy as np
 
 from eeg_pipeline.infra.matplotlib import setup_matplotlib
+from eeg_pipeline.preprocessing.report.phases import phases_as_json
 
 OKABE_ITO = {
     "black": "#000000",
@@ -275,6 +276,16 @@ table.report-table tr.key th,
 table.report-table tr.key td {{ font-weight: 600; }}
 table.report-table tr.sub th[scope='row'] {{ padding-left: 1.5rem; color: #555; }}
 table.report-table .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+.report-phase-heading {{
+  margin: 0.9rem 0 0.15rem;
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b6b6b;
+}}
+.report-phase-heading:first-child {{ margin-top: 0; }}
 """
 
 
@@ -302,6 +313,44 @@ _REPORT_JS_SENTINEL = "/* eeg-pipeline report js */"
 #: was actually produced -- which sections a report contains depends on configuration and
 #: on what was recorded.
 REPORT_JS = f"""{_REPORT_JS_SENTINEL}
+(function () {{
+  var phases = {phases_as_json()};
+
+  function groupContents() {{
+    var nav = document.getElementById('toc-navbar');
+    if (!nav || nav.dataset.phasesApplied) return;
+    var links = Array.prototype.slice.call(nav.querySelectorAll('a.nav-link'));
+    if (!links.length) return;
+
+    phases.forEach(function (phase) {{
+      var first = null;
+      links.forEach(function (link) {{
+        if (first) return;
+        var title = link.textContent.trim();
+        var belongs = phase.sections.some(function (section) {{
+          return title.indexOf(section) === 0;
+        }});
+        if (belongs) first = link;
+      }});
+      // A phase with no section in this document contributes no heading.
+      if (!first) return;
+      var heading = document.createElement('div');
+      heading.className = 'report-phase-heading';
+      heading.textContent = phase.title;
+      first.parentNode.insertBefore(heading, first);
+    }});
+
+    nav.dataset.phasesApplied = '1';
+  }}
+
+  function apply() {{ groupContents(); }}
+
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', apply);
+  }} else {{
+    apply();
+  }}
+}})();
 """
 
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 from eeg_pipeline.preprocessing.report.phases import (
     PHASES,
     SECTION_ORDER,
+    phases_as_json,
     phases_present,
 )
 
@@ -72,3 +75,15 @@ def test_a_report_with_no_cardiac_review_still_groups_the_decomposition():
     present = phases_present(["ICA decomposition quality", "ICA: removals"])
 
     assert [phase.title for phase in present] == ["What the decomposition did"]
+
+
+def test_the_serialised_table_carries_every_phase_in_order():
+    payload = json.loads(phases_as_json())
+
+    assert [entry["title"] for entry in payload] == [phase.title for phase in PHASES]
+
+
+def test_the_serialised_table_carries_each_phases_sections():
+    payload = json.loads(phases_as_json())
+
+    assert payload[0]["sections"] == list(PHASES[0].sections)

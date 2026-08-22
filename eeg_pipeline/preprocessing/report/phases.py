@@ -7,6 +7,7 @@ leaves one source for both.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -91,4 +92,10 @@ def phases_present(section_titles: Iterable[str]) -> tuple[Phase, ...]:
     )
 
 
-__all__ = ["PHASES", "SECTION_ORDER", "Phase", "phases_present"]
+def phases_as_json() -> str:
+    return json.dumps(
+        [{"title": phase.title, "sections": list(phase.sections)} for phase in PHASES]
+    )
+
+
+__all__ = ["PHASES", "SECTION_ORDER", "Phase", "phases_as_json", "phases_present"]
