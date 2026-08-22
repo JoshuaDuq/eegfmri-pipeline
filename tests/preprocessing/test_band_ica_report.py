@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
@@ -979,6 +980,17 @@ def test_retained_epochs_are_mapped_by_original_mne_selection_values() -> None:
     assert retained_epochs.selection.tolist() == [2]
 
 
+def _document_html(html: str) -> str:
+    """``html`` with its embedded scripts removed.
+
+    The report's contents-grouping script names every section the document *can* hold, so
+    a bare substring search finds a section name whether or not the document has that
+    section. These assertions are about what the report contains, so the machinery that
+    lays it out is not part of what they read.
+    """
+    return re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
+
+
 def test_generate_band_report_persists_real_mne_html_sections(tmp_path) -> None:
     import matplotlib.pyplot as plt
     import mne
@@ -1055,7 +1067,7 @@ def test_generate_band_report_persists_real_mne_html_sections(tmp_path) -> None:
             settings=BandIcaReportSettings(),
         )
 
-    html = report_path.with_suffix(".html").read_text(encoding="utf-8")
+    html = _document_html(report_path.with_suffix(".html").read_text(encoding="utf-8"))
     # The guide sits inside the review section it describes rather than claiming a
     # contents entry of its own for one paragraph.
     assert "How to review ICA component dossiers" in html
