@@ -468,6 +468,19 @@ ica:
   # ECG is the detector that does transfer, so it provides the automated baseline and the
   # manual review adjusts it rather than being the only line of defence.
   use_ecg_detection: true
+  # CTPS threshold the ECG detector flags a component on. Null leaves it to
+  # MNE-BIDS-Pipeline, whose default is 0.1 -- which is what every run of this pipeline
+  # has used, so null preserves them exactly.
+  #
+  # Set it where the recordings warrant it. 0.1 is well below MNE's own 0.25 default for
+  # find_bads_ecg, and it suits data carrying a ballistocardiogram, where cardiac
+  # components are unmistakable. On EEG recorded outside a scanner there is no BCG, only
+  # the small ordinary cardiac field, and the CTPS scores form one unimodal distribution
+  # with no cardiac population separating out -- so a threshold inside that distribution
+  # selects its top tail. Measured on a four-participant EEG-only cohort, 0.1 excluded
+  # 20-33 of ~57 components per participant as cardiac while the full beat train put
+  # 0-2 above 0.25 and no component correlated with the ECG lead above r = 0.30.
+  ecg_threshold: null
   use_eog_detection: true
   require_manual_review: true
   # True on the operator's instruction for the 2026-08-03 re-run, without a component-by-

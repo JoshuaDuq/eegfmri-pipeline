@@ -2599,6 +2599,16 @@ class PreprocessingPipeline(PipelineBase):
         lines.append(f"ica_use_ecg_detection = {use_ecg_detection}")
         lines.append(f"ica_use_eog_detection = {use_eog_detection}")
 
+        # The CTPS threshold the ECG detector flags a component on. Left unwritten when
+        # unset, so MNE-BIDS-Pipeline's own default still decides it and no existing
+        # study's exclusions move. It is named at all because the right value is a
+        # property of the recordings: the upstream default suits data carrying a
+        # ballistocardiogram, and on EEG acquired outside a scanner it falls inside the
+        # null distribution of CTPS scores, where it selects the top tail of noise.
+        ecg_threshold = self.config.get("ica.ecg_threshold")
+        if ecg_threshold is not None:
+            lines.append(f"ica_ecg_threshold = {float(ecg_threshold)}")
+
         if use_icalabel:
             labels_to_keep = tuple(self.config.get("ica.labels_to_keep", []))
             if not labels_to_keep:
