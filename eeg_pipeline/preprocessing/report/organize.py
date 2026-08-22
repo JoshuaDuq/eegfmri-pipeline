@@ -15,6 +15,7 @@ from typing import Callable
 
 import mne
 
+from eeg_pipeline.preprocessing.report.phases import SECTION_ORDER
 from eeg_pipeline.preprocessing.report.style import apply_report_css
 
 
@@ -277,50 +278,6 @@ def drop_replaced_per_run_bad_channels(report: mne.Report) -> None:
     )
 
 
-#: The order sections appear in, as a reading order rather than a build order.
-#:
-#: Matched as prefixes, so ``ICA component review`` covers the per-band sections whose
-#: names carry the band. A section matching nothing is appended in the order it was
-#: added, which is what a new stage gets until it is named here.
-#:
-#: The document previously had no declared order at all. Each stage moved its own content
-#: relative to whatever happened to exist when it ran, so the shape of the report depended
-#: on which stages ran and in what sequence -- visible in the archive as sections
-#: occupying two separate positions each, and as the events panel
-#: rendering behind the trial counts it describes because it was placed last.
-#:
-#: The sequence: what the run was, what came in, what the decomposition did, what survived.
-SECTION_ORDER = (
-    # What this report says, and what produced it.
-    "At a glance",
-    "Configuration",
-    "Filter response",
-    # What came in.
-    "Channel and region coverage",
-    "Data quality over time",
-    "Raw (original)",
-    "Raw (filtered)",
-    # The decomposition: the whole of it, then each detector with the evidence behind
-    # it, then each component.
-    "ICA: epochs for fitting",
-    "ICA decomposition quality",
-    "ICA cardiac artifact review",
-    "Cardiac rhythm",
-    "ICA ocular artifact review",
-    "ICA component review",
-    "ICA: components",
-    "ICA: removals",
-    "Exploratory band-fitted ICAs",
-    # Whether the cleaning worked.
-    "Sensor spectra before and after ICA",
-    # What was presented, what survived, and whether the survivors carry signal.
-    "Events",
-    "Epoch rejection",
-    "Signal preservation",
-    "Epochs (before cleaning)",
-    "Epochs (clean)",
-    "Raw (clean)",
-)
 
 
 def _section_rank(element: object) -> int:
