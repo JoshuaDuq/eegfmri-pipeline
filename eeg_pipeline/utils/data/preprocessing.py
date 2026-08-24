@@ -38,8 +38,15 @@ logger = logging.getLogger(__name__)
 ###################################################################
 
 
-def find_brainvision_vhdrs(source_root: Path) -> List[Path]:
-    vhdrs = sorted(source_root.glob("sub-*/eeg/brainvision_processed_1khz/**/*.vhdr"))
+def find_brainvision_vhdrs(source_root: Path, source_layout: str) -> List[Path]:
+    # Named rather than fixed because a participant directory holds several generations of
+    # the same recording -- the original acquisition and whatever an artifact-correction
+    # stage wrote -- and only the caller knows which generation this conversion is of.
+    if "/" in source_layout or "\\" in source_layout:
+        raise ValueError(
+            f"Source layout must be a single directory name under sub-*/eeg/, got {source_layout!r}"
+        )
+    vhdrs = sorted(source_root.glob(f"sub-*/eeg/{source_layout}/**/*.vhdr"))
     return [p for p in vhdrs if p.is_file() and not p.name.startswith("._")]
 
 

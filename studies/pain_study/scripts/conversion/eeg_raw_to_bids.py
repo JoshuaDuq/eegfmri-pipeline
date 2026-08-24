@@ -62,6 +62,25 @@ def trim_to_volume_bounds(raw: mne.io.BaseRaw) -> bool:
     raw.crop(tmin=float(first_onset), tmax=float(last_onset))
     return True
 
+
+# The marker-driven counterpart to trim_to_volume_bounds, for a study whose recordings
+# carry no volume markers: the paradigm's own first marker bounds the recording instead.
+def trim_to_first_event(raw: mne.io.BaseRaw, prefix: str) -> float:
+    normalized_prefix = normalize_string(prefix)
+    onsets = [
+        float(onset)
+        for onset, description in zip(raw.annotations.onset, raw.annotations.description)
+        if normalize_string(description).startswith(normalized_prefix)
+    ]
+    if not onsets:
+        raise ValueError(f"Cannot trim: no annotation starts with {prefix!r} in this recording")
+    first_onset = min(onsets)
+    logger.info("Trimming raw to first %r at %.3fs.", prefix, first_onset)
+    # Annotation onsets are absolute against orig_time; crop takes a time in raw.times.
+    raw.crop(tmin=first_onset - raw.first_time)
+    return first_onset
+
+
 def _find_native_corrected_fifs(source_root: Path, task: str) -> list[Path]:
     pattern = f"sub-*/eeg/sub-*_task-{task}_run-*_desc-mriartifactclean_raw.fif"
     return sorted(
@@ -75,9 +94,10 @@ def _find_source_files(
     source_root: Path,
     source_format: SourceFormat,
     task: str,
+    source_layout: str,
 ) -> list[Path]:
     if source_format == "brainvision":
-        source_files = find_brainvision_vhdrs(source_root)
+        source_files = find_brainvision_vhdrs(source_root, source_layout)
     elif source_format == "native-fif":
         source_files = _find_native_corrected_fifs(source_root, task)
     else:
@@ -174,6 +194,8 @@ def run_raw_to_bids(
     keep_all_annotations: bool = False,
     *,
     source_format: SourceFormat = "brainvision",
+    source_layout: str = "brainvision_processed_1khz",
+    trim_to_first_event_prefix: Optional[str] = None,
     _logger: Optional[logging.Logger] = None,
 ) -> int:
     """Convert one explicitly selected EEG source format to BIDS."""
@@ -182,7 +204,7 @@ def run_raw_to_bids(
     from mne_bids import BIDSPath, write_raw_bids
 
     log.info("Scanning for %s EEG files in: %s", source_format, source_root)
-    source_files = _find_source_files(source_root, source_format, task)
+    source_files = _find_source_files(source_root, source_format, task, source_layout)
 
     if subjects:
         subj_set = set(subjects)
@@ -226,6 +248,9 @@ def run_raw_to_bids(
         was_trimmed = False
         if do_trim_to_volume_bounds:
             was_trimmed = trim_to_volume_bounds(raw)
+        if trim_to_first_event_prefix:
+            trim_to_first_event(raw, trim_to_first_event_prefix)
+            was_trimmed = True
 
         if was_trimmed and not raw.preload:
             raw.load_data()

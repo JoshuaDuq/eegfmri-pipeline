@@ -74,6 +74,19 @@ restrict a run.
 
 Converts BrainVision (`.vhdr`) source files to BIDS EEG format using `mne-bids`.
 
+`--source-layout` names which directory under `sub-*/eeg/` holds the generation to
+convert, because a participant directory holds several. It defaults to
+`brainvision_processed_1khz`, this paradigm's Analyzer-corrected export. A study whose
+source is the original acquisition — one recorded outside the scanner, with no Analyzer
+stage — passes `--source-layout original_untrimmed_5khz` instead.
+
+`--trim-to-first-event PREFIX` crops each recording to start at its first annotation
+beginning with `PREFIX`, discarding the setup period before the paradigm begins. It is
+the marker-driven counterpart to `--trim-to-volume-bounds`, for a study whose recordings
+carry no volume markers to bound them. It fails on a recording that has no such
+annotation rather than passing it through untrimmed, so a run with a missing marker is
+visible instead of silently longer than its neighbours.
+
 ---
 
 ### `fmri-raw-to-bids`

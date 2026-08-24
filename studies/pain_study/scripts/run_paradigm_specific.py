@@ -27,11 +27,30 @@ def _parser() -> argparse.ArgumentParser:
         choices=["brainvision", "native-fif"],
         default="brainvision",
     )
+    eeg.add_argument(
+        "--source-layout",
+        default="brainvision_processed_1khz",
+        help=(
+            "Directory under sub-*/eeg/ holding the BrainVision generation to convert. "
+            "Default is the Analyzer-corrected 1 kHz export; use original_untrimmed_5khz "
+            "for a study whose source is the original acquisition."
+        ),
+    )
     eeg.add_argument("--subject", action="append", default=None)
     eeg.add_argument("--montage", default="easycap-M1")
     eeg.add_argument("--line-freq", type=float, default=60.0)
     eeg.add_argument("--overwrite", action="store_true")
     eeg.add_argument("--trim-to-volume-bounds", action="store_true")
+    eeg.add_argument(
+        "--trim-to-first-event",
+        default=None,
+        metavar="PREFIX",
+        help=(
+            "Crop each recording to start at its first annotation beginning with PREFIX, "
+            "dropping the setup period before the paradigm starts (e.g. Iti_start). "
+            "Fails if a recording has no such annotation."
+        ),
+    )
     eeg.add_argument("--event-prefix", action="append", default=None)
     eeg.add_argument("--keep-all-annotations", action="store_true")
 
@@ -91,6 +110,8 @@ def main() -> int:
             event_prefixes=args.event_prefix,
             keep_all_annotations=bool(args.keep_all_annotations),
             source_format=args.source_format,
+            source_layout=args.source_layout,
+            trim_to_first_event_prefix=args.trim_to_first_event,
         )
         print(f"Converted EEG files: {n}")
         return 0
