@@ -16,13 +16,19 @@ def _validate_epoch_parameters(args: argparse.Namespace) -> None:
 
     if args.baseline is not None:
         baseline_start, baseline_end = args.baseline
-        if baseline_start >= baseline_end:
+        if baseline_start > baseline_end:
             raise ValueError(
-                f"Baseline start ({baseline_start}s) must be less than end ({baseline_end}s)"
+                f"Baseline start ({baseline_start}s) must not exceed end ({baseline_end}s)"
             )
-        if args.tmin is not None and baseline_end > args.tmin:
+        if args.tmin is not None and baseline_start < args.tmin:
             raise ValueError(
-                f"Baseline end ({baseline_end}s) must not exceed epoch start ({args.tmin}s)"
+                f"Baseline ({baseline_start}s, {baseline_end}s) must be within the epoch "
+                f"starting at {args.tmin}s."
+            )
+        if args.tmax is not None and baseline_end > args.tmax:
+            raise ValueError(
+                f"Baseline ({baseline_start}s, {baseline_end}s) must be within the epoch "
+                f"ending at {args.tmax}s."
             )
 
 
@@ -92,8 +98,8 @@ def _update_ica_config(args: argparse.Namespace, config: Any) -> None:
     if args.spatial_filter:
         ica_config["spatial_filter"] = args.spatial_filter
     if args.ica_method:
-        ica_config["method"] = args.ica_method
-    if args.ica_components:
+        ica_config["algorithm"] = args.ica_method
+    if args.ica_components is not None:
         ica_config["n_components"] = args.ica_components
     if args.ica_l_freq is not None:
         ica_config["l_freq"] = args.ica_l_freq
@@ -132,6 +138,8 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
     preprocessing_cfg = config.setdefault("preprocessing", {})
     if args.allow_misaligned_trim:
         alignment_cfg["allow_misaligned_trim"] = True
+    if args.trim_to_volume_bounds:
+        alignment_cfg["trim_to_volume_bounds"] = True
     if args.min_alignment_samples is not None:
         alignment_cfg["min_alignment_samples"] = int(args.min_alignment_samples)
     if args.fmri_onset_reference:

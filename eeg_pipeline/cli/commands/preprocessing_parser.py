@@ -12,6 +12,23 @@ from eeg_pipeline.cli.common import (
 )
 
 
+def _parse_ica_components(value: str) -> int | float:
+    """Parse an exact component count or an explained-variance fraction."""
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "ICA components must be an integer greater than 1 or a fraction between 0 and 1."
+        ) from error
+    if parsed.is_integer() and parsed > 1:
+        return int(parsed)
+    if 0 < parsed < 1:
+        return parsed
+    raise argparse.ArgumentTypeError(
+        "ICA components must be an integer greater than 1 or a fraction between 0 and 1."
+    )
+
+
 def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the preprocessing command parser."""
     parser = subparsers.add_parser(
@@ -136,12 +153,17 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     )
     prep_group.add_argument(
         "--ica-method",
-        choices=["extended_infomax", "fastica", "infomax", "picard"],
+        choices=[
+            "extended_infomax",
+            "picard-extended_infomax",
+            "fastica",
+            "picard",
+        ],
         help="ICA algorithm",
     )
     prep_group.add_argument(
         "--ica-components",
-        type=float,
+        type=_parse_ica_components,
         help="Number of ICA components (int) or variance fraction (float)",
     )
     prep_group.add_argument("--ica-l-freq", type=float, help="ICA high-pass filter frequency (Hz)")
@@ -279,6 +301,12 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         action="store_true",
         default=False,
         help="Allow trimming when EEG/fMRI trial counts are slightly misaligned",
+    )
+    prep_group.add_argument(
+        "--trim-to-volume-bounds",
+        action="store_true",
+        default=False,
+        help="Trim aligned EEG events to the available fMRI volume interval",
     )
     prep_group.add_argument(
         "--min-alignment-samples",

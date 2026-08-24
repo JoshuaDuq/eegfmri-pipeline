@@ -381,10 +381,11 @@ ICA
      - Description
    * - ``ica.algorithm``
      - ``"extended_infomax"``
-     - ICA decomposition algorithm (``"extended_infomax"``, ``"fastica"``, ``"picard"``)
+     - ICA decomposition algorithm (``"extended_infomax"``,
+       ``"picard-extended_infomax"``, ``"fastica"``, ``"picard"``)
    * - ``ica.n_components``
-     - ``0.99``
-     - Number of components; float < 1 = explained-variance fraction
+     - ``null``
+     - Near-rank decomposition; float < 1 = explained-variance fraction; int = exact count
    * - ``ica.l_freq``
      - ``1.0``
      - High-pass before ICA fitting (Hz); suppresses slow drift

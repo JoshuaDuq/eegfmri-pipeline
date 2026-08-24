@@ -191,8 +191,6 @@ def _check_task_settings(config: Any, errors: List[ConfigIssue]) -> None:
     )
 
 
-
-
 def _check_ecg_settings(config: Any, warnings: List[ConfigIssue]) -> None:
     """Stages that need a recorded ECG lead, checked against whether one is named.
 
@@ -246,6 +244,37 @@ def _check_decomb_notch(config: Any, errors: List[ConfigIssue]) -> None:
         )
 
 
+def _check_icalabel_settings(config: Any, errors: List[ConfigIssue]) -> None:
+    if not bool(get_config_value(config, "ica.use_icalabel", False)):
+        return
+
+    algorithm = get_config_value(config, "ica.algorithm", None)
+    supported_algorithms = ("extended_infomax", "picard-extended_infomax")
+    if algorithm not in supported_algorithms:
+        errors.append(
+            ConfigIssue(
+                "ica.algorithm",
+                "must be 'extended_infomax' or 'picard-extended_infomax' when "
+                f"ica.use_icalabel is true; got {algorithm!r}.",
+            )
+        )
+
+    required_values = (
+        ("ica.l_freq", 1.0),
+        ("ica.h_freq", 100.0),
+        ("eeg.reference", "average"),
+    )
+    for key, required_value in required_values:
+        value = get_config_value(config, key, None)
+        if value != required_value:
+            errors.append(
+                ConfigIssue(
+                    key,
+                    f"must be {required_value!r} when ica.use_icalabel is true; " f"got {value!r}.",
+                )
+            )
+
+
 def check_config_coherence(config: Any) -> CoherenceReport:
     """Check every config-only contradiction and report them together."""
     errors: List[ConfigIssue] = []
@@ -261,6 +290,7 @@ def check_config_coherence(config: Any) -> CoherenceReport:
     # Unconditional: the ECG stages need a lead whether or not there was a scanner.
     _check_ecg_settings(config, warnings)
     _check_decomb_notch(config, errors)
+    _check_icalabel_settings(config, errors)
 
     return CoherenceReport(errors=tuple(errors), warnings=tuple(warnings))
 

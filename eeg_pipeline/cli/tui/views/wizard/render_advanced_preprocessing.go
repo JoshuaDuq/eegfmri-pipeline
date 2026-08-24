@@ -445,7 +445,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			value = spatialFilterVal
 			hint = "Spatial filter: ICA or SSP"
 		case optPrepICAAlgorithm:
-			icaAlgVal := []string{"extended_infomax", "fastica", "infomax", "picard"}[m.prepICAAlgorithm]
+			icaAlgVal := []string{"extended_infomax", "fastica", "picard-extended_infomax", "picard"}[m.prepICAAlgorithm]
 			label = "Algorithm"
 			value = icaAlgVal
 			hint = "ICA decomposition algorithm"

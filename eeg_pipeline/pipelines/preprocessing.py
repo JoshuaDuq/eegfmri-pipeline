@@ -723,17 +723,51 @@ class PreprocessingPipeline(PipelineBase):
         exactly like a recording with no blinks in it. This montage has no dedicated EOG
         electrode, so that is the default outcome unless surrogates are named.
         """
-        configured = self.config.get("eeg.eog_channels")
-        if isinstance(configured, str):
-            channels = [name.strip() for name in configured.split(",") if name.strip()]
-        elif isinstance(configured, (list, tuple)):
-            channels = [str(name).strip() for name in configured if str(name).strip()]
-        else:
-            channels = []
+        configured = self._normalize_eog_channels(self.config.get("eeg.eog_channels"))
+        if configured is None:
+            return sorted(self._bids_eog_channel_names())
+        if isinstance(configured, dict):
+            channels = [
+                channel
+                for subject_channels in configured.values()
+                if subject_channels is not None
+                for channel in subject_channels
+            ]
+            return sorted(set(channels))
+        return configured
 
-        if channels:
-            return channels
-        return sorted(self._bids_eog_channel_names())
+    @staticmethod
+    def _normalize_eog_channels(value: Any) -> list[str] | dict[str, list[str] | None] | None:
+        """Normalize supported EOG channel selectors without changing their structure."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return [channel.strip() for channel in value.split(",") if channel.strip()]
+        if isinstance(value, (list, tuple)):
+            if not all(isinstance(channel, str) and channel.strip() for channel in value):
+                raise TypeError("eeg.eog_channels must contain non-empty channel names.")
+            return [channel.strip() for channel in value]
+        if isinstance(value, dict):
+            normalized = {}
+            for subject, channels in value.items():
+                if not isinstance(subject, str):
+                    raise TypeError("eeg.eog_channels mapping keys must be strings.")
+                if channels is None:
+                    normalized[subject] = None
+                    continue
+                if not isinstance(channels, (list, tuple)) or not all(
+                    isinstance(channel, str) and channel.strip() for channel in channels
+                ):
+                    raise TypeError(
+                        "eeg.eog_channels mapping values must be lists of non-empty "
+                        "channel names or null."
+                    )
+                normalized[subject] = [channel.strip() for channel in channels]
+            return normalized
+        raise TypeError(
+            "eeg.eog_channels must be null, a channel-name sequence, a comma-separated "
+            "string, or a subject/session mapping."
+        )
 
     def _validate_eog_detection_is_reachable(self) -> None:
         """Reject an EOG detection request that upstream would silently skip."""
@@ -2667,7 +2701,7 @@ class PreprocessingPipeline(PipelineBase):
                 "Non-resting-state preprocessing requires epochs.conditions or "
                 "detectable BIDS event conditions."
             )
-        lines.append(f"conditions = {list(conditions)}")
+        lines.append(f"conditions = {conditions!r}")
 
         epochs_tmin = self.config.get("epochs.tmin", -3.0)
         if epochs_tmin is not None:
@@ -2774,24 +2808,15 @@ class PreprocessingPipeline(PipelineBase):
 
         # EEG reference
         eeg_reference = self.config.get("eeg.reference", "average")
-        if eeg_reference:
-            lines.append(f'eeg_reference = "{eeg_reference}"')
+        lines.append(f"eeg_reference = {eeg_reference!r}")
 
         # EOG channels. Emitted from the configured names only: a channel already typed
         # EOG in channels.tsv is found by upstream on its own, and restating it here
         # would be redundant. The guard below is what makes the "neither" case loud.
         self._validate_eog_detection_is_reachable()
-        eog_channels = self.config.get("eeg.eog_channels")
-        if eog_channels:
-            if isinstance(eog_channels, list):
-                lines.append(f"eog_channels = {eog_channels}")
-            elif isinstance(eog_channels, str):
-                # Handle comma-separated string
-                eog_list = [ch.strip() for ch in eog_channels.split(",") if ch.strip()]
-                if eog_list:
-                    lines.append(f"eog_channels = {eog_list}")
-            else:
-                lines.append(f'eog_channels = ["{eog_channels}"]')
+        eog_channels = self._normalize_eog_channels(self.config.get("eeg.eog_channels"))
+        if eog_channels is not None:
+            lines.append(f"eog_channels = {eog_channels!r}")
 
         # NOTE: mne-bids-pipeline does not accept an `ecg_channels` config variable.
         # ECG channel typing is handled via BIDS channels.tsv (type=ECG) and MNE.
@@ -2832,17 +2857,16 @@ class PreprocessingPipeline(PipelineBase):
         lines.append("")
         lines.append("# ICA")
 
+        if self.config.get("ica.method") is not None:
+            raise ValueError("ica.method is unsupported; configure ica.algorithm instead.")
+
         # Spatial filter
         spatial_filter = self.config.get("ica.spatial_filter", "ica")
-        if spatial_filter:
-            lines.append(f'spatial_filter = "{spatial_filter}"')
+        lines.append(f"spatial_filter = {spatial_filter!r}")
 
         # ICA algorithm
-        ica_algorithm = self.config.get("ica.method") or self.config.get(
-            "ica.algorithm", "extended_infomax"
-        )
-        if ica_algorithm:
-            lines.append(f'ica_algorithm = "{ica_algorithm}"')
+        ica_algorithm = self.config.get("ica.algorithm", "extended_infomax")
+        lines.append(f"ica_algorithm = {ica_algorithm!r}")
 
         # ICA n_components
         ica_n_components = self.config.get("ica.n_components")

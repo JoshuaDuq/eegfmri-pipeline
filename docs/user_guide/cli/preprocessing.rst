@@ -56,7 +56,8 @@ Key Options
      - Skip PyPREP bad-channel detection entirely
      - disabled
    * - ``--ica-method``
-     - ICA algorithm: ``extended_infomax``, ``fastica``, ``infomax``, ``picard``
+     - ICA algorithm: ``extended_infomax``, ``picard-extended_infomax``,
+       ``fastica``, ``picard``
      - from config (default: ``extended_infomax``)
    * - ``--ica-components``
      - Number of ICA components (int) or explained-variance fraction (float < 1)

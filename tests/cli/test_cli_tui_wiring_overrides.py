@@ -21,9 +21,11 @@ from eeg_pipeline.cli.commands.machine_learning_parser import setup_ml
 from eeg_pipeline.cli.commands.preprocessing_overrides import (
     _update_alignment_event_config,
     _update_epochs_config,
+    _update_ica_config,
     _update_icalabel_config,
     _update_pyprep_config,
     _update_preprocessing_config,
+    _validate_epoch_parameters,
 )
 from eeg_pipeline.cli.commands.preprocessing_parser import setup_preprocessing
 from eeg_pipeline.utils.config.loader import ConfigDict
@@ -126,6 +128,52 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         _update_icalabel_config(args, config)
 
         self.assertEqual(config.get("ica.probability_threshold"), 0.9)
+
+    def test_ica_cli_preserves_exact_component_counts_and_algorithm_key(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_preprocessing(subparsers)
+        args = parser.parse_args(
+            [
+                "preprocessing",
+                "ica",
+                "--ica-method",
+                "picard-extended_infomax",
+                "--ica-components",
+                "32",
+            ]
+        )
+        config = ConfigDict({})
+
+        _update_ica_config(args, config)
+
+        self.assertEqual(config.get("ica.algorithm"), "picard-extended_infomax")
+        self.assertIsInstance(config.get("ica.n_components"), int)
+        self.assertEqual(config.get("ica.n_components"), 32)
+
+    def test_ica_cli_preserves_variance_fraction_components(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_preprocessing(subparsers)
+        args = parser.parse_args(["preprocessing", "ica", "--ica-components", "0.95"])
+        config = ConfigDict({})
+
+        _update_ica_config(args, config)
+
+        self.assertIsInstance(config.get("ica.n_components"), float)
+        self.assertEqual(config.get("ica.n_components"), 0.95)
+
+    def test_epoch_baseline_is_validated_against_both_epoch_bounds(self):
+        _validate_epoch_parameters(argparse.Namespace(tmin=-1.0, tmax=2.0, baseline=(-0.2, 0.0)))
+
+        with self.assertRaisesRegex(ValueError, "within the epoch"):
+            _validate_epoch_parameters(
+                argparse.Namespace(tmin=-1.0, tmax=2.0, baseline=(-1.2, 0.0))
+            )
+        with self.assertRaisesRegex(ValueError, "within the epoch"):
+            _validate_epoch_parameters(
+                argparse.Namespace(tmin=-1.0, tmax=2.0, baseline=(-0.2, 2.2))
+            )
 
 
 class TestFeaturesTUIWiring(unittest.TestCase):

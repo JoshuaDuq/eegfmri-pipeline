@@ -101,7 +101,7 @@ func (m Model) renderPreprocessingICA() string {
 
 	labelWidth := defaultLabelWidth
 
-	methods := []string{"extended_infomax", "fastica", "infomax", "picard"}
+	methods := []string{"extended_infomax", "fastica", "picard-extended_infomax", "picard"}
 	methodVal := methods[m.prepICAAlgorithm]
 
 	compVal := fmt.Sprintf("%.2f", m.prepICAComp)
@@ -125,7 +125,7 @@ func (m Model) renderPreprocessingICA() string {
 		value string
 		hint  string
 	}{
-		{"ICA Method", methodVal, "fastica, infomax, or picard"},
+		{"ICA Method", methodVal, "extended Infomax, Picard, or FastICA"},
 		{"Components", compVal, "Number or variance fraction"},
 	}
 	labelOptions := []struct {

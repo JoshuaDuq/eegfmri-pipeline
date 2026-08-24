@@ -293,7 +293,8 @@ Configuration
      - Description
    * - ``ica.algorithm``
      - ``"extended_infomax"``
-     - ICA algorithm. Options: ``"extended_infomax"``, ``"picard"``, ``"fastica"``
+     - ICA algorithm. Options: ``"extended_infomax"``,
+       ``"picard-extended_infomax"``, ``"picard"``, ``"fastica"``
    * - ``ica.n_components``
      - ``null``
      - Near-rank decomposition; float = variance explained; int = exact count
@@ -315,8 +316,9 @@ Configuration
 
 .. note::
 
-   ``"extended_infomax"`` is required when using ICLabel (Step 4), because the ICLabel
-   classifier was trained on extended infomax decompositions.
+   ``"extended_infomax"`` or ``"picard-extended_infomax"`` is required when using
+   ICLabel (Step 4), because the classifier was trained on extended Infomax
+   decompositions.
 
 Step 4 — ICA Component Labeling
 ---------------------------------

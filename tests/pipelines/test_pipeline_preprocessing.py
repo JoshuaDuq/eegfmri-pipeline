@@ -85,6 +85,16 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
     def _get_config_value(config, key, default=None):
         return config.get(key, default) if hasattr(config, "get") else default
 
+    class _ReportSettings:
+        @classmethod
+        def from_config(cls, config):
+            return SimpleNamespace(
+                figure_dpi=float(_get_config_value(config, "report.display.figure_dpi", 200.0)),
+                figure_max_width_px=int(
+                    _get_config_value(config, "report.display.figure_max_width_px", 2_000)
+                ),
+            )
+
     return {
         "eeg_pipeline.pipelines.base": _make_module(
             "eeg_pipeline.pipelines.base",
@@ -141,6 +151,11 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
         "eeg_pipeline.preprocessing.pipeline": _make_package("eeg_pipeline.preprocessing.pipeline"),
         "eeg_pipeline.preprocessing.derivatives": _derivatives_module,
         "eeg_pipeline.preprocessing.ica_exclusions": _ica_exclusions_module,
+        "eeg_pipeline.preprocessing.report": _make_package("eeg_pipeline.preprocessing.report"),
+        "eeg_pipeline.preprocessing.report.settings": _make_module(
+            "eeg_pipeline.preprocessing.report.settings",
+            ReportSettings=_ReportSettings,
+        ),
     }
 
 
@@ -2321,7 +2336,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         p.logger = Mock()
         p.config = DotConfig(
             {
-                "eeg": {"ch_types": "eeg", "reference": "avg", "eog_channels": 1},
+                "eeg": {"ch_types": "eeg", "reference": "avg", "eog_channels": "EOG1"},
                 "preprocessing": {"notch_freq": 60, "resample_freq": 200},
                 "ica": {"reject": {"eeg": 1e-4}},
                 "epochs": {
@@ -2335,7 +2350,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
             }
         )
         cfg = p._generate_mne_bids_config("x", subjects=["0001"])
-        self.assertIn('eog_channels = ["1"]', cfg)
+        self.assertIn("eog_channels = ['EOG1']", cfg)
         self.assertIn("notch_freq = 60", cfg)
         self.assertIn("raw_resample_sfreq = 200", cfg)
         self.assertIn("ica_reject = {'eeg': 0.0001}", cfg)

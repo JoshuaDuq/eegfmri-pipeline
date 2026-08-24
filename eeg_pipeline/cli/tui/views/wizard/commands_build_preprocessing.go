@@ -68,7 +68,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--spatial-filter", spatialFilterVal)
 	}
 	if m.prepICAAlgorithm != 0 {
-		icaMethodVal := []string{"extended_infomax", "fastica", "infomax", "picard"}[m.prepICAAlgorithm]
+		icaMethodVal := []string{"extended_infomax", "fastica", "picard-extended_infomax", "picard"}[m.prepICAAlgorithm]
 		args = append(args, "--ica-method", icaMethodVal)
 	}
 	if m.prepICAComp != 0.99 {

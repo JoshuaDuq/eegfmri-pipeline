@@ -7,7 +7,7 @@ import pyprep
 import pandas as pd
 import numpy as np
 from joblib import Parallel, delayed
-from mne_bids import BIDSPath, get_entities_from_fname, read_raw_bids
+from mne_bids import get_bids_path_from_fname, get_entities_from_fname, read_raw_bids
 from mne_bids_pipeline._logging import gen_log_kwargs, logger
 
 from . import utils
@@ -160,7 +160,6 @@ def run_bads_detection_single_file(
     l_pass=100,
     notch=None,
     custom_bad_dict=None,
-    file_extension=".vhdr",
     random_state=42,
 ):
     bads_frame = pd.DataFrame(
@@ -244,18 +243,7 @@ def run_bads_detection_single_file(
                 misc_chans = list(sorted(set(misc_chans + gsr_names)))
 
             if bids_path:
-                ents = get_entities_from_fname(file)
-                bp = BIDSPath(
-                    root=bids_path,
-                    subject=ents.get("subject"),
-                    session=ents.get("session"),
-                    task=ents.get("task"),
-                    run=ents.get("run"),
-                    datatype="eeg",
-                    suffix="eeg",
-                    extension=file_extension,
-                    check=False,
-                )
+                bp = get_bids_path_from_fname(file, check=False)
                 raw = read_raw_bids(bp, verbose=False)
                 raw.load_data()
             else:
@@ -562,7 +550,6 @@ def run_bads_detection(
                 l_pass=l_pass,
                 notch=notch,
                 custom_bad_dict=custom_bad_dict,
-                file_extension=file_extension,
                 random_state=random_state,
             )
             for file in eeg_files
@@ -587,7 +574,6 @@ def run_bads_detection(
                 l_pass=l_pass,
                 notch=notch,
                 custom_bad_dict=custom_bad_dict,
-                file_extension=file_extension,
                 random_state=random_state,
             )
             bads_frame_list.append(bframe)

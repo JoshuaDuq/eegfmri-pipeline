@@ -25,6 +25,12 @@ from eeg_pipeline.preprocessing.pipeline.preprocess import (
 )
 
 
+def _bids_eeg_directory(root: Path) -> Path:
+    directory = root / "sub-0001" / "ses-01" / "eeg"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 class _FakeRansacDetector:
     def __init__(
         self,
@@ -89,7 +95,7 @@ def test_ransac_warning_boundary_rejects_nonfinite_correlations() -> None:
 
 
 def test_bads_detection_surfaces_bids_read_errors(tmp_path: Path) -> None:
-    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_eeg.vhdr"
+    eeg_path = _bids_eeg_directory(tmp_path) / "sub-0001_ses-01_task-pain_eeg.vhdr"
     eeg_path.write_text("", encoding="utf-8")
     channels_path = tmp_path / "sub-0001_ses-01_task-pain_channels.tsv"
     channels_path.write_text("name\ttype\tstatus\tdescription\nCz\tEEG\tgood\t\n", encoding="utf-8")
@@ -135,10 +141,12 @@ def test_bads_detection_surfaces_bids_read_errors(tmp_path: Path) -> None:
             )
 
 
-def test_bads_detection_preserves_run_entity_when_reading_bids(tmp_path: Path) -> None:
-    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_run-1_eeg.vhdr"
+def test_bads_detection_preserves_all_entities_when_reading_bids(tmp_path: Path) -> None:
+    eeg_dir = tmp_path / "sub-0001" / "ses-01" / "eeg"
+    eeg_dir.mkdir(parents=True)
+    eeg_path = eeg_dir / "sub-0001_ses-01_task-pain_acq-highres_run-1_eeg.vhdr"
     eeg_path.write_text("", encoding="utf-8")
-    channels_path = tmp_path / "sub-0001_ses-01_task-pain_run-1_channels.tsv"
+    channels_path = eeg_dir / "sub-0001_ses-01_task-pain_acq-highres_run-1_channels.tsv"
     channels_path.write_text("name\ttype\tstatus\tdescription\nCz\tEEG\tgood\t\n", encoding="utf-8")
     channels_df = pd.DataFrame(
         {
@@ -148,12 +156,12 @@ def test_bads_detection_preserves_run_entity_when_reading_bids(tmp_path: Path) -
             "description": [""],
         }
     )
-    captured_run = None
+    captured_path = None
 
     def _capture_bids_path(bids_path, verbose=False):
-        nonlocal captured_run
+        nonlocal captured_path
         _ = verbose
-        captured_run = bids_path.run
+        captured_path = bids_path
         raise RuntimeError("captured BIDSPath")
 
     with (
@@ -176,7 +184,9 @@ def test_bads_detection_preserves_run_entity_when_reading_bids(tmp_path: Path) -
                 bids_path=tmp_path,
             )
 
-    assert str(captured_run) == "1"
+    assert captured_path.fpath == eeg_path
+    assert captured_path.acquisition == "highres"
+    assert str(captured_path.run) == "1"
 
 
 def test_bads_detection_surfaces_montage_application_errors(tmp_path: Path) -> None:
@@ -193,7 +203,7 @@ def test_bads_detection_surfaces_montage_application_errors(tmp_path: Path) -> N
         def set_montage(self, _montage: str) -> None:
             raise RuntimeError("montage missing")
 
-    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_eeg.vhdr"
+    eeg_path = _bids_eeg_directory(tmp_path) / "sub-0001_ses-01_task-pain_eeg.vhdr"
     eeg_path.write_text("", encoding="utf-8")
     channels_path = tmp_path / "sub-0001_ses-01_task-pain_channels.tsv"
     channels_path.write_text("name\ttype\tstatus\tdescription\nCz\tEEG\tgood\t\n", encoding="utf-8")
@@ -280,7 +290,7 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
     raw_bad_snapshots: list[list[str]] = []
     random_states: list[int | None] = []
     written: dict[str, pd.DataFrame] = {}
-    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_eeg.vhdr"
+    eeg_path = _bids_eeg_directory(tmp_path) / "sub-0001_ses-01_task-pain_eeg.vhdr"
     eeg_path.write_text("", encoding="utf-8")
     channels_path = tmp_path / "sub-0001_ses-01_task-pain_channels.tsv"
     channels_path.write_text(
@@ -487,7 +497,7 @@ def test_clean_recording_logs_no_bad_channels_rather_than_an_empty_name(
             return []
 
     written: dict[str, pd.DataFrame] = {}
-    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_eeg.vhdr"
+    eeg_path = _bids_eeg_directory(tmp_path) / "sub-0001_ses-01_task-pain_eeg.vhdr"
     eeg_path.write_text("", encoding="utf-8")
     channels_path = tmp_path / "sub-0001_ses-01_task-pain_channels.tsv"
     channels_path.write_text(

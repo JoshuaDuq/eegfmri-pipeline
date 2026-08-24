@@ -149,6 +149,17 @@ func TestBuildPreprocessingAdvancedArgs_EmitsBadChannelPolicyOverride(t *testing
 	}
 }
 
+func TestBuildPreprocessingAdvancedArgs_EmitsPicardExtendedInfomax(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+	m.prepICAAlgorithm = 2
+
+	args := m.buildPreprocessingAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--ica-method", "picard-extended_infomax"}) {
+		t.Fatalf("expected supported Picard extended-Infomax option: %#v", args)
+	}
+}
+
 func TestBuildCommand_FeaturesRestModeIncludesRestSafePowerFlags(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i := range m.selected {

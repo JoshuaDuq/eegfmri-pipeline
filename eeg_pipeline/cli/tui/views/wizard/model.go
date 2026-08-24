@@ -184,7 +184,7 @@ type FilteringOptions struct {
 
 // ICAOptions represents ICA configuration
 type ICAOptions struct {
-	Method               *string  // fastica, infomax, picard
+	Method               *string  // extended_infomax, picard-extended_infomax, fastica, picard
 	Components           *float64 // int or variance fraction
 	ProbabilityThreshold *float64 // 0-1
 	LabelsToKeep         *string  // comma-separated labels
@@ -1774,7 +1774,7 @@ type Model struct {
 	prepCustomBadDict        string // Dictionary of custom bad channels (config-only)
 	// ICA options
 	prepSpatialFilter int     // 0: ica, 1: ssp
-	prepICAAlgorithm  int     // 0: extended_infomax, 1: fastica, 2: infomax, 3: picard
+	prepICAAlgorithm  int     // 0: extended_infomax, 1: fastica, 2: picard-extended_infomax, 3: picard
 	prepICAComp       float64 // ICA components (variance fraction)
 	prepICALFreq      float64 // ICA high-pass filter frequency
 	prepICARejThresh  float64 // ICA rejection threshold (µV)

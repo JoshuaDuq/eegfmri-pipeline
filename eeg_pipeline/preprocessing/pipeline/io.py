@@ -26,7 +26,7 @@ def save_ica(ica, file_path, overwrite=True):
 
 
 def read_channels_tsv(file_path):
-    return pd.read_csv(file_path, sep="\t")
+    return pd.read_csv(file_path, sep="\t", keep_default_na=False)
 
 
 def write_channels_tsv(channels_df, file_path, index=False):

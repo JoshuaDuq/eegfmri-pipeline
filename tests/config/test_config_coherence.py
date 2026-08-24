@@ -60,6 +60,31 @@ def test_null_decomb_manifest_preserves_notch_behavior() -> None:
     assert check_config_coherence(config).errors == ()
 
 
+def test_every_icalabel_prerequisite_is_reported_before_processing() -> None:
+    config = _config(
+        ica__use_icalabel=True,
+        ica__algorithm="fastica",
+        ica__l_freq=2.0,
+        ica__h_freq=80.0,
+    )
+    config["eeg.reference"] = ["P9", "P10"]
+
+    report = check_config_coherence(config)
+
+    assert {
+        "ica.algorithm",
+        "ica.l_freq",
+        "ica.h_freq",
+        "eeg.reference",
+    } <= _keys(report.errors)
+
+
+def test_icalabel_accepts_picard_extended_infomax() -> None:
+    config = _config(ica__algorithm="picard-extended_infomax")
+
+    assert check_config_coherence(config).errors == ()
+
+
 def test_every_rest_incompatibility_is_reported_in_one_pass() -> None:
     """The behaviour this whole module exists for: three fixes named at once rather than
     discovered across three runs."""
@@ -147,8 +172,6 @@ def test_disagreeing_rest_flags_are_reported_not_raised_from_inside() -> None:
     )
 
     assert "project.paradigm" in _keys(check_config_coherence(config).errors)
-
-
 
 
 def test_an_eeg_fmri_dataset_gets_no_scanner_warnings() -> None:

@@ -133,3 +133,62 @@ def test_generated_config_is_valid_python_with_the_settings_iclabel_requires(
         f"ica_n_components must be None or an explicit component count, got "
         f"{n_components!r}; a variance fraction collapses when artifact dominates."
     )
+
+
+def test_generated_config_preserves_native_upstream_configuration_types(pipeline) -> None:
+    """Lists and mappings must not become strings or lose values at the wrapper."""
+    pipeline.config["eeg.reference"] = ["P9", "P10"]
+    pipeline.config["eeg.eog_channels"] = {
+        "default": ["Fp1", "Fp2"],
+        "sub-0002": None,
+    }
+    pipeline.config["epochs.conditions"] = {
+        "painful": "stimulus/thermal/painful",
+        "neutral": "stimulus/thermal/neutral",
+    }
+
+    source = pipeline._generate_mne_bids_config(
+        "preprocessing/_07_make_epochs",
+        subjects=["0001"],
+        task="thermalactive",
+        task_is_rest=False,
+    )
+    namespace: dict = {}
+    exec(compile(source, "<generated>", "exec"), namespace)
+
+    assert namespace["eeg_reference"] == ["P9", "P10"]
+    assert namespace["eog_channels"] == {
+        "default": ["Fp1", "Fp2"],
+        "sub-0002": None,
+    }
+    assert namespace["conditions"] == {
+        "painful": "stimulus/thermal/painful",
+        "neutral": "stimulus/thermal/neutral",
+    }
+
+
+def test_documented_ica_algorithm_is_the_single_generated_source(pipeline) -> None:
+    pipeline.config["ica.algorithm"] = "picard-extended_infomax"
+
+    source = pipeline._generate_mne_bids_config(
+        "preprocessing/_06a1_fit_ica",
+        subjects=["0001"],
+        task="thermalactive",
+        task_is_rest=False,
+    )
+    namespace: dict = {}
+    exec(compile(source, "<generated>", "exec"), namespace)
+
+    assert namespace["ica_algorithm"] == "picard-extended_infomax"
+
+
+def test_removed_ica_method_key_fails_loudly(pipeline) -> None:
+    pipeline.config["ica.method"] = "fastica"
+
+    with pytest.raises(ValueError, match=r"ica\.method.*ica\.algorithm"):
+        pipeline._generate_mne_bids_config(
+            "preprocessing/_06a1_fit_ica",
+            subjects=["0001"],
+            task="thermalactive",
+            task_is_rest=False,
+        )

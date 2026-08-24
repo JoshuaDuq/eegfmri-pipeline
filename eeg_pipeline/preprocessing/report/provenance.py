@@ -32,7 +32,7 @@ PROVENANCE_KEYS = (
     ("pyprep.ransac", "PyPREP RANSAC used"),
     ("pyprep.repeats", "PyPREP detection repeats"),
     ("pyprep.consider_previous_bads", "Previous bad channels retained"),
-    ("ica.method", "ICA method"),
+    ("ica.algorithm", "ICA algorithm"),
     ("ica.n_components", "ICA components requested"),
     ("ica.l_freq", "ICA high-pass (Hz)"),
     ("ica.h_freq", "ICA low-pass (Hz)"),

@@ -475,7 +475,6 @@ pyprep:
 
 ica:
   algorithm: "extended_infomax"
-  method: "extended_infomax"
   # Average referencing removes one degree of freedom and every excluded channel removes
   # another, so the data are rank-deficient and asking for all components yields split
   # and ghost components that ICLabel then has to label.
