@@ -159,6 +159,7 @@ Explore the Documentation
    :caption: User Guide
 
    user_guide/index
+   artifact_correction_audit
    pulse_artifact_correction_recovery
    scanner_harmonic_diagnosis
    scanner_harmonic_removal
