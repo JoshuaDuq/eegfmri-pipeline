@@ -276,6 +276,32 @@ def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 
 
 
+# Annotation onsets are reported on the raw's absolute timeline, so they must be
+# rebased before they can be compared against sample indices or raw.times, both
+# of which start at zero on a cropped raw.
+def data_relative_onsets(raw: mne.io.BaseRaw) -> np.ndarray:
+    return np.asarray(raw.annotations.onset, dtype=float) - raw.first_time
+
+
+# raw.annotations.onset is reported on the raw's absolute timeline, but
+# set_annotations() reads an orig_time=None object as relative to the first
+# sample: it crops against that frame and then adds raw.first_time back. Undo
+# that here so rebuilding annotations from onsets read off a cropped raw is an
+# identity rather than a silent shift by the crop offset.
+def set_annotations_at_absolute_onsets(
+    raw: mne.io.BaseRaw,
+    annotations: mne.Annotations,
+) -> None:
+    if annotations.orig_time is None and raw.first_time:
+        annotations = mne.Annotations(
+            onset=np.asarray(annotations.onset, dtype=float) - raw.first_time,
+            duration=annotations.duration,
+            description=annotations.description,
+            orig_time=None,
+        )
+    raw.set_annotations(annotations)
+
+
 def filter_annotations(
     raw: mne.io.BaseRaw,
     event_prefixes: Optional[List[str]],
@@ -291,7 +317,7 @@ def filter_annotations(
         onsets = [float(o) for o in raw.annotations.onset]
         if not onsets:
             return
-        base = min(onsets)
+        base = min(onsets) - raw.first_time
         if base == 0.0:
             return
         shifted = mne.Annotations(
@@ -300,7 +326,7 @@ def filter_annotations(
             description=list(raw.annotations.description),
             orig_time=raw.annotations.orig_time,
         )
-        raw.set_annotations(shifted)
+        set_annotations_at_absolute_onsets(raw, shifted)
         return
 
     if event_prefixes is None:
@@ -325,7 +351,9 @@ def filter_annotations(
             normalized_prefixes,
             len(raw.annotations),
         )
-        raw.set_annotations(mne.Annotations([], [], [], orig_time=raw.annotations.orig_time))
+        set_annotations_at_absolute_onsets(
+            raw, mne.Annotations([], [], [], orig_time=raw.annotations.orig_time)
+        )
         return
 
     new_onsets = [raw.annotations.onset[idx] for idx in keep_indices]
@@ -333,7 +361,7 @@ def filter_annotations(
     new_descriptions = [raw.annotations.description[idx] for idx in keep_indices]
 
     if zero_base and new_onsets:
-        base = float(min(float(o) for o in new_onsets))
+        base = float(min(float(o) for o in new_onsets)) - raw.first_time
         if base != 0.0:
             new_onsets = [float(onset) - base for onset in new_onsets]
 
@@ -343,7 +371,7 @@ def filter_annotations(
         description=new_descriptions,
         orig_time=raw.annotations.orig_time,
     )
-    raw.set_annotations(filtered_annotations)
+    set_annotations_at_absolute_onsets(raw, filtered_annotations)
 
 
 def set_channel_types(raw: mne.io.BaseRaw) -> None:
@@ -976,7 +1004,9 @@ __all__ = [
     "update_sample_indices",
     "get_sort_columns",
     "combine_runs_for_subject",
+    "data_relative_onsets",
     "filter_annotations",
+    "set_annotations_at_absolute_onsets",
     "set_channel_types",
     "set_montage",
     "ensure_dataset_description",
