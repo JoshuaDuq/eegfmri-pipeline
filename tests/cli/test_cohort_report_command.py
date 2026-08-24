@@ -23,7 +23,6 @@ from eeg_pipeline.cli.commands.cohort_report_orchestrator import (  # noqa: E402
 )
 from eeg_pipeline.preprocessing.report.cohort.record import channel_table  # noqa: E402
 from eeg_pipeline.preprocessing.report.cohort.sidecar import (  # noqa: E402
-    AcquisitionContext,
     Paradigm,
     SubjectSidecar,
     write_sidecar,
@@ -61,7 +60,6 @@ def _sidecar(subject: str, *, task: str = "thermalactive") -> SubjectSidecar:
     return SubjectSidecar(
         subject=subject,
         task=task,
-        context=AcquisitionContext.OUT_OF_SCANNER,
         paradigm=Paradigm.REST,
         measurements={"variance_removed": 0.84, "n_channels": 63},
         settings={"spectra_line_frequency": 60.0},
