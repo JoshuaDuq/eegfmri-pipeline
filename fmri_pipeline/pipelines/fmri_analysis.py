@@ -62,7 +62,7 @@ def _contrast_arg_for_model_runs(flm: Any, contrast_def: Any) -> Any:
 
 def _contrast_vector_for_design(
     *, glm_result: Any, contrast_def: Any
-) -> tuple[Optional[list[float]], list[str]]:
+) -> tuple[list[float], list[str]]:
     """Expand a contrast expression into weights against the design's own columns.
 
     The report draws the contrast as a strip beneath the design matrix, and computes
@@ -70,41 +70,31 @@ def _contrast_vector_for_design(
     only the expression string, so neither could ever be produced. Matching is by
     column name downstream, so the two lists are returned together.
 
-    Best-effort: an expression nilearn cannot parse against these columns costs the
-    contrast strip and nothing else, and the map is already on disk by now.
+    Invalid or unavailable design metadata is an incomplete scientific derivative,
+    so it surfaces rather than silently dropping the report's contrast strip.
     """
-    import logging
-
     import numpy as np
 
-    logger = logging.getLogger(__name__)
     design_matrices = getattr(getattr(glm_result, "flm", None), "design_matrices_", None)
     if not design_matrices:
-        return None, []
+        raise ValueError("The fitted model has no design matrices to record.")
 
     columns = [str(c) for c in design_matrices[0].columns]
     if not isinstance(contrast_def, str):
         # An explicit vector, already aligned to the design nilearn was given.
-        try:
-            values = np.asarray(contrast_def, dtype=float).ravel()
-        except (TypeError, ValueError):
-            return None, []
-        return (
-            (list(map(float, values)), columns) if values.size == len(columns) else (None, [])
-        )
+        values = np.asarray(contrast_def, dtype=float).ravel()
+        if values.size != len(columns):
+            raise ValueError(
+                f"Contrast vector has {values.size} weights for {len(columns)} design columns."
+            )
+        return list(map(float, values)), columns
 
-    try:
-        from nilearn.glm.contrasts import expression_to_contrast_vector
+    if contrast_def in columns:
+        return [1.0 if column == contrast_def else 0.0 for column in columns], columns
 
-        vector = expression_to_contrast_vector(contrast_def, columns)
-    except Exception as exc:
-        logger.info(
-            "Could not expand contrast %r against the design columns (%s); the "
-            "report will show the design matrix without its contrast strip.",
-            contrast_def,
-            exc,
-        )
-        return None, []
+    from nilearn.glm.contrasts import expression_to_contrast_vector
+
+    vector = expression_to_contrast_vector(contrast_def, columns)
     return [float(v) for v in np.asarray(vector).ravel()], columns
 
 
@@ -260,21 +250,13 @@ class FmriAnalysisPipeline(PipelineBase):
         return out_path
 
     def _save_optional(self, img: Any, path: Path) -> Optional[Path]:
-        """Write an image if there is one, and return where it went.
-
-        Returns ``None`` on failure rather than raising. By the time this runs the GLM
-        is fitted and the contrast is on disk; losing that to a problem writing an
-        ancillary map would be the most expensive failure available.
-        """
+        """Write an image when requested; only an absent optional image is skipped."""
         if img is None:
             return None
-        try:
-            import nibabel as nib
 
-            nib.save(img, str(path))
-        except Exception as exc:
-            self.logger.warning("Could not write %s (%s)", path.name, exc)
-            return None
+        import nibabel as nib
+
+        nib.save(img, str(path))
         self.logger.info("Saved %s", path.name)
         return path
 
@@ -290,7 +272,7 @@ class FmriAnalysisPipeline(PipelineBase):
         return path
 
     def _contrast_detail_maps(
-        self, *, glm_result: Any, contrast_def: Any, plotting_cfg: Any
+        self, *, glm_result: Any, contrast_def: Any, stats_cfg: Any
     ) -> tuple[Any, Any]:
         """Compute the effect and variance maps behind a contrast, if wanted.
 
@@ -300,34 +282,20 @@ class FmriAnalysisPipeline(PipelineBase):
         rendered later without refitting the model, which is the one thing the
         manifest seam exists to prevent.
         """
-        want_effect = bool(getattr(plotting_cfg, "include_effect_size", True))
-        want_variance = bool(getattr(plotting_cfg, "include_standard_error", True))
+        want_effect = bool(getattr(stats_cfg, "include_effect_size", True))
+        want_variance = bool(getattr(stats_cfg, "include_standard_error", True))
         if not (want_effect or want_variance):
             return None, None
 
         flm = getattr(glm_result, "flm", None)
         if flm is None:
-            return None, None
+            raise ValueError("Cannot compute detail maps without the fitted model.")
 
-        try:
-            argument = _contrast_arg_for_model_runs(flm, contrast_def)
-            effect = (
-                flm.compute_contrast(argument, output_type="effect_size") if want_effect else None
-            )
-            variance = (
-                flm.compute_contrast(argument, output_type="effect_variance")
-                if want_variance
-                else None
-            )
-        except Exception as exc:
-            # Two extra contrasts off an already-fitted model. Failing here must not
-            # cost the fitted contrast that has already succeeded.
-            self.logger.warning(
-                "Could not compute the effect/variance maps for this contrast (%s); "
-                "the report will omit the dual-coded and standard-error panels.",
-                exc,
-            )
-            return None, None
+        argument = _contrast_arg_for_model_runs(flm, contrast_def)
+        effect = flm.compute_contrast(argument, output_type="effect_size") if want_effect else None
+        variance = (
+            flm.compute_contrast(argument, output_type="effect_variance") if want_variance else None
+        )
         return effect, variance
 
     def _run_level_maps(
@@ -377,7 +345,7 @@ class FmriAnalysisPipeline(PipelineBase):
 
         flm = getattr(glm_result, "flm", None)
         if flm is None:
-            return {}
+            raise ValueError("Cannot compute run-level diagnostics without the fitted model.")
 
         # The manifest's own labeller, so the forest plot's rows carry the same run
         # names as the motion table and the design section.
@@ -386,11 +354,7 @@ class FmriAnalysisPipeline(PipelineBase):
         included = run_meta.get("included_bold_paths") or [] if isinstance(run_meta, dict) else []
         labels = list(run_labels_from_bold_paths(included))
 
-        try:
-            result = compute_run_level_contrast(flm, contrast_def, run_labels=labels)
-        except Exception as exc:
-            self.logger.warning("Could not compute run-level contrasts (%s)", exc)
-            return {}
+        result = compute_run_level_contrast(flm, contrast_def, run_labels=labels)
         if result is None:
             return {}
 
@@ -406,11 +370,7 @@ class FmriAnalysisPipeline(PipelineBase):
             "run_variance_map": variance_path,
         }
 
-        try:
-            null = compute_sign_flip_null(flm, contrast_def)
-        except Exception as exc:
-            self.logger.warning("Could not compute the sign-flip null (%s)", exc)
-            null = None
+        null = compute_sign_flip_null(flm, contrast_def)
         if null is not None:
             sign_flip_path = write_sign_flip_null(
                 null, out_dir=out_dir, stem=stem, cfg_hash=cfg_hash
@@ -436,13 +396,9 @@ class FmriAnalysisPipeline(PipelineBase):
                     null.p_floor,
                 )
 
-        try:
-            influence = compute_run_influence(
-                flm, contrast_def, run_labels=labels, threshold=float(z_threshold)
-            )
-        except Exception as exc:
-            self.logger.warning("Could not compute run influence (%s)", exc)
-            influence = None
+        influence = compute_run_influence(
+            flm, contrast_def, run_labels=labels, threshold=float(z_threshold)
+        )
         if influence:
             influence_path = write_run_influence(
                 influence, out_dir=out_dir, stem=stem, cfg_hash=cfg_hash
@@ -482,7 +438,7 @@ class FmriAnalysisPipeline(PipelineBase):
         task: str,
         *,
         contrast_cfg: Any,
-        plotting_cfg: Optional[Any] = None,
+        stats_cfg: Optional[Any] = None,
         output_dir: Optional[Path] = None,
         freesurfer_subjects_dir: Optional[Path] = None,
         dry_run: bool = False,
@@ -495,6 +451,19 @@ class FmriAnalysisPipeline(PipelineBase):
             build_contrast_from_runs_detailed,
             resample_to_freesurfer,
         )
+
+        if stats_cfg is None:
+            from fmri_pipeline.analysis.plotting_config import FmriStatsConfig
+
+            stats_cfg = FmriStatsConfig()
+        if hasattr(stats_cfg, "validate"):
+            stats_cfg.validate()
+        configured_signatures = self.config.get("paths.signature_maps", []) or []
+        if stats_cfg.include_signatures and configured_signatures and stats_cfg.space == "native":
+            raise ValueError(
+                "Configured multivariate signatures require fmri_stats.space='mni' "
+                "or 'both' because their weight maps are defined in standard space."
+            )
 
         sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
 
@@ -589,7 +558,7 @@ class FmriAnalysisPipeline(PipelineBase):
         # error panel were unreachable from any real run -- while the code that draws
         # them was fully written and tested.
         native_effect, native_variance = self._contrast_detail_maps(
-            glm_result=glm_result, contrast_def=contrast_def, plotting_cfg=plotting_cfg
+            glm_result=glm_result, contrast_def=contrast_def, stats_cfg=stats_cfg
         )
         analysis_mask_img = getattr(glm_result, "mask_img", None)
 
@@ -674,16 +643,13 @@ class FmriAnalysisPipeline(PipelineBase):
             out_dir=out_dir,
             stem=stem,
             cfg_hash=cfg_hash,
-            z_threshold=float(getattr(plotting_cfg, "z_threshold", 2.3) or 2.3),
+            z_threshold=float(stats_cfg.z_threshold),
         )
 
         # Record what was fit, beside what was fit. This is what lets `fmri-analysis
         # report` render from the derivatives tree without touching the model.
         from fmri_pipeline.analysis.report.manifest import write_report_manifest
 
-        plot_cfg_for_manifest = (
-            plotting_cfg.normalized() if hasattr(plotting_cfg, "normalized") else None
-        )
         contrast_vector, contrast_columns = _contrast_vector_for_design(
             glm_result=glm_result, contrast_def=contrast_def
         )
@@ -714,26 +680,26 @@ class FmriAnalysisPipeline(PipelineBase):
             # contrast ever produced -- while the model scales unconditionally -- and
             # the report labelled percent-signal-change maps "arbitrary BOLD units".
             signal_scaling_mode=fitted_signal_scaling_mode(getattr(glm_result, "flm", None)),
-            threshold_mode=getattr(plot_cfg_for_manifest, "threshold_mode", "z"),
-            z_threshold=getattr(plot_cfg_for_manifest, "z_threshold", 2.3),
-            fdr_q=getattr(plot_cfg_for_manifest, "fdr_q", 0.05),
-            cluster_min_voxels=getattr(plot_cfg_for_manifest, "cluster_min_voxels", 0),
-            two_sided=getattr(plot_cfg_for_manifest, "two_sided", True),
-            radiological=getattr(plot_cfg_for_manifest, "radiological", False),
+            threshold_mode=stats_cfg.threshold_mode,
+            z_threshold=stats_cfg.z_threshold,
+            fdr_q=stats_cfg.fdr_q,
+            cluster_min_voxels=stats_cfg.cluster_min_voxels,
+            two_sided=stats_cfg.two_sided,
+            radiological=False,
             contrast_cfg=contrast_cfg,
         )
         self.logger.info("Wrote report manifest: %s", manifest_path.name)
 
-        plotting_meta: Optional[dict[str, Any]] = None  # reporting now runs separately
-        from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
-
-        cfg_obj = plotting_cfg if isinstance(plotting_cfg, FmriPlottingConfig) else None
-        if cfg_obj is not None and cfg_obj.normalized().enabled:
-            # Optionally generate an MNI-space contrast in-memory (for plots only).
+        sig_root, sig_specs = (None, [])
+        if stats_cfg.include_signatures:
+            sig_root, sig_specs = self._discover_signature_root_and_specs()
+        signatures_requested = bool(sig_specs)
+        if stats_cfg.space in {"mni", "both"}:
+            # Generate explicitly configured standard-space statistical artifacts.
             mni_img = None
             mni_effect = None
             mni_variance = None
-            want_mni = cfg_obj.normalized().space in {"mni", "both"}
+            want_mni = True
             if want_mni:
                 from fmri_pipeline.analysis.contrast_builder import ContrastBuilderConfig
 
@@ -763,10 +729,8 @@ class FmriAnalysisPipeline(PipelineBase):
                     f"{sub_label}_task-{task}_contrast-{contrast_name}"
                     f"_space-MNI152NLin2009cAsym_stat-effect_variance_{cfg_hash}.nii.gz"
                 )
-                need_mni_effect = bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
-                    getattr(cfg_obj, "include_signatures", True)
-                )
-                need_mni_variance = bool(getattr(cfg_obj, "include_standard_error", True))
+                need_mni_effect = stats_cfg.include_effect_size or stats_cfg.include_signatures
+                need_mni_variance = stats_cfg.include_standard_error
                 have_complete_mni_cache = mni_nifti_path.exists()
                 if need_mni_effect:
                     have_complete_mni_cache = have_complete_mni_cache and mni_effect_path.exists()
@@ -809,14 +773,6 @@ class FmriAnalysisPipeline(PipelineBase):
                             )
                             nib.save(mni_variance, str(mni_variance_path))
 
-            native_bg, native_mask = self._discover_plot_assets(
-                sub_label=sub_label, task=task, space="native"
-            )
-            mni_bg, mni_mask = self._discover_plot_assets(
-                sub_label=sub_label, task=task, space="mni"
-            )
-            sig_root, sig_specs = self._discover_signature_root_and_specs()
-
             # native_effect and native_variance were recomputed here. They are now
             # computed once above, before the FreeSurfer resample, and written to
             # disk -- which is what makes them available to the report at all.
@@ -824,29 +780,30 @@ class FmriAnalysisPipeline(PipelineBase):
             # Signature expression is a computation, not a rendering step: it needs
             # the weight maps and the study's signature configuration. It is written
             # beside the contrast's maps, and the report reads it from there.
-            if sig_root is not None and sig_specs and mni_effect is not None:
-                try:
-                    from fmri_pipeline.analysis.multivariate_signatures import (
-                        compute_signature_expression,
-                        write_signature_expression_tsv,
+            if signatures_requested and sig_root is not None:
+                if mni_effect is None:
+                    raise ValueError(
+                        "fmri_stats.include_signatures requires space='mni' or 'both' "
+                        "and an MNI effect-size map."
                     )
+                _mni_bg, mni_mask = self._discover_plot_assets(
+                    sub_label=sub_label, task=task, space="mni"
+                )
+                from fmri_pipeline.analysis.multivariate_signatures import (
+                    compute_signature_expression,
+                    write_signature_expression_tsv,
+                )
 
-                    signature_results = compute_signature_expression(
-                        stat_or_effect_img=mni_effect,
-                        signature_root=sig_root,
-                        signature_specs=sig_specs,
-                        mask_img=(nib.load(str(mni_mask)) if mni_mask is not None else None),
-                    )
-                    tsv_path = write_signature_expression_tsv(
-                        signature_results, out_dir / "signature_expression.tsv"
-                    )
-                    self.logger.info("Wrote signature expression: %s", tsv_path.name)
-                except Exception as exc:
-                    # A signature that cannot be expressed is a measurement that did
-                    # not resolve, not a reason to lose the fitted contrast.
-                    self.logger.warning(
-                        "Signature expression failed for %s (%s)", contrast_name, exc
-                    )
+                signature_results = compute_signature_expression(
+                    stat_or_effect_img=mni_effect,
+                    signature_root=sig_root,
+                    signature_specs=sig_specs,
+                    mask_img=(nib.load(str(mni_mask)) if mni_mask is not None else None),
+                )
+                tsv_path = write_signature_expression_tsv(
+                    signature_results, out_dir / "signature_expression.tsv"
+                )
+                self.logger.info("Wrote signature expression: %s", tsv_path.name)
 
         import json
 
@@ -862,14 +819,9 @@ class FmriAnalysisPipeline(PipelineBase):
                 if hasattr(contrast_cfg, "__dataclass_fields__")
                 else repr(contrast_cfg)
             ),
-            "plotting": {
-                "cfg": (
-                    asdict(plotting_cfg)
-                    if hasattr(plotting_cfg, "__dataclass_fields__")
-                    else repr(plotting_cfg)
-                ),
-                "outputs": plotting_meta,
-            },
+            "fmri_stats": (
+                asdict(stats_cfg) if hasattr(stats_cfg, "__dataclass_fields__") else repr(stats_cfg)
+            ),
         }
         sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 

@@ -776,7 +776,6 @@ const (
 	optFmriGroupAnatomical
 	optFmriGroupBold
 	optFmriGroupQc
-	optFmriGroupDenoising
 	optFmriGroupSurface
 	optFmriGroupMultiecho
 	optFmriGroupRepro
@@ -792,7 +791,6 @@ const (
 	optFmriOutputSpaces
 	optFmriIgnore
 	optFmriBidsFilterFile
-	optFmriUseAroma
 	optFmriSkipBidsValidation
 	optFmriStopOnFirstCrash
 	optFmriCleanWorkdir
@@ -803,14 +801,14 @@ const (
 	optFmriNThreads
 	optFmriOmpNThreads
 	optFmriLowMem
-	optFmriLongitudinal
+	optFmriSubjectAnatomicalReference
 	optFmriCiftiOutput
 	optFmriSkullStripTemplate
 	optFmriSkullStripFixedSeed
 	optFmriRandomSeed
 	optFmriDummyScans
-	optFmriBold2T1wInit
-	optFmriBold2T1wDof
+	optFmriBold2AnatInit
+	optFmriBold2AnatDof
 	optFmriSliceTimeRef
 	optFmriFdSpikeThreshold
 	optFmriDvarsSpikeThreshold

@@ -11,15 +11,16 @@ from eeg_pipeline.preprocessing.report.phases import (
     phases_present,
 )
 
-#: The order the document was built in before the phase table existed. Copied from the
-#: literal that stood in organize.py, so the derivation is checked against the shipped
-#: document rather than against itself.
-ORDER_BEFORE_PHASES = (
+#: The complete reading order, stated independently so a new section cannot land in the
+#: document merely because it was appended last during the build.
+EXPECTED_SECTION_ORDER = (
     "At a glance",
     "Configuration",
     "Filter response",
     "Channel and region coverage",
+    "Electrode bridging",
     "Data quality over time",
+    "Muscle artifact screening",
     "Raw (original)",
     "Raw (filtered)",
     "ICA: epochs for fitting",
@@ -34,6 +35,7 @@ ORDER_BEFORE_PHASES = (
     "Sensor spectra before and after ICA",
     "Events",
     "Epoch rejection",
+    "Evoked responses",
     "Signal preservation",
     "Epochs (before cleaning)",
     "Epochs (clean)",
@@ -41,8 +43,8 @@ ORDER_BEFORE_PHASES = (
 )
 
 
-def test_the_derived_order_is_the_order_the_document_already_had():
-    assert SECTION_ORDER == ORDER_BEFORE_PHASES
+def test_the_derived_order_is_the_declared_reading_order():
+    assert SECTION_ORDER == EXPECTED_SECTION_ORDER
 
 
 def test_every_section_belongs_to_exactly_one_phase():

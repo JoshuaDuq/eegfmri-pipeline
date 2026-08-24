@@ -1,4 +1,4 @@
-"""Sensor spectra must show the worst channel, stop at the low-pass, and drop bads."""
+"""Sensor spectra show focal maxima, stop at the low-pass, and exclude marked bads."""
 
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ def test_an_empty_band_is_rejected() -> None:
         compute_run_spectra(raw, raw.copy(), recording_id="run-1", fmin=200.0, fmax=100.0)
 
 
-def test_the_summary_states_the_exponents_and_the_worst_channel_gap() -> None:
+def test_the_summary_states_the_exponents_and_the_maximum_envelope_gap() -> None:
     raw = _raw(focal_channels=(0,), focal_amplitude=4e-5)
     spectra = compute_run_spectra(raw, raw.copy(), recording_id="run-1", fmax=100.0)
 
@@ -154,8 +154,11 @@ def test_the_summary_states_the_exponents_and_the_worst_channel_gap() -> None:
 
     assert "run-1" in document
     assert "exponent" in document
-    assert "Worst channel above median" in document
-    assert plot_run_spectra(spectra, line_frequency=60.0).axes
+    assert "Frequency-wise maximum above median" in document
+    figure = plot_run_spectra(spectra, line_frequency=60.0)
+    labels = [line.get_label() for axis in figure.axes for line in axis.lines]
+    assert "maximum envelopes (not a paired sensor)" in labels
+    assert "worst channel" not in " ".join(labels).lower()
 
 
 def test_the_summary_exposes_aperiodic_fit_quality() -> None:
@@ -327,9 +330,9 @@ def test_compute_run_spectra_no_longer_takes_a_volume_rate():
 
     from eeg_pipeline.preprocessing.report import spectra
 
-    assert "gradient_fundamental_hz" not in inspect.signature(
-        spectra.compute_run_spectra
-    ).parameters
+    assert (
+        "gradient_fundamental_hz" not in inspect.signature(spectra.compute_run_spectra).parameters
+    )
     assert not hasattr(spectra, "gradient_windows")
 
 
@@ -346,8 +349,6 @@ def test_aperiodic_exclude_hz_composes_with_notch_windows():
         raw, raw, line_frequency=60.0, aperiodic_exclude_hz=((20.0, 25.0),), **shared
     )
     notch_only = compute_run_spectra(raw, raw, line_frequency=60.0, **shared)
-    exclude_only = compute_run_spectra(
-        raw, raw, aperiodic_exclude_hz=((20.0, 25.0),), **shared
-    )
+    exclude_only = compute_run_spectra(raw, raw, aperiodic_exclude_hz=((20.0, 25.0),), **shared)
     assert both.before.aperiodic.exponent != notch_only.before.aperiodic.exponent
     assert both.before.aperiodic.exponent != exclude_only.before.aperiodic.exponent

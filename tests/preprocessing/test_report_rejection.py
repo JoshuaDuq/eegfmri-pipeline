@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import matplotlib
+import numpy as np
 import pandas as pd
 import pytest
 
 matplotlib.use("Agg")
 
 from eeg_pipeline.preprocessing.report.rejection import (  # noqa: E402
+    autoreject_log_html,
     plot_rejection,
+    plot_autoreject_log,
     rejection_summary_html,
     retention_by_group,
     summarize_rejection,
 )
+from eeg_pipeline.preprocessing.autoreject_log import AutorejectLog  # noqa: E402
 
 
 def _drop_log(dropped: set[int], total: int = 10):
@@ -27,6 +31,33 @@ def test_summarize_counts_reasons_and_positions() -> None:
     assert summary.dropped_fraction == pytest.approx(0.3)
     assert summary.reasons == {"AUTOREJECT": 3}
     assert summary.dropped_positions == (0, 1, 7)
+
+
+def test_autoreject_repair_matrix_names_recurrently_interpolated_channels() -> None:
+    log = AutorejectLog(
+        ch_names=("C3", "C4", "Pz"),
+        labels=np.array(
+            [
+                [2, 0, 0],
+                [2, 0, 0],
+                [1, 0, 0],
+                [2, 2, 0],
+                [0, 0, 0],
+            ]
+        ),
+        bad_epochs=np.array([False, False, True, False, False]),
+        n_interpolate=2,
+        consensus=0.6,
+    )
+
+    document = autoreject_log_html(log)
+    figure = plot_autoreject_log(log)
+
+    assert "C3" in document
+    assert "3" in document
+    assert "n_interpolate=2" in document
+    assert "consensus=0.60" in document
+    assert figure.axes[0].images[0].get_array().shape == (3, 5)
 
 
 def test_summarize_handles_a_fully_retained_set() -> None:
@@ -89,9 +120,7 @@ def test_summary_html_states_the_dropped_fraction_and_grouping() -> None:
 def test_uniform_single_group_is_not_reported_as_a_distribution() -> None:
     """A single-valued grouping carries no information about uneven loss."""
     summary = summarize_rejection(_drop_log({0}))
-    retention = retention_by_group(
-        pd.DataFrame({"trial_type": ["a", "a", "a"]}), total=10
-    )
+    retention = retention_by_group(pd.DataFrame({"trial_type": ["a", "a", "a"]}), total=10)
 
     document = rejection_summary_html(summary, group_retention=retention)
     figure = plot_rejection(summary, group_retention=retention)

@@ -44,7 +44,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriGroupAnatomicalExpanded"] = m.fmriGroupAnatomicalExpanded
 	cfg["fmriGroupBoldExpanded"] = m.fmriGroupBoldExpanded
 	cfg["fmriGroupQcExpanded"] = m.fmriGroupQcExpanded
-	cfg["fmriGroupDenoisingExpanded"] = m.fmriGroupDenoisingExpanded
 	cfg["fmriGroupSurfaceExpanded"] = m.fmriGroupSurfaceExpanded
 	cfg["fmriGroupMultiechoExpanded"] = m.fmriGroupMultiechoExpanded
 	cfg["fmriGroupReproExpanded"] = m.fmriGroupReproExpanded
@@ -548,7 +547,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriIgnoreSpec"] = m.fmriIgnoreSpec
 	cfg["fmriBidsFilterFile"] = m.fmriBidsFilterFile
 	cfg["fmriExtraArgs"] = m.fmriExtraArgs
-	cfg["fmriUseAroma"] = m.fmriUseAroma
 	cfg["fmriSkipBidsValidation"] = m.fmriSkipBidsValidation
 	cfg["fmriStopOnFirstCrash"] = m.fmriStopOnFirstCrash
 	cfg["fmriCleanWorkdir"] = m.fmriCleanWorkdir
@@ -557,14 +555,14 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriNThreads"] = m.fmriNThreads
 	cfg["fmriOmpNThreads"] = m.fmriOmpNThreads
 	cfg["fmriLowMem"] = m.fmriLowMem
-	cfg["fmriLongitudinal"] = m.fmriLongitudinal
+	cfg["fmriSubjectAnatomicalReferenceIndex"] = m.fmriSubjectAnatomicalReferenceIndex
 	cfg["fmriCiftiOutputIndex"] = m.fmriCiftiOutputIndex
 	cfg["fmriSkullStripTemplate"] = m.fmriSkullStripTemplate
 	cfg["fmriSkullStripFixedSeed"] = m.fmriSkullStripFixedSeed
 	cfg["fmriRandomSeed"] = m.fmriRandomSeed
 	cfg["fmriDummyScans"] = m.fmriDummyScans
-	cfg["fmriBold2T1wInitIndex"] = m.fmriBold2T1wInitIndex
-	cfg["fmriBold2T1wDof"] = m.fmriBold2T1wDof
+	cfg["fmriBold2AnatInitIndex"] = m.fmriBold2AnatInitIndex
+	cfg["fmriBold2AnatDof"] = m.fmriBold2AnatDof
 	cfg["fmriSliceTimeRef"] = m.fmriSliceTimeRef
 	cfg["fmriFdSpikeThreshold"] = m.fmriFdSpikeThreshold
 	cfg["fmriDvarsSpikeThreshold"] = m.fmriDvarsSpikeThreshold
@@ -996,7 +994,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriGroupAnatomicalExpanded = getBool("fmriGroupAnatomicalExpanded", m.fmriGroupAnatomicalExpanded)
 	m.fmriGroupBoldExpanded = getBool("fmriGroupBoldExpanded", m.fmriGroupBoldExpanded)
 	m.fmriGroupQcExpanded = getBool("fmriGroupQcExpanded", m.fmriGroupQcExpanded)
-	m.fmriGroupDenoisingExpanded = getBool("fmriGroupDenoisingExpanded", m.fmriGroupDenoisingExpanded)
 	m.fmriGroupSurfaceExpanded = getBool("fmriGroupSurfaceExpanded", m.fmriGroupSurfaceExpanded)
 	m.fmriGroupMultiechoExpanded = getBool("fmriGroupMultiechoExpanded", m.fmriGroupMultiechoExpanded)
 	m.fmriGroupReproExpanded = getBool("fmriGroupReproExpanded", m.fmriGroupReproExpanded)
@@ -1506,7 +1503,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriIgnoreSpec = getString("fmriIgnoreSpec", m.fmriIgnoreSpec)
 	m.fmriBidsFilterFile = getString("fmriBidsFilterFile", m.fmriBidsFilterFile)
 	m.fmriExtraArgs = getString("fmriExtraArgs", m.fmriExtraArgs)
-	m.fmriUseAroma = getBool("fmriUseAroma", m.fmriUseAroma)
 	m.fmriSkipBidsValidation = getBool("fmriSkipBidsValidation", m.fmriSkipBidsValidation)
 	m.fmriStopOnFirstCrash = getBool("fmriStopOnFirstCrash", m.fmriStopOnFirstCrash)
 	m.fmriCleanWorkdir = getBool("fmriCleanWorkdir", m.fmriCleanWorkdir)
@@ -1515,14 +1511,14 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriNThreads = getInt("fmriNThreads", m.fmriNThreads)
 	m.fmriOmpNThreads = getInt("fmriOmpNThreads", m.fmriOmpNThreads)
 	m.fmriLowMem = getBool("fmriLowMem", m.fmriLowMem)
-	m.fmriLongitudinal = getBool("fmriLongitudinal", m.fmriLongitudinal)
+	m.fmriSubjectAnatomicalReferenceIndex = getInt("fmriSubjectAnatomicalReferenceIndex", m.fmriSubjectAnatomicalReferenceIndex)
 	m.fmriCiftiOutputIndex = getInt("fmriCiftiOutputIndex", m.fmriCiftiOutputIndex)
 	m.fmriSkullStripTemplate = getString("fmriSkullStripTemplate", m.fmriSkullStripTemplate)
 	m.fmriSkullStripFixedSeed = getBool("fmriSkullStripFixedSeed", m.fmriSkullStripFixedSeed)
 	m.fmriRandomSeed = getInt("fmriRandomSeed", m.fmriRandomSeed)
 	m.fmriDummyScans = getInt("fmriDummyScans", m.fmriDummyScans)
-	m.fmriBold2T1wInitIndex = getInt("fmriBold2T1wInitIndex", m.fmriBold2T1wInitIndex)
-	m.fmriBold2T1wDof = getInt("fmriBold2T1wDof", m.fmriBold2T1wDof)
+	m.fmriBold2AnatInitIndex = getInt("fmriBold2AnatInitIndex", m.fmriBold2AnatInitIndex)
+	m.fmriBold2AnatDof = getInt("fmriBold2AnatDof", m.fmriBold2AnatDof)
 	m.fmriSliceTimeRef = getFloat("fmriSliceTimeRef", m.fmriSliceTimeRef)
 	m.fmriFdSpikeThreshold = getFloat("fmriFdSpikeThreshold", m.fmriFdSpikeThreshold)
 	m.fmriDvarsSpikeThreshold = getFloat("fmriDvarsSpikeThreshold", m.fmriDvarsSpikeThreshold)

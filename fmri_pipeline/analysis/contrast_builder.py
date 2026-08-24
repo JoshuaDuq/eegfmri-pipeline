@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from fmri_pipeline.analysis.confounds_selection import DEFAULT_CONFOUNDS_STRATEGY
 from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
 from fmri_pipeline.analysis.constraint_masking import build_thresholded_constraint_mask
 from fmri_pipeline.utils.bold_discovery import (
@@ -77,7 +78,7 @@ class ContrastBuilderConfig:
     # Events column used for `condition_scope_trial_types`.
     condition_scope_column: str = ""
     # Confounds / QC (optional)
-    confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|motion24+wmcsf+fd+compcor|auto
+    confounds_strategy: str = DEFAULT_CONFOUNDS_STRATEGY
     auto_compcor_n: int = 5
     write_design_matrix: bool = False
     smoothing_fwhm: Optional[float] = None
@@ -97,6 +98,12 @@ class ContrastBuilderConfig:
     # Optional value in `phase_scope_column` to restrict where phase filtering is applied.
     # If None, phase filtering applies to all rows.
     phase_scope_value: Optional[str] = None
+    # Numeric events column to model as a parametric modulator of the scoped trials.
+    # Mutually exclusive with condition_a_column: a parametric term asks how the response
+    # scales with a continuous quantity, where an A-vs-B contrast asks about two of its
+    # levels. When set, every scoped trial contributes to both regressors, so the estimate
+    # rests on the whole stimulus range rather than on its two thinnest cells.
+    parametric_column: Optional[str] = None
 
 
 SUPPORTED_CONTRAST_TYPES = frozenset({"custom", "t-test"})
@@ -125,8 +132,7 @@ def _normalize_contrast_type(raw_value: Any) -> str:
     if contrast_type not in SUPPORTED_CONTRAST_TYPES:
         supported = ", ".join(sorted(SUPPORTED_CONTRAST_TYPES))
         raise ValueError(
-            f"Unsupported fmri_contrast.type {raw_value!r}. "
-            f"Supported values: {supported}."
+            f"Unsupported fmri_contrast.type {raw_value!r}. " f"Supported values: {supported}."
         )
     return contrast_type
 
@@ -146,8 +152,7 @@ def _normalize_requested_output_type(raw_value: Any) -> str:
     if output_type not in OUTPUT_TYPE_MAP:
         supported = ", ".join(sorted(OUTPUT_TYPE_MAP))
         raise ValueError(
-            f"Unsupported fmri output_type {raw_value!r}. "
-            f"Supported values: {supported}."
+            f"Unsupported fmri output_type {raw_value!r}. " f"Supported values: {supported}."
         )
     return output_type
 
@@ -169,9 +174,28 @@ def _assert_constraint_mask_requires_z_output(
 
 def validate_contrast_config_section(contrast_cfg: Dict[str, Any]) -> None:
     """Reject misleading or unsupported contrast-section keys."""
+    # A parametric term and an A-vs-B contrast are different questions: one asks how the
+    # response scales across the stimulus range, the other about two of its levels. Asked
+    # for both, the fit would build regressors for one and name the other in its contrast.
+    if contrast_cfg.get("parametric_column"):
+        conflicting = [
+            key
+            for key in ("condition_a", "condition_b")
+            if isinstance(contrast_cfg.get(key), dict)
+            and str(contrast_cfg[key].get("value") or "").strip()
+        ]
+        if conflicting:
+            raise ValueError(
+                "fmri_contrast.parametric_column models the scoped trials as a continuous "
+                f"modulator and cannot be combined with {' and '.join(conflicting)}. "
+                "Choose the parametric fit or the two-level contrast."
+            )
+
     legacy_keys = [key for key in LEGACY_CONDITION_KEY_MAP if key in contrast_cfg]
     if legacy_keys:
-        key_map = ", ".join(f"{key}->{LEGACY_CONDITION_KEY_MAP[key]}" for key in sorted(legacy_keys))
+        key_map = ", ".join(
+            f"{key}->{LEGACY_CONDITION_KEY_MAP[key]}" for key in sorted(legacy_keys)
+        )
         raise ValueError(
             "Use fmri_contrast.condition_a / fmri_contrast.condition_b keys. "
             f"Legacy keys are unsupported: {key_map}."
@@ -204,7 +228,7 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
         str(contrast_cfg.low_pass_hz or ""),
         str(contrast_cfg.drift_model or ""),
         str(contrast_cfg.hrf_model),
-        str(getattr(contrast_cfg, "confounds_strategy", "auto")),
+        str(getattr(contrast_cfg, "confounds_strategy", DEFAULT_CONFOUNDS_STRATEGY)),
         str(int(getattr(contrast_cfg, "auto_compcor_n", 5))),
         str(bool(getattr(contrast_cfg, "write_design_matrix", False))),
         str(getattr(contrast_cfg, "smoothing_fwhm", None) or ""),
@@ -280,16 +304,16 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         else:
             # Allow comma-separated string
             condition_scope_trial_types = [
-                part.strip()
-                for part in str(scope_raw).split(",")
-                if part.strip()
+                part.strip() for part in str(scope_raw).split(",") if part.strip()
             ] or None
     condition_scope_column = str(contrast_cfg.get("condition_scope_column", "") or "").strip()
 
     # Confounds/QC (optional; safe defaults keep behavior stable)
-    confounds_strategy = str(contrast_cfg.get("confounds_strategy", "auto")).strip().lower()
+    confounds_strategy = (
+        str(contrast_cfg.get("confounds_strategy", DEFAULT_CONFOUNDS_STRATEGY)).strip().lower()
+    )
     if confounds_strategy == "":
-        confounds_strategy = "auto"
+        confounds_strategy = DEFAULT_CONFOUNDS_STRATEGY
     auto_compcor_n = int(contrast_cfg.get("auto_compcor_n", 5))
     write_design_matrix = bool(contrast_cfg.get("write_design_matrix", False))
     from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
@@ -297,9 +321,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     smoothing_fwhm = normalize_smoothing_fwhm(contrast_cfg.get("smoothing_fwhm"))
 
     events_to_model = normalize_trial_type_list(contrast_cfg.get("events_to_model"))
-    events_to_model_column = str(
-        contrast_cfg.get("events_to_model_column", "") or ""
-    ).strip()
+    events_to_model_column = str(contrast_cfg.get("events_to_model_column", "") or "").strip()
     stim_phases_to_model = normalize_trial_type_list(contrast_cfg.get("stim_phases_to_model"))
     phase_column = str(contrast_cfg.get("phase_column", "") or "").strip()
     phase_scope_column = str(contrast_cfg.get("phase_scope_column", "") or "").strip()
@@ -313,13 +335,10 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         )
     if events_to_model and not events_to_model_column:
         raise ValueError(
-            "fmri_contrast.events_to_model requires "
-            "fmri_contrast.events_to_model_column."
+            "fmri_contrast.events_to_model requires " "fmri_contrast.events_to_model_column."
         )
     if stim_phases_to_model and not phase_column:
-        raise ValueError(
-            "fmri_contrast.stim_phases_to_model requires fmri_contrast.phase_column."
-        )
+        raise ValueError("fmri_contrast.stim_phases_to_model requires fmri_contrast.phase_column.")
     if phase_scope_value and not phase_scope_column:
         raise ValueError(
             "fmri_contrast.phase_scope_value requires fmri_contrast.phase_scope_column."
@@ -335,6 +354,9 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         condition1=contrast_cfg.get("condition1"),
         condition2=contrast_cfg.get("condition2"),
         # New condition_a/condition_b column + value pairs from TUI
+        parametric_column=(
+            str(contrast_cfg.get("parametric_column") or "").strip() or None
+        ),
         condition_a_column=cond_a_cfg.get("column"),
         condition_a_value=cond_a_cfg.get("value"),
         condition_b_column=cond_b_cfg.get("column"),
@@ -405,8 +427,7 @@ def _build_events_to_model_mask(
         column_name = "trial_type"
     if column_name not in events_df.columns:
         raise ValueError(
-            "events_to_model is set but events file has no "
-            f"'{column_name}' column."
+            "events_to_model is set but events file has no " f"'{column_name}' column."
         )
 
     allow = {str(value).strip() for value in allowed_values if str(value).strip()}
@@ -438,9 +459,7 @@ def _build_trial_phase_model_mask(
         return pd.Series(True, index=events_df.index, dtype=bool)
 
     if not phase_column_name:
-        raise ValueError(
-            "stim_phases_to_model is set but no phase_column was configured."
-        )
+        raise ValueError("stim_phases_to_model is set but no phase_column was configured.")
     if phase_column_name not in events_df.columns:
         raise ValueError(
             "stim_phases_to_model is set but events file has no "
@@ -448,9 +467,7 @@ def _build_trial_phase_model_mask(
         )
 
     if phase_scope_value is not None and not phase_scope_column_name:
-        raise ValueError(
-            "phase_scope_value is set but no phase_scope_column was configured."
-        )
+        raise ValueError("phase_scope_value is set but no phase_scope_column was configured.")
     if phase_scope_value is not None and phase_scope_column_name not in events_df.columns:
         raise ValueError(
             "phase_scope_value is set but events file has no "
@@ -460,8 +477,12 @@ def _build_trial_phase_model_mask(
     allow = set(allow_norm)
     phase_norm = events_df[phase_column_name].fillna("").astype(str).str.strip().str.lower()
     if phase_scope_value is not None and phase_scope_column_name in events_df.columns:
-        scope_match = events_df[phase_scope_column_name].astype(str).str.strip().str.lower().eq(
-            str(phase_scope_value).strip().lower()
+        scope_match = (
+            events_df[phase_scope_column_name]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .eq(str(phase_scope_value).strip().lower())
         )
         return (~scope_match) | phase_norm.isin(sorted(allow))
     return phase_norm.isin(sorted(allow))
@@ -542,20 +563,28 @@ def _validate_events_against_bold_run(
 
     if onset.isna().any():
         bad_rows = onset.index[onset.isna()].tolist()
-        raise ValueError(f"{context}: onset contains non-numeric or missing values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: onset contains non-numeric or missing values at rows {bad_rows}."
+        )
     if duration.isna().any():
         bad_rows = duration.index[duration.isna()].tolist()
-        raise ValueError(f"{context}: duration contains non-numeric or missing values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: duration contains non-numeric or missing values at rows {bad_rows}."
+        )
     if not np.isfinite(onset.to_numpy(dtype=float)).all():
         raise ValueError(f"{context}: onset contains non-finite values.")
     if not np.isfinite(duration.to_numpy(dtype=float)).all():
         raise ValueError(f"{context}: duration contains non-finite values.")
     if (onset < 0).any():
         bad_rows = onset.index[onset < 0].tolist()
-        raise ValueError(f"{context}: onset must be >= 0, found negative values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: onset must be >= 0, found negative values at rows {bad_rows}."
+        )
     if (duration < 0).any():
         bad_rows = duration.index[duration < 0].tolist()
-        raise ValueError(f"{context}: duration must be >= 0, found negative values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: duration must be >= 0, found negative values at rows {bad_rows}."
+        )
 
     run_duration = _get_bold_run_duration_seconds(bold_path)
     tr = float(_get_tr_from_bold(bold_path))
@@ -582,8 +611,7 @@ def _load_matching_brain_mask_for_bold(bold_path: Path) -> Any:
     mask_path = _discover_brain_mask_for_bold(bold_path)
     if mask_path is None:
         raise FileNotFoundError(
-            "First-level GLM requires a matching fMRIPrep brain mask for "
-            f"{bold_path.name}."
+            "First-level GLM requires a matching fMRIPrep brain mask for " f"{bold_path.name}."
         )
     return nib.load(str(mask_path))
 
@@ -728,9 +756,7 @@ def discover_bold_runs(
             raise FileNotFoundError(
                 f"None of the requested runs were found for subject {subject}, task {task}: {requested}"
             )
-        raise FileNotFoundError(
-            f"No runs found for subject {subject}, task {task} in {func_dir}"
-        )
+        raise FileNotFoundError(f"No runs found for subject {subject}, task {task} in {func_dir}")
 
     selected_input_source = _normalize_input_source(getattr(cfg, "input_source", "bids_raw"))
     preproc_by_run: Dict[int, Optional[Path]] = {}
@@ -823,8 +849,7 @@ def discover_bold_runs(
                     f"{missing_runs}."
                 )
         details = ", ".join(
-            f"run {run_num} missing {' + '.join(parts)}"
-            for run_num, parts in missing_run_inputs
+            f"run {run_num} missing {' + '.join(parts)}" for run_num, parts in missing_run_inputs
         )
         raise FileNotFoundError(
             "Some discovered runs could not be resolved to matching BOLD + events inputs: "
@@ -924,6 +949,7 @@ def discover_runless_confounds(
 ###################################################################
 # GLM Fitting
 ###################################################################
+
 
 def _run_label_from_bold_path(bold_path: Path, fallback_idx: int) -> str:
     """Extract a BIDS-style run label (e.g., 'run-01') from a BOLD filename."""
@@ -1045,7 +1071,9 @@ def _remap_events_by_condition_columns(
                 "condition_scope_trial_types is set but no condition_scope_column was configured."
             )
         normalized_scope = [str(v).strip() for v in scope_trial_types if str(v).strip()]
-        if normalized_scope and not any(v.lower() in {"all", "*", "@all"} for v in normalized_scope):
+        if normalized_scope and not any(
+            v.lower() in {"all", "*", "@all"} for v in normalized_scope
+        ):
             if scope_column not in events_df.columns:
                 raise ValueError(
                     f"Condition scope column '{scope_column}' not found in events. "
@@ -1087,10 +1115,7 @@ def _remap_events_by_condition_columns(
     if cond_a_found:
         events_out.loc[mask_a, "trial_type"] = label_a
         synthetic_labels.append(label_a)
-        logger.info(
-            "Mapped %d events where %s=%s to '%s'",
-            cond_a_count, col_a, val_a, label_a
-        )
+        logger.info("Mapped %d events where %s=%s to '%s'", cond_a_count, col_a, val_a, label_a)
 
     # Check condition B if specified
     cond_b_found = True
@@ -1129,10 +1154,7 @@ def _remap_events_by_condition_columns(
         if cond_b_found:
             events_out.loc[mask_b, "trial_type"] = label_b
             synthetic_labels.append(label_b)
-            logger.info(
-                "Mapped %d events where %s=%s to '%s'",
-                cond_b_count, col_b, val_b, label_b
-            )
+            logger.info("Mapped %d events where %s=%s to '%s'", cond_b_count, col_b, val_b, label_b)
 
     return ConditionRemapResult(
         events_df=events_out,
@@ -1143,6 +1165,106 @@ def _remap_events_by_condition_columns(
         cond_b_count=cond_b_count,
         missing_cond_a_msg=missing_cond_a_msg,
         missing_cond_b_msg=missing_cond_b_msg,
+    )
+
+
+def _expand_events_for_parametric(
+    events_df: pd.DataFrame,
+    cfg: ContrastBuilderConfig,
+    *,
+    eligible_mask: Optional[pd.Series] = None,
+) -> ConditionRemapResult:
+    """Give the scoped trials a response regressor and a modulator of the same onsets.
+
+    Nilearn takes regressor amplitudes from a ``modulation`` column, so a parametric term
+    is a second copy of the same onsets carrying the modulator's value. Both copies are
+    returned in one events frame; Nilearn convolves each trial_type separately.
+
+    The modulator is mean-centred within the run. Uncentred, the parametric copy is
+    near-collinear with the response regressor -- it would be the same boxcar scaled by
+    roughly a constant -- and the split of variance between them becomes arbitrary.
+    Centring within the run rather than across the session also keeps any between-run
+    difference in mean stimulus out of the modulator, where it would be confounded with
+    run-level drift.
+
+    A trial with no value for the modulator cannot be placed on that axis, so it keeps
+    its response regressor and is left out of the parametric copy rather than being
+    imputed to the centre.
+    """
+    column = cfg.parametric_column
+    if not column:
+        raise ValueError("Parametric expansion requires parametric_column.")
+    if column not in events_df.columns:
+        raise ValueError(
+            f"Parametric column '{column}' not found in events. "
+            f"Available columns: {list(events_df.columns)}"
+        )
+
+    events_out = events_df.copy()
+    if "modulation" not in events_out.columns:
+        events_out["modulation"] = 1.0
+
+    scope_mask = pd.Series(True, index=events_out.index, dtype=bool)
+    if eligible_mask is not None:
+        if len(eligible_mask) != len(events_out):
+            raise ValueError("eligible_mask must match events_df length.")
+        scope_mask &= eligible_mask.astype(bool)
+    scope_column = str(getattr(cfg, "condition_scope_column", "") or "").strip()
+    scope_values = cfg.condition_scope_trial_types
+    if scope_values:
+        if not scope_column:
+            raise ValueError(
+                "condition_scope_trial_types is set but no condition_scope_column was configured."
+            )
+        if scope_column not in events_out.columns:
+            raise ValueError(
+                f"Condition scope column '{scope_column}' not found in events. "
+                f"Available columns: {list(events_out.columns)}"
+            )
+        wanted = [str(v).strip() for v in scope_values if str(v).strip()]
+        if wanted and not any(v.lower() in {"all", "*", "@all"} for v in wanted):
+            scope_mask &= events_out[scope_column].astype(str).isin(wanted)
+
+    values = pd.to_numeric(events_out[column], errors="coerce")
+    usable = scope_mask & values.notna()
+    if not usable.any():
+        return ConditionRemapResult(
+            events_df=events_out,
+            synthetic_labels=[],
+            cond_a_found=False,
+            cond_b_found=True,
+            missing_cond_a_msg=(
+                f"Parametric column '{column}' has no usable values on the scoped trials."
+            ),
+        )
+
+    label_main = f"main_{cfg.name}"
+    label_param = f"param_{cfg.name}"
+
+    main = events_out.loc[usable].copy()
+    main["trial_type"] = label_main
+    main["modulation"] = 1.0
+
+    param = events_out.loc[usable].copy()
+    param["trial_type"] = label_param
+    param["modulation"] = (values.loc[usable] - values.loc[usable].mean()).astype(float)
+
+    rest = events_out.loc[~usable].copy()
+    combined = pd.concat([rest, main, param], ignore_index=True).sort_values(
+        ["onset", "trial_type"], kind="stable"
+    )
+    logger.info(
+        "Parametric modulation on '%s': %d scoped trials, centred within run",
+        column,
+        int(usable.sum()),
+    )
+    return ConditionRemapResult(
+        events_df=combined.reset_index(drop=True),
+        synthetic_labels=[label_main, label_param],
+        cond_a_found=True,
+        cond_b_found=True,
+        cond_a_count=int(usable.sum()),
+        cond_b_count=int(usable.sum()),
     )
 
 
@@ -1188,9 +1310,16 @@ def fit_first_level_glm(
 
     confounds = None
     sample_mask = None
-    confounds_strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
+    confounds_strategy = (
+        str(
+            getattr(cfg, "confounds_strategy", DEFAULT_CONFOUNDS_STRATEGY)
+            or DEFAULT_CONFOUNDS_STRATEGY
+        )
+        .strip()
+        .lower()
+    )
     if confounds_strategy in {"", "default"}:
-        confounds_strategy = "auto"
+        confounds_strategy = DEFAULT_CONFOUNDS_STRATEGY
     if confounds_strategy not in {"none", "no", "off"}:
         if confounds_path is None or not confounds_path.exists():
             raise ValueError(
@@ -1230,6 +1359,7 @@ def fit_first_level_glm(
     )
 
     return flm, synthetic_labels
+
 
 @dataclass
 class MultiRunGLMResult:
@@ -1360,20 +1490,32 @@ def fit_first_level_glm_multi_run(
 
         events_df, eligible_mask = _prepare_events_for_glm(events_df, cfg)
 
-        # Remap conditions, allowing missing values (strict=False)
-        remap_result = _remap_events_by_condition_columns(
-            events_df,
-            cfg,
-            strict=False,
-            eligible_mask=eligible_mask,
-        )
+        if cfg.parametric_column:
+            remap_result = _expand_events_for_parametric(
+                events_df, cfg, eligible_mask=eligible_mask
+            )
+        else:
+            # Remap conditions, allowing missing values (strict=False)
+            remap_result = _remap_events_by_condition_columns(
+                events_df,
+                cfg,
+                strict=False,
+                eligible_mask=eligible_mask,
+            )
 
         # Check if this run should be skipped due to missing conditions
         needs_both = bool(cfg.condition_b_column) and _value_is_specified(cfg.condition_b_value)
         run_valid = True
         skip_reason = ""
 
-        if cfg.condition_a_column:
+        if cfg.parametric_column:
+            # A run only fails here if it carries no usable modulator value at all. Unlike
+            # an A-vs-B contrast, no single level has to be present: the modulator spans
+            # whatever range the run happened to sample.
+            if not remap_result.cond_a_found:
+                run_valid = False
+                skip_reason = remap_result.missing_cond_a_msg
+        elif cfg.condition_a_column:
             if not remap_result.cond_a_found:
                 run_valid = False
                 skip_reason = remap_result.missing_cond_a_msg
@@ -1394,7 +1536,12 @@ def fit_first_level_glm_multi_run(
         if remap_result.synthetic_labels and not synthetic_labels:
             synthetic_labels = remap_result.synthetic_labels
 
-        events_out = remap_result.events_df[["onset", "duration", "trial_type"]].copy()
+        keep = ["onset", "duration", "trial_type"]
+        # Nilearn reads regressor amplitudes from `modulation`; without it the
+        # parametric copy would convolve at unit height and restate the main effect.
+        if cfg.parametric_column and "modulation" in remap_result.events_df.columns:
+            keep.append("modulation")
+        events_out = remap_result.events_df[keep].copy()
         valid_bold_paths.append(bold_path)
         valid_events_paths.append(events_path)
         valid_events_list.append(events_out)
@@ -1407,7 +1554,7 @@ def fit_first_level_glm_multi_run(
             confounds_df = pd.read_csv(confounds_path, sep="\t")
             confounds, _conf_cols, sample_mask = _select_confounds_for_glm(
                 confounds_df,
-                getattr(cfg, "confounds_strategy", "auto"),
+                getattr(cfg, "confounds_strategy", DEFAULT_CONFOUNDS_STRATEGY),
                 auto_compcor_n=int(getattr(cfg, "auto_compcor_n", 5)),
             )
             if confounds is not None:
@@ -1433,9 +1580,16 @@ def fit_first_level_glm_multi_run(
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
-    strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
+    strategy = (
+        str(
+            getattr(cfg, "confounds_strategy", DEFAULT_CONFOUNDS_STRATEGY)
+            or DEFAULT_CONFOUNDS_STRATEGY
+        )
+        .strip()
+        .lower()
+    )
     if strategy in {"", "default"}:
-        strategy = "auto"
+        strategy = DEFAULT_CONFOUNDS_STRATEGY
 
     all_none = all(c is None for c in valid_confounds_list)
     any_none = any(c is None for c in valid_confounds_list)
@@ -1502,6 +1656,29 @@ def fit_first_level_glm_multi_run(
     )
 
 
+def _contrast_definition_for(
+    cfg: ContrastBuilderConfig, synthetic_labels: Sequence[str]
+) -> str:
+    """Turn the synthetic regressor labels into the contrast that was actually asked for.
+
+    Two labels normally mean an A-vs-B difference. A parametric fit also produces two --
+    the response and its modulator -- but the modulator alone is the estimate: it is the
+    slope of the response across the stimulus range, and the response regressor beside it
+    is what that slope is measured against, not a baseline to subtract.
+    """
+    labels = list(synthetic_labels)
+    if cfg.parametric_column:
+        for label in labels:
+            if label.startswith("param_"):
+                return label
+        raise ValueError(f"Parametric fit produced no modulator regressor: {labels}")
+    if len(labels) == 2:
+        return f"{labels[0]} - {labels[1]}"
+    if len(labels) == 1:
+        return labels[0]
+    raise ValueError(f"Unexpected number of synthetic labels: {labels}")
+
+
 def compute_contrast_map(
     flm: "FirstLevelModel",
     cfg: ContrastBuilderConfig,
@@ -1519,17 +1696,14 @@ def compute_contrast_map(
     if cfg.contrast_type == "custom" and cfg.formula:
         contrast_def = cfg.formula
     elif synthetic_labels:
-        if len(synthetic_labels) == 2:
-            contrast_def = f"{synthetic_labels[0]} - {synthetic_labels[1]}"
-        elif len(synthetic_labels) == 1:
-            contrast_def = synthetic_labels[0]
-        else:
-            raise ValueError(
-                f"Unexpected number of synthetic labels: {synthetic_labels}"
-            )
+        contrast_def = _contrast_definition_for(cfg, synthetic_labels)
     else:
-        cond_a = cfg.condition_a_value if _value_is_specified(cfg.condition_a_value) else cfg.condition1
-        cond_b = cfg.condition_b_value if _value_is_specified(cfg.condition_b_value) else cfg.condition2
+        cond_a = (
+            cfg.condition_a_value if _value_is_specified(cfg.condition_a_value) else cfg.condition1
+        )
+        cond_b = (
+            cfg.condition_b_value if _value_is_specified(cfg.condition_b_value) else cfg.condition2
+        )
 
         if _value_is_specified(cond_a) and _value_is_specified(cond_b):
             if cond_a not in available_conditions:
@@ -1584,6 +1758,7 @@ def compute_contrast_map(
 ###################################################################
 # Multi-run Processing
 ###################################################################
+
 
 def build_contrast_from_runs_detailed(
     bids_fmri_root: Path,
@@ -1672,12 +1847,9 @@ def build_contrast_from_runs_detailed(
         "included_bold_paths": [str(p) for p in glm_result.included_bold_paths],
         "included_events_paths": [str(p) for p in glm_result.included_events_paths],
         "included_confounds_paths": [
-            str(p) if p is not None else None
-            for p in glm_result.included_confounds_paths
+            str(p) if p is not None else None for p in glm_result.included_confounds_paths
         ],
-        "retained_frame_indices": [
-            list(indices) for indices in glm_result.retained_frame_indices
-        ],
+        "retained_frame_indices": [list(indices) for indices in glm_result.retained_frame_indices],
         # Skipped runs with reasons
         "n_runs_skipped": len(glm_result.skipped_runs),
         "skipped_runs": [
@@ -1689,7 +1861,7 @@ def build_contrast_from_runs_detailed(
         "total_cond_b_events": glm_result.total_cond_b_events,
         # GLM details
         "confound_columns": glm_result.confound_columns,
-        "confounds_strategy": str(getattr(cfg, "confounds_strategy", "auto")),
+        "confounds_strategy": str(getattr(cfg, "confounds_strategy", DEFAULT_CONFOUNDS_STRATEGY)),
         "contrast_def": contrast_def,
         "output_type": output_type,
         # The space the BOLD above lives in. QC panels read those files directly and
@@ -1735,8 +1907,7 @@ def resample_to_freesurfer(
 
     if target_img is None:
         raise FileNotFoundError(
-            f"No FreeSurfer MRI found in {mri_dir}. "
-            f"Looked for: {target_candidates}"
+            f"No FreeSurfer MRI found in {mri_dir}. " f"Looked for: {target_candidates}"
         )
 
     resampled = resample_to_img(
@@ -1776,9 +1947,9 @@ def _load_constraint_mask_spec(config: Any) -> Optional[Dict[str, Any]]:
         )
 
     thresholding_cfg = fmri_cfg.get("thresholding", {}) or {}
-    threshold_mode = str(
-        thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))
-    ).strip().lower()
+    threshold_mode = (
+        str(thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))).strip().lower()
+    )
     if threshold_mode not in {"z", "fdr"}:
         raise ValueError(
             "feature_engineering.sourcelocalization.fmri.thresholding.mode must be one of {'z','fdr'}."
@@ -1950,13 +2121,15 @@ def build_fmri_contrast(
         constraint_spec=constraint_spec,
     )
 
-    contrast_map, run_meta, glm_result, _contrast_def, _output_type = build_contrast_from_runs_detailed(
-        bids_fmri_root=bids_fmri_root,
-        bids_derivatives=bids_derivatives,
-        subject=subject,
-        task=task,
-        cfg=cfg,
-        output_dir=output_dir,
+    contrast_map, run_meta, glm_result, _contrast_def, _output_type = (
+        build_contrast_from_runs_detailed(
+            bids_fmri_root=bids_fmri_root,
+            bids_derivatives=bids_derivatives,
+            subject=subject,
+            task=task,
+            cfg=cfg,
+            output_dir=output_dir,
+        )
     )
 
     fs_subject_dir = freesurfer_subjects_dir / sub_label
@@ -1985,9 +2158,7 @@ def build_fmri_contrast(
 
     if cfg.resample_to_freesurfer:
         if not fs_subject_dir.exists():
-            raise FileNotFoundError(
-                f"FreeSurfer subject directory not found: {fs_subject_dir}"
-            )
+            raise FileNotFoundError(f"FreeSurfer subject directory not found: {fs_subject_dir}")
         contrast_map = resample_to_freesurfer(contrast_map, fs_subject_dir)
         if constraint_mask_img is not None:
             constraint_mask_img = resample_to_freesurfer(
@@ -2101,7 +2272,9 @@ def ensure_fmri_stats_map(
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
     output_dir = bids_derivatives / sub_label / "fmri_contrasts"
     contrast_hash = _get_contrast_hash(contrast_cfg)
-    output_name = f"{sub_label}_{contrast_cfg.name}_{contrast_cfg.output_type}_{contrast_hash}.nii.gz"
+    output_name = (
+        f"{sub_label}_{contrast_cfg.name}_{contrast_cfg.output_type}_{contrast_hash}.nii.gz"
+    )
     cached_path = output_dir / output_name
 
     if cached_path.exists():

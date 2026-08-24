@@ -264,7 +264,7 @@ def validate_manifest(manifest: ContrastManifest) -> None:
     has_columns = bool(manifest.contrast_columns)
     if has_vector != has_columns:
         raise ValueError(
-            "contrast_vector and contrast_columns must either both be present or " "both be absent."
+            "contrast_vector and contrast_columns must either both be present or both be absent."
         )
     if has_vector and len(manifest.contrast_vector or ()) != len(manifest.contrast_columns):
         raise ValueError(
@@ -822,13 +822,9 @@ def write_report_manifest(
         sign_flip_fwe_survivors=(
             None if sign_flip_fwe_survivors is None else int(sign_flip_fwe_survivors)
         ),
-        sign_flip_global_p=(
-            None if sign_flip_global_p is None else float(sign_flip_global_p)
-        ),
+        sign_flip_global_p=(None if sign_flip_global_p is None else float(sign_flip_global_p)),
         sign_flip_p_floor=(None if sign_flip_p_floor is None else float(sign_flip_p_floor)),
-        sign_flip_n_patterns=(
-            None if sign_flip_n_patterns is None else int(sign_flip_n_patterns)
-        ),
+        sign_flip_n_patterns=(None if sign_flip_n_patterns is None else int(sign_flip_n_patterns)),
         sign_flip_n_runs=(None if sign_flip_n_runs is None else int(sign_flip_n_runs)),
         sign_flip_observed_max=(
             None if sign_flip_observed_max is None else float(sign_flip_observed_max)

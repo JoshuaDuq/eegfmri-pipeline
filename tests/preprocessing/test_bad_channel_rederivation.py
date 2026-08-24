@@ -105,10 +105,7 @@ def _write_run(root, subject: str, run: int, rows) -> None:
 
 def _read_run(root, subject: str, run: int) -> pd.DataFrame:
     path = (
-        root
-        / f"sub-{subject}"
-        / "eeg"
-        / f"sub-{subject}_task-thermalactive_run-{run}_channels.tsv"
+        root / f"sub-{subject}" / "eeg" / f"sub-{subject}_task-thermalactive_run-{run}_channels.tsv"
     )
     return pd.read_csv(path, sep="\t", keep_default_na=False)
 
@@ -164,3 +161,36 @@ def test_synchronization_leaves_non_eeg_rows_alone(tmp_path) -> None:
     run1 = _read_run(tmp_path, "0001", 1)
     assert run1.loc[0, "status"] == "bad"
     assert run1.loc[0, "description"] == "Detached lead"
+
+
+def test_bad_channel_union_does_not_cross_bids_sessions(tmp_path) -> None:
+    """Different recording sessions must retain independent sensor-quality decisions."""
+    for session, bad_channel in (("01", "C3"), ("02", "C4")):
+        directory = tmp_path / "sub-0001" / f"ses-{session}" / "eeg"
+        directory.mkdir(parents=True)
+        for run in (1, 2):
+            rows = [
+                (
+                    channel,
+                    "EEG",
+                    "bad" if run == 1 and channel == bad_channel else "good",
+                    PYPREP_BAD_DESCRIPTION if run == 1 and channel == bad_channel else "",
+                )
+                for channel in ("C3", "C4")
+            ]
+            path = directory / f"sub-0001_ses-{session}_task-thermalactive_run-{run}_channels.tsv"
+            _channels(rows).to_csv(path, sep="\t", index=False)
+
+    synchronize_bad_channels_across_runs(str(tmp_path), "thermalactive", subjects=["0001"])
+
+    for session, expected in (("01", ["C3"]), ("02", ["C4"])):
+        for run in (1, 2):
+            path = (
+                tmp_path
+                / "sub-0001"
+                / f"ses-{session}"
+                / "eeg"
+                / f"sub-0001_ses-{session}_task-thermalactive_run-{run}_channels.tsv"
+            )
+            frame = pd.read_csv(path, sep="\t", keep_default_na=False)
+            assert frame.loc[frame["status"] == "bad", "name"].tolist() == expected

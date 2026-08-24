@@ -2767,3 +2767,154 @@ def test_trial_signature_discovery_requires_bold_for_each_discovered_events_run(
             fmriprep_space=None,
             require_fmriprep=False,
         )
+
+
+def _parametric_cfg(**overrides) -> ContrastBuilderConfig:
+    base = dict(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column=None,
+        condition_a_value=None,
+        condition_b_column=None,
+        condition_b_value=None,
+        formula=None,
+        name="temp",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="cope",
+        resample_to_freesurfer=False,
+        parametric_column="stimulus_temp",
+        condition_scope_column="trial_type",
+        condition_scope_trial_types=["stimulation"],
+    )
+    base.update(overrides)
+    return ContrastBuilderConfig(**base)
+
+
+def test_parametric_expansion_pairs_each_trial_with_a_centred_modulator() -> None:
+    """One regressor for the response and one for how it scales with the stimulus.
+
+    Nilearn reads amplitudes from a `modulation` column, so a parametric term is a second
+    copy of the same onsets carrying the modulator. Centring is what keeps that copy from
+    simply restating the main effect: uncentred, the two are near-collinear and the split
+    between them is arbitrary.
+    """
+    from fmri_pipeline.analysis.contrast_builder import _expand_events_for_parametric
+
+    events_df = pd.DataFrame(
+        {
+            "onset": [10.0, 30.0, 50.0, 70.0],
+            "duration": [7.5, 7.5, 7.5, 1.0],
+            "trial_type": ["stimulation", "stimulation", "stimulation", "vas_rating"],
+            "stimulus_temp": [44.3, 46.3, 48.3, np.nan],
+        }
+    )
+
+    result = _expand_events_for_parametric(events_df, _parametric_cfg())
+    out = result.events_df
+
+    main = out[out["trial_type"] == "main_temp"]
+    param = out[out["trial_type"] == "param_temp"]
+    assert len(main) == 3 and len(param) == 3
+    assert list(main["modulation"]) == [1.0, 1.0, 1.0]
+    # centred within the run, so the modulator carries no mean of its own
+    assert param["modulation"].sum() == pytest.approx(0.0)
+    assert list(param["modulation"]) == pytest.approx([-2.0, 0.0, 2.0])
+    # the parametric copy sits on the same onsets as the response it modulates
+    assert list(param["onset"]) == list(main["onset"])
+    # rows outside the scope are untouched and carry unit amplitude
+    assert list(out.loc[out["trial_type"] == "vas_rating", "modulation"]) == [1.0]
+    assert result.synthetic_labels == ["main_temp", "param_temp"]
+
+
+def test_parametric_contrast_is_the_modulator_not_a_difference() -> None:
+    """The response regressor is what the modulation is measured against, not a baseline.
+
+    Two synthetic labels otherwise mean an A-vs-B contrast, and the generic rule would
+    build `main - param`, which subtracts the slope from the mean response and answers
+    nothing anyone asked.
+    """
+    from fmri_pipeline.analysis.contrast_builder import _contrast_definition_for
+
+    cfg = _parametric_cfg()
+    assert _contrast_definition_for(cfg, ["main_temp", "param_temp"]) == "param_temp"
+
+    ab = _parametric_cfg(parametric_column=None, condition_a_column="trial_type",
+                         condition_a_value="hot", condition_b_column="trial_type",
+                         condition_b_value="cold", name="hc")
+    assert _contrast_definition_for(ab, ["cond_a_hc", "cond_b_hc"]) == "cond_a_hc - cond_b_hc"
+
+
+def test_parametric_and_two_condition_contrasts_cannot_be_requested_together() -> None:
+    """They are different questions, and silently honouring one would answer neither.
+
+    A parametric term asks how the response scales across the stimulus range; an A-vs-B
+    contrast asks about two of its levels. Given both, the run would build regressors for
+    one and a contrast naming the other.
+    """
+    from fmri_pipeline.analysis.contrast_builder import validate_contrast_config_section
+
+    with pytest.raises(ValueError, match="parametric_column"):
+        validate_contrast_config_section(
+            {
+                "enabled": True,
+                "parametric_column": "stimulus_temp",
+                "condition_a": {"column": "stimulus_temp", "value": 49.3},
+                "condition_b": {"column": "stimulus_temp", "value": 44.3},
+            }
+        )
+
+
+def test_parametric_column_is_reachable_from_a_study_config_not_only_the_cli() -> None:
+    """This pipeline is driven by per-study YAML; a mode only the CLI can reach is not general.
+
+    `load_contrast_config` is what a study's own config goes through, so a field the loader
+    does not read is invisible to every study that configures itself the documented way.
+    """
+    from fmri_pipeline.analysis.contrast_builder import load_contrast_config
+
+    class _Config(dict):
+        def get(self, key, default=None):
+            current = self
+            for part in str(key).split("."):
+                if not isinstance(current, dict) or part not in current:
+                    return default
+                current = current[part]
+            return current
+
+    cfg = load_contrast_config(
+        _Config(
+            {
+                "fmri_contrast": {
+                    "enabled": True,
+                    "contrast_type": "t-test",
+                    "name": "loudness",
+                    "parametric_column": "stimulus_db",
+                    "condition_scope_column": "trial_type",
+                    "condition_scope_trial_types": ["tone"],
+                }
+            }
+        )
+    )
+
+    assert cfg.parametric_column == "stimulus_db"
+
+
+def test_parametric_column_describes_the_contrast_not_the_model() -> None:
+    """Two contrasts off one preprocessing must stay combinable at second level.
+
+    The model signature deliberately excludes the fields that say *which* contrast was
+    computed. Leaving the parametric column out of that set would make an otherwise
+    identical model look like a different one.
+    """
+    from fmri_pipeline.analysis.second_level import _FIRST_LEVEL_CONTRAST_FIELDS
+
+    assert "parametric_column" in _FIRST_LEVEL_CONTRAST_FIELDS

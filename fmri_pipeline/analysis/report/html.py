@@ -15,12 +15,10 @@ from __future__ import annotations
 
 import base64
 import html as html_escape
-import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, Union
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -28,6 +26,7 @@ class Figure:
     title: str
     path: Path
     caption: str = ""
+    tsv_path: Optional[Path] = None
     #: Dense figures are raster and stay raster; carried so the assembler does not
     #: have to re-derive it from the suffix.
     dense: bool = True
@@ -42,6 +41,21 @@ class Table:
 
 
 @dataclass(frozen=True)
+class Embed:
+    """A self-contained HTML fragment authored elsewhere, dropped in verbatim.
+
+    Nilearn's interactive viewers hand back a complete iframe with their data and script
+    already inlined. Escaping it would render the markup as text; there is nothing to
+    escape it against, because the fragment is built by this process from its own maps
+    and never carries anything a reader supplied.
+    """
+
+    title: str
+    html: str = ""
+    caption: str = ""
+
+
+@dataclass(frozen=True)
 class KeyValues:
     title: str
     items: Tuple[Tuple[str, str], ...] = ()
@@ -52,7 +66,7 @@ class Note:
     text: str
 
 
-Block = Union[Figure, Table, KeyValues, Note]
+Block = Union[Figure, Table, Embed, KeyValues, Note]
 
 
 @dataclass(frozen=True)
@@ -93,8 +107,6 @@ section { border-top: 1px solid var(--border); padding-top: 18px; margin-bottom:
 .fig-title { font-weight: 600; margin: 0 0 6px 0; font-size: 14px; }
 .fig-cap { color: var(--muted); font-size: 12px; margin-top: 6px; }
 img { width: 100%; height: auto; display: block; }
-.missing { color: var(--muted); font-size: 12px; font-style: italic; padding: 18px;
-           border: 1px dashed var(--border); border-radius: 6px; }
 table { width: 100%; border-collapse: collapse; font-size: 12px;
         font-variant-numeric: tabular-nums; }
 th, td { border-bottom: 1px solid var(--border); padding: 5px 8px; text-align: left; }
@@ -116,10 +128,8 @@ def _esc(value: object) -> str:
 
 
 def _relpath(base_dir: Path, target: Path) -> str:
-    try:
-        return str(Path(target).relative_to(base_dir))
-    except ValueError:
-        return str(target)
+    path = Path(target)
+    return str(path) if not path.is_absolute() else os.path.relpath(path, start=base_dir)
 
 
 def _mime(path: Path) -> str:
@@ -142,18 +152,11 @@ def _image_source(path: Path, *, base_dir: Path, embed: bool) -> str:
 
 def _render_figure(figure: Figure, *, base_dir: Path, embed: bool) -> str:
     parts = ['<div class="fig">', f'<div class="fig-title">{_esc(figure.title)}</div>']
-    try:
-        source = _image_source(figure.path, base_dir=base_dir, embed=embed)
-        parts.append(
-            f'<img src="{_esc(source)}" loading="lazy" alt="{_esc(figure.title)}" />'
-        )
-    except OSError as exc:
-        # A missing panel is a gap in the document, not a reason to lose it.
-        logger.warning("Figure %s could not be read (%s)", figure.path, exc)
-        parts.append(
-            '<div class="missing">This figure could not be rendered: '
-            f"{_esc(figure.path.name)}</div>"
-        )
+    source = _image_source(figure.path, base_dir=base_dir, embed=embed)
+    parts.append(f'<img src="{_esc(source)}" loading="lazy" alt="{_esc(figure.title)}" />')
+    if figure.tsv_path is not None:
+        link = _esc(_relpath(base_dir, figure.tsv_path))
+        parts.append(f'<div class="fig-cap"><a href="{link}">Download TSV</a></div>')
     if figure.caption:
         parts.append(f'<div class="fig-cap">{_esc(figure.caption)}</div>')
     parts.append("</div>")
@@ -179,10 +182,15 @@ def _render_block(block: Block, *, base_dir: Path, embed: bool) -> str:
         return _render_figure(block, base_dir=base_dir, embed=embed)
     if isinstance(block, Table):
         return _render_table(block, base_dir=base_dir)
+    if isinstance(block, Embed):
+        caption = f'<div class="fig-cap">{_esc(block.caption)}</div>' if block.caption else ""
+        return (
+            f'<div class="fig"><div class="fig-title">{_esc(block.title)}</div>'
+            f"{block.html}{caption}</div>"
+        )
     if isinstance(block, KeyValues):
         rows = "".join(
-            f'<div class="k">{_esc(k)}</div><div>{_esc(v)}</div>'
-            for k, v in block.items
+            f'<div class="k">{_esc(k)}</div><div>{_esc(v)}</div>' for k, v in block.items
         )
         return (
             f'<div class="fig"><div class="fig-title">{_esc(block.title)}</div>'
@@ -195,15 +203,13 @@ def render(document: Document, *, base_dir: Path, embed: bool = True) -> str:
     """Render ``document`` as one self-contained HTML page."""
     base_dir = Path(base_dir)
     toc = "".join(
-        f"<li><a class=\"toc-link\" href=\"#{_esc(s.slug)}\">{_esc(s.title)}</a></li>"
+        f'<li><a class="toc-link" href="#{_esc(s.slug)}">{_esc(s.title)}</a></li>'
         for s in document.sections
     )
 
     body = []
     for section in document.sections:
-        blocks = "".join(
-            _render_block(b, base_dir=base_dir, embed=embed) for b in section.blocks
-        )
+        blocks = "".join(_render_block(b, base_dir=base_dir, embed=embed) for b in section.blocks)
         inner = (
             f"<details><summary>Show diagnostics</summary>{blocks}</details>"
             if section.collapsed
@@ -230,6 +236,7 @@ def render(document: Document, *, base_dir: Path, embed: bool = True) -> str:
 __all__ = [
     "Block",
     "Document",
+    "Embed",
     "Figure",
     "KeyValues",
     "Note",

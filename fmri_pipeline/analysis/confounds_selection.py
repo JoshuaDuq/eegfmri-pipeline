@@ -16,6 +16,10 @@ def _unique_preserve_order(items: Iterable[str]) -> List[str]:
 
 _COMP_COR_RE = re.compile(r"^(?P<prefix>[atcw]_comp_cor)_(?P<idx>\d+)$")
 
+# A fixed nuisance model is the reproducible default. ``auto`` remains available
+# only when a study explicitly chooses a derivative-dependent column set.
+DEFAULT_CONFOUNDS_STRATEGY = "motion24+wmcsf+fd+compcor"
+
 
 def _pick_compcor_components(
     available_columns: Sequence[str],
@@ -51,7 +55,7 @@ def _pick_compcor_components(
 def select_fmriprep_confounds_columns(
     available_columns: Sequence[str],
     *,
-    strategy: str = "auto",
+    strategy: str = DEFAULT_CONFOUNDS_STRATEGY,
     auto_compcor_n: int = 5,
 ) -> List[str]:
     """
@@ -59,9 +63,9 @@ def select_fmriprep_confounds_columns(
 
     This function is stdlib-only so it can be unit-tested without numpy/pandas.
     """
-    strategy = str(strategy or "auto").strip().lower()
+    strategy = str(strategy or DEFAULT_CONFOUNDS_STRATEGY).strip().lower()
     if strategy in {"", "default"}:
-        strategy = "auto"
+        strategy = DEFAULT_CONFOUNDS_STRATEGY
 
     if strategy in {"none", "no", "off"}:
         return []
@@ -81,13 +85,21 @@ def select_fmriprep_confounds_columns(
     elif strategy in {"motion24"}:
         base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2
     elif strategy in {"motion24+wmcsf", "motion24+wm_csf"}:
-        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + ["white_matter", "csf"]
+        base_cols = (
+            motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + ["white_matter", "csf"]
+        )
     elif strategy in {"motion24+wmcsf+fd", "motion24+wm_csf+fd"}:
-        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + [
-            "white_matter",
-            "csf",
-            "framewise_displacement",
-        ]
+        base_cols = (
+            motion6
+            + motion_derivs
+            + motion_power2
+            + motion_derivs_power2
+            + [
+                "white_matter",
+                "csf",
+                "framewise_displacement",
+            ]
+        )
     elif strategy in {
         "motion24+wmcsf+fd+compcor",
         "motion24+wm_csf+fd+compcor",
@@ -152,7 +164,9 @@ def select_fmriprep_confounds_columns(
     outlier_cols = [
         c
         for c in available_columns
-        if c.startswith("motion_outlier") or c.startswith("non_steady_state_outlier") or c.startswith("outlier")
+        if c.startswith("motion_outlier")
+        or c.startswith("non_steady_state_outlier")
+        or c.startswith("outlier")
     ]
 
     cols = [c for c in base_cols if c in avail]

@@ -22,6 +22,8 @@ from eeg_pipeline.preprocessing.report.style import (
     MARK_COLOR,
     REFERENCE_COLOR,
     RUN_COLORS,
+    DEFAULT_REPORT_FIGURE_DPI,
+    DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
     draw_component_status_strip,
     report_image_format,
     apply_report_style,
@@ -63,6 +65,7 @@ def beat_source_phrase(source: str) -> str:
         return "beat markers"
     return "R peaks detected from the ECG signal"
 
+
 CARDIAC_REPORT_TITLES = (
     "How to review ECG artifacts",
     "ECG detection summary",
@@ -70,38 +73,6 @@ CARDIAC_REPORT_TITLES = (
     "ICA components: cardiac scores across the decomposition",
     "ICA components: R-locked cardiac evidence",
 )
-
-
-def _cardiac_threshold_band(review: ComponentCardiacReview) -> tuple[float, float] | None:
-    """Bracket the score at which the detectors separated flagged from kept.
-
-    The counterpart of the ocular panel's bracket, and derived the same way and for the
-    same reason: both detectors threshold a statistic of each run's own distribution, so
-    no single score describes the cutoff, but the decisions bound it exactly -- above every
-    component a run left unflagged, and at or below the lowest one it flagged.
-
-    Spans both detectors and every run, so it is a statement about the session. ``None``
-    when nothing was flagged anywhere: the cutoff is then above every score observed, and
-    a band drawn there would put a threshold on the figure that no decision supports.
-    """
-    lows: list[float] = []
-    highs: list[float] = []
-    for scores, flags in (
-        (review.ctps_scores, review.ctps_flags),
-        (review.correlation_scores, review.correlation_flags),
-    ):
-        magnitudes = np.abs(np.asarray(scores, dtype=float))
-        marked = np.asarray(flags, dtype=bool)
-        for run_index in range(magnitudes.shape[0]):
-            flagged = np.flatnonzero(marked[run_index])
-            if not flagged.size:
-                continue
-            kept = magnitudes[run_index][~marked[run_index]]
-            highs.append(float(magnitudes[run_index][flagged].min()))
-            lows.append(float(kept.max()) if kept.size else highs[-1])
-    if not highs:
-        return None
-    return min(lows), max(highs)
 
 
 def _plot_component_cardiac_scores(
@@ -207,21 +178,6 @@ def _plot_component_cardiac_scores(
         yscale="log",
         ylim=(floor, None),
     )
-    band = _cardiac_threshold_band(review)
-    if band is not None:
-        low, high = band
-        # ``fill_between`` rather than ``axhspan``, as in the ocular panel: this axis draws
-        # no patches on purpose, so "there are no bars here" stays a checkable property.
-        axis.fill_between(
-            [-0.7, component_count - 0.3],
-            low,
-            high,
-            color=FLAG_COLOR,
-            alpha=0.10,
-            linewidth=0,
-            zorder=0,
-            label="where the detectors drew their line",
-        )
     axis.legend(frameon=False, fontsize=7, ncol=2)
     axis.grid(axis="y", alpha=0.2)
     axis.spines[["top", "right"]].set_visible(False)
@@ -344,8 +300,8 @@ def _plot_run_cardiac_review(
     # contradiction between the panel and the title. No threshold decides when to show it:
     # the ratio is a measurement, and what it implies is the reviewer's call.
     notes.append(
-        f"detected {review.average_pulse_bpm:.0f}/recording min "
-        f"= {review.average_pulse_bpm / median_bpm:.0%} of the median rate"
+        f"detected {review.detected_beats_per_recording_minute:.0f}/recording min "
+        f"= {review.detected_beats_per_recording_minute / median_bpm:.0%} of the median rate"
     )
     if notes:
         heart_rate_axis.annotate(
@@ -412,7 +368,7 @@ def _plot_run_cardiac_review(
         axis.spines[["top", "right"]].set_visible(False)
     figure.suptitle(
         f"{review.recording_id} · {review.r_locked_epoch_count} R-locked epochs · "
-        f"{review.average_pulse_bpm:.1f} detected beats per recording minute"
+        f"{review.detected_beats_per_recording_minute:.1f} detected beats per recording minute"
     )
     plt.close(figure)
     return figure
@@ -619,9 +575,7 @@ def _ordered_cardiac_indices(content) -> list[int]:
             "ICA cardiac-review content carries unrecognized report entries: "
             + ", ".join(unexpected)
         )
-    return [
-        cardiac_indices[title] for title in CARDIAC_REPORT_TITLES if title in cardiac_indices
-    ]
+    return [cardiac_indices[title] for title in CARDIAC_REPORT_TITLES if title in cardiac_indices]
 
 
 def _organize_cardiac_review(report: mne.Report) -> None:
@@ -722,7 +676,7 @@ def run_cardiac_review_table(run_reviews: list[RunCardiacReview]) -> pd.DataFram
             {
                 "recording_id": review.recording_id,
                 "r_locked_epoch_count": review.r_locked_epoch_count,
-                "mne_average_pulse_bpm": review.average_pulse_bpm,
+                "detected_beats_per_recording_minute": (review.detected_beats_per_recording_minute),
             }
             for review in run_reviews
         ]
@@ -740,13 +694,13 @@ def run_cardiac_review_html(run_reviews: list[RunCardiacReview]) -> str:
     columns = (
         Column("Run", align=Align.TEXT),
         Column("R-locked epochs"),
-        Column("Average rate (bpm)"),
+        Column("Detected beats / recording min"),
     )
     rows = [
         [
             run_label(review.recording_id),
             f"{int(review.r_locked_epoch_count):,}",
-            f"{float(review.average_pulse_bpm):.1f}",
+            f"{float(review.detected_beats_per_recording_minute):.1f}",
         ]
         for review in run_reviews
     ]
@@ -797,6 +751,8 @@ def _write_unusable_cardiac_review(
     output_path: Path,
     unusable: Sequence[tuple[str, str]],
     settings: CardiacReviewSettings,
+    figure_dpi: float,
+    figure_max_width_px: int,
 ) -> Path:
     """Record that no run's ECG resolved, in the report and in the sidecars.
 
@@ -815,7 +771,11 @@ def _write_unusable_cardiac_review(
         ]
     ).to_csv(_cardiac_sidecar(output_path, "runs"), sep="\t", index=False)
 
-    report = open_subject_report(report_path)
+    report = open_subject_report(
+        report_path,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     _clear_cardiac_review(report)
     drop_replaced_ica_ecg_panels(report)
     report.add_html(
@@ -846,6 +806,8 @@ def generate_ica_cardiac_review(
     report_path: Path,
     output_path: Path,
     settings: CardiacReviewSettings,
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI,
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
     _rebuilding: bool = False,
 ) -> Path:
     """Append direct ECG diagnostics and ICA cardiac evidence to an MNE report.
@@ -860,7 +822,7 @@ def generate_ica_cardiac_review(
         raise ValueError("generate_ica_cardiac_review requires cardiac_review.enabled=true.")
     if not filtered_raw_paths:
         raise ValueError("No filtered raw recordings were provided for ECG review.")
-    apply_report_style()
+    apply_report_style(figure_dpi=figure_dpi)
     # The "after ICA" traces below must show the exclusions that build the cleaned data,
     # which live in the component table rather than in the ICA file.
     ica = read_ica_with_reviewed_exclusions(ica_path)
@@ -897,6 +859,8 @@ def generate_ica_cardiac_review(
             output_path=output_path,
             unusable=unusable,
             settings=settings,
+            figure_dpi=figure_dpi,
+            figure_max_width_px=figure_max_width_px,
         )
 
     component_review = _build_component_cardiac_review(
@@ -925,6 +889,8 @@ def generate_ica_cardiac_review(
                 report_path=report_path,
                 output_path=output_path,
                 settings=settings,
+                figure_dpi=figure_dpi,
+                figure_max_width_px=figure_max_width_px,
                 _rebuilding=True,
             )
 
@@ -947,7 +913,11 @@ def generate_ica_cardiac_review(
         index=False,
     )
 
-    report = open_subject_report(report_path)
+    report = open_subject_report(
+        report_path,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     _clear_cardiac_review(report)
     # MNE's own ECG panels measure the same thing this section is about to render per
     # run, without saying whether the beats behind them were detected well. Dropped here

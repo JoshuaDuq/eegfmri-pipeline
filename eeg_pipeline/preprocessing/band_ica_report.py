@@ -14,10 +14,15 @@ from matplotlib.ticker import NullFormatter, ScalarFormatter
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.preprocessing.ica_exclusions import read_ica_with_reviewed_exclusions
+from eeg_pipeline.preprocessing.ica_exclusions import (
+    components_path_for_ica,
+    read_component_statuses,
+    read_ica_with_reviewed_exclusions,
+)
 from eeg_pipeline.preprocessing.report.build_record import save_subject_report
 from eeg_pipeline.preprocessing.report.filtering import NOTCH_EXCLUSION_HALF_WIDTH_HZ
 from eeg_pipeline.preprocessing.report.organize import (
+    configure_report_rendering,
     drop_superseded_mne_ica_panels,
     open_subject_report,
     remove_tagged_content,
@@ -43,6 +48,8 @@ from eeg_pipeline.preprocessing.report.style import (
     PRIMARY_COLOR,
     REPORT_IMAGE_FORMAT,
     REPORT_RASTER_IMAGE_FORMAT,
+    DEFAULT_REPORT_FIGURE_DPI,
+    DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
     apply_report_style,
     power_colorbar_label,
     report_image_format,
@@ -72,9 +79,7 @@ class BandIcaDefinition:
 #: The five ranges this replaced were nested: delta+theta, alpha and beta all sat inside
 #: broadband 1-30, so three of the five sections were a zoom on a fourth. Together they
 #: were 49 MB of a 79 MB report and 295 slides for 59 components.
-DEFAULT_REVIEW_BANDS = (
-    BandIcaDefinition("broadband1to100", "Broadband 1–100 Hz", 1.0, 100.0),
-)
+DEFAULT_REVIEW_BANDS = (BandIcaDefinition("broadband1to100", "Broadband 1–100 Hz", 1.0, 100.0),)
 
 
 @dataclass(frozen=True)
@@ -335,9 +340,7 @@ def _parse_review_bands(values: Any) -> tuple[BandIcaDefinition, ...]:
     if values is None:
         return DEFAULT_REVIEW_BANDS
     if not isinstance(values, list) or not values:
-        raise TypeError(
-            "ica.band_specific_report.review_bands must be a non-empty list of bands."
-        )
+        raise TypeError("ica.band_specific_report.review_bands must be a non-empty list of bands.")
     bands = []
     slugs = set()
     for entry in values:
@@ -345,9 +348,7 @@ def _parse_review_bands(values: Any) -> tuple[BandIcaDefinition, ...]:
             raise TypeError("Each ica.band_specific_report.review_bands entry must be a mapping.")
         missing = {"slug", "title", "fmin", "fmax"} - set(entry)
         if missing:
-            raise ValueError(
-                f"A review band is missing {', '.join(sorted(missing))}."
-            )
+            raise ValueError(f"A review band is missing {', '.join(sorted(missing))}.")
         slug = str(entry["slug"]).strip()
         if not slug:
             raise ValueError("A review band slug must not be empty.")
@@ -883,8 +884,7 @@ def _tfr_configuration_title(
         f"{settings.time_step_s:g} s grid · baseline "
         f"{baseline[0]:g}–{baseline[1]:g} s · relative dB"
         + (
-            f" (clipped to the epoch from the configured "
-            f"{configured[0]:g}–{configured[1]:g} s)"
+            f" (clipped to the epoch from the configured " f"{configured[0]:g}–{configured[1]:g} s)"
             if clipped
             else ""
         )
@@ -922,8 +922,7 @@ def _comparison_configuration_html(
     return (
         "<p>Configured comparisons are first computed from all pre-ICA task epochs for manual "
         "component review, then replaced after rejection using retained epochs and aligned "
-        "events metadata.</p>"
-        + grid_table(columns, rows)
+        "events metadata.</p>" + grid_table(columns, rows)
     )
 
 
@@ -1608,9 +1607,7 @@ def _create_component_dossier(
             # The summary row draws the shared power scale when it has a grand average to
             # draw it beside; the first comparison row picks it up when there is none, so
             # the slide always carries the scale exactly once.
-            draw_power_colorbar=(
-                row == 1 + activity_rows and not review.diagnostics.has_tfr
-            ),
+            draw_power_colorbar=(row == 1 + activity_rows and not review.diagnostics.has_tfr),
         )
 
     _plot_dossier_summary(
@@ -2175,6 +2172,38 @@ def _add_standard_component_review(
     return summary
 
 
+def refresh_standard_component_review(
+    *,
+    report: mne.Report,
+    epochs_path: Path,
+    ica_path: Path,
+    filtered_raw_paths: Sequence[Path],
+    settings: BandIcaReportSettings,
+    analysis_status: str,
+    spectral_availability: Any = None,
+) -> DecompositionSummary | None:
+    """Rebuild authoritative dossiers from the component decisions applied to epochs."""
+    epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
+    ica = read_ica_with_reviewed_exclusions(ica_path)
+    components = read_component_statuses(
+        components_path_for_ica(ica_path),
+        component_count=int(ica.n_components_),
+    )
+    labels = _label_components(epochs=epochs, ica=ica)
+    return _add_standard_component_review(
+        report=report,
+        ica=ica,
+        epochs=epochs,
+        metadata=None,
+        labels=labels,
+        settings=settings,
+        analysis_status=analysis_status,
+        filtered_raw_paths=filtered_raw_paths,
+        status_descriptions=tuple(components["status_description"].fillna("").astype(str)),
+        spectral_availability=spectral_availability,
+    )
+
+
 def _write_component_table(
     *,
     path: Path,
@@ -2244,11 +2273,13 @@ def append_condition_tfr_report(
     settings: BandIcaReportSettings,
     analysis_status: str,
     spectral_availability: Any = None,
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI,
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
 ) -> None:
     """Replace authoritative component dossiers with condition-aware evidence."""
     if not settings.comparisons:
         return
-    apply_report_style()
+    apply_report_style(figure_dpi=figure_dpi)
     ica_fit_epochs = mne.read_epochs(ica_fit_epochs_path, preload=True, verbose="ERROR")
     pre_ica_epochs = mne.read_epochs(pre_ica_epochs_path, preload=True, verbose="ERROR")
     clean_epochs = mne.read_epochs(clean_epochs_path, preload=False, verbose="ERROR")
@@ -2268,7 +2299,11 @@ def append_condition_tfr_report(
 
     standard_ica = read_ica_with_reviewed_exclusions(standard_ica_path)
     labels = _label_components(epochs=ica_fit_epochs, ica=standard_ica)
-    report = open_subject_report(report_path)
+    report = open_subject_report(
+        report_path,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     summary = _add_standard_component_review(
         spectral_availability=spectral_availability,
         report=report,
@@ -2297,13 +2332,15 @@ def generate_band_ica_report(
     settings: BandIcaReportSettings,
     filtered_raw_paths: Sequence[Path] | None = None,
     spectral_availability: Any = None,
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI,
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
 ) -> list[Path]:
     """Fit exploratory band-specific ICAs and append diagnostics to an MNE report.
 
     ``spectral_availability`` is the epoch-aligned unavailable-frequency contract. When
     it is ``None`` every panel is computed exactly as before.
     """
-    apply_report_style()
+    apply_report_style(figure_dpi=figure_dpi)
     epochs = mne.read_epochs(epochs_path, preload=True, verbose="ERROR")
     nyquist = float(epochs.info["sfreq"]) / 2.0
     maximum_frequency = max(band.fmax for band in BAND_ICA_DEFINITIONS)
@@ -2314,7 +2351,11 @@ def generate_band_ica_report(
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report = open_subject_report(report_path)
+    report = open_subject_report(
+        report_path,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     standard_ica_path = epochs_path.with_name(f"{output_prefix}_proc-ica_ica.fif")
     if not standard_ica_path.is_file():
         raise FileNotFoundError(f"Standard ICA does not exist: {standard_ica_path}")
@@ -2353,6 +2394,11 @@ def generate_band_ica_report(
         exploratory_report = mne.Report(
             title=f"{output_prefix} · exploratory band-fitted ICAs",
             verbose="ERROR",
+        )
+        configure_report_rendering(
+            exploratory_report,
+            figure_dpi=figure_dpi,
+            figure_max_width_px=figure_max_width_px,
         )
     # Removed by title before it is re-added, not replaced in place. ``replace=True``
     # substitutes the content of an existing panel and leaves it in the section it was

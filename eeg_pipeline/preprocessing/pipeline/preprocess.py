@@ -42,6 +42,11 @@ PIPELINE_BAD_DESCRIPTIONS = frozenset(
 )
 
 
+def _pyprep_reject_by_annotation(*, delete_breaks):
+    """Exclude deliberately marked breaks from PyPREP's channel statistics."""
+    return "omit" if delete_breaks else None
+
+
 def _is_eeg_row(chan_file):
     """Return a mask over ``chan_file`` rows typed as EEG."""
     return chan_file["type"].astype(str).str.lower() == "eeg"
@@ -350,7 +355,11 @@ def run_bads_detection_single_file(
                 repeat_random_state = (
                     None if random_state is None else int(random_state) + repeat_index
                 )
-                nc = pyprep.NoisyChannels(raw=raw, random_state=repeat_random_state)
+                nc = pyprep.NoisyChannels(
+                    raw=raw,
+                    random_state=repeat_random_state,
+                    reject_by_annotation=_pyprep_reject_by_annotation(delete_breaks=delete_breaks),
+                )
                 # Flat and NaN channels first: they are not merely noisy, and leaving them
                 # in place makes every correlation against them meaningless.
                 nc.find_bad_by_nan_flat()
@@ -633,51 +642,66 @@ def synchronize_bad_channels_across_runs(bids_path, task, subjects="all"):
             logger.warning(f"No channel files found for subject {subject}")
             continue
 
-        logger.info(f"📋 Processing {len(channel_files)} channel files for sub-{subject}")
-
-        all_bad_channels = set()
-        channel_data = {}
-
+        files_by_session = {}
         for file_path in channel_files:
-            df = io.read_channels_tsv(file_path)
-            is_eeg = df["type"].astype(str).str.lower() == "eeg"
-            bad_channels = df.loc[is_eeg & (df["status"] == "bad"), "name"].tolist()
-            all_bad_channels.update(bad_channels)
-            channel_data[file_path] = df
+            session = get_entities_from_fname(file_path).get("session")
+            files_by_session.setdefault(session, []).append(file_path)
 
-            run_info = os.path.basename(file_path).split("_")
-            run_id = next((part for part in run_info if part.startswith("run-")), "unknown")
-            logger.info(f"  📁 {run_id}: Found {len(bad_channels)} bad channels: {bad_channels}")
-
-        unified_bad_channels = sorted(list(all_bad_channels))
         logger.info(
-            f"🔗 Unified bad channels for sub-{subject}: {unified_bad_channels} (total: {len(unified_bad_channels)})"
+            f"📋 Processing {len(channel_files)} channel files for sub-{subject} "
+            f"in {len(files_by_session)} session(s)"
         )
-
-        for file_path, df in channel_data.items():
-            # Only EEG statuses are the pipeline's to decide. Clearing every row would
-            # silently un-mark a hand-marked bad ECG or EOG channel.
-            is_eeg = _is_eeg_row(df)
-            # Which channels this run marked on its own, before the union widens the set.
-            # Their ``description`` says who marked them and has to survive, or the next
-            # PyPREP pass cannot tell a curated mark from one this function propagated.
-            already_bad = is_eeg & (df["status"] == "bad")
-            df.loc[is_eeg, "status"] = "good"
-            df.loc[is_eeg & df["name"].isin(unified_bad_channels), "status"] = "bad"
-
-            if "description" in df.columns:
-                df["description"] = df["description"].astype(str)
-                # Marks this run did not make itself are attributed to this function, so
-                # that re-running detection re-derives them instead of reading them back
-                # as curated input and making the union permanent.
-                propagated = is_eeg & (df["status"] == "bad") & ~already_bad
-                df.loc[propagated, "description"] = SYNCHRONIZED_BAD_DESCRIPTION
-                df.loc[is_eeg & (df["status"] != "bad"), "description"] = ""
-
-            io.write_channels_tsv(df, file_path, index=False)
-
-            run_info = os.path.basename(file_path).split("_")
-            run_id = next((part for part in run_info if part.startswith("run-")), "unknown")
-            logger.info(f"  ✅ Updated {run_id} with {len(unified_bad_channels)} bad channels")
+        for session, session_files in sorted(
+            files_by_session.items(), key=lambda item: str(item[0] or "")
+        ):
+            _synchronize_bad_channels_within_session(
+                session_files,
+                subject=subject,
+                session=session,
+            )
 
     logger.info("✅ Bad channel synchronization completed")
+
+
+def _synchronize_bad_channels_within_session(channel_files, *, subject, session):
+    """Apply one bad-channel union to runs that share a recording session."""
+    all_bad_channels = set()
+    channel_data = {}
+    for file_path in channel_files:
+        frame = io.read_channels_tsv(file_path)
+        is_eeg = _is_eeg_row(frame)
+        bad_channels = frame.loc[is_eeg & (frame["status"] == "bad"), "name"].tolist()
+        all_bad_channels.update(bad_channels)
+        channel_data[file_path] = frame
+
+        run_id = next(
+            (part for part in os.path.basename(file_path).split("_") if part.startswith("run-")),
+            "unknown",
+        )
+        logger.info(f"  📁 {run_id}: Found {len(bad_channels)} bad channels: {bad_channels}")
+
+    unified_bad_channels = sorted(all_bad_channels)
+    session_label = f"ses-{session}" if session is not None else "no-session"
+    logger.info(
+        f"🔗 Unified bad channels for sub-{subject} {session_label}: "
+        f"{unified_bad_channels} (total: {len(unified_bad_channels)})"
+    )
+
+    for file_path, frame in channel_data.items():
+        is_eeg = _is_eeg_row(frame)
+        already_bad = is_eeg & (frame["status"] == "bad")
+        frame.loc[is_eeg, "status"] = "good"
+        frame.loc[is_eeg & frame["name"].isin(unified_bad_channels), "status"] = "bad"
+
+        if "description" in frame.columns:
+            frame["description"] = frame["description"].astype(str)
+            propagated = is_eeg & (frame["status"] == "bad") & ~already_bad
+            frame.loc[propagated, "description"] = SYNCHRONIZED_BAD_DESCRIPTION
+            frame.loc[is_eeg & (frame["status"] != "bad"), "description"] = ""
+
+        io.write_channels_tsv(frame, file_path, index=False)
+        run_id = next(
+            (part for part in os.path.basename(file_path).split("_") if part.startswith("run-")),
+            "unknown",
+        )
+        logger.info(f"  ✅ Updated {run_id} with {len(unified_bad_channels)} bad channels")

@@ -33,7 +33,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.progress import ensure_progress_reporter
-from eeg_pipeline.utils.config.loader import get_condition_column_candidates
 from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root, resolve_eeg_deriv_root
 
 STEP_BAD_CHANNELS = "bad-channels"
@@ -73,6 +72,32 @@ def _mne_annotation_event_pattern() -> "re.Pattern[str]":
 
 def _is_events_tsv(path: Path) -> bool:
     return path.is_file() and path.name.endswith("_events.tsv") and not path.name.startswith("._")
+
+
+def _session_entity(path: Path) -> str | None:
+    """Return the BIDS session entity carried by a derivative filename."""
+    match = re.search(r"(?:^|_)ses-([^_]+)(?:_|$)", path.name)
+    return None if match is None else match.group(1)
+
+
+def _bids_event_descriptions(path: Path) -> tuple[list[str], str | None]:
+    """Return the annotation descriptions MNE-BIDS derives from one events table.
+
+    The public MNE-BIDS converter is authoritative. Keeping a local implementation of its
+    missing-value, value-fallback, and hierarchical-name rules allowed the conditions this
+    pipeline requested to drift from the annotations MNE-BIDS actually created.
+    """
+    from mne_bids import events_file_to_annotation_kwargs
+
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        fieldnames = set(csv.DictReader(handle, delimiter="\t").fieldnames or ())
+    source_column = next(
+        (name for name in ("trial_type", "stim_type", "value") if name in fieldnames),
+        None,
+    )
+    annotation_kwargs = events_file_to_annotation_kwargs(path, verbose="ERROR")
+    descriptions = [str(description) for description in annotation_kwargs["description"]]
+    return descriptions, source_column
 
 
 def _preservation_measurements(*, reliability, alpha) -> dict:
@@ -148,7 +173,7 @@ def _subject_of_report(report_path: Path) -> Optional[str]:
     return None
 
 
-def _review_stage_measurements(*, coverage, evidence) -> dict:
+def _review_stage_measurements(*, coverage, evidence, bridging=()) -> dict:
     """Headline numbers the review stage measures, for the report's landing panel.
 
     Only what this stage owns. The panel is assembled from the build record so that every
@@ -164,9 +189,18 @@ def _review_stage_measurements(*, coverage, evidence) -> dict:
         measurements["n_channels"] = int(coverage.n_channels)
         measurements["n_bad_channels"] = len(coverage.bad_channels)
         measurements["n_runs"] = int(coverage.n_runs)
+    if bridging:
+        measurements["n_bridged_pairs"] = len(
+            {tuple(sorted(pair)) for review in bridging for pair in review.pair_names}
+        )
     if evidence is not None:
         if getattr(evidence, "spectra", None):
             measurements["n_runs"] = len(evidence.spectra)
+        muscle_reviews = getattr(evidence, "muscle_artifacts", ())
+        if muscle_reviews:
+            measurements["max_muscle_artifact_fraction"] = max(
+                review.artifact_fraction for review in muscle_reviews
+            )
         # The lowest agreement across runs, because the panel exists to surface the run
         # that stands apart rather than an average that hides it. Runs whose fraction is
         # undefined carry no number to be lowest.
@@ -189,9 +223,7 @@ def _review_stage_measurements(*, coverage, evidence) -> dict:
             if worst.median_lag_s is not None:
                 measurements["worst_marker_agreement_lag_ms"] = float(worst.median_lag_s * 1000.0)
             if worst.lag_iqr_s is not None:
-                measurements["worst_marker_agreement_lag_iqr_ms"] = float(
-                    worst.lag_iqr_s * 1000.0
-                )
+                measurements["worst_marker_agreement_lag_iqr_ms"] = float(worst.lag_iqr_s * 1000.0)
     return measurements
 
 
@@ -523,7 +555,20 @@ class PreprocessingPipeline(PipelineBase):
 
         manual_review_required = bool(self.config.get("ica.require_manual_review", False))
         manual_review_complete = bool(self.config.get("ica.manual_review_complete", False))
-        if mode in {"full", "epochs"} and manual_review_required and not manual_review_complete:
+        if manual_review_required and mode == "full":
+            raise ValueError(
+                "Manual ICA review requires separate runs: run mode='ica', review "
+                "*_proc-ica_components.tsv, then run mode='epochs'. A full run would "
+                "fit a new decomposition and apply it before that decomposition could "
+                "be reviewed."
+            )
+        if manual_review_required and mode == "ica" and manual_review_complete:
+            raise ValueError(
+                "ICA review is marked complete. To refit ICA, reopen the review by "
+                "setting ica.manual_review_complete=false; the new decomposition must "
+                "then be reviewed before mode='epochs'."
+            )
+        if mode == "epochs" and manual_review_required and not manual_review_complete:
             raise ValueError(
                 "Epoch creation is blocked because manual ICA review is required. Run "
                 "mode='ica', review *_proc-ica_components.tsv, then set "
@@ -577,7 +622,6 @@ class PreprocessingPipeline(PipelineBase):
         report.log_warnings(self.logger)
         report.raise_if_errors()
 
-
     def _validate_bad_channel_sync_policy_for_steps(
         self,
         steps: List[str],
@@ -586,9 +630,9 @@ class PreprocessingPipeline(PipelineBase):
     ) -> None:
         """Reject a sync policy the requested steps cannot satisfy, before any work runs.
 
-        MNE-BIDS-Pipeline concatenates runs for the shared ICA and for epoching, which
-        requires one bad-channel set per subject. Under ``per_run`` that constraint is
-        violated by any subject whose runs disagree — the normal case once PyPREP has run.
+        MNE-BIDS-Pipeline concatenates runs within each session for the shared ICA and for
+        epoching, which requires one bad-channel set per session. Under ``per_run`` that
+        constraint is violated when runs in the same session disagree.
 
         The BIDS ``channels.tsv`` files already record the per-run decision and cost
         nothing to read, so the same failure that used to surface after PyPREP and
@@ -604,16 +648,22 @@ class PreprocessingPipeline(PipelineBase):
             bads_by_run = self._read_bids_bad_channels(subject, task)
             if len(bads_by_run) < 2:
                 continue
-            distinct = {tuple(bads) for bads in bads_by_run.values()}
-            if len(distinct) > 1:
-                raise ValueError(
-                    f"sub-{subject} has different bad channels in different runs "
-                    f"({bads_by_run}), but pyprep.bad_channel_sync_policy='per_run'. "
-                    "MNE-BIDS-Pipeline concatenates runs for the shared ICA and for "
-                    "epoching, which requires one bad-channel set per subject. Set "
-                    "pyprep.bad_channel_sync_policy='subject_union', or process each run "
-                    "as its own task."
-                )
+            sessions: Dict[str | None, Dict[str, tuple[str, ...]]] = {}
+            for filename, bad_channels in bads_by_run.items():
+                sessions.setdefault(_session_entity(Path(filename)), {})[filename] = bad_channels
+            for session, session_bads in sessions.items():
+                distinct = {tuple(bads) for bads in session_bads.values()}
+                if len(distinct) > 1:
+                    session_label = "without a session" if session is None else f"ses-{session}"
+                    raise ValueError(
+                        f"sub-{subject} {session_label} has different bad channels in "
+                        f"different runs ({session_bads}), but "
+                        "pyprep.bad_channel_sync_policy='per_run'. MNE-BIDS-Pipeline "
+                        "concatenates runs within a session for the shared ICA and for "
+                        "epoching, which requires one bad-channel set per session. Set "
+                        "pyprep.bad_channel_sync_policy='subject_union', or process each "
+                        "run as its own task."
+                    )
 
     def _resolve_bids_subjects(self, subjects: List[str]) -> List[str]:
         """Resolve explicit or discovered subjects against the BIDS root."""
@@ -649,7 +699,6 @@ class PreprocessingPipeline(PipelineBase):
                 )
             )
         return bads_by_run
-
 
     def _bids_eog_channel_names(self) -> set[str]:
         """Return every channel any run types as EOG in its channels.tsv."""
@@ -764,13 +813,10 @@ class PreprocessingPipeline(PipelineBase):
 
         return outputs
 
-
     def _get_marker_ctps_qc_config(self) -> Any:
         config = self.config.get("ica.cardiac_review.marker_ctps_qc")
         if not config:
-            raise ValueError(
-                "Missing required config mapping: ica.cardiac_review.marker_ctps_qc"
-            )
+            raise ValueError("Missing required config mapping: ica.cardiac_review.marker_ctps_qc")
         return config
 
     def _resolve_ecg_channel(self) -> str:
@@ -809,7 +855,6 @@ class PreprocessingPipeline(PipelineBase):
             # from the ECG channel instead and marks the result as a fallback.
             marker_description=self.config.get("ica.cardiac_review.marker_description"),
         )
-
 
     def _run_bad_channel_detection(
         self,
@@ -938,12 +983,9 @@ class PreprocessingPipeline(PipelineBase):
             n_jobs=n_jobs,
         )
 
-        # The cardiac review measures the ballistocardiogram against a recorded ECG. Both
-        # the artifact and the channel are properties of scanner acquisition, so outside
-        # one there is nothing for it to measure. Skipping is what the dataset declaration
-        # asks for, and is logged rather than silent — the opposite case, a stage quietly
-        # doing nothing while its config says it is on, is the failure mode that hid the
-        # missing ocular detection for so long.
+        # The cardiac review measures heartbeat-locked EEG against a recorded ECG. In the
+        # scanner this includes the ballistocardiogram; outside it, the smaller cardiac
+        # field can still be present. The dataset decides explicitly whether to run it.
         if bool(self.config.get("ica.cardiac_review.enabled", False)):
             self._run_ica_cardiac_review(subjects=subjects, task=task)
 
@@ -976,6 +1018,7 @@ class PreprocessingPipeline(PipelineBase):
                     task=task,
                 )
 
+        self._initialize_manual_ica_review_attestations(subjects)
         self.logger.info("ICA fitting complete")
 
     def _run_ica_cardiac_review(
@@ -989,8 +1032,10 @@ class PreprocessingPipeline(PipelineBase):
             generate_ica_cardiac_review,
         )
         from eeg_pipeline.preprocessing.ica_cardiac_review import CardiacReviewSettings
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
         settings = CardiacReviewSettings.from_mapping(self.config.get("ica.cardiac_review", {}))
+        report_settings = ReportSettings.from_config(self.config)
 
         # Promotion writes into the same table the manual review edits, and it cannot tell
         # a component nobody has looked at from one a reviewer deliberately cleared. Once
@@ -1028,6 +1073,8 @@ class PreprocessingPipeline(PipelineBase):
                         f"{output_prefix}_desc-icaecg_components.tsv"
                     ),
                     settings=settings,
+                    figure_dpi=report_settings.figure_dpi,
+                    figure_max_width_px=report_settings.figure_max_width_px,
                 )
 
     def _run_ica_ocular_review(
@@ -1040,8 +1087,10 @@ class PreprocessingPipeline(PipelineBase):
             generate_ica_ocular_review,
             OcularReviewSettings,
         )
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
         settings = OcularReviewSettings.from_mapping(self.config.get("ica.ocular_review", {}))
+        report_settings = ReportSettings.from_config(self.config)
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
             for epochs_path, report_path, output_prefix in self._find_band_ica_report_inputs(
@@ -1064,6 +1113,8 @@ class PreprocessingPipeline(PipelineBase):
                         f"{output_prefix}_desc-icaeog_components.tsv"
                     ),
                     settings=settings,
+                    figure_dpi=report_settings.figure_dpi,
+                    figure_max_width_px=report_settings.figure_max_width_px,
                 )
 
     def _run_band_specific_ica_report(
@@ -1076,8 +1127,10 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.preprocessing.band_ica_report import (
             generate_band_ica_report,
         )
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
         settings = self._band_ica_settings()
+        report_settings = ReportSettings.from_config(self.config)
         random_state = int(self.config.get("project.random_state", 42))
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
@@ -1101,6 +1154,8 @@ class PreprocessingPipeline(PipelineBase):
                         task,
                         epochs_path.with_name(f"{output_prefix}_task-{task}_proc-clean_events.tsv"),
                     ),
+                    figure_dpi=report_settings.figure_dpi,
+                    figure_max_width_px=report_settings.figure_max_width_px,
                 )
             self.logger.info(
                 "Added exploratory band-specific ICA diagnostics for sub-%s, task=%s",
@@ -1140,15 +1195,17 @@ class PreprocessingPipeline(PipelineBase):
         self,
         *,
         subjects: List[str],
-        task: str,
+        task: Optional[str],
     ) -> None:
         """Append pre-review comparisons from all pre-ICA task epochs."""
         from eeg_pipeline.preprocessing.band_ica_report import (
             append_condition_tfr_report,
         )
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
         from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
 
         settings = self._band_ica_settings()
+        report_settings = ReportSettings.from_config(self.config)
         conditions = self._resolve_epoch_conditions(task)
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
@@ -1191,6 +1248,8 @@ class PreprocessingPipeline(PipelineBase):
                     report_path=report_path,
                     settings=settings,
                     analysis_status="Provisional — all task epochs",
+                    figure_dpi=report_settings.figure_dpi,
+                    figure_max_width_px=report_settings.figure_max_width_px,
                 )
 
     def _harmonize_filtered_raw_bads_for_mne_concat(
@@ -1198,81 +1257,102 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str],
         task: Optional[str],
     ) -> None:
-        """Set filtered run bads to the subject union before MNE epoch concatenation."""
+        """Set filtered run bads to the session union before MNE epoch concatenation."""
         import mne
 
         qc_records = []
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
-            if len(filtered_paths) < 2:
-                continue
-
-            # Only metadata is needed to decide whether anything must change, and a
-            # rewrite is the exception rather than the rule — the second call of this
-            # method in a run always finds the runs already harmonized. Reading headers
-            # here keeps that pass off the data entirely.
-            bads_by_path = {}
-            ch_names_by_path = {}
-            eeg_ch_names_by_path = {}
+            paths_by_session: dict[str | None, list[Path]] = {}
             for path in filtered_paths:
-                raw = mne.io.read_raw_fif(path, preload=False, verbose=False)
-                bads_by_path[path] = sorted(set(raw.info.get("bads", [])))
-                ch_names_by_path[path] = set(raw.ch_names)
-                eeg_ch_names_by_path[path] = set(self._get_eeg_channel_names(raw))
-
-            subject_bad_union = sorted(
-                {channel for bads in bads_by_path.values() for channel in bads}
-            )
-            all_channel_names = sorted(
-                {channel for ch_names in eeg_ch_names_by_path.values() for channel in ch_names}
-            )
-            qc_records.append(
-                self._build_bad_channel_union_qc_record(
-                    subject=subject,
-                    task=task,
-                    paths=filtered_paths,
-                    channel_names=all_channel_names,
-                    subject_bad_union=subject_bad_union,
-                )
-            )
-            if all(bads == subject_bad_union for bads in bads_by_path.values()):
-                continue
-
-            bad_channel_sync_policy = self._resolve_bad_channel_sync_policy()
-            if bad_channel_sync_policy != "subject_union":
-                raise ValueError(
-                    "MNE-BIDS shared ICA/epoch concatenation requires matching "
-                    "filtered raw bad-channel metadata across runs. Found mismatched "
-                    f"bad-channel sets for sub-{subject}: {bads_by_path}. Set "
-                    "pyprep.bad_channel_sync_policy='subject_union' for this workflow "
-                    "or fit/process runs separately."
-                )
-
-            for path, ch_names in ch_names_by_path.items():
-                missing_channels = sorted(set(subject_bad_union) - ch_names)
-                if missing_channels:
-                    raise ValueError(
-                        f"Cannot harmonize bad channels for {path}: "
-                        f"channels missing from this run: {missing_channels}"
+                paths_by_session.setdefault(_session_entity(path), []).append(path)
+            for session, session_paths in sorted(
+                paths_by_session.items(), key=lambda item: str(item[0] or "")
+            ):
+                if len(session_paths) < 2:
+                    continue
+                qc_records.append(
+                    self._harmonize_filtered_raw_bad_group(
+                        subject=subject,
+                        session=session,
+                        task=task,
+                        filtered_paths=session_paths,
+                        mne=mne,
                     )
-
-            for path in filtered_paths:
-                raw = mne.io.read_raw_fif(path, preload=True, verbose=False)
-                raw.info["bads"] = subject_bad_union
-                self._save_raw_with_updated_bads(raw, path)
-
-            self.logger.info(
-                "Harmonized filtered raw bad channels for sub-%s before "
-                "MNE-BIDS cross-run concatenation: %s",
-                subject,
-                subject_bad_union,
-            )
+                )
 
         self._write_bad_channel_union_qc(task=task, records=qc_records)
+
+    def _harmonize_filtered_raw_bad_group(
+        self,
+        *,
+        subject: str,
+        session: str | None,
+        task: Optional[str],
+        filtered_paths: List[Path],
+        mne: Any,
+    ) -> Dict[str, Any]:
+        """Harmonize bad-channel metadata inside one concatenation group."""
+        bads_by_path = {}
+        channel_names_by_path = {}
+        eeg_channel_names_by_path = {}
+        for path in filtered_paths:
+            raw = mne.io.read_raw_fif(path, preload=False, verbose=False)
+            bads_by_path[path] = sorted(set(raw.info.get("bads", [])))
+            channel_names_by_path[path] = set(raw.ch_names)
+            eeg_channel_names_by_path[path] = set(self._get_eeg_channel_names(raw))
+
+        bad_union = sorted({channel for bads in bads_by_path.values() for channel in bads})
+        all_channel_names = sorted(
+            {
+                channel
+                for channel_names in eeg_channel_names_by_path.values()
+                for channel in channel_names
+            }
+        )
+        record = self._build_bad_channel_union_qc_record(
+            subject=subject,
+            session=session,
+            task=task,
+            paths=filtered_paths,
+            channel_names=all_channel_names,
+            subject_bad_union=bad_union,
+        )
+        if all(bads == bad_union for bads in bads_by_path.values()):
+            return record
+
+        if self._resolve_bad_channel_sync_policy() != "subject_union":
+            raise ValueError(
+                "MNE-BIDS shared ICA/epoch concatenation requires matching filtered raw "
+                f"bad-channel metadata within sub-{subject} ses-{session}: {bads_by_path}. "
+                "Set pyprep.bad_channel_sync_policy='subject_union' for this workflow or "
+                "fit/process runs separately."
+            )
+        for path, channel_names in channel_names_by_path.items():
+            missing_channels = sorted(set(bad_union) - channel_names)
+            if missing_channels:
+                raise ValueError(
+                    f"Cannot harmonize bad channels for {path}: channels missing from "
+                    f"this run: {missing_channels}"
+                )
+        for path in filtered_paths:
+            raw = mne.io.read_raw_fif(path, preload=True, verbose=False)
+            raw.info["bads"] = bad_union
+            self._save_raw_with_updated_bads(raw, path)
+
+        self.logger.info(
+            "Harmonized filtered raw bad channels for sub-%s ses-%s before MNE-BIDS "
+            "cross-run concatenation: %s",
+            subject,
+            session,
+            bad_union,
+        )
+        return record
 
     def _build_bad_channel_union_qc_record(
         self,
         subject: str,
+        session: str | None,
         task: Optional[str],
         paths: List[Path],
         channel_names: List[str],
@@ -1284,6 +1364,7 @@ class PreprocessingPipeline(PipelineBase):
         bad_channel_fraction = bad_channel_count / channel_count if channel_count else 0.0
         return {
             "subject": subject,
+            "session": session or "",
             "task": task or "",
             "bad_channel_sync_policy": self._resolve_bad_channel_sync_policy(),
             "n_runs": len(paths),
@@ -1361,6 +1442,7 @@ class PreprocessingPipeline(PipelineBase):
         qc_path.parent.mkdir(parents=True, exist_ok=True)
         fieldnames = [
             "subject",
+            "session",
             "task",
             "bad_channel_sync_policy",
             "n_runs",
@@ -1458,6 +1540,7 @@ class PreprocessingPipeline(PipelineBase):
     ) -> None:
         """Create epochs and apply ICA via MNE-BIDS pipeline."""
         steps = "preprocessing/_07_make_epochs,preprocessing/_08a_apply_ica,preprocessing/_09_ptp_reject"
+        self._validate_manual_ica_review_attestations(subjects)
         self._harmonize_filtered_raw_bads_for_mne_concat(subjects, task)
 
         self._run_mne_bids_pipeline(
@@ -1484,6 +1567,56 @@ class PreprocessingPipeline(PipelineBase):
             self._append_band_ica_condition_tfrs(subjects=subjects, task=task)
 
         self.logger.info("Epoch creation complete")
+
+    def _validate_manual_ica_review_attestations(self, subjects: List[str]) -> None:
+        """Require component-level evidence before a manually gated ICA is applied."""
+        if not bool(self.config.get("ica.require_manual_review", False)):
+            return
+        if not bool(self.config.get("ica.manual_review_complete", False)):
+            raise ValueError(
+                "Manual ICA review is required but ica.manual_review_complete is false."
+            )
+
+        from eeg_pipeline.preprocessing.ica_exclusions import (
+            validate_manual_review_attestation,
+        )
+
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            tables = self._manual_ica_component_tables(subject)
+            if not tables:
+                raise FileNotFoundError(
+                    f"No ICA component table exists to attest for sub-{subject}."
+                )
+            for table in tables:
+                validate_manual_review_attestation(table)
+
+    def _initialize_manual_ica_review_attestations(self, subjects: List[str]) -> None:
+        """Create a pending row-level review ledger after fitting a new ICA."""
+        if not bool(self.config.get("ica.require_manual_review", False)):
+            return
+        from eeg_pipeline.preprocessing.ica_exclusions import (
+            initialize_manual_review_attestation,
+        )
+
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            tables = self._manual_ica_component_tables(subject)
+            if not tables:
+                raise FileNotFoundError(
+                    f"No ICA component table exists to initialize for sub-{subject}."
+                )
+            for table in tables:
+                initialize_manual_review_attestation(table)
+
+    def _manual_ica_component_tables(self, subject: str) -> tuple[Path, ...]:
+        """Return native ICA decision tables for one participant."""
+        subject_root = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
+        return tuple(
+            sorted(
+                path
+                for path in subject_root.rglob(f"sub-{subject}*_proc-ica_components.tsv")
+                if not path.name.startswith("._")
+            )
+        )
 
     def _write_autoreject_logs(
         self,
@@ -1567,8 +1700,14 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.preprocessing.report.build_record import save_subject_report
         from eeg_pipeline.preprocessing.report.organize import open_subject_report
         from eeg_pipeline.preprocessing.report.rejection import add_rejection_review
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
+        from eeg_pipeline.preprocessing.autoreject_log import (
+            autoreject_log_path_for_epochs,
+            read_autoreject_log,
+        )
         from eeg_pipeline.utils.data.preprocessing import presented_events_for_epochs
 
+        report_settings = ReportSettings.from_config(self.config)
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             epochs_path = find_clean_epochs_path(
                 subject,
@@ -1594,18 +1733,32 @@ class PreprocessingPipeline(PipelineBase):
             events_path = epochs_path.with_name(epochs_path.name.replace("_epo.fif", "_events.tsv"))
             clean_events = pd.read_csv(events_path, sep="\t") if events_path.is_file() else None
             clean_epochs = mne.read_epochs(epochs_path, preload=False, verbose="ERROR")
+            autoreject_log = None
+            if bool(self.config.get("preprocessing.autoreject_log", False)):
+                autoreject_path = autoreject_log_path_for_epochs(epochs_path)
+                if not autoreject_path.is_file():
+                    raise FileNotFoundError(
+                        "preprocessing.autoreject_log is enabled but the report input is "
+                        f"missing: {autoreject_path}"
+                    )
+                autoreject_log = read_autoreject_log(autoreject_path)
             presented_events = presented_events_for_epochs(
                 subject=subject,
                 task=task,
                 bids_root=self.bids_root,
                 epochs=clean_epochs,
             )
-            report = open_subject_report(report_path)
+            report = open_subject_report(
+                report_path,
+                figure_dpi=report_settings.figure_dpi,
+                figure_max_width_px=report_settings.figure_max_width_px,
+            )
             summary = add_rejection_review(
                 report=report,
                 clean_epochs=clean_epochs,
                 clean_events=clean_events,
                 presented_events=presented_events,
+                autoreject_log=autoreject_log,
                 config=self.config,
             )
             preservation = self._append_signal_preservation(
@@ -1771,6 +1924,9 @@ class PreprocessingPipeline(PipelineBase):
             describe_configured_filter,
         )
         from eeg_pipeline.preprocessing.report.build_record import save_subject_report
+        from eeg_pipeline.preprocessing.report.manual_ica_review import (
+            add_manual_ica_review,
+        )
         from eeg_pipeline.preprocessing.report.organize import open_subject_report
         from eeg_pipeline.preprocessing.report.provenance import add_provenance_review
         from eeg_pipeline.preprocessing.report.settings import ReportSettings
@@ -1796,8 +1952,26 @@ class PreprocessingPipeline(PipelineBase):
                 continue
             filtered_paths = self._find_filtered_raw_run_files(subject, task)
             for report_path in reports:
-                report = open_subject_report(report_path)
+                report = open_subject_report(
+                    report_path,
+                    figure_dpi=report_settings.figure_dpi,
+                    figure_max_width_px=report_settings.figure_max_width_px,
+                )
                 add_provenance_review(report=report, config=self.config)
+                decomposition = self._refresh_manually_reviewed_ica_report(
+                    report=report,
+                    report_path=report_path,
+                    filtered_paths=filtered_paths,
+                    subject=subject,
+                    task=task,
+                )
+                if bool(self.config.get("ica.require_manual_review", False)):
+                    components = self._ica_component_table(report_path)
+                    if components is None:
+                        raise FileNotFoundError(
+                            f"No ICA component table exists for report {report_path}."
+                        )
+                    add_manual_ica_review(report=report, components=components)
                 filter_edge_support_s = 0.0
                 # Skipped without a filtered run to read the sampling rate from, which is
                 # the case for a dataset filtered upstream: there is no pipeline filter to
@@ -1822,6 +1996,12 @@ class PreprocessingPipeline(PipelineBase):
                             ),
                             subject=subject,
                         )
+                bridging = self._append_bridging_reviews(
+                    report=report,
+                    report_path=report_path,
+                    filtered_paths=filtered_paths,
+                    diagnostic_duration_seconds=(report_settings.bridge_diagnostic_duration_s),
+                )
                 coverage = add_coverage_review(
                     report=report,
                     deriv_eeg_root=deriv_eeg_root,
@@ -1833,6 +2013,7 @@ class PreprocessingPipeline(PipelineBase):
                     report=report,
                     report_path=report_path,
                     filtered_paths=filtered_paths,
+                    task=task,
                     settings=report_settings,
                     edge_support_seconds=filter_edge_support_s,
                 )
@@ -1843,14 +2024,22 @@ class PreprocessingPipeline(PipelineBase):
                     subject=subject,
                     settings=report_settings,
                 )
+                measurements = _review_stage_measurements(
+                    coverage=coverage,
+                    evidence=evidence,
+                    bridging=bridging,
+                )
+                if decomposition is not None:
+                    from eeg_pipeline.preprocessing.report.summary import (
+                        decomposition_measurements,
+                    )
+
+                    measurements.update(decomposition_measurements(decomposition))
                 record = save_subject_report(
                     report,
                     report_path,
                     stage="report-review",
-                    measurements=_review_stage_measurements(
-                        coverage=coverage,
-                        evidence=evidence,
-                    ),
+                    measurements=measurements,
                 )
                 # Written after the report is saved, so the sidecar carries the record of
                 # the document that exists rather than of the one being built.
@@ -1868,6 +2057,83 @@ class PreprocessingPipeline(PipelineBase):
                     "present" if coverage is not None else "absent",
                     0 if evidence is None else len(evidence.spectra),
                 )
+
+    def _refresh_manually_reviewed_ica_report(
+        self,
+        *,
+        report,
+        report_path: Path,
+        filtered_paths: List[Path],
+        subject: str,
+        task: str,
+    ):
+        """Rebuild component evidence after row-level review changed the decisions."""
+        if not bool(self.config.get("ica.require_manual_review", False)):
+            return None
+        if not bool(self.config.get("ica.manual_review_complete", False)):
+            return None
+        if not bool(self.config.get("ica.band_specific_report.enabled", False)):
+            return None
+
+        from eeg_pipeline.preprocessing.band_ica_report import (
+            refresh_standard_component_review,
+        )
+
+        prefix = report_path.name.removesuffix("_report.h5")
+        epochs_path = report_path.with_name(f"{prefix}_proc-icafit_epo.fif")
+        ica_path = report_path.with_name(f"{prefix}_proc-ica_ica.fif")
+        if not epochs_path.is_file() or not ica_path.is_file():
+            raise FileNotFoundError(
+                "Cannot refresh manually reviewed ICA evidence; missing "
+                f"{epochs_path if not epochs_path.is_file() else ica_path}."
+            )
+        run_paths = [path for path in filtered_paths if path.name.startswith(f"{prefix}_task-")]
+        return refresh_standard_component_review(
+            report=report,
+            epochs_path=epochs_path,
+            ica_path=ica_path,
+            filtered_raw_paths=run_paths,
+            settings=self._band_ica_settings(),
+            analysis_status="Finalized — manually reviewed exclusions",
+            spectral_availability=self._report_spectral_availability(
+                subject,
+                task,
+                report_path.with_name(f"{prefix}_task-{task}_proc-clean_events.tsv"),
+            ),
+        )
+
+    def _append_bridging_reviews(
+        self,
+        *,
+        report,
+        report_path: Path,
+        filtered_paths: List[Path],
+        diagnostic_duration_seconds: float,
+    ):
+        """Add MNE's bridge diagnostic for every run belonging to this report."""
+        import mne
+
+        from eeg_pipeline.preprocessing.report.bridging import (
+            add_bridging_reviews,
+            compute_bridging_review,
+        )
+
+        prefix = report_path.name.removesuffix("_report.h5")
+        run_paths = [path for path in filtered_paths if path.name.startswith(f"{prefix}_task-")]
+        if not run_paths:
+            return ()
+        reviews = []
+        for path in run_paths:
+            raw = mne.io.read_raw_fif(path, preload=False, verbose="ERROR")
+            reviews.append(
+                compute_bridging_review(
+                    raw,
+                    recording_id=path.stem,
+                    duration_seconds=diagnostic_duration_seconds,
+                )
+            )
+        add_bridging_reviews(report=report, reviews=reviews)
+        return tuple(reviews)
 
     def _write_qc_sidecar(
         self,
@@ -1969,10 +2235,7 @@ class PreprocessingPipeline(PipelineBase):
         path = components_path_for_ica(report_path.with_name(f"{prefix}_proc-ica_ica.fif"))
         if not path.is_file():
             return None
-        try:
-            return pd.read_csv(path, sep="\t")
-        except (OSError, ValueError):
-            return None
+        return pd.read_csv(path, sep="\t", keep_default_na=False)
 
     def _condition_counts(self, *, report_path: Path, task: str) -> tuple[dict, dict]:
         """Trials presented and trials retained, per condition.
@@ -2035,6 +2298,7 @@ class PreprocessingPipeline(PipelineBase):
         report,
         report_path: Path,
         filtered_paths: List[Path],
+        task: str,
         settings,
         edge_support_seconds: float,
     ):
@@ -2067,6 +2331,7 @@ class PreprocessingPipeline(PipelineBase):
             # The one place the beat label is configured. Absent, the interval series and
             # the beat rug are skipped rather than searched for a guessed spelling.
             beat_marker_description=self.config.get("ica.cardiac_review.marker_description"),
+            event_descriptions=self._detect_conditions_from_bids(task),
         )
 
     def _find_subject_report_path(self, epochs_path: Path) -> Optional[Path]:
@@ -2088,8 +2353,10 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.preprocessing.band_ica_report import (
             append_condition_tfr_report,
         )
+        from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
         settings = self._band_ica_settings()
+        report_settings = ReportSettings.from_config(self.config)
         for subject in self._resolve_bad_harmonization_subjects(subjects):
             subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
             clean_epochs_paths = sorted(
@@ -2136,6 +2403,8 @@ class PreprocessingPipeline(PipelineBase):
                     report_path=report_path,
                     settings=settings,
                     analysis_status="Finalized — retained epochs",
+                    figure_dpi=report_settings.figure_dpi,
+                    figure_max_width_px=report_settings.figure_max_width_px,
                 )
 
     def _band_ica_settings(self):
@@ -2157,7 +2426,9 @@ class PreprocessingPipeline(PipelineBase):
         notch = self.config.get("preprocessing.notch_freq", None)
         if notch is None:
             return settings
-        frequencies = tuple(float(value) for value in (notch if isinstance(notch, (list, tuple)) else [notch]))
+        frequencies = tuple(
+            float(value) for value in (notch if isinstance(notch, (list, tuple)) else [notch])
+        )
         half_width = self.config.get(
             "report.thresholds.notch_exclusion_half_width_hz",
             settings.notch_half_width_hz,
@@ -2229,7 +2500,6 @@ class PreprocessingPipeline(PipelineBase):
         )
 
         self.logger.info("Statistics collection complete")
-
 
     def _run_mne_bids_pipeline(
         self,
@@ -2649,8 +2919,8 @@ class PreprocessingPipeline(PipelineBase):
     def _detect_conditions_from_bids(self, task: Optional[str] = None) -> list | None:
         """Detect unique condition names from BIDS events files.
 
-        Reads a configured condition column from first available events TSV and returns
-        unique values as a list suitable for mne_bids_pipeline conditions.
+        Reads the BIDS event descriptions that ``mne_bids.read_raw_bids`` turns into raw
+        annotations and returns names suitable for MNE-BIDS-Pipeline ``conditions``.
 
         Returns:
             List of unique condition values, or None if detection fails.
@@ -2685,41 +2955,17 @@ class PreprocessingPipeline(PipelineBase):
                 )
             return None
 
-        candidates = list(get_condition_column_candidates(config_obj))
-        if not candidates:
-            candidates = ["condition", "trial_type"]
-
         conditions = set()
         detected_columns = set()
         for events_file in events_files:
-            with open(events_file, "r", encoding="utf-8") as f:
-                header = f.readline().strip().split("\t")
-                header_lookup = {str(name).strip().lower(): idx for idx, name in enumerate(header)}
-                condition_column = None
-                condition_idx = None
-                for candidate in candidates:
-                    idx = header_lookup.get(candidate.lower())
-                    if idx is not None:
-                        condition_column = candidate
-                        condition_idx = idx
-                        break
-
-                if condition_idx is None:
-                    continue
-
-                detected_columns.add(str(condition_column))
-                for line in f:
-                    parts = line.strip().split("\t")
-                    if len(parts) <= condition_idx:
-                        continue
-                    condition_value = parts[condition_idx].strip()
-                    if condition_value and condition_value != "n/a":
-                        conditions.add(condition_value)
+            descriptions, source_column = _bids_event_descriptions(events_file)
+            conditions.update(descriptions)
+            if source_column is not None:
+                detected_columns.add(source_column)
 
         if not detected_columns:
             self.logger.debug(
-                "No configured condition column found in any events file header (candidates=%s)",
-                candidates,
+                "No BIDS trial_type or value column found in any events file header",
             )
             return None
 

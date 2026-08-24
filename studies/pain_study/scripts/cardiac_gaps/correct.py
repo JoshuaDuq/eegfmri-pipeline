@@ -422,7 +422,13 @@ def markers_run(pair, output_root: Path) -> dict:
     # A run with nothing to add is still re-emitted, so the output tree is a complete
     # drop-in replacement rather than a partial one the caller has to merge by hand.
     marker_file = bcg_markers.read_marker_file(source.with_suffix(".vmrk"))
-    augmented = bcg_markers.add_pulse_markers(marker_file, recovery.recovered_beats, sfreq)
+    # `recover_beats` clears Analyzer's double marks before it searches for gaps, so the file
+    # has to lose them too. Adding only -- which is all this did -- left the written train
+    # disagreeing with `combined_beats` by exactly the marks that were dropped, and handed
+    # step 3 marks that make it subtract a pulse template where no beat is.
+    double_marks = np.setdiff1d(analyzer, recovery.analyzer_beats)
+    pruned = bcg_markers.remove_pulse_markers(marker_file, double_marks, sfreq)
+    augmented = bcg_markers.add_pulse_markers(pruned, recovery.recovered_beats, sfreq)
 
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -443,6 +449,7 @@ def markers_run(pair, output_root: Path) -> dict:
         "run": pair.run,
         "status": recovery_status(recovery, minimum=1),
         "analyzer_beats": int(analyzer.size),
+        "double_marks_dropped": int(double_marks.size),
         "recovered_beats": int(recovery.recovered_beats.size),
         "total_r_markers": int(check.size),
         "markers_total": len(augmented.markers),

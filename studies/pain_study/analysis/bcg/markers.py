@@ -187,3 +187,42 @@ def add_pulse_markers(
         markers=combined,
         user_info_preamble=marker_file.user_info_preamble,
     )
+
+
+def remove_pulse_markers(
+    marker_file: MarkerFile,
+    beat_seconds: np.ndarray,
+    sfreq: float,
+) -> MarkerFile:
+    """Return the marker set with the `Pulse Artifact/R` mark at each supplied beat gone.
+
+    `drop_double_marks` clears Analyzer's second mark inside a cardiac cycle before the gap
+    search runs, but the written marker file was only ever added to, so it kept every one of
+    them and carried a different beat train than the recovery reported. Step 3 re-runs the
+    correction from this file, and a mark where no beat is makes it subtract a pulse
+    template against nothing -- injecting artifact rather than removing it.
+
+    A beat with no marker at its position is an error rather than a no-op: it means the
+    train being reconciled against did not come from this file.
+    """
+    positions = np.round(np.asarray(beat_seconds, dtype=float) * sfreq).astype(int) + 1
+    wanted = {int(position) for position in positions}
+
+    kept: list[Marker] = []
+    removed: set[int] = set()
+    for marker in marker_file.markers:
+        is_pulse = marker.type == PULSE_TYPE and marker.description == PULSE_DESCRIPTION
+        if is_pulse and marker.position in wanted and marker.position not in removed:
+            removed.add(marker.position)
+            continue
+        kept.append(marker)
+
+    missing = sorted(wanted - removed)
+    if missing:
+        raise ValueError(f"no R marker at sample {missing[0]} to remove")
+
+    return MarkerFile(
+        preamble=marker_file.preamble,
+        markers=kept,
+        user_info_preamble=marker_file.user_info_preamble,
+    )

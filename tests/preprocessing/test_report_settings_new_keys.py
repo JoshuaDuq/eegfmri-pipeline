@@ -7,22 +7,48 @@ import pytest
 from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
 
-
-
 def test_the_spectra_ceiling_is_unset_so_it_can_inherit_the_low_pass() -> None:
     assert ReportSettings().spectra_fmax is None
 
 
+def test_muscle_screening_method_is_configurable_and_recorded() -> None:
+    settings = ReportSettings.from_mapping(
+        {
+            "analysis": {
+                "muscle_filter_freq_hz": [65.0, 85.0],
+                "muscle_zscore_threshold": 5.0,
+                "muscle_min_length_good_s": 0.2,
+            }
+        }
+    )
+
+    assert settings.muscle_filter_freq_hz == (65.0, 85.0)
+    assert settings.muscle_zscore_threshold == 5.0
+    assert settings.muscle_min_length_good_s == 0.2
+
+
+def test_rendering_and_fixed_diagnostic_sampling_are_configurable() -> None:
+    settings = ReportSettings.from_mapping(
+        {
+            "display": {
+                "figure_dpi": 240,
+                "figure_max_width_px": 2400,
+                "evoked_topomap_count": 5,
+            },
+            "analysis": {"bridge_diagnostic_duration_s": 120.0},
+        }
+    )
+
+    assert settings.figure_dpi == 240
+    assert settings.figure_max_width_px == 2400
+    assert settings.evoked_topomap_count == 5
+    assert settings.bridge_diagnostic_duration_s == 120.0
 
 
 def test_an_explicit_null_ceiling_stays_unset() -> None:
     settings = ReportSettings.from_mapping({"display": {"spectra_fmax": None}})
 
     assert settings.spectra_fmax is None
-
-
-
-
 
 
 @pytest.mark.parametrize(
@@ -42,6 +68,33 @@ def test_an_explicit_null_ceiling_stays_unset() -> None:
             "aperiodic_fit_range_hz",
             [45.0, 2.0],
             "aperiodic_fit_range_hz",
+        ),
+        (
+            "analysis",
+            "muscle_filter_freq_hz",
+            [90.0, 70.0],
+            "muscle_filter_freq_hz",
+        ),
+        (
+            "analysis",
+            "muscle_zscore_threshold",
+            0.0,
+            "muscle_zscore_threshold",
+        ),
+        (
+            "analysis",
+            "muscle_min_length_good_s",
+            -0.1,
+            "muscle_min_length_good_s",
+        ),
+        ("display", "figure_dpi", 99, "figure_dpi"),
+        ("display", "figure_max_width_px", 849, "figure_max_width_px"),
+        ("display", "evoked_topomap_count", 0, "evoked_topomap_count"),
+        (
+            "analysis",
+            "bridge_diagnostic_duration_s",
+            0.0,
+            "bridge_diagnostic_duration_s",
         ),
     ],
 )
@@ -69,8 +122,6 @@ def test_empty_acquisition_identifiers_are_rejected(key) -> None:
 def test_unknown_report_keys_are_rejected(values) -> None:
     with pytest.raises(ValueError, match="unknown report"):
         ReportSettings.from_mapping(values)
-
-
 
 
 def test_enabled_must_be_a_boolean_not_a_truthy_string() -> None:

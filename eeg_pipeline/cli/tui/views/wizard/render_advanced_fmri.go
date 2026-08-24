@@ -93,10 +93,13 @@ func (m Model) renderFmriAdvancedConfig() string {
 		skullStripTemplateVal = "OASIS30ANTs"
 	}
 
-	bold2t1wInitOptions := []string{"register", "header"}
-	bold2t1wInitVal := bold2t1wInitOptions[m.fmriBold2T1wInitIndex%2]
+	subjectReferenceOptions := []string{"first-lex", "unbiased", "sessionwise"}
+	subjectReferenceVal := subjectReferenceOptions[m.fmriSubjectAnatomicalReferenceIndex%len(subjectReferenceOptions)]
 
-	bold2t1wDofVal := fmt.Sprintf("%d", m.fmriBold2T1wDof)
+	bold2anatInitOptions := []string{"t1w", "auto", "t2w", "header"}
+	bold2anatInitVal := bold2anatInitOptions[m.fmriBold2AnatInitIndex%len(bold2anatInitOptions)]
+
+	bold2anatDofVal := fmt.Sprintf("%d", m.fmriBold2AnatDof)
 	sliceTimeRefVal := fmt.Sprintf("%.2f", m.fmriSliceTimeRef)
 	dummyScansVal := fmt.Sprintf("%d", m.fmriDummyScans)
 	if m.fmriDummyScans == 0 {
@@ -129,8 +132,8 @@ func (m Model) renderFmriAdvancedConfig() string {
 			ompNthreadsVal = buffer
 		case m.isCurrentlyEditing(optFmriMemMb):
 			memVal = buffer
-		case m.isCurrentlyEditing(optFmriBold2T1wDof):
-			bold2t1wDofVal = buffer
+		case m.isCurrentlyEditing(optFmriBold2AnatDof):
+			bold2anatDofVal = buffer
 		case m.isCurrentlyEditing(optFmriSliceTimeRef):
 			sliceTimeRefVal = buffer
 		case m.isCurrentlyEditing(optFmriDummyScans):
@@ -253,15 +256,6 @@ func (m Model) renderFmriAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
-		case optFmriGroupDenoising:
-			label = styles.RenderChevron(m.fmriGroupDenoisingExpanded) + " Denoising"
-			hint = "ICA-AROMA"
-			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-			}
-
 		case optFmriGroupSurface:
 			label = styles.RenderChevron(m.fmriGroupSurfaceExpanded) + " Surface"
 			hint = "Cortical surface options"
@@ -366,10 +360,10 @@ func (m Model) renderFmriAdvancedConfig() string {
 			label = "Skip Recon-All"
 			value = m.boolToOnOff(m.fmriSkipReconstruction)
 			hint = "No FreeSurfer"
-		case optFmriLongitudinal:
-			label = "Longitudinal"
-			value = m.boolToOnOff(m.fmriLongitudinal)
-			hint = "Unbiased template"
+		case optFmriSubjectAnatomicalReference:
+			label = "Anatomical Ref"
+			value = subjectReferenceVal
+			hint = "Across sessions"
 		case optFmriSkullStripTemplate:
 			label = "Skull Strip Tpl"
 			value = skullStripTemplateVal
@@ -380,13 +374,13 @@ func (m Model) renderFmriAdvancedConfig() string {
 			hint = "Reproducible strip"
 
 		// BOLD options (indented)
-		case optFmriBold2T1wInit:
-			label = "BOLD→T1w Init"
-			value = bold2t1wInitVal
-			hint = "register/header"
-		case optFmriBold2T1wDof:
-			label = "BOLD→T1w DOF"
-			value = bold2t1wDofVal
+		case optFmriBold2AnatInit:
+			label = "BOLD→Anat Init"
+			value = bold2anatInitVal
+			hint = "t1w/auto/t2w/header"
+		case optFmriBold2AnatDof:
+			label = "BOLD→Anat DOF"
+			value = bold2anatDofVal
 			hint = "Degrees freedom"
 		case optFmriSliceTimeRef:
 			label = "Slice Time Ref"
@@ -406,12 +400,6 @@ func (m Model) renderFmriAdvancedConfig() string {
 			label = "DVARS Threshold"
 			value = dvarsSpikeVal
 			hint = "Standardized"
-
-		// Denoising options (indented)
-		case optFmriUseAroma:
-			label = "Use AROMA"
-			value = m.boolToOnOff(m.fmriUseAroma)
-			hint = "ICA-AROMA"
 
 		// Surface options (indented)
 		case optFmriMedialSurfaceNan:

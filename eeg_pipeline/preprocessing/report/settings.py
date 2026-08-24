@@ -22,15 +22,6 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
-# Inlined when the cardiac-residual modules moved to the study, because core cannot import them
-# back. Task 12 deletes the fields these feed, and these constants with them.
-MARKER_AGREEMENT_TOLERANCE_S = 0.1
-RESIDUAL_WINDOW_S = (-0.2, 0.6)
-RESIDUAL_BASELINE_S = (-0.2, -0.1)
-RESIDUAL_MEASUREMENT_S = (0.0, 0.5)
-from eeg_pipeline.preprocessing.report.rr_intervals import (
-    DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
-)
 from eeg_pipeline.preprocessing.report.aperiodic import DEFAULT_FIT_RANGE_HZ
 from eeg_pipeline.preprocessing.report.continuity import NON_EVENT_PREFIXES
 from eeg_pipeline.preprocessing.report.filtering import NOTCH_EXCLUSION_HALF_WIDTH_HZ
@@ -40,6 +31,18 @@ from eeg_pipeline.preprocessing.report.preservation import (
     DEFAULT_RESPONSE_WINDOW_S,
     POSTERIOR_PATTERN,
 )
+from eeg_pipeline.preprocessing.report.rr_intervals import (
+    DEFAULT_PLAUSIBLE_HEART_RATE_BPM,
+)
+from eeg_pipeline.preprocessing.report.style import (
+    DEFAULT_REPORT_FIGURE_DPI,
+    DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
+)
+
+MARKER_AGREEMENT_TOLERANCE_S = 0.1
+RESIDUAL_WINDOW_S = (-0.2, 0.6)
+RESIDUAL_BASELINE_S = (-0.2, -0.1)
+RESIDUAL_MEASUREMENT_S = (0.0, 0.5)
 
 #: Participant counts at which each cohort band becomes drawable, and the montage and
 #: sequence tolerances the cohort panels pool across. Stated here rather than imported
@@ -71,9 +74,7 @@ DEFAULT_COMPONENT_LABEL_PATTERNS = (
 #: patterns -- the first collects descriptions nothing matched, the second exclusions no
 #: detector explained -- so a config that named either would be describing a fallback as
 #: though it were a rule.
-_ASSIGNABLE_LABEL_CLASSES = frozenset(
-    {"eye", "heart", "muscle", "line", "channel"}
-)
+_ASSIGNABLE_LABEL_CLASSES = frozenset({"eye", "heart", "muscle", "line", "channel"})
 
 _REPORT_KEYS = frozenset({"enabled", "thresholds", "display", "analysis", "acquisition"})
 _THRESHOLD_KEYS = frozenset(
@@ -100,6 +101,9 @@ _DISPLAY_KEYS = frozenset(
         "component_overview_columns",
         "spectra_fmax",
         "continuity_window_seconds",
+        "figure_dpi",
+        "figure_max_width_px",
+        "evoked_topomap_count",
     }
 )
 _ANALYSIS_KEYS = frozenset(
@@ -109,6 +113,10 @@ _ANALYSIS_KEYS = frozenset(
         "response_window_s",
         "alpha_band_hz",
         "alpha_reference_band_hz",
+        "muscle_filter_freq_hz",
+        "muscle_zscore_threshold",
+        "muscle_min_length_good_s",
+        "bridge_diagnostic_duration_s",
     }
 )
 _ACQUISITION_KEYS = frozenset(
@@ -171,6 +179,21 @@ def _pair(
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise TypeError(f"{setting} must contain exactly two values.")
     return (float(value[0]), float(value[1]))
+
+
+def _optional_pair(
+    block: Mapping[str, Any],
+    key: str,
+    *,
+    default: tuple[float, float] | None,
+    setting: str,
+) -> tuple[float, float] | None:
+    """Read a numeric pair for a diagnostic that an explicit null disables."""
+    if key not in block:
+        return default
+    if block[key] is None:
+        return None
+    return _pair(block, key, default=(0.0, 0.0), setting=setting)
 
 
 # _pair reads a single bounded numeric pair; this reads a list of them, e.g. the windows
@@ -325,6 +348,9 @@ class ReportSettings:
     spectra_fmax: float | None = None
     #: Window over which time-resolved amplitude is pooled.
     continuity_window_seconds: float = 1.0
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX
+    evoked_topomap_count: int = 4
     #: Band the aperiodic background is fitted over. Keep it below the line-noise
     #: fundamental so the notch and its skirts cannot tilt the slope.
     aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ
@@ -345,6 +371,18 @@ class ReportSettings:
     #: ``alpha_band_hz``: a band shifted for a developmental cohort needs a reference
     #: window that still surrounds it, or the peak is scored against the wrong background.
     alpha_reference_band_hz: tuple[float, float] = ALPHA_REFERENCE_BAND_HZ
+    #: High-frequency band used by MNE's continuous muscle-artifact screening. The
+    #: pipeline low-passes at 100 Hz, so the MNE example's 110–140 Hz band no longer
+    #: exists in this derivative; 70–90 Hz retains a high-frequency EEG window while
+    #: avoiding the 60 Hz notch. ``None`` explicitly disables this diagnostic for a
+    #: recording whose sampling rate or low-pass cannot support it.
+    muscle_filter_freq_hz: tuple[float, float] | None = (70.0, 90.0)
+    muscle_zscore_threshold: float = 4.0
+    muscle_min_length_good_s: float = 0.1
+    #: Final segment used by MNE's electrical-distance bridge diagnostic. MNE's example
+    #: recommends approximately three minutes at the end of the recording because gel
+    #: can settle over time. Fixed in configuration, never chosen after viewing a run.
+    bridge_diagnostic_duration_s: float = 180.0
     #: Physiologically possible heart rate, in bpm. Drives both the interval range the
     #: subject tachogram shades and the bound the cohort panel counts against.
     plausible_heart_rate_bpm: tuple[float, float] = DEFAULT_PLAUSIBLE_HEART_RATE_BPM
@@ -441,6 +479,9 @@ class ReportSettings:
             continuity_window_seconds=float(
                 display.get("continuity_window_seconds", cls.continuity_window_seconds)
             ),
+            figure_dpi=float(display.get("figure_dpi", cls.figure_dpi)),
+            figure_max_width_px=int(display.get("figure_max_width_px", cls.figure_max_width_px)),
+            evoked_topomap_count=int(display.get("evoked_topomap_count", cls.evoked_topomap_count)),
             aperiodic_fit_range_hz=_pair(
                 analysis,
                 "aperiodic_fit_range_hz",
@@ -476,6 +517,30 @@ class ReportSettings:
                 default=cls.alpha_reference_band_hz,
                 setting="report.analysis.alpha_reference_band_hz",
             ),
+            muscle_filter_freq_hz=_optional_pair(
+                analysis,
+                "muscle_filter_freq_hz",
+                default=cls.muscle_filter_freq_hz,
+                setting="report.analysis.muscle_filter_freq_hz",
+            ),
+            muscle_zscore_threshold=float(
+                analysis.get(
+                    "muscle_zscore_threshold",
+                    cls.muscle_zscore_threshold,
+                )
+            ),
+            muscle_min_length_good_s=float(
+                analysis.get(
+                    "muscle_min_length_good_s",
+                    cls.muscle_min_length_good_s,
+                )
+            ),
+            bridge_diagnostic_duration_s=float(
+                analysis.get(
+                    "bridge_diagnostic_duration_s",
+                    cls.bridge_diagnostic_duration_s,
+                )
+            ),
             plausible_heart_rate_bpm=_pair(
                 thresholds,
                 "plausible_heart_rate_bpm",
@@ -483,14 +548,10 @@ class ReportSettings:
                 setting="report.thresholds.plausible_heart_rate_bpm",
             ),
             marker_agreement_tolerance_s=float(
-                thresholds.get(
-                    "marker_agreement_tolerance_s", cls.marker_agreement_tolerance_s
-                )
+                thresholds.get("marker_agreement_tolerance_s", cls.marker_agreement_tolerance_s)
             ),
             notch_exclusion_half_width_hz=float(
-                thresholds.get(
-                    "notch_exclusion_half_width_hz", cls.notch_exclusion_half_width_hz
-                )
+                thresholds.get("notch_exclusion_half_width_hz", cls.notch_exclusion_half_width_hz)
             ),
             channel_position_tolerance_m=float(
                 thresholds.get("channel_position_tolerance_m", cls.channel_position_tolerance_m)
@@ -547,24 +608,24 @@ class ReportSettings:
             raise ValueError("report.display.spectra_fmax must be positive when set.")
         if self.continuity_window_seconds <= 0:
             raise ValueError("report.display.continuity_window_seconds must be positive.")
+        if not 100 <= self.figure_dpi <= 600:
+            raise ValueError("report.display.figure_dpi must lie in [100, 600].")
+        if not 850 <= self.figure_max_width_px <= 10_000:
+            raise ValueError("report.display.figure_max_width_px must lie in [850, 10000].")
+        if not 1 <= self.evoked_topomap_count <= 12:
+            raise ValueError("report.display.evoked_topomap_count must lie in [1, 12].")
         aperiodic_low, aperiodic_high = self.aperiodic_fit_range_hz
         if not 0 < aperiodic_low < aperiodic_high:
-            raise ValueError(
-                "report.analysis.aperiodic_fit_range_hz must satisfy 0 < low < high."
-            )
+            raise ValueError("report.analysis.aperiodic_fit_range_hz must satisfy 0 < low < high.")
         response_start, response_stop = self.response_window_s
         if response_stop <= response_start:
-            raise ValueError(
-                "report.analysis.response_window_s must have a stop after its start."
-            )
+            raise ValueError("report.analysis.response_window_s must have a stop after its start.")
         alpha_low, alpha_high = self.alpha_band_hz
         if not 0 < alpha_low < alpha_high:
             raise ValueError("report.analysis.alpha_band_hz must satisfy 0 < low < high.")
         reference_low, reference_high = self.alpha_reference_band_hz
         if not 0 < reference_low < reference_high:
-            raise ValueError(
-                "report.analysis.alpha_reference_band_hz must satisfy 0 < low < high."
-            )
+            raise ValueError("report.analysis.alpha_reference_band_hz must satisfy 0 < low < high.")
         # The prominence is the peak's excess over a background fitted outside the band,
         # so a reference window that does not surround the band scores the peak against a
         # neighbourhood it does not have.
@@ -574,15 +635,25 @@ class ReportSettings:
                 f"report.analysis.alpha_band_hz; {self.alpha_reference_band_hz} does not "
                 f"contain {self.alpha_band_hz}."
             )
+        if self.muscle_filter_freq_hz is not None:
+            muscle_low, muscle_high = self.muscle_filter_freq_hz
+            if not 0 < muscle_low < muscle_high:
+                raise ValueError(
+                    "report.analysis.muscle_filter_freq_hz must satisfy 0 < low < high."
+                )
+        if self.muscle_zscore_threshold <= 0:
+            raise ValueError("report.analysis.muscle_zscore_threshold must be positive.")
+        if self.muscle_min_length_good_s < 0:
+            raise ValueError("report.analysis.muscle_min_length_good_s must be non-negative.")
+        if self.bridge_diagnostic_duration_s <= 0:
+            raise ValueError("report.analysis.bridge_diagnostic_duration_s must be positive.")
         bpm_low, bpm_high = self.plausible_heart_rate_bpm
         if not 0 < bpm_low < bpm_high:
             raise ValueError(
                 "report.thresholds.plausible_heart_rate_bpm must satisfy 0 < low < high."
             )
         if self.marker_agreement_tolerance_s <= 0:
-            raise ValueError(
-                "report.thresholds.marker_agreement_tolerance_s must be positive."
-            )
+            raise ValueError("report.thresholds.marker_agreement_tolerance_s must be positive.")
         # Half the shortest plausible interval: a tolerance at or above it lets a marker
         # match the beat after the one it belongs to, which reports agreement that the two
         # detectors never had.
@@ -594,9 +665,7 @@ class ReportSettings:
                 f"{bpm_high:g} bpm), or one beat can match its neighbour."
             )
         if self.notch_exclusion_half_width_hz <= 0:
-            raise ValueError(
-                "report.thresholds.notch_exclusion_half_width_hz must be positive."
-            )
+            raise ValueError("report.thresholds.notch_exclusion_half_width_hz must be positive.")
         if self.channel_position_tolerance_m <= 0:
             raise ValueError("report.thresholds.channel_position_tolerance_m must be positive.")
         self._validate_subject_gates()
@@ -606,9 +675,7 @@ class ReportSettings:
                 "prefixes this pipeline writes for itself; an empty list counts BAD spans "
                 "as trials."
             )
-        for key, value in (
-            ("posterior_channel_pattern", self.posterior_channel_pattern),
-        ):
+        for key, value in (("posterior_channel_pattern", self.posterior_channel_pattern),):
             if not value.strip():
                 raise ValueError(f"report.acquisition.{key} must not be empty.")
         try:

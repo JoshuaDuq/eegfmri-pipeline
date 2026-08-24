@@ -100,11 +100,24 @@ def test_the_packaged_config_needs_no_file_only_this_study_has() -> None:
     retired ``eeg_only`` preset used to carry the override; the packaged default carries
     it now, so there is nothing left to opt out of.
     """
-    packaged = yaml.safe_load(
-        (CONFIG_ROOT / SHIPPED_CONFIGS[0]).read_text(encoding="utf-8")
-    )
+    packaged = yaml.safe_load((CONFIG_ROOT / SHIPPED_CONFIGS[0]).read_text(encoding="utf-8"))
 
     assert packaged["paths"]["decomb_manifest"] is None
+
+
+def test_the_packaged_config_does_not_preapprove_manual_ica_review() -> None:
+    """A shipped default cannot attest to a human action that has not happened."""
+    packaged = yaml.safe_load((CONFIG_ROOT / SHIPPED_CONFIGS[0]).read_text(encoding="utf-8"))
+
+    assert packaged["ica"]["require_manual_review"] is True
+    assert packaged["ica"]["manual_review_complete"] is False
+
+
+def test_the_thermal_response_review_uses_the_stimulation_window() -> None:
+    """Split-half reliability must measure the interval where heat is delivered."""
+    packaged = yaml.safe_load((CONFIG_ROOT / SHIPPED_CONFIGS[0]).read_text(encoding="utf-8"))
+
+    assert packaged["report"]["analysis"]["response_window_s"] == packaged["time_windows"]["active"]
 
 
 def test_a_configured_manifest_that_is_absent_is_still_an_error() -> None:

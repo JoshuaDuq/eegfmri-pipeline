@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import mne
 import numpy as np
@@ -26,7 +28,13 @@ from eeg_pipeline.preprocessing.report.style import (
     GUIDE_COLOR,
     RETAINED_COLOR,
 )
-from eeg_pipeline.preprocessing.report.tables import Metric, metric_table
+from eeg_pipeline.preprocessing.report.tables import (
+    Align,
+    Column,
+    Metric,
+    grid_table,
+    metric_table,
+)
 
 #: Grouping columns to report retention over, when the events table provides them.
 #:
@@ -79,6 +87,108 @@ class GroupRetention:
         if self.presented is None:
             return None
         return self.retained / self.presented
+
+
+def autoreject_log_html(log) -> str:
+    """Summarize channel-level interpolation and unresolved bad verdicts."""
+    labels = np.asarray(log.labels, dtype=int)
+    bad_epochs = np.asarray(log.bad_epochs, dtype=bool)
+    if labels.shape != (bad_epochs.size, len(log.ch_names)):
+        raise ValueError(
+            "AutoReject labels must be epochs × channels and match bad_epochs/ch_names."
+        )
+    interpolated = (labels == 2).sum(axis=0)
+    unresolved = (labels == 1).sum(axis=0)
+    rows = [
+        [channel, int(interpolated[index]), int(unresolved[index])]
+        for index, channel in sorted(
+            enumerate(log.ch_names),
+            key=lambda item: (-interpolated[item[0]], -unresolved[item[0]], item[1]),
+        )
+        if interpolated[index] or unresolved[index]
+    ]
+    details = (
+        grid_table(
+            (
+                Column("Channel", align=Align.TEXT),
+                Column("Interpolated epochs"),
+                Column("Bad, not interpolated"),
+            ),
+            rows,
+        )
+        if rows
+        else "<p>No channel-level repairs or unresolved bad channel-epochs were recorded.</p>"
+    )
+    return (
+        "<p>AutoReject's channel-by-epoch verdict distinguishes recorded samples from "
+        "whole-epoch spline estimates. Recurrent interpolation can alter spatial and "
+        "connectivity measures even when the epoch itself was retained. Codes in the "
+        "matrix are: good, bad but not interpolated, and bad then interpolated.</p>"
+        f"<p>Selected <code>n_interpolate={int(log.n_interpolate)}</code>; "
+        f"<code>consensus={float(log.consensus):.2f}</code>; "
+        f"{int(bad_epochs.sum())} of {bad_epochs.size} epochs dropped.</p>" + details
+    )
+
+
+def plot_autoreject_log(log) -> plt.Figure:
+    """Plot AutoReject's complete channel × pre-rejection epoch verdict matrix."""
+    labels = np.asarray(log.labels, dtype=int)
+    bad_epochs = np.asarray(log.bad_epochs, dtype=bool)
+    if labels.shape != (bad_epochs.size, len(log.ch_names)):
+        raise ValueError(
+            "AutoReject labels must be epochs × channels and match bad_epochs/ch_names."
+        )
+    figure, axis = plt.subplots(figsize=(10.0, 5.5), layout="constrained")
+    colors = ListedColormap([RETAINED_COLOR, EXCLUDED_COLOR, "#D99B2B"])
+    axis.imshow(
+        labels.T,
+        aspect="auto",
+        interpolation="nearest",
+        origin="upper",
+        cmap=colors,
+        norm=BoundaryNorm([-0.5, 0.5, 1.5, 2.5], colors.N),
+    )
+    dropped = np.flatnonzero(bad_epochs)
+    if dropped.size:
+        axis.scatter(
+            dropped,
+            np.full(dropped.size, -0.65),
+            marker="v",
+            color=EXCLUDED_COLOR,
+            s=18,
+            clip_on=False,
+            label="Dropped epoch",
+        )
+    tick_step = max(1, int(np.ceil(len(log.ch_names) / 24)))
+    ticks = np.arange(0, len(log.ch_names), tick_step)
+    axis.set(
+        title="AutoReject repair matrix · all pre-rejection epochs",
+        xlabel="Epoch position before cleaning",
+        ylabel="EEG channel",
+        yticks=ticks,
+        yticklabels=[log.ch_names[index] for index in ticks],
+    )
+    axis.legend(
+        handles=[
+            Patch(facecolor=RETAINED_COLOR, label="Good"),
+            Patch(facecolor=EXCLUDED_COLOR, label="Bad, not interpolated"),
+            Patch(facecolor="#D99B2B", label="Bad, interpolated"),
+            Line2D(
+                [],
+                [],
+                marker="v",
+                linestyle="none",
+                color=EXCLUDED_COLOR,
+                label="Dropped epoch",
+            ),
+        ],
+        frameon=False,
+        fontsize=7,
+        ncol=2,
+        loc="upper right",
+    )
+    plt.close(figure)
+    return figure
 
 
 def summarize_rejection(drop_log: Sequence[Sequence[str]]) -> RejectionSummary:
@@ -298,9 +408,7 @@ def plot_rejection(
     if run_assignment is not None:
         run_assignment = np.asarray(run_assignment, dtype=float)
         if run_assignment.shape != (summary.total,):
-            raise ValueError(
-                "Run assignment must contain one label per pre-cleaning epoch."
-            )
+            raise ValueError("Run assignment must contain one label per pre-cleaning epoch.")
         if not np.isfinite(run_assignment).all():
             raise ValueError("Run assignment must contain only finite labels.")
         # Run boundaries turn "a block of epochs was dropped" into "run N lost them".
@@ -342,34 +450,22 @@ def plot_rejection(
     )
     position_axis.spines[["top", "right", "left"]].set_visible(False)
 
-    for axis, (column, retention) in zip(
-        axes[0][1:], group_retention.items(), strict=True
-    ):
+    for axis, (column, retention) in zip(axes[0][1:], group_retention.items(), strict=True):
         rates = retention.rates
         values = retention.retained if rates is None else rates
         positions = np.arange(values.size)
         axis.bar(positions, values.to_numpy(), color="0.80")
-        baseline = (
-            float(values.mean())
-            if rates is None
-            else summary.kept / summary.total
-        )
+        baseline = float(values.mean()) if rates is None else summary.kept / summary.total
         axis.axhline(
             baseline,
             color=GUIDE_COLOR,
             linestyle="--",
             linewidth=1.0,
-            label=(
-                f"mean {baseline:.1f}"
-                if rates is None
-                else f"overall {baseline:.1%}"
-            ),
+            label=(f"mean {baseline:.1f}" if rates is None else f"overall {baseline:.1%}"),
         )
         axis.set(
             title=(
-                f"Retained trials by {column}"
-                if rates is None
-                else f"Retention rate by {column}"
+                f"Retained trials by {column}" if rates is None else f"Retention rate by {column}"
             ),
             xlabel=column,
             ylabel="Trials retained" if rates is None else "Retained / presented",
@@ -391,6 +487,7 @@ def add_rejection_review(
     clean_epochs: mne.BaseEpochs,
     clean_events: pd.DataFrame | None = None,
     presented_events: pd.DataFrame | None = None,
+    autoreject_log=None,
     config: object | None = None,
     section: str = "Epoch rejection",
 ) -> RejectionSummary:
@@ -426,9 +523,7 @@ def add_rejection_review(
         else None
     )
     run_assignment = (
-        run_of_position(summary, presented_events)
-        if presented_events is not None
-        else None
+        run_of_position(summary, presented_events) if presented_events is not None else None
     )
     remove_tagged_content(report, tag="epoch-rejection")
     report.add_html(
@@ -450,6 +545,29 @@ def add_rejection_review(
         image_format=report_image_format(),
         replace=True,
     )
+    if autoreject_log is not None:
+        if len(autoreject_log.bad_epochs) != summary.total:
+            raise ValueError("AutoReject log epoch count does not match the rejection denominator.")
+        logged_drops = tuple(np.flatnonzero(autoreject_log.bad_epochs).tolist())
+        if logged_drops != summary.dropped_positions:
+            raise ValueError(
+                "AutoReject log dropped epochs do not match the clean epochs drop log."
+            )
+        report.add_html(
+            html=autoreject_log_html(autoreject_log),
+            title="AutoReject interpolation burden",
+            section=section,
+            tags=("epochs", "epoch-rejection"),
+            replace=True,
+        )
+        report.add_figure(
+            fig=plot_autoreject_log(autoreject_log),
+            title="AutoReject channel-by-epoch repair matrix",
+            section=section,
+            tags=("epochs", "epoch-rejection"),
+            image_format=report_image_format(has_dense_image=True),
+            replace=True,
+        )
     # The counts above say how many trials survived; this says what they are like. The
     # report measures time-resolved quality on the raw runs and, without this, nothing at
     # all on the epochs it delivers -- so a trial set could pass every count in this
@@ -480,6 +598,8 @@ __all__ = [
     "GroupRetention",
     "RejectionSummary",
     "add_rejection_review",
+    "autoreject_log_html",
+    "plot_autoreject_log",
     "plot_rejection",
     "rejection_summary_html",
     "resolve_grouping_columns",

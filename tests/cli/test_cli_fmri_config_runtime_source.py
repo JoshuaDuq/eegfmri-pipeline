@@ -111,6 +111,35 @@ def _build_args_for_fmri_analysis(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def test_fmri_cli_exposes_the_current_fmriprep_registration_interface() -> None:
+    args = _build_args_for_fmri(
+        [
+            "fmri",
+            "preprocess",
+            "--subject-anatomical-reference",
+            "unbiased",
+            "--bold2anat-init",
+            "header",
+            "--bold2anat-dof",
+            "9",
+        ]
+    )
+
+    assert args.subject_anatomical_reference == "unbiased"
+    assert args.bold2anat_init == "header"
+    assert args.bold2anat_dof == 9
+
+
+def test_removed_fmriprep_flags_are_not_accepted() -> None:
+    with pytest.raises(SystemExit):
+        _build_args_for_fmri(["fmri", "preprocess", "--use-aroma"])
+
+
+def test_removed_first_level_plot_flags_are_not_accepted() -> None:
+    with pytest.raises(SystemExit):
+        _build_args_for_fmri_analysis(["fmri-analysis", "first-level", "--plots"])
+
+
 def _yaml_path(path) -> str:
     return path.as_posix()
 
@@ -276,6 +305,9 @@ fmri_contrast:
   name: "from_yaml"
   condition_a:
     column: "trial_type"
+fmri_stats:
+  space: "mni"
+  include_effect_size: true
 """.strip() + "\n",
         encoding="utf-8",
     )
@@ -294,7 +326,7 @@ fmri_contrast:
         sys.modules,
         "fmri_pipeline.analysis.plotting_config",
         types.SimpleNamespace(
-            build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)
+            stats_config_from_mapping=lambda section: types.SimpleNamespace(**section)
         ),
     )
     monkeypatch.setitem(
@@ -332,6 +364,7 @@ fmri_contrast:
     run_fmri_analysis(args, [], config)
 
     assert _CaptureAnalysisPipeline.last_config.get("fmri_contrast.name") == "from_yaml"
+    assert _CaptureAnalysisPipeline.last_kwargs["stats_cfg"].space == "mni"
 
 
 def test_run_fmri_analysis_uses_yaml_defaults_for_first_level_cfg(tmp_path, monkeypatch) -> None:
@@ -373,7 +406,7 @@ fmri_contrast:
         sys.modules,
         "fmri_pipeline.analysis.plotting_config",
         types.SimpleNamespace(
-            build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)
+            stats_config_from_mapping=lambda section: types.SimpleNamespace(**section)
         ),
     )
     monkeypatch.setitem(
@@ -428,8 +461,10 @@ def test_run_fmri_analysis_dispatches_second_level_mode(tmp_path, monkeypatch) -
         "fmri_pipeline.analysis.second_level",
         types.SimpleNamespace(
             SecondLevelConfig=_SecondLevelConfig,
-            SecondLevelPermutationConfig=_SecondLevelPermutationConfig,
             load_second_level_config_section=lambda config: config.get("fmri_group_level", {}),
+            second_level_permutation_config_from_mapping=lambda section: (
+                _SecondLevelPermutationConfig(**section)
+            ),
         ),
     )
     monkeypatch.setitem(
@@ -454,6 +489,7 @@ def test_run_fmri_analysis_dispatches_second_level_mode(tmp_path, monkeypatch) -
             "--group-n-permutations",
             "2500",
             "--group-one-sided",
+            "--no-group-report",
             "--dry-run",
         ]
     )
@@ -472,6 +508,28 @@ def test_run_fmri_analysis_dispatches_second_level_mode(tmp_path, monkeypatch) -
     assert second_level_cfg.permutation.enabled is True
     assert second_level_cfg.permutation.n_permutations == 2500
     assert second_level_cfg.permutation.two_sided is False
+    assert second_level_cfg.report.enabled is False
+    assert second_level_cfg.threshold.height_control == "fdr"
+    assert second_level_cfg.threshold.alpha == pytest.approx(0.05)
+
+    config["fmri_group_level"]["report"]["html_report"] = False
+    enabled_args = _build_args_for_fmri_analysis(
+        [
+            "fmri-analysis",
+            "second-level",
+            "--all-subjects",
+            "--group-model",
+            "one-sample",
+            "--group-contrast-names",
+            "pain",
+            "--group-report",
+            "--dry-run",
+        ]
+    )
+    run_fmri_analysis(enabled_args, [], config)
+    enabled_cfg = _CaptureSecondLevelPipeline.last_kwargs["second_level_cfg"]
+    assert enabled_cfg.report.enabled is True
+    assert enabled_cfg.report.html_report is True
 
 
 def test_run_fmri_analysis_dispatches_rest_mode(tmp_path, monkeypatch) -> None:

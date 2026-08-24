@@ -14,9 +14,15 @@ from unittest.mock import Mock, patch
 # Derivative discovery is pure pathlib with no MNE dependency, so the stubs below hand
 # back the real module rather than a fake: these tests assert on the layouts it matches.
 _derivatives_module = importlib.import_module("eeg_pipeline.preprocessing.derivatives")
+_ica_exclusions_module = importlib.import_module("eeg_pipeline.preprocessing.ica_exclusions")
 
 
-from tests.utils.pipelines_test_utils import DotConfig, DummyProgress, NoopBatchProgress, NoopProgress
+from tests.utils.pipelines_test_utils import (
+    DotConfig,
+    DummyProgress,
+    NoopBatchProgress,
+    NoopProgress,
+)
 
 _DummyProgress = DummyProgress
 _NoopBatchProgress = NoopBatchProgress
@@ -134,6 +140,7 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
         "eeg_pipeline.preprocessing": _make_package("eeg_pipeline.preprocessing"),
         "eeg_pipeline.preprocessing.pipeline": _make_package("eeg_pipeline.preprocessing.pipeline"),
         "eeg_pipeline.preprocessing.derivatives": _derivatives_module,
+        "eeg_pipeline.preprocessing.ica_exclusions": _ica_exclusions_module,
     }
 
 
@@ -188,6 +195,21 @@ class _TrackingProgress:
 
 
 class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
+    def test_bridge_duration_belongs_to_bridge_helper_not_ica_refresh(self):
+        import inspect
+
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        bridge_parameters = inspect.signature(
+            PreprocessingPipeline._append_bridging_reviews
+        ).parameters
+        refresh_parameters = inspect.signature(
+            PreprocessingPipeline._refresh_manually_reviewed_ica_report
+        ).parameters
+
+        self.assertIn("diagnostic_duration_seconds", bridge_parameters)
+        self.assertNotIn("diagnostic_duration_seconds", refresh_parameters)
+
     def _make_bad_channel_pipeline(self, pyprep_config):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -318,11 +340,6 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown preprocessing mode"):
             p._get_steps_for_mode("bogus")
 
-
-
-
-
-
     def test_report_review_sections_do_not_depend_on_the_analyzer_steps(self):
         """An EEG-only run must still get provenance, spectra, coverage, and continuity.
 
@@ -376,7 +393,6 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
 
         pipeline._append_report_review_sections.assert_not_called()
 
-
     def test_detect_conditions_from_bids(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -388,7 +404,8 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         )
         ev = ev_dir / "sub-0001_task-task_run-01_events.tsv"
         ev.write_text(
-            "trial_type\tonset\nTrig_thermHot\t0\nVolume\t1\nTrig_thermWarm\t2\n",
+            "onset\tduration\ttrial_type\n"
+            "0\t0\tTrig_thermHot\n1\t0\tVolume\n2\t0\tTrig_thermWarm\n",
             encoding="utf-8",
         )
 
@@ -657,7 +674,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         ev_dir.mkdir(parents=True, exist_ok=True)
         events_path = ev_dir / "sub-0001_task-task_run-01_events.tsv"
         events_path.write_text(
-            "trial_type\tonset\nCueA\t0\nVolume\t1\nCueB\t2\n",
+            "onset\tduration\ttrial_type\n0\t0\tCueA\n1\t0\tVolume\n2\t0\tCueB\n",
             encoding="utf-8",
         )
 
@@ -802,6 +819,65 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
 
         self.assertTrue(mock_preproc.run_bads_detection.called)
 
+    def test_manual_review_requires_separate_ica_and_epoch_runs(self):
+        """A full run refits ICA, so an earlier sign-off cannot authorize its output."""
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        for complete in (False, True):
+            p.config = DotConfig(
+                {
+                    "ica": {
+                        "require_manual_review": True,
+                        "manual_review_complete": complete,
+                    }
+                }
+            )
+
+            with self.assertRaisesRegex(ValueError, "mode='ica'.*mode='epochs'"):
+                p._get_steps_for_mode("full")
+
+    def test_a_completed_review_must_be_reopened_before_refitting_ica(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.config = DotConfig(
+            {
+                "ica": {
+                    "require_manual_review": True,
+                    "manual_review_complete": True,
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "reopen.*manual_review_complete=false"):
+            p._get_steps_for_mode("ica")
+
+        self.assertEqual(p._get_steps_for_mode("epochs"), ["epochs", "stats"])
+
+    def test_epoch_gate_rejects_a_boolean_without_component_attestations(self):
+        import pandas as pd
+
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = DotConfig(
+            {"ica": {"require_manual_review": True, "manual_review_complete": True}}
+        )
+        directory = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "eeg"
+        directory.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "component": [0, 1],
+                "status": ["bad", "good"],
+                "status_description": ["blink", ""],
+            }
+        ).to_csv(directory / "sub-0001_proc-ica_components.tsv", sep="\t", index=False)
+
+        with self.assertRaisesRegex(ValueError, "manual_review_status"):
+            p._validate_manual_ica_review_attestations(["0001"])
+
     def test_harmonize_filtered_raw_bads_uses_subject_union(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -865,6 +941,58 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("bad_channel_fraction", qc_text)
         self.assertIn("0.666667", qc_text)
         self.assertIn("C3,C4", qc_text)
+
+    def test_filtered_bad_channel_union_does_not_cross_sessions(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig({"pyprep": {"bad_channel_sync_policy": "subject_union"}})
+        p.deriv_root = Path(tempfile.mkdtemp())
+
+        paths = []
+        for session in ("01", "02"):
+            directory = (
+                p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / f"ses-{session}" / "eeg"
+            )
+            directory.mkdir(parents=True)
+            for run in (1, 2):
+                path = directory / (f"sub-0001_ses-{session}_task-pain_run-{run}_proc-filt_raw.fif")
+                path.write_text("raw", encoding="utf-8")
+                paths.append(path)
+
+        class FakeRaw:
+            def __init__(self, bads):
+                self.info = {"bads": list(bads)}
+                self.ch_names = ["C3", "C4"]
+
+            def get_channel_types(self, picks):
+                assert picks == self.ch_names
+                return ["eeg", "eeg"]
+
+            def save(self, path, overwrite, split_naming):
+                Path(path).write_text("updated", encoding="utf-8")
+
+        raws = {
+            str(path): FakeRaw(
+                ["C3"]
+                if "ses-01" in str(path) and "run-1_" in path.name
+                else ["C4"] if "ses-02" in str(path) and "run-1_" in path.name else []
+            )
+            for path in paths
+        }
+
+        def fake_read_raw_fif(path, preload, verbose):
+            self.assertFalse(verbose)
+            return raws[str(path)]
+
+        fake_mne = types.SimpleNamespace(io=types.SimpleNamespace(read_raw_fif=fake_read_raw_fif))
+        with patch.dict(sys.modules, {"mne": fake_mne}):
+            p._harmonize_filtered_raw_bads_for_mne_concat(["0001"], "pain")
+
+        for path in paths:
+            expected = ["C3"] if "ses-01" in str(path) else ["C4"]
+            self.assertEqual(raws[str(path)].info["bads"], expected)
 
     def test_mismatched_filtered_raw_bads_fail_with_per_run_policy(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -1227,7 +1355,13 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
                         "enabled": True,
                         "ecg_channel": "ECG",
                     }
-                }
+                },
+                "report": {
+                    "display": {
+                        "figure_dpi": 240,
+                        "figure_max_width_px": 2400,
+                    }
+                },
             }
         )
         eeg_directory = Path("/derivatives/sub-0001/eeg")
@@ -1280,7 +1414,83 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         assert arguments["report_path"] == report_path
         assert arguments["output_path"] == (eeg_directory / "sub-0001_desc-icaecg_components.tsv")
         assert arguments["settings"] is settings
+        assert arguments["figure_dpi"] == 240
+        assert arguments["figure_max_width_px"] == 2400
         settings_class.from_mapping.assert_called_once_with({"enabled": True, "ecg_channel": "ECG"})
+
+    def test_ocular_and_band_reports_receive_configured_rendering(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "project": {"random_state": 7},
+                "ica": {"ocular_review": {"enabled": True}},
+                "report": {
+                    "display": {
+                        "figure_dpi": 240,
+                        "figure_max_width_px": 2400,
+                    }
+                },
+            }
+        )
+        eeg_directory = Path("/derivatives/sub-0001/eeg")
+        epochs_path = eeg_directory / "sub-0001_proc-icafit_epo.fif"
+        report_path = eeg_directory / "sub-0001_report.h5"
+        filtered_path = eeg_directory / "sub-0001_task-pain_run-1_proc-filt_raw.fif"
+        ocular_generate = Mock()
+        ocular_settings = object()
+        ocular_module = _make_module(
+            "eeg_pipeline.preprocessing.ica_ocular_report",
+            generate_ica_ocular_review=ocular_generate,
+            OcularReviewSettings=SimpleNamespace(from_mapping=Mock(return_value=ocular_settings)),
+        )
+        band_generate = Mock()
+        band_module = _make_module(
+            "eeg_pipeline.preprocessing.band_ica_report",
+            generate_band_ica_report=band_generate,
+        )
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.preprocessing.ica_ocular_report": ocular_module,
+                    "eeg_pipeline.preprocessing.band_ica_report": band_module,
+                },
+            ),
+            patch.object(
+                PreprocessingPipeline,
+                "_resolve_bad_harmonization_subjects",
+                return_value=["0001"],
+            ),
+            patch.object(
+                PreprocessingPipeline,
+                "_find_filtered_raw_run_files",
+                return_value=[filtered_path],
+            ),
+            patch.object(
+                PreprocessingPipeline,
+                "_find_band_ica_report_inputs",
+                return_value=[(epochs_path, report_path, "sub-0001")],
+            ),
+            patch.object(PreprocessingPipeline, "_band_ica_settings", return_value=object()),
+            patch.object(
+                PreprocessingPipeline,
+                "_report_spectral_availability",
+                return_value=None,
+            ),
+        ):
+            p._run_ica_ocular_review(subjects=["0001"], task="pain")
+            p._run_band_specific_ica_report(subjects=["0001"], task="pain")
+
+        for arguments in (
+            ocular_generate.call_args.kwargs,
+            band_generate.call_args.kwargs,
+        ):
+            assert arguments["figure_dpi"] == 240
+            assert arguments["figure_max_width_px"] == 2400
 
     def test_band_report_input_discovery_preserves_session_entities(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -1931,7 +2141,6 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
             p._execute_steps(["bad-channels"], ["0001"], "t", False, False, 1, _NoopProgress())
         m1.assert_not_called()
 
-
     def test_run_epoch_creation_and_collect_stats(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -2047,16 +2256,16 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         ev_dir = p.bids_root / "sub-0001" / "eeg"
         ev_dir.mkdir(parents=True, exist_ok=True)
         ev = ev_dir / "x_events.tsv"
-        ev.write_text("onset\n0\n", encoding="utf-8")
+        ev.write_text("onset\tduration\n0\t0\n", encoding="utf-8")
         self.assertIsNone(p._detect_conditions_from_bids())
 
         # many filtered conditions -> warning branch
-        many = "\n".join([f"Cond{i}\t0" for i in range(60)])
-        ev.write_text(f"trial_type\tonset\n{many}\n", encoding="utf-8")
+        many = "\n".join([f"0\t0\tCond{i}" for i in range(60)])
+        ev.write_text(f"onset\tduration\ttrial_type\n{many}\n", encoding="utf-8")
         self.assertIsNone(p._detect_conditions_from_bids())
 
         # read/parsing errors should surface
-        with patch("builtins.open", side_effect=RuntimeError("bad-open")):
+        with patch.object(Path, "open", side_effect=RuntimeError("bad-open")):
             with self.assertRaisesRegex(RuntimeError, "bad-open"):
                 p._detect_conditions_from_bids()
 
@@ -2070,11 +2279,11 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         session_eeg_dir = p.bids_root / "sub-0001" / "ses-01" / "eeg"
         session_eeg_dir.mkdir(parents=True, exist_ok=True)
         (session_eeg_dir / "sub-0001_ses-01_task-audio_run-01_events.tsv").write_text(
-            "trial_type\tonset\nAudioOnly\t0\n",
+            "onset\tduration\ttrial_type\n0\t0\tAudioOnly\n",
             encoding="utf-8",
         )
         (session_eeg_dir / "sub-0001_ses-01_task-pain_run-01_events.tsv").write_text(
-            "trial_type\tonset\nCueA\t0\nCueB\t1\n",
+            "onset\tduration\ttrial_type\n0\t0\tCueA\n1\t0\tCueB\n",
             encoding="utf-8",
         )
 
@@ -2093,11 +2302,11 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         subject_b_dir.mkdir(parents=True, exist_ok=True)
 
         (subject_a_dir / "sub-0001_task-pain_run-01_events.tsv").write_text(
-            "trial_type\tonset\nVolume\t0\n",
+            "onset\tduration\ttrial_type\n0\t0\tVolume\n",
             encoding="utf-8",
         )
         (subject_b_dir / "sub-0002_task-pain_run-01_events.tsv").write_text(
-            "trial_type\tonset\nCueA\t0\nCueB\t1\n",
+            "onset\tduration\ttrial_type\n0\t0\tCueA\n1\t0\tCueB\n",
             encoding="utf-8",
         )
 
@@ -2205,19 +2414,22 @@ class TestPreprocessingGapfill(_PreprocessingImportMixin, unittest.TestCase):
         ev_dir = p.bids_root / "sub-0001" / "eeg"
         ev_dir.mkdir(parents=True, exist_ok=True)
         (ev_dir / "sub-0001_task-t_run-01_events.tsv").write_text(
-            "trial_type\tonset\nVolume\t0\nPulse Artifact\t1\n", encoding="utf-8"
+            "onset\tduration\ttrial_type\n0\t0\tVolume\n1\t0\tPulse Artifact\n",
+            encoding="utf-8",
         )
         self.assertIsNone(p._detect_conditions_from_bids())
 
         # Empty/non-usable trial_type values -> empty conditions set branch
         (ev_dir / "sub-0001_task-t_run-01_events.tsv").write_text(
-            "trial_type\tonset\nn/a\t0\nn/a\t1\n", encoding="utf-8"
+            "onset\tduration\ttrial_type\n0\t0\tn/a\n1\t0\tn/a\n",
+            encoding="utf-8",
         )
         self.assertIsNone(p._detect_conditions_from_bids())
 
         # filtered return branch
         (ev_dir / "sub-0001_task-t_run-01_events.tsv").write_text(
-            "trial_type\tonset\nCueA\t0\nCueB\t1\n", encoding="utf-8"
+            "onset\tduration\ttrial_type\n0\t0\tCueA\n1\t0\tCueB\n",
+            encoding="utf-8",
         )
         self.assertEqual(p._detect_conditions_from_bids(), ["CueA", "CueB"])
 
@@ -2265,9 +2477,6 @@ class TestPreprocessingStepSelection(_PreprocessingImportMixin, unittest.TestCas
         steps = p._get_steps_for_run("full", task_is_rest=False)
 
         self.assertNotIn("ica-cardiac-qc", steps)
-
-
-
 
     def test_per_run_policy_fails_before_any_recording_is_opened(self):
         """The mismatch is visible in channels.tsv, so it must not wait for filtering."""
@@ -2317,6 +2526,33 @@ class TestPreprocessingStepSelection(_PreprocessingImportMixin, unittest.TestCas
                 + f"C3\teeg\tbad\nC4\teeg\tgood\nECG\tecg\t{'bad' if run == 1 else 'good'}\n",
                 encoding="utf-8",
             )
+
+        self.assertEqual(p._get_steps_for_run("ica", False, ["0001"], "pain"), ["ica-fit"])
+
+    def test_per_run_policy_compares_bad_channels_within_each_session(self):
+        """Session-specific ICAs do not require bad-channel agreement across sessions."""
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {"brainvision_analyzer": {"enabled": False}},
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+            }
+        )
+        p.bids_root = Path(tempfile.mkdtemp())
+        header = "name\ttype\tstatus\n"
+        for session, bad_channel in (("01", "C3"), ("02", "C4")):
+            eeg_dir = p.bids_root / "sub-0001" / f"ses-{session}" / "eeg"
+            eeg_dir.mkdir(parents=True)
+            for run in (1, 2):
+                (eeg_dir / f"sub-0001_ses-{session}_task-pain_run-{run}_channels.tsv").write_text(
+                    header
+                    + f"C3\teeg\t{'bad' if bad_channel == 'C3' else 'good'}\n"
+                    + f"C4\teeg\t{'bad' if bad_channel == 'C4' else 'good'}\n",
+                    encoding="utf-8",
+                )
 
         self.assertEqual(p._get_steps_for_run("ica", False, ["0001"], "pain"), ["ica-fit"])
 

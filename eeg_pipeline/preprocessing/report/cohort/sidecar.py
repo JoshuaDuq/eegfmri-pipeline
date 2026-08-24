@@ -81,12 +81,12 @@ RUN_COLUMNS = (
 )
 
 
-#: The across-channel median and the worst channel, per run and stage.
+#: The across-channel median and frequency-wise maximum envelope, per run and stage.
 #:
 #: The spread quantiles the subject panel draws are a within-participant quantity that no
 #: cohort panel pools, and a required column nothing reads is dead weight in a contract.
-#: The worst channel is kept because interference is often focal: a montage median can sit
-#: near zero while individual sensors are unusable.
+#: The envelope is kept because interference is often focal: a montage median can sit
+#: near zero while an individual sensor dominates a frequency bin.
 SPECTRUM_COLUMNS = ("run", "stage", "freq_hz", "median_db", "max_db")
 #: One row per EEG channel: where it sat on the head, and how many runs it was bad in.
 #:
@@ -119,8 +119,6 @@ COMB_COLUMNS = (
 #: merely underpowering it -- which a total-epoch count cannot show. Written only for a task
 #: acquisition, since a resting-state recording has no conditions to count.
 CONDITION_COLUMNS = ("condition", "n_total", "n_kept")
-
-
 
 
 class Paradigm(Enum):
@@ -251,8 +249,6 @@ def has_sidecar(report_path: Path | str) -> bool:
     return all(path.is_file() for path in sidecar_paths(report_path).required)
 
 
-
-
 def _require_columns(
     frame: pd.DataFrame,
     columns: tuple[str, ...],
@@ -284,8 +280,6 @@ def _resolved_value(value: Any, *, column: str) -> bool | None:
     if text in {"false", "0", "0.0"}:
         return False
     raise ValueError(f"The run table has an invalid boolean in {column}: {value!r}.")
-
-
 
 
 def _read_table(

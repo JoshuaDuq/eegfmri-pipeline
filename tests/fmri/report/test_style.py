@@ -120,8 +120,8 @@ def test_pipeline_decisions_get_a_neutral_ramp_not_a_hue() -> None:
 
 
 def test_embedded_figures_are_lighter_than_print_figures() -> None:
-    """300 dpi at a 1180 px layout width embeds resolution no reader sees."""
-    assert style.HTML_FIGURE_DPI == 150
+    """Dense HTML maps are sharp without paying manuscript-raster file sizes."""
+    assert style.HTML_FIGURE_DPI == 200
     assert style.PRINT_FIGURE_DPI == 300
     assert style.FMRI_RC["savefig.dpi"] == style.HTML_FIGURE_DPI
 

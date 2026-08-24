@@ -57,8 +57,9 @@ func (m Model) buildFmriAdvancedArgs() []string {
 	if m.fmriSkipReconstruction {
 		ab.args = append(ab.args, "--fs-no-reconall")
 	}
-	if m.fmriLongitudinal {
-		ab.args = append(ab.args, "--longitudinal")
+	subjectReferenceOptions := []string{"first-lex", "unbiased", "sessionwise"}
+	if m.fmriSubjectAnatomicalReferenceIndex != 0 {
+		ab.args = append(ab.args, "--subject-anatomical-reference", subjectReferenceOptions[m.fmriSubjectAnatomicalReferenceIndex%len(subjectReferenceOptions)])
 	}
 	if strings.TrimSpace(m.fmriSkullStripTemplate) != "" && m.fmriSkullStripTemplate != "OASIS30ANTs" {
 		ab.args = append(ab.args, "--skull-strip-template", m.fmriSkullStripTemplate)
@@ -68,12 +69,12 @@ func (m Model) buildFmriAdvancedArgs() []string {
 	}
 
 	// BOLD processing
-	bold2t1wInitOptions := []string{"register", "header"}
-	if m.fmriBold2T1wInitIndex == 1 {
-		ab.args = append(ab.args, "--bold2t1w-init", bold2t1wInitOptions[1])
+	bold2anatInitOptions := []string{"t1w", "auto", "t2w", "header"}
+	if m.fmriBold2AnatInitIndex != 0 {
+		ab.args = append(ab.args, "--bold2anat-init", bold2anatInitOptions[m.fmriBold2AnatInitIndex%len(bold2anatInitOptions)])
 	}
-	if m.fmriBold2T1wDof != 6 {
-		ab.args = append(ab.args, "--bold2t1w-dof", fmt.Sprintf("%d", m.fmriBold2T1wDof))
+	if m.fmriBold2AnatDof != 6 {
+		ab.args = append(ab.args, "--bold2anat-dof", fmt.Sprintf("%d", m.fmriBold2AnatDof))
 	}
 	if m.fmriSliceTimeRef != 0.5 {
 		ab.args = append(ab.args, "--slice-time-ref", fmt.Sprintf("%.2f", m.fmriSliceTimeRef))
@@ -88,11 +89,6 @@ func (m Model) buildFmriAdvancedArgs() []string {
 	}
 	if m.fmriDvarsSpikeThreshold != 1.5 {
 		ab.args = append(ab.args, "--dvars-spike-threshold", fmt.Sprintf("%.2f", m.fmriDvarsSpikeThreshold))
-	}
-
-	// Denoising
-	if m.fmriUseAroma {
-		ab.args = append(ab.args, "--use-aroma")
 	}
 
 	// Surface
@@ -410,102 +406,13 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 
 		return ab.build()
 	}
-
-	// Plotting / Report (CLI defaults are off)
-	if isFirstLevel && m.fmriAnalysisPlotsEnabled {
-		ab.args = append(ab.args, "--plots")
-
-		if m.fmriAnalysisPlotHTML {
-			ab.args = append(ab.args, "--plot-html-report")
+	if isFirstLevel {
+		if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
+			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
 		}
-
-		plotSpaceOptions := []string{"both", "native", "mni"}
-		ab.args = append(ab.args, "--plot-space", plotSpaceOptions[m.fmriAnalysisPlotSpaceIndex%len(plotSpaceOptions)])
-
-		thresholdModeOptions := []string{"z", "fdr", "none"}
-		ab.args = append(ab.args, "--plot-threshold-mode", thresholdModeOptions[m.fmriAnalysisPlotThresholdModeIndex%len(thresholdModeOptions)])
-
-		ab.args = append(ab.args, "--plot-z-threshold", fmt.Sprintf("%.2f", m.fmriAnalysisPlotZThreshold))
-		if m.fmriAnalysisPlotThresholdModeIndex%3 == 1 { // fdr
-			ab.args = append(ab.args, "--plot-fdr-q", fmt.Sprintf("%.3f", m.fmriAnalysisPlotFdrQ))
-		}
-		if m.fmriAnalysisPlotClusterMinVoxels > 0 {
-			ab.args = append(ab.args, "--plot-cluster-min-voxels", fmt.Sprintf("%d", m.fmriAnalysisPlotClusterMinVoxels))
-		}
-
-		vmaxModeOptions := []string{"per-space-robust", "shared-robust", "manual"}
-		ab.args = append(ab.args, "--plot-vmax-mode", vmaxModeOptions[m.fmriAnalysisPlotVmaxModeIndex%len(vmaxModeOptions)])
-		if m.fmriAnalysisPlotVmaxModeIndex%3 == 2 { // manual
-			ab.args = append(ab.args, "--plot-vmax", fmt.Sprintf("%.2f", m.fmriAnalysisPlotVmaxManual))
-		}
-
-		if !m.fmriAnalysisPlotIncludeUnthresholded {
-			ab.args = append(ab.args, "--no-plot-include-unthresholded")
-		}
-
-		if !m.fmriAnalysisPlotEffectSize {
-			ab.args = append(ab.args, "--plot-no-effect-size")
-		}
-		if !m.fmriAnalysisPlotStandardError {
-			ab.args = append(ab.args, "--plot-no-standard-error")
-		}
-		if !m.fmriAnalysisPlotMotionQC {
-			ab.args = append(ab.args, "--plot-no-motion-qc")
-		}
-		if !m.fmriAnalysisPlotCarpetQC {
-			ab.args = append(ab.args, "--plot-no-carpet-qc")
-		}
-		if !m.fmriAnalysisPlotTSNRQC {
-			ab.args = append(ab.args, "--plot-no-tsnr-qc")
-		}
-		if !m.fmriAnalysisPlotDesignQC {
-			ab.args = append(ab.args, "--plot-no-design-qc")
-		}
-		if !m.fmriAnalysisPlotEmbedImages {
-			ab.args = append(ab.args, "--plot-no-embed-images")
-		}
-		if !m.fmriAnalysisPlotSignatures {
-			ab.args = append(ab.args, "--plot-no-signatures")
-		} else {
-			if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
-				ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
-			}
-			if strings.TrimSpace(m.fmriAnalysisSignatureMaps) != "" {
-				ab.args = append(ab.args, "--signature-maps")
-				ab.args = append(ab.args, strings.Fields(strings.TrimSpace(m.fmriAnalysisSignatureMaps))...)
-			}
-		}
-
-		// Formats: require at least one
-		var formats []string
-		if m.fmriAnalysisPlotFormatPNG {
-			formats = append(formats, "png")
-		}
-		if m.fmriAnalysisPlotFormatSVG {
-			formats = append(formats, "svg")
-		}
-		if len(formats) > 0 {
-			ab.args = append(ab.args, "--plot-formats")
-			ab.args = append(ab.args, formats...)
-		}
-
-		// Plot types: require at least one
-		var plotTypes []string
-		if m.fmriAnalysisPlotTypeSlices {
-			plotTypes = append(plotTypes, "slices")
-		}
-		if m.fmriAnalysisPlotTypeGlass {
-			plotTypes = append(plotTypes, "glass")
-		}
-		if m.fmriAnalysisPlotTypeHist {
-			plotTypes = append(plotTypes, "hist")
-		}
-		if m.fmriAnalysisPlotTypeClusters {
-			plotTypes = append(plotTypes, "clusters")
-		}
-		if len(plotTypes) > 0 {
-			ab.args = append(ab.args, "--plot-types")
-			ab.args = append(ab.args, plotTypes...)
+		if strings.TrimSpace(m.fmriAnalysisSignatureMaps) != "" {
+			ab.args = append(ab.args, "--signature-maps")
+			ab.args = append(ab.args, strings.Fields(strings.TrimSpace(m.fmriAnalysisSignatureMaps))...)
 		}
 	}
 

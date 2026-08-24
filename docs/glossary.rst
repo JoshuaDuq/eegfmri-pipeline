@@ -96,8 +96,9 @@ Glossary
 
    confound strategy
       A named preset for selecting nuisance regressors from fMRIPrep's
-      ``*_confounds_timeseries.tsv``. ``"auto"`` selects motion parameters,
-      WM/CSF signals, and scrubbing spikes automatically.
+      ``*_confounds_timeseries.tsv``. The default is the fixed
+      ``"motion24+wmcsf+fd+compcor"`` model. ``"auto"`` is an explicit,
+      derivative-adaptive option rather than the default.
 
    fMRIPrep
       A robust and reproducible fMRI preprocessing pipeline based on

@@ -29,6 +29,23 @@ class _Config:
 
 
 NEW_KEYS = (
+    "project.random_state",
+    "preprocessing.line_freq",
+    "paths.decomb_manifest",
+    "pyprep.detection_low_pass",
+    "pyprep.ransac",
+    "pyprep.repeats",
+    "pyprep.consider_previous_bads",
+    "ica.reject",
+    "ica.h_freq",
+    "ica.use_ecg_detection",
+    "ica.ecg_threshold",
+    "ica.use_eog_detection",
+    "ica.require_manual_review",
+    "ica.manual_review_complete",
+    "ica.cardiac_review.promote_exclusions",
+    "ica.cardiac_review.promotion_minimum_run_fraction",
+    "ica.ocular_review.eog_channels",
     "report.analysis.aperiodic_exclude_hz",
     "report.analysis.alpha_reference_band_hz",
     "report.acquisition.non_event_prefixes",
@@ -58,6 +75,34 @@ def test_a_setting_the_dataset_never_configured_is_omitted_rather_than_listed() 
     """An EEG-only dataset gains no rows about a scanner it was not in."""
     html = provenance_html(_Config({"report.thresholds.plausible_heart_rate_bpm": [30, 220]}))
     assert "bcg_residual_window_s" not in html
+
+
+def test_manual_review_status_is_stated_as_a_configuration_claim() -> None:
+    html = provenance_html(
+        _Config(
+            {
+                "ica.require_manual_review": True,
+                "ica.manual_review_complete": True,
+            }
+        )
+    )
+
+    assert "marked complete" in html
+    assert "configuration assertion" in html
+
+
+def test_pending_manual_review_is_named_as_blocking_epoch_creation() -> None:
+    html = provenance_html(
+        _Config(
+            {
+                "ica.require_manual_review": True,
+                "ica.manual_review_complete": False,
+            }
+        )
+    )
+
+    assert "pending" in html
+    assert "epoch creation is blocked" in html
 
 
 COMPARED_NEW_KEYS = (
@@ -137,9 +182,7 @@ def test_aperiodic_exclude_hz_agreement_is_not_reported_as_a_disagreement() -> N
     from eeg_pipeline.preprocessing.report.cohort.homogeneity import _disagreements
 
     shared = {"aperiodic_exclude_hz": [[20.0, 25.0], [58.0, 62.0]]}
-    found = _disagreements(
-        {"0001": dict(shared), "0002": dict(shared)}, ("aperiodic_exclude_hz",)
-    )
+    found = _disagreements({"0001": dict(shared), "0002": dict(shared)}, ("aperiodic_exclude_hz",))
     assert found == {}
 
 

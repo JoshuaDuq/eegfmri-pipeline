@@ -16,7 +16,7 @@ Nothing here is graded. Reference values, the reasoning about what a number mean
 the caveats that come with it stay in the owning section, where there is room to state
 them properly. A landing panel that said "variance removed: 93.9% ⚠" would be asserting
 something this pipeline deliberately refuses to assert, because a high value is ordinary
-ordinary for one acquisition and alarming for another, and the panel does not know which
+for one acquisition and alarming for another, and the panel does not know which it is
 looking at.
 """
 
@@ -100,6 +100,18 @@ HEADLINES: tuple[Headline, ...] = (
     Headline("n_runs", "Runs", _count, "Data quality over time"),
     Headline("n_channels", "EEG channels", _count, "Channel and region coverage"),
     Headline("n_bad_channels", "Bad channels", _count, "Channel and region coverage"),
+    Headline(
+        "n_bridged_pairs",
+        "Unique candidate bridged pairs",
+        _count,
+        "Electrode bridging",
+    ),
+    Headline(
+        "max_muscle_artifact_fraction",
+        "Highest candidate muscle fraction",
+        _percentage,
+        "Muscle artifact screening",
+    ),
     Headline("n_components", "ICA components fitted", _count, "ICA decomposition quality"),
     Headline("n_excluded", "Components excluded", _count, "ICA decomposition quality"),
     Headline("retained_dimensions", "Dimensions left", _count, "ICA decomposition quality"),
@@ -223,13 +235,8 @@ def at_a_glance_html(record: Mapping[str, Any]) -> str:
         Column("Section", align=Align.TEXT),
     )
     return (
-        "<p>Each measurement below was made by the section named beside it. What a value "
-        "means &mdash; the reference figures, the caveats, and what would explain an "
-        "unusual one &mdash; is stated in that section.</p>"
-        + grid_table(columns, rows)
-        + "<p>A measurement no stage recorded has no row: a dataset recorded outside a "
-        "beat-marker train has no marker agreement, and a resting-state recording has no trial "
-        "retention.</p>"
+        "<p>Each value comes from the named evidence section; absent measurements are "
+        "omitted.</p>" + grid_table(columns, rows)
     )
 
 

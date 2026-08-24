@@ -179,7 +179,7 @@ Default Directory Layout
        ├── freesurfer/             # FreeSurfer reconstructions
        ├── group/
        │   └── fmri/
-       │       └── second_level/   # Group GLM inference maps
+       │       └── second_level/   # Group GLM maps, manifests, and cohort HTML reports
        └── sub-XXXX/
            ├── eeg/
            │   ├── sub-XXXX_task-*_proc-clean_epo.fif

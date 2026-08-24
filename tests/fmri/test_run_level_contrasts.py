@@ -16,7 +16,6 @@ import pytest
 
 from fmri_pipeline.analysis import run_level
 
-
 SHAPE = (8, 8, 8)
 N_FRAMES = 60
 TR = 2.0
@@ -39,9 +38,7 @@ def _fit(active_runs, n_runs=4, seed=0):
                 frame = int(onset / TR)
                 data[2:5, 2:5, 2:5, frame : frame + 3] += 8.0
         bolds.append(nib.Nifti1Image(data, np.eye(4)))
-        events.append(
-            pd.DataFrame({"onset": ONSETS, "duration": 4.0, "trial_type": "task"})
-        )
+        events.append(pd.DataFrame({"onset": ONSETS, "duration": 4.0, "trial_type": "task"}))
 
     model = FirstLevelModel(
         t_r=TR,
@@ -103,9 +100,7 @@ def test_the_combined_estimate_lies_among_the_run_estimates(split_model) -> None
     per_run = np.asarray(result.effect.get_fdata())[ACTIVE]
     combined = float(
         np.asarray(
-            split_model.compute_contrast(
-                ["task"] * 4, output_type="effect_size"
-            ).get_fdata()
+            split_model.compute_contrast(["task"] * 4, output_type="effect_size").get_fdata()
         )[ACTIVE]
     )
     assert per_run.min() <= combined <= per_run.max()
@@ -174,9 +169,7 @@ def test_the_written_maps_carry_the_run_axis_last(split_model, tmp_path) -> None
         result, out_dir=tmp_path, stem="s", cfg_hash="h"
     )
     written = np.asarray(nib.load(str(effect_path)).get_fdata())
-    np.testing.assert_allclose(
-        written, np.asarray(result.effect.get_fdata()), rtol=1e-5
-    )
+    np.testing.assert_allclose(written, np.asarray(result.effect.get_fdata()), rtol=1e-5)
 
 
 # --- the pipeline seam -----------------------------------------------------
@@ -219,9 +212,7 @@ def test_the_pipeline_writes_named_run_level_maps(split_model, tmp_path) -> None
     assert list(influence["dropped_run"]) == ["run-01", "run-02", "run-03", "run-04"]
 
 
-def test_the_pipeline_writes_the_sign_flip_null_and_run_influence(
-    split_model, tmp_path
-) -> None:
+def test_the_pipeline_writes_the_sign_flip_null_and_run_influence(split_model, tmp_path) -> None:
     """Both diagnostics ride along with the per-run maps, from the same fitted model."""
     import logging
 
@@ -258,7 +249,7 @@ def test_the_pipeline_writes_the_sign_flip_null_and_run_influence(
     assert len(pd.read_csv(fields["sign_flip_null_tsv"], sep="\t")) == 8
 
 
-def test_a_pipeline_without_a_fitted_model_writes_nothing(tmp_path) -> None:
+def test_a_pipeline_without_a_fitted_model_surfaces(tmp_path) -> None:
     import logging
 
     from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -269,7 +260,7 @@ def test_a_pipeline_without_a_fitted_model_writes_nothing(tmp_path) -> None:
     class _GlmResult:
         flm = None
 
-    assert (
+    with pytest.raises(ValueError, match="without the fitted model"):
         FmriAnalysisPipeline._run_level_maps(
             _Stub(),
             glm_result=_GlmResult(),
@@ -279,5 +270,3 @@ def test_a_pipeline_without_a_fitted_model_writes_nothing(tmp_path) -> None:
             stem="s",
             cfg_hash="h",
         )
-        == {}
-    )

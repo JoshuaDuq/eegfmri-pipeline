@@ -46,7 +46,7 @@ class _Ica:
 def _run_review(
     *,
     heart_rate_bpm: np.ndarray | None = None,
-    average_pulse_bpm: float = 60.0,
+    detected_beats_per_recording_minute: float = 60.0,
     beat_source: str = "ecg-channel",
 ) -> RunCardiacReview:
     times = np.arange(0.0, 10.0, 1.0 / SFREQ)
@@ -68,7 +68,7 @@ def _run_review(
         before_gfp_uv=np.ones_like(locked) * 2.0,
         after_gfp_uv=np.ones_like(locked),
         r_locked_epoch_count=int(peak_times.size),
-        average_pulse_bpm=average_pulse_bpm,
+        detected_beats_per_recording_minute=detected_beats_per_recording_minute,
         events=np.zeros((peak_times.size, 3), dtype=int),
         before_topography_uv=np.linspace(-2.0, 2.0, len(CHANNELS)),
         after_topography_uv=np.linspace(-1.0, 1.0, len(CHANNELS)),
@@ -161,7 +161,11 @@ def test_the_two_rates_are_labelled_by_what_each_one_measures() -> None:
     rate = np.full(300, 68.0)
 
     figure = _plot_run_cardiac_review(
-        _run_review(heart_rate_bpm=rate, average_pulse_bpm=57.1), ica=_Ica()
+        _run_review(
+            heart_rate_bpm=rate,
+            detected_beats_per_recording_minute=57.1,
+        ),
+        ica=_Ica(),
     )
 
     suptitle = figure.get_suptitle()
@@ -177,14 +181,22 @@ def test_the_ratio_between_the_two_rates_is_stated_on_the_panel() -> None:
     quantity. It is a measurement and is shown unconditionally: gating it on a threshold
     would make the figure assert a verdict about the detector instead of reporting."""
     figure = _plot_run_cardiac_review(
-        _run_review(heart_rate_bpm=np.full(300, 68.0), average_pulse_bpm=57.1), ica=_Ica()
+        _run_review(
+            heart_rate_bpm=np.full(300, 68.0),
+            detected_beats_per_recording_minute=57.1,
+        ),
+        ica=_Ica(),
     )
 
     annotations = " ".join(text.get_text() for text in _heart_rate_axis(figure).texts)
     assert "84%" in annotations
 
     agreeing = _plot_run_cardiac_review(
-        _run_review(heart_rate_bpm=np.full(300, 60.0), average_pulse_bpm=60.0), ica=_Ica()
+        _run_review(
+            heart_rate_bpm=np.full(300, 60.0),
+            detected_beats_per_recording_minute=60.0,
+        ),
+        ica=_Ica(),
     )
     assert "100%" in " ".join(text.get_text() for text in _heart_rate_axis(agreeing).texts)
 
@@ -192,7 +204,11 @@ def test_the_ratio_between_the_two_rates_is_stated_on_the_panel() -> None:
 def test_the_panel_draws_no_verdict_about_the_detector() -> None:
     """A ratio below one has several causes and the figure cannot tell them apart."""
     figure = _plot_run_cardiac_review(
-        _run_review(heart_rate_bpm=np.full(300, 68.0), average_pulse_bpm=40.0), ica=_Ica()
+        _run_review(
+            heart_rate_bpm=np.full(300, 68.0),
+            detected_beats_per_recording_minute=40.0,
+        ),
+        ica=_Ica(),
     )
 
     text = " ".join(
@@ -459,7 +475,7 @@ def test_the_screening_panel_uses_a_log_axis_and_shows_every_run() -> None:
     labels = " | ".join(text.get_text() for text in axis.get_legend().get_texts())
     assert "individual runs" in labels
     assert "median across runs" in labels
-    assert "drew their line" in labels
+    assert "drew their line" not in labels
     plt.close(figure)
 
 
@@ -472,9 +488,7 @@ def test_the_screening_axis_survives_a_score_at_zero() -> None:
 
     from eeg_pipeline.preprocessing.ica_cardiac_report import _plot_component_cardiac_scores
 
-    figure = _plot_component_cardiac_scores(
-        _cardiac_review(near_zero=True), excluded=[2]
-    )
+    figure = _plot_component_cardiac_scores(_cardiac_review(near_zero=True), excluded=[2])
 
     low, high = figure.axes[0].get_ylim()
     assert np.log10(high / low) < 4.0
@@ -486,14 +500,9 @@ def test_the_screening_panel_draws_no_threshold_band_when_nothing_was_flagged() 
     threshold on the figure that no decision supports."""
     import matplotlib.pyplot as plt
 
-    from eeg_pipeline.preprocessing.ica_cardiac_report import (
-        _cardiac_threshold_band,
-        _plot_component_cardiac_scores,
-    )
+    from eeg_pipeline.preprocessing.ica_cardiac_report import _plot_component_cardiac_scores
 
     review = _cardiac_review(lift_at=())
-    assert _cardiac_threshold_band(review) is None
-
     figure = _plot_component_cardiac_scores(review, excluded=[])
     labels = [text.get_text() for text in figure.axes[0].get_legend().get_texts()]
     assert not any("drew their line" in label for label in labels)

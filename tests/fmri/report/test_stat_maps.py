@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import warnings
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
+import pandas as pd
 import pytest
 
 from fmri_pipeline.analysis.report.figures import stat_maps
@@ -463,3 +465,93 @@ def test_a_peak_label_count_mismatch_is_rejected() -> None:
             peak_coords=[(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)],
             peak_labels=["1"],
         )
+
+
+def _fsaverage_is_cached() -> bool:
+    from pathlib import Path
+
+    return (Path.home() / "nilearn_data" / "fsaverage" / "infl_left.gii.gz").is_file()
+
+
+@pytest.mark.skipif(not _fsaverage_is_cached(), reason="fsaverage mesh is not cached")
+def test_surface_projection_names_the_mesh_and_the_cortex_it_omits() -> None:
+    """The panel is a projection, not the volume, and it drops everything but cortex.
+
+    Nilearn samples between the white and pial surfaces, so cerebellum, brainstem and
+    subcortex are absent by construction rather than by threshold. A reader comparing
+    this against the mosaic beside it has to be told that, inside the figure, because
+    a figure travels away from its caption.
+    """
+    figure = stat_maps.surface_projection(
+        _noise_img(), threshold=1.5, mesh="fsaverage", title="Cortical surface"
+    )
+    try:
+        provenance = " ".join(text.get_text() for text in figure.texts)
+        assert "fsaverage" in provenance
+        assert "cortical surface projection" in provenance
+        assert "cerebellum" in provenance
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.skipif(not _fsaverage_is_cached(), reason="fsaverage mesh is not cached")
+def test_surface_projection_formats_a_non_integer_colourbar() -> None:
+    """Nilearn's cbar_tick_format defaults to '%i'.
+
+    Left alone it renders a z scale of 1.5 to 4.5 as a column of identical integers and
+    warns while doing it, which is the colourbar saying nothing at all.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        figure = stat_maps.surface_projection(_noise_img(), threshold=1.5, mesh="fsaverage")
+    try:
+        assert not [w for w in caught if "integer formatting" in str(w.message)]
+    finally:
+        plt.close(figure)
+
+
+def test_a_thresholded_panel_counts_what_it_drew_not_just_what_it_masked() -> None:
+    """`n = 85,326 voxels` beside `|z| > 2.93` reads as 85,326 voxels above 2.93.
+
+    It was the mask size; 5,882 voxels actually survived. The two clauses sat adjacent in
+    one strip with nothing marking them apart, and the panel was read that way -- by me,
+    repeatedly -- so the count has to name what it counts.
+    """
+    values = np.concatenate([np.zeros(900), np.full(100, 5.0)])
+
+    lines = stat_maps._provenance(values, threshold=3.0, limit=6.0, two_sided=True)
+    strip = " · ".join(lines)
+
+    assert "100 of 1,000" in strip
+    assert "n = 1,000 voxels" not in strip
+
+
+def test_an_unthresholded_panel_still_reports_a_plain_voxel_count() -> None:
+    lines = stat_maps._provenance(np.ones(1000), threshold=None, limit=2.0, two_sided=True)
+
+    assert "n = 1,000 voxels" in " · ".join(lines)
+
+
+def test_residual_panel_states_the_bound_its_own_tails_cannot_cross() -> None:
+    """Standardised residuals are bounded by sqrt(n - rank), which is small here.
+
+    All the residual can sit on one observation at most, giving |e| = sqrt(SSE) against
+    sqrt(SSE / (n - rank)). At 13 participants and one column that ceiling is 3.46, so
+    the tails are cut off by arithmetic and cannot look normal whatever the data does.
+    Comparing them to the drawn normal without knowing that reads as a finding.
+    """
+    from fmri_pipeline.analysis.report.figures import residuals as residual_figures
+
+    rng = np.random.default_rng(0)
+    normalized = rng.standard_normal((13, 400))
+    per_subject = pd.DataFrame(
+        {"subject": [f"sub-{i:04d}" for i in range(13)], "residual RMS": rng.random(13)}
+    )
+
+    figure = residual_figures.residual_figure(normalized, per_subject, r_square=0.0, rank=1)
+    try:
+        provenance = " ".join(text.get_text() for text in figure.texts)
+        assert "3.46" in provenance
+        assert "bounded" in provenance
+    finally:
+        plt.close(figure)

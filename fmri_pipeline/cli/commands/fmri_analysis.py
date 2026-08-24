@@ -14,8 +14,12 @@ from eeg_pipeline.cli.common import (
     create_progress_reporter,
     resolve_task,
 )
-from eeg_pipeline.utils.config.roots import resolve_fmri_bids_root
+from eeg_pipeline.utils.config.roots import (
+    resolve_fmri_bids_root,
+    resolve_fmri_deriv_root,
+)
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
+from fmri_pipeline.analysis.confounds_selection import DEFAULT_CONFOUNDS_STRATEGY
 from fmri_pipeline.cli.commands.subject_selection import resolve_subjects
 from fmri_pipeline.utils.config import apply_fmri_config_defaults
 
@@ -112,6 +116,17 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         choices=["t-test", "custom"],
         default=None,
         help="Contrast type (default from config if set)",
+    )
+    contrast_group.add_argument(
+        "--parametric-column",
+        type=str,
+        default=None,
+        help=(
+            "Numeric events column to model as a parametric modulator of the scoped "
+            "trials (e.g. stimulus_temp). Fits a response regressor plus a run-centred "
+            "modulator and contrasts the modulator, so every scoped trial contributes "
+            "instead of only two levels. Not combinable with --cond-a-value."
+        ),
     )
     contrast_group.add_argument(
         "--cond-a-column",
@@ -258,7 +273,11 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
             "motion24+wmcsf+fd+compcor",
         ],
         default=None,
-        help="Which confound regressors to include (default: auto; explicit compcor strategy fails if required components are missing)",
+        help=(
+            "Which confound regressors to include (default: "
+            "motion24+wmcsf+fd+compcor; fixed strategies fail when required "
+            "columns are missing)"
+        ),
     )
     qc_group.add_argument(
         "--write-design-matrix",
@@ -349,216 +368,15 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="FreeSurfer SUBJECTS_DIR (overrides paths.freesurfer_dir)",
     )
 
-    plot_group = parser.add_argument_group("Plotting / Report")
-    plot_group.add_argument(
-        "--plots",
-        dest="plots",
-        action="store_true",
-        default=None,
-        help="Generate per-subject figures under <contrast>/plots/",
-    )
-    plot_group.add_argument(
-        "--no-plots",
-        dest="plots",
-        action="store_false",
-        help="Do not generate per-subject figures",
-    )
-    plot_group.add_argument(
-        "--plot-html-report",
-        dest="plot_html_report",
-        action="store_true",
-        default=None,
-        help="Write <contrast>/report.html embedding generated figures",
-    )
-    plot_group.add_argument(
-        "--no-plot-html-report",
-        dest="plot_html_report",
-        action="store_false",
-        help="Do not write HTML report",
-    )
-    plot_group.add_argument(
-        "--plot-formats",
-        nargs="+",
-        choices=["png", "svg"],
-        default=None,
-        metavar="FMT",
-        help="Figure formats to write (default: png)",
-    )
-    plot_group.add_argument(
-        "--plot-space",
-        choices=["native", "mni", "both"],
-        default=None,
-        help="Which space(s) to plot in (default: both)",
-    )
-    plot_group.add_argument(
-        "--plot-z-threshold",
-        type=float,
-        default=None,
-        help="Z threshold for thresholded overlays (default: 2.3)",
-    )
-    plot_group.add_argument(
-        "--plot-threshold-mode",
-        choices=["z", "fdr", "none"],
-        default=None,
-        help="Thresholding mode for overlays/cluster table (default: z)",
-    )
-    plot_group.add_argument(
-        "--plot-fdr-q",
-        type=float,
-        default=None,
-        help="FDR q-value for threshold-mode=fdr (default: 0.05)",
-    )
-    plot_group.add_argument(
-        "--plot-cluster-min-voxels",
-        type=int,
-        default=None,
-        help="Minimum cluster size (voxels) for displaying clusters (default: 0 = disabled)",
-    )
-    plot_group.add_argument(
-        "--plot-vmax-mode",
-        choices=["per-space-robust", "shared-robust", "manual"],
-        default=None,
-        help="Color scaling mode (default: per-space-robust)",
-    )
-    plot_group.add_argument(
-        "--plot-vmax",
-        type=float,
-        default=None,
-        help="Manual vmax (required if plot-vmax-mode=manual)",
-    )
-    plot_group.add_argument(
-        "--plot-include-unthresholded",
-        dest="plot_include_unthresholded",
-        action="store_true",
-        default=None,
-        help="Also generate unthresholded panels (default: enabled)",
-    )
-    plot_group.add_argument(
-        "--no-plot-include-unthresholded",
-        dest="plot_include_unthresholded",
-        action="store_false",
-        help="Disable unthresholded panels",
-    )
-    plot_group.add_argument(
-        "--plot-types",
-        nargs="+",
-        choices=["slices", "glass", "hist", "clusters"],
-        default=None,
-        metavar="PLOT",
-        help="Which plot types to generate (default: slices glass hist clusters)",
-    )
-    plot_group.add_argument(
-        "--plot-no-effect-size",
-        dest="plot_effect_size",
-        action="store_false",
-        default=None,
-        help="Do not generate effect-size (beta/cope) panels",
-    )
-    plot_group.add_argument(
-        "--plot-effect-size",
-        dest="plot_effect_size",
-        action="store_true",
-        help="Generate effect-size (beta/cope) panels",
-    )
-    plot_group.add_argument(
-        "--plot-no-standard-error",
-        dest="plot_standard_error",
-        action="store_false",
-        default=None,
-        help="Do not generate standard-error panels (from variance)",
-    )
-    plot_group.add_argument(
-        "--plot-standard-error",
-        dest="plot_standard_error",
-        action="store_true",
-        help="Generate standard-error panels (from variance)",
-    )
-    plot_group.add_argument(
-        "--plot-no-motion-qc",
-        dest="plot_motion_qc",
-        action="store_false",
-        default=None,
-        help="Disable motion QC panels (FD/DVARS)",
-    )
-    plot_group.add_argument(
-        "--plot-motion-qc",
-        dest="plot_motion_qc",
-        action="store_true",
-        help="Enable motion QC panels (FD/DVARS)",
-    )
-    plot_group.add_argument(
-        "--plot-no-carpet-qc",
-        dest="plot_carpet_qc",
-        action="store_false",
-        default=None,
-        help="Disable carpet plot QC panels",
-    )
-    plot_group.add_argument(
-        "--plot-carpet-qc",
-        dest="plot_carpet_qc",
-        action="store_true",
-        help="Enable carpet plot QC panels",
-    )
-    plot_group.add_argument(
-        "--plot-no-tsnr-qc",
-        dest="plot_tsnr_qc",
-        action="store_false",
-        default=None,
-        help="Disable tSNR QC summary",
-    )
-    plot_group.add_argument(
-        "--plot-tsnr-qc",
-        dest="plot_tsnr_qc",
-        action="store_true",
-        help="Enable tSNR QC summary",
-    )
-    plot_group.add_argument(
-        "--plot-no-design-qc",
-        dest="plot_design_qc",
-        action="store_false",
-        default=None,
-        help="Disable design-matrix sanity summaries",
-    )
-    plot_group.add_argument(
-        "--plot-design-qc",
-        dest="plot_design_qc",
-        action="store_true",
-        help="Enable design-matrix sanity summaries",
-    )
-    plot_group.add_argument(
-        "--plot-no-embed-images",
-        dest="plot_embed_images",
-        action="store_false",
-        default=None,
-        help="Do not embed images in HTML (use relative file paths)",
-    )
-    plot_group.add_argument(
-        "--plot-embed-images",
-        dest="plot_embed_images",
-        action="store_true",
-        help="Embed images in HTML",
-    )
-    plot_group.add_argument(
-        "--plot-no-signatures",
-        dest="plot_signatures",
-        action="store_false",
-        default=None,
-        help="Disable multivariate signature readouts",
-    )
-    plot_group.add_argument(
-        "--plot-signatures",
-        dest="plot_signatures",
-        action="store_true",
-        help="Enable multivariate signature readouts",
-    )
-    plot_group.add_argument(
+    signature_group = parser.add_argument_group("Multivariate signatures")
+    signature_group.add_argument(
         "--signature-dir",
         type=str,
         default=None,
         dest="signature_dir",
         help="Root directory for signature weight maps (paths.signature_dir)",
     )
-    plot_group.add_argument(
+    signature_group.add_argument(
         "--signature-maps",
         nargs="+",
         default=None,
@@ -680,6 +498,19 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         dest="group_two_sided",
         action="store_false",
         help="Use one-sided second-level permutation inference.",
+    )
+    group_group.add_argument(
+        "--group-report",
+        dest="group_report",
+        action="store_true",
+        default=None,
+        help="Write the cohort-level HTML report after second-level inference.",
+    )
+    group_group.add_argument(
+        "--no-group-report",
+        dest="group_report",
+        action="store_false",
+        help="Disable the cohort-level HTML report.",
     )
 
     trial_group = parser.add_argument_group("Trial-wise betas / signatures (beta-series, lss)")
@@ -836,8 +667,6 @@ def _map_task_to_fmri(task: str) -> str:
     return task if task else "task"
 
 
-
-
 def _run_report_mode(
     args: argparse.Namespace,
     config: Any,
@@ -853,30 +682,35 @@ def _run_report_mode(
     """
     import logging
 
-    from fmri_pipeline.analysis.plotting_config import FmriReportConfig
+    from fmri_pipeline.analysis.plotting_config import report_config_from_mapping
     from fmri_pipeline.analysis.report.manifest import discover_manifests
     from fmri_pipeline.analysis.report.subject import build_subject_report
 
     logger = logging.getLogger(__name__)
 
-    deriv_root = Path(str(config.get("paths.deriv_root"))).expanduser().resolve()
+    deriv_root = resolve_fmri_deriv_root(config, task_is_rest=False)
     report_root = (
         Path(str(args.report_dir)).expanduser().resolve()
         if getattr(args, "report_dir", None)
         else deriv_root
     )
     if not subjects:
-        raise SystemExit(
-            "No subjects selected; pass --subject, --group, or --all-subjects."
-        )
+        raise SystemExit("No subjects selected; pass --subject, --group, or --all-subjects.")
 
-    cfg = FmriReportConfig(enabled=True, html_report=True)
+    report_section = config.get("fmri_report", {}) or {}
+    if not isinstance(report_section, dict):
+        raise TypeError("fmri_report must be a YAML mapping")
+    cfg = report_config_from_mapping(report_section)
+    cfg.validate()
+    if not cfg.enabled or not cfg.html_report:
+        raise ValueError(
+            "fmri-analysis report requires fmri_report.enabled=true and "
+            "fmri_report.html_report=true"
+        )
     written: List[Path] = []
     for subject in subjects:
         sub_label = subject if str(subject).startswith("sub-") else f"sub-{subject}"
-        manifests = discover_manifests(
-            deriv_root=deriv_root, subject=sub_label, task=task
-        )
+        manifests = discover_manifests(deriv_root=deriv_root, subject=sub_label, task=task)
         if not manifests:
             # No fitted contrast is a state of the derivatives tree, not a fault.
             # Reporting it and continuing keeps one unfitted subject from ending a
@@ -888,9 +722,7 @@ def _run_report_mode(
                 deriv_root,
             )
             continue
-        out_path = (
-            report_root / sub_label / "fmri" / f"{sub_label}_task-{task}_report.html"
-        )
+        out_path = report_root / sub_label / "fmri" / f"{sub_label}_task-{task}_report.html"
         written.append(
             build_subject_report(
                 manifests=manifests,
@@ -964,7 +796,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
 
     rest_task_label = str(config.get("fmri_resting_state.task_label") or "").strip()
     base_task = (
-        rest_task_label if rest_mode_enabled and not getattr(args, "task", None) and rest_task_label else resolve_task(args.task, config)
+        rest_task_label
+        if rest_mode_enabled and not getattr(args, "task", None) and rest_task_label
+        else resolve_task(args.task, config)
     )
     fmri_task = _map_task_to_fmri(base_task)
 
@@ -1055,15 +889,17 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                 _coalesce(
                     args.confounds_strategy,
                     _rest_cfg_value("confounds_strategy"),
-                    "auto",
+                    DEFAULT_CONFOUNDS_STRATEGY,
                 )
             ).strip(),
             auto_compcor_n=int(_coalesce(_rest_cfg_value("auto_compcor_n"), 5)),
             high_pass_hz=_coalesce(args.high_pass_hz, _rest_cfg_value("high_pass_hz"), 0.008),
             low_pass_hz=low_pass_hz,
-            smoothing_fwhm=args.smoothing_fwhm
-            if args.smoothing_fwhm is not None
-            else _rest_cfg_value("smoothing_fwhm"),
+            smoothing_fwhm=(
+                args.smoothing_fwhm
+                if args.smoothing_fwhm is not None
+                else _rest_cfg_value("smoothing_fwhm")
+            ),
             atlas_labels_img=_coalesce(
                 getattr(args, "atlas_labels_img", None),
                 _rest_cfg_value("atlas_labels_img"),
@@ -1106,8 +942,12 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     if mode == "second-level":
         from fmri_pipeline.analysis.second_level import (
             SecondLevelConfig,
-            SecondLevelPermutationConfig,
             load_second_level_config_section,
+            second_level_permutation_config_from_mapping,
+        )
+        from fmri_pipeline.analysis.cohort_config import (
+            cohort_report_config_from_mapping,
+            cohort_threshold_config_from_mapping,
         )
         from fmri_pipeline.pipelines.fmri_second_level import (
             FmriSecondLevelPipeline,
@@ -1127,14 +967,33 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             if value is None:
                 return None
             if isinstance(value, str):
-                items = [
-                    part.strip()
-                    for part in value.replace(",", " ").split()
-                    if part.strip()
-                ]
+                items = [part.strip() for part in value.replace(",", " ").split() if part.strip()]
                 return tuple(items) if items else None
             items = [str(part).strip() for part in value if str(part).strip()]
             return tuple(items) if items else None
+
+        threshold_section = _group_cfg_value("threshold") or {}
+        report_section = _group_cfg_value("report") or {}
+        if not isinstance(report_section, dict):
+            raise TypeError("fmri_group_level.report must be a YAML mapping")
+        report_section = dict(report_section)
+        if args.group_report is not None:
+            report_section["enabled"] = args.group_report
+            if args.group_report:
+                report_section["html_report"] = True
+        permutation_section = _group_cfg_value("permutation") or {}
+        if not isinstance(permutation_section, dict):
+            raise TypeError("fmri_group_level.permutation must be a YAML mapping")
+        permutation_section = dict(permutation_section)
+        if args.group_permutation_inference is not None:
+            permutation_section["enabled"] = args.group_permutation_inference
+        if args.group_n_permutations is not None:
+            permutation_section["n_permutations"] = args.group_n_permutations
+        if args.group_two_sided is not None:
+            permutation_section["two_sided"] = args.group_two_sided
+        threshold_cfg = cohort_threshold_config_from_mapping(threshold_section)
+        report_cfg = cohort_report_config_from_mapping(report_section)
+        permutation_cfg = second_level_permutation_config_from_mapping(permutation_section)
 
         second_level_cfg = SecondLevelConfig(
             model=str(
@@ -1164,8 +1023,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                 )
             ),
             formula=str(
-                _coalesce(getattr(args, "formula", None), _group_cfg_value("formula"))
-                or ""
+                _coalesce(getattr(args, "formula", None), _group_cfg_value("formula")) or ""
             ).strip()
             or None,
             output_name=str(
@@ -1177,8 +1035,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             ).strip()
             or None,
             output_dir=str(
-                _coalesce(getattr(args, "output_dir", None), _group_cfg_value("output_dir"))
-                or ""
+                _coalesce(getattr(args, "output_dir", None), _group_cfg_value("output_dir")) or ""
             ).strip()
             or None,
             covariates_file=_coalesce(
@@ -1228,25 +1085,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                 if args.write_design_matrix is not None
                 else bool(_coalesce(_group_cfg_value("write_design_matrix"), True))
             ),
-            permutation=SecondLevelPermutationConfig(
-                enabled=(
-                    bool(args.group_permutation_inference)
-                    if args.group_permutation_inference is not None
-                    else bool(_coalesce(_group_cfg_value("permutation", "enabled"), False))
-                ),
-                n_permutations=int(
-                    _coalesce(
-                        getattr(args, "group_n_permutations", None),
-                        _group_cfg_value("permutation", "n_permutations"),
-                        5000,
-                    )
-                ),
-                two_sided=(
-                    bool(args.group_two_sided)
-                    if args.group_two_sided is not None
-                    else bool(_coalesce(_group_cfg_value("permutation", "two_sided"), True))
-                ),
-            ),
+            permutation=permutation_cfg,
+            threshold=threshold_cfg,
+            report=report_cfg,
         ).normalized()
 
         pipeline = FmriSecondLevelPipeline(config=config)
@@ -1264,9 +1105,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         load_contrast_config_section,
         validate_contrast_config_section,
     )
-    from fmri_pipeline.analysis.plotting_config import (
-        build_fmri_plotting_config_from_args,
-    )
+    from fmri_pipeline.analysis.plotting_config import stats_config_from_mapping
     from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
     from fmri_pipeline.analysis.trial_signatures import (
         TrialSignatureExtractionConfig,
@@ -1287,9 +1126,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             current = current[key]
         return current
 
-    input_source = str(
-        _coalesce(args.input_source, _cfg_value("input_source"), "fmriprep")
-    ).strip().lower()
+    input_source = (
+        str(_coalesce(args.input_source, _cfg_value("input_source"), "fmriprep")).strip().lower()
+    )
     if input_source != "fmriprep":
         raise ValueError(
             "input_source must be 'fmriprep'. "
@@ -1311,20 +1150,26 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
 
     formula = str(_coalesce(args.formula, _cfg_value("formula")) or "").strip() or None
     contrast_name = (
-        str(_coalesce(args.contrast_name, _cfg_value("name"), "contrast")).strip()
-        or "contrast"
+        str(_coalesce(args.contrast_name, _cfg_value("name"), "contrast")).strip() or "contrast"
     )
     contrast_type = str(
         _coalesce(args.contrast_type, _cfg_value("type"), "custom" if formula else "t-test")
     ).strip()
     if contrast_type not in {"t-test", "custom"}:
-        raise ValueError(
-            f"contrast-type must be 't-test' or 'custom', got {contrast_type!r}."
-        )
+        raise ValueError(f"contrast-type must be 't-test' or 'custom', got {contrast_type!r}.")
     cond_a_column = str(
         _coalesce(args.cond_a_column, _cfg_value("condition_a", "column"), "trial_type") or ""
     ).strip()
     cond_a_value = _coalesce(args.cond_a_value, _cfg_value("condition_a", "value"))
+    parametric_column = str(
+        _coalesce(getattr(args, "parametric_column", None), _cfg_value("parametric_column"))
+        or ""
+    ).strip() or None
+    if parametric_column and _has_value(cond_a_value):
+        raise SystemExit(
+            "--parametric-column models the scoped trials as a continuous modulator "
+            "and cannot be combined with --cond-a-value. Choose one."
+        )
     cond_b_column = str(
         _coalesce(args.cond_b_column, _cfg_value("condition_b", "column"), "trial_type") or ""
     ).strip()
@@ -1344,18 +1189,19 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     if contrast_type == "custom" and not formula:
         raise ValueError("contrast-type=custom requires --formula")
 
-    if contrast_type != "custom" and not cond_a_column:
-        raise ValueError(
-            "Missing required --cond-a-column or fmri_contrast.condition_a.column."
-        )
-    if contrast_type != "custom" and not _has_value(cond_a_value):
-        raise ValueError(
-            "Missing required --cond-a-value (or use --contrast-type custom --formula ...)"
-        )
+    # A parametric fit names no levels: the modulator column is the whole specification,
+    # so the condition_a pair that a two-level contrast needs does not apply to it.
+    if contrast_type != "custom" and not parametric_column:
+        if not cond_a_column:
+            raise ValueError(
+                "Missing required --cond-a-column or fmri_contrast.condition_a.column."
+            )
+        if not _has_value(cond_a_value):
+            raise ValueError(
+                "Missing required --cond-a-value (or use --contrast-type custom --formula ...)"
+            )
     if _has_value(cond_b_value) and not cond_b_column:
-        raise ValueError(
-            "Missing required --cond-b-column or fmri_contrast.condition_b.column."
-        )
+        raise ValueError("Missing required --cond-b-column or fmri_contrast.condition_b.column.")
     if condition_scope_trial_types and not condition_scope_column:
         raise ValueError(
             "condition_scope_trial_types requires --condition-scope-column "
@@ -1366,11 +1212,19 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             "Trial-wise modes require --cond-b-value (e.g., condition_a vs condition_b)."
         )
 
-    confounds_strategy = str(
-        _coalesce(args.confounds_strategy, _cfg_value("confounds_strategy"), "auto")
-    ).strip().lower()
+    confounds_strategy = (
+        str(
+            _coalesce(
+                args.confounds_strategy,
+                _cfg_value("confounds_strategy"),
+                DEFAULT_CONFOUNDS_STRATEGY,
+            )
+        )
+        .strip()
+        .lower()
+    )
     if not confounds_strategy:
-        confounds_strategy = "auto"
+        confounds_strategy = DEFAULT_CONFOUNDS_STRATEGY
     if args.write_design_matrix is not None:
         write_design_matrix = bool(args.write_design_matrix)
     else:
@@ -1414,9 +1268,14 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             )
             or ""
         ).strip()
-        phase_scope_value = str(
-            _coalesce(getattr(args, "phase_scope_value", None), _cfg_value("phase_scope_value"), "")
-        ).strip() or None
+        phase_scope_value = (
+            str(
+                _coalesce(
+                    getattr(args, "phase_scope_value", None), _cfg_value("phase_scope_value"), ""
+                )
+            ).strip()
+            or None
+        )
         if events_to_model and not events_to_model_column:
             raise ValueError(
                 "events_to_model requires --events-to-model-column "
@@ -1424,8 +1283,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             )
         if stim_phases_to_model and not phase_column:
             raise ValueError(
-                "stim_phases_to_model requires --phase-column "
-                "or fmri_contrast.phase_column."
+                "stim_phases_to_model requires --phase-column " "or fmri_contrast.phase_column."
             )
         if phase_scope_value and not phase_scope_column:
             raise ValueError(
@@ -1444,6 +1302,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             contrast_type=contrast_type,
             condition1=None,
             condition2=None,
+            parametric_column=parametric_column,
             condition_a_column=cond_a_column,
             condition_a_value=str(cond_a_value).strip() if _has_value(cond_a_value) else None,
             condition_b_column=cond_b_column,
@@ -1455,9 +1314,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             runs=list(args.runs) if args.runs else _normalize_runs(_cfg_value("runs")),
             hrf_model=str(_coalesce(args.hrf_model, _cfg_value("hrf_model"), "spm")).strip(),
             drift_model=str(drift_model).strip() if drift_model else None,
-            high_pass_hz=float(
-                _coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)
-            ),
+            high_pass_hz=float(_coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)),
             low_pass_hz=float(low_pass_hz) if low_pass_hz is not None else None,
             output_type=str(
                 _coalesce(args.output_type, _cfg_value("output_type"), "z-score")
@@ -1502,9 +1359,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             condition_b_value=str(cond_b_value).strip(),
             hrf_model=str(_coalesce(args.hrf_model, _cfg_value("hrf_model"), "spm")).strip(),
             drift_model=str(drift_model).strip() if drift_model else None,
-            high_pass_hz=float(
-                _coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)
-            ),
+            high_pass_hz=float(_coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)),
             low_pass_hz=float(low_pass_hz) if low_pass_hz is not None else None,
             smoothing_fwhm=smoothing_fwhm,
             confounds_strategy=confounds_strategy,
@@ -1518,23 +1373,17 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                 getattr(args, "signature_scope_phase_column", "") or ""
             ).strip(),
             condition_scope_trial_types=tuple(
-                _normalize_string_list(getattr(args, "signature_scope_trial_types", None))
-                or ()
+                _normalize_string_list(getattr(args, "signature_scope_trial_types", None)) or ()
             )
             or None,
             condition_scope_stim_phases=tuple(
-                _normalize_string_list(getattr(args, "signature_scope_stim_phases", None))
-                or ()
+                _normalize_string_list(getattr(args, "signature_scope_stim_phases", None)) or ()
             )
             or None,
-            max_trials_per_run=int(args.max_trials_per_run)
-            if args.max_trials_per_run
-            else None,
+            max_trials_per_run=int(args.max_trials_per_run) if args.max_trials_per_run else None,
             fixed_effects_weighting=fixed_weighting,
             signatures=tuple(args.signatures) if args.signatures else None,
-            signature_group_column=str(
-                getattr(args, "signature_group_column", "") or ""
-            ).strip()
+            signature_group_column=str(getattr(args, "signature_group_column", "") or "").strip()
             or None,
             signature_group_values=tuple(getattr(args, "signature_group_values", None) or ())
             or None,
@@ -1546,50 +1395,26 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                 if getattr(args, "signature_group_scope", None)
                 else "across_runs"
             ),
-            write_trial_betas=bool(args.write_trial_betas)
-            if args.write_trial_betas is not None
-            else False,
-            write_trial_variances=bool(args.write_trial_variances)
-            if args.write_trial_variances is not None
-            else False,
-            write_condition_betas=bool(args.write_condition_betas)
-            if args.write_condition_betas is not None
-            else True,
+            write_trial_betas=(
+                bool(args.write_trial_betas) if args.write_trial_betas is not None else False
+            ),
+            write_trial_variances=(
+                bool(args.write_trial_variances)
+                if args.write_trial_variances is not None
+                else False
+            ),
+            write_condition_betas=(
+                bool(args.write_condition_betas) if args.write_condition_betas is not None else True
+            ),
         )
 
     out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
 
     if mode == "first-level":
-        vmax_mode = str(args.plot_vmax_mode).strip().lower() if args.plot_vmax_mode else None
-        if vmax_mode == "per-space-robust":
-            vmax_mode = "per_space_robust"
-        elif vmax_mode == "shared-robust":
-            vmax_mode = "shared_robust"
-
-        plotting_cfg = build_fmri_plotting_config_from_args(
-            enabled=bool(args.plots) if args.plots is not None else False,
-            html_report=bool(args.plot_html_report) if args.plot_html_report is not None else False,
-            formats=tuple(args.plot_formats) if args.plot_formats else None,
-            space=str(args.plot_space).strip().lower() if args.plot_space else None,
-            threshold_mode=str(args.plot_threshold_mode).strip().lower() if args.plot_threshold_mode else None,
-            z_threshold=float(args.plot_z_threshold) if args.plot_z_threshold is not None else None,
-            fdr_q=float(args.plot_fdr_q) if args.plot_fdr_q is not None else None,
-            cluster_min_voxels=int(args.plot_cluster_min_voxels) if args.plot_cluster_min_voxels is not None else None,
-            vmax_mode=vmax_mode,
-            vmax_manual=float(args.plot_vmax) if args.plot_vmax is not None else None,
-            include_unthresholded=bool(args.plot_include_unthresholded)
-            if args.plot_include_unthresholded is not None
-            else None,
-            plot_types=tuple(args.plot_types) if args.plot_types else None,
-            include_effect_size=bool(args.plot_effect_size) if args.plot_effect_size is not None else None,
-            include_standard_error=bool(args.plot_standard_error) if args.plot_standard_error is not None else None,
-            include_motion_qc=bool(args.plot_motion_qc) if args.plot_motion_qc is not None else None,
-            include_carpet_qc=bool(args.plot_carpet_qc) if args.plot_carpet_qc is not None else None,
-            include_tsnr_qc=bool(args.plot_tsnr_qc) if args.plot_tsnr_qc is not None else None,
-            include_design_qc=bool(args.plot_design_qc) if args.plot_design_qc is not None else None,
-            embed_images=bool(args.plot_embed_images) if args.plot_embed_images is not None else None,
-            include_signatures=bool(args.plot_signatures) if args.plot_signatures is not None else None,
-        )
+        stats_section = config.get("fmri_stats", {}) or {}
+        if not isinstance(stats_section, dict):
+            raise TypeError("fmri_stats must be a YAML mapping")
+        stats_cfg = stats_config_from_mapping(stats_section)
 
         fs_dir = None
         if cfg.resample_to_freesurfer:
@@ -1603,7 +1428,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             progress=progress,
             dry_run=bool(getattr(args, "dry_run", False)),
             contrast_cfg=cfg,
-            plotting_cfg=plotting_cfg,
+            stats_cfg=stats_cfg,
             output_dir=out_dir,
             freesurfer_subjects_dir=fs_dir,
         )

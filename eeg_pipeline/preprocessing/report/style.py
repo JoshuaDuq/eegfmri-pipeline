@@ -119,6 +119,11 @@ REPORT_IMAGE_FORMAT = "svg"
 #: these figures stay raster and use the smallest raster MNE supports.
 REPORT_RASTER_IMAGE_FORMAT = "webp"
 
+#: Screen and print resolution used by report figures unless the YAML overrides it.
+DEFAULT_REPORT_FIGURE_DPI = 200.0
+#: Wide enough for a ten-inch figure at the default resolution without downsampling.
+DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX = 2_000
+
 
 def report_image_format(*, has_dense_image: bool = False, is_figure_list: bool = False) -> str:
     """Return a safe embedding format for one ``Report.add_figure`` call.
@@ -489,9 +494,11 @@ def draw_component_status_strip(
 COLOR_LIMIT_PERCENTILE = 98.0
 
 
-def apply_report_style() -> None:
+def apply_report_style(*, figure_dpi: float | None = None) -> None:
     """Configure the non-interactive backend and shared render defaults."""
-    setup_matplotlib()
+    setup_matplotlib(
+        figure_dpi=(DEFAULT_REPORT_FIGURE_DPI if figure_dpi is None else float(figure_dpi))
+    )
 
 
 def robust_symmetric_limit(

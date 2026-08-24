@@ -9,7 +9,6 @@ import mne
 import numpy as np
 import pandas as pd
 
-
 PULSE_EVENT_ID = 999
 
 
@@ -28,9 +27,7 @@ BEAT_SOURCES = ("markers", "detect", "auto")
 def _beat_source(value: Any) -> str:
     text = str(value).strip()
     if text not in BEAT_SOURCES:
-        raise ValueError(
-            "ica.cardiac_review.beat_source must be one of " + ", ".join(BEAT_SOURCES)
-        )
+        raise ValueError("ica.cardiac_review.beat_source must be one of " + ", ".join(BEAT_SOURCES))
     return text
 
 
@@ -176,7 +173,7 @@ class EcgDetection:
     """The run's beat train, and which of the two sources it came from."""
 
     events: np.ndarray
-    average_pulse_bpm: float
+    detected_beats_per_recording_minute: float
     #: :data:`MARKER_TRAIN_SOURCE` or :data:`ECG_CHANNEL_SOURCE`. Carried so every panel
     #: can say where its beats came from: the two sources fail on different runs, so a rate
     #: is not interpretable without knowing which one produced it.
@@ -197,7 +194,7 @@ class RunCardiacReview:
     before_gfp_uv: np.ndarray
     after_gfp_uv: np.ndarray
     r_locked_epoch_count: int
-    average_pulse_bpm: float
+    detected_beats_per_recording_minute: float
     events: np.ndarray
     before_topography_uv: np.ndarray
     after_topography_uv: np.ndarray
@@ -272,21 +269,20 @@ def _marker_beats(raw: mne.io.BaseRaw, description: str) -> np.ndarray:
     return np.asarray(events, dtype=int)
 
 
-def _rate_from_beats(events: np.ndarray, sfreq: float) -> float:
-    """Beats per minute from the median interval of a beat train.
+def _rate_from_beats(events: np.ndarray, sfreq: float, n_times: int) -> float:
+    """Detected beats per recording minute.
 
-    A median rather than the count over the recording length, because a train with gaps --
-    which is what a partially failed detection produces -- reports a rate far below the
-    heart's when divided by the whole duration. The median interval describes the beats that
-    were found rather than the ones that were missed.
+    This is deliberately a count over the complete recording. A median RR rate can look
+    physiologically normal even when the marker detector missed a long stretch; using it
+    as a completeness measure would certify precisely the failure this QC is meant to
+    reveal.
     """
-    if events.shape[0] < 2:
+    if events.shape[0] < 1:
         return float("nan")
-    intervals = np.diff(np.sort(events[:, 0].astype(float))) / float(sfreq)
-    intervals = intervals[intervals > 0]
-    if intervals.size == 0:
+    duration_s = float(n_times) / float(sfreq)
+    if duration_s <= 0:
         return float("nan")
-    return float(60.0 / np.median(intervals))
+    return float(events.shape[0] * 60.0 / duration_s)
 
 
 def detect_ecg_events(
@@ -318,11 +314,11 @@ def detect_ecg_events(
     if settings.beat_source in {"markers", "auto"} and settings.marker_description:
         markers = _marker_beats(raw, settings.marker_description)
         if markers.shape[0] >= MINIMUM_BEATS:
-            rate = _rate_from_beats(markers, sfreq)
+            rate = _rate_from_beats(markers, sfreq, raw.n_times)
             if np.isfinite(rate) and rate > 0:
                 return EcgDetection(
                     events=markers,
-                    average_pulse_bpm=rate,
+                    detected_beats_per_recording_minute=rate,
                     source=MARKER_TRAIN_SOURCE,
                 )
         if settings.beat_source == "markers":
@@ -337,7 +333,7 @@ def detect_ecg_events(
             "annotation."
         )
 
-    events, _, average_pulse_bpm, _ = mne.preprocessing.find_ecg_events(
+    events, _, detected_beats_per_recording_minute, _ = mne.preprocessing.find_ecg_events(
         raw,
         ch_name=settings.ecg_channel,
         event_id=PULSE_EVENT_ID,
@@ -349,11 +345,17 @@ def detect_ecg_events(
             f"No usable beat markers, and direct ECG detection found only {len(events)} "
             f"R peaks; at least {MINIMUM_BEATS} are required."
         )
-    if not np.isfinite(average_pulse_bpm) or average_pulse_bpm <= 0:
-        raise UnusableEcg(f"Invalid average pulse estimate: {average_pulse_bpm!r}.")
+    if (
+        not np.isfinite(detected_beats_per_recording_minute)
+        or detected_beats_per_recording_minute <= 0
+    ):
+        raise UnusableEcg(
+            "Invalid detected-beat count per recording minute: "
+            f"{detected_beats_per_recording_minute!r}."
+        )
     return EcgDetection(
         events=np.asarray(events, dtype=int),
-        average_pulse_bpm=float(average_pulse_bpm),
+        detected_beats_per_recording_minute=float(detected_beats_per_recording_minute),
         source=ECG_CHANNEL_SOURCE,
     )
 
@@ -658,7 +660,7 @@ def _build_run_cardiac_review(
         before_gfp_uv=before_gfp,
         after_gfp_uv=after_gfp,
         r_locked_epoch_count=len(ecg_epochs),
-        average_pulse_bpm=detection.average_pulse_bpm,
+        detected_beats_per_recording_minute=(detection.detected_beats_per_recording_minute),
         events=ecg_epochs.events.copy(),
         before_topography_uv=before_evoked[:, peak_index],
         after_topography_uv=after_evoked[:, peak_index],

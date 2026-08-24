@@ -31,9 +31,7 @@ from fmri_pipeline.analysis.report.manifest import (
     validate_manifest_collection,
 )
 from fmri_pipeline.analysis.report.style import (
-    figure_format,
-    plot_context,
-    savefig_kwargs,
+    save_report_figure,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,11 +80,12 @@ def _note(facts: Optional[SummaryFacts], label: str, value: Any) -> None:
 
 @contextmanager
 def _panel(description: str) -> Iterator[None]:
-    """Log and swallow one panel's failure so the document still builds."""
+    """Attach panel context to a rendering error and let it fail the report."""
     try:
         yield
-    except Exception as exc:
-        logger.warning("Failed to generate %s (%s)", description, exc)
+    except Exception:
+        logger.exception("Failed to generate %s", description)
+        raise
 
 
 def _save(
@@ -114,32 +113,17 @@ def _save(
     Saving happens inside the style context because ``svg.hashsalt`` and
     ``savefig.dpi`` are read at save time, not draw time.
     """
-    import matplotlib.pyplot as plt
-
-    preferred = figure_format(dense=dense)
-    wanted = [preferred] + [fmt for fmt in formats if fmt != preferred]
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        primary: Optional[Path] = None
-        with plot_context():
-            for fmt in wanted:
-                path = out_dir / f"{stem}.{fmt}"
-                figure.savefig(path, **savefig_kwargs(path))
-                if primary is None:
-                    primary = path
-        return primary
-    finally:
-        try:
-            plt.close(figure)
-        except Exception:
-            logger.debug("Could not close figure %s", stem)
+    return save_report_figure(
+        figure,
+        out_dir=out_dir,
+        stem=stem,
+        formats=formats,
+        dense=dense,
+    )
 
 
 def _slug(manifest: ContrastManifest) -> str:
-    cleaned = "".join(
-        ch if ch.isalnum() or ch == "-" else "-" for ch in manifest.contrast_name
-    )
+    cleaned = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in manifest.contrast_name)
     return "contrast-" + cleaned.strip("-").lower()
 
 
@@ -171,9 +155,7 @@ def _unit_name(manifest: ContrastManifest) -> str:
     """
     if not manifest.signal_scaling:
         return "arbitrary BOLD units"
-    return _SCALED_EFFECT_UNITS.get(
-        str(manifest.signal_scaling_mode or ""), "scaled BOLD units"
-    )
+    return _SCALED_EFFECT_UNITS.get(str(manifest.signal_scaling_mode or ""), "scaled BOLD units")
 
 
 def _effect_units(manifest: ContrastManifest) -> str:
@@ -218,23 +200,25 @@ def build_header_section(
         ("Effect units", _effect_units(first)),
         (
             "Analysis mask",
-            "the mask the GLM was fitted inside"
-            if first.mask_is_analysis_mask
-            else "discovered from preprocessing; not verified as the fitted mask",
+            (
+                "the mask the GLM was fitted inside"
+                if first.mask_is_analysis_mask
+                else "discovered from preprocessing; not verified as the fitted mask"
+            ),
         ),
     ]
     if background_source:
         items.append(
             (
                 "Volume underlay",
-                Path(background_source).name
-                if Path(background_source).suffix
-                else background_source,
+                (
+                    Path(background_source).name
+                    if Path(background_source).suffix
+                    else background_source
+                ),
             )
         )
-    blocks: List[html.Block] = [
-        html.KeyValues(title="Acquisition and model", items=tuple(items))
-    ]
+    blocks: List[html.Block] = [html.KeyValues(title="Acquisition and model", items=tuple(items))]
     if first.excluded_runs:
         blocks.append(
             html.KeyValues(
@@ -245,9 +229,7 @@ def build_header_section(
     return html.Section(slug="overview", title="Overview", blocks=tuple(blocks))
 
 
-def load_background(
-    *, deriv_root: Path, manifest: ContrastManifest
-) -> Tuple[Any, str]:
+def load_background(*, deriv_root: Path, manifest: ContrastManifest) -> Tuple[Any, str]:
     """Load the anatomical image the volume panels are drawn over.
 
     Every volume panel in this report previously passed ``bg_img=None``, so a cluster
@@ -260,27 +242,19 @@ def load_background(
     """
     from fmri_pipeline.analysis.report.assets import discover_plot_assets
 
-    try:
-        assets = discover_plot_assets(
-            deriv_root=Path(deriv_root),
-            subject=manifest.subject,
-            task=manifest.task,
-            space=manifest.space,
-        )
-    except Exception as exc:
-        logger.warning("Could not discover plotting assets (%s)", exc)
-        return None, "asset discovery failed"
+    assets = discover_plot_assets(
+        deriv_root=Path(deriv_root),
+        subject=manifest.subject,
+        task=manifest.task,
+        space=manifest.space,
+    )
 
     if assets.background is None:
         return None, "no anatomical image found in the derivatives"
 
-    try:
-        import nibabel as nib
+    import nibabel as nib
 
-        return nib.load(str(assets.background)), str(assets.background)
-    except Exception as exc:
-        logger.warning("Could not load background %s (%s)", assets.background, exc)
-        return None, "the discovered anatomical image could not be read"
+    return nib.load(str(assets.background)), str(assets.background)
 
 
 def _retained_frame_masks(
@@ -324,9 +298,7 @@ def build_qc_sections(
     qc_dir = out_dir / "plots" / "qc"
     blocks: List[html.Block] = []
 
-    bold_imgs = [
-        nib.load(str(path)) for path in first.bold_paths if Path(path).exists()
-    ]
+    bold_imgs = [nib.load(str(path)) for path in first.bold_paths if Path(path).exists()]
 
     sample_masks = _retained_frame_masks(
         bold_imgs,
@@ -446,8 +418,7 @@ def build_qc_sections(
         html.Section(
             slug="qc",
             title="Quality control (as modelled)",
-            blocks=tuple(blocks)
-            or (html.Note(text="No QC panels could be generated."),),
+            blocks=tuple(blocks) or (html.Note(text="No QC panels could be generated."),),
         )
     ]
 
@@ -484,9 +455,7 @@ def _motion_blocks(
     blocks: List[html.Block] = []
     with _panel("motion figure"):
         path = _save(
-            motion_figures.run_motion_figure(
-                summaries, title="Head motion by run (as modelled)"
-            ),
+            motion_figures.run_motion_figure(summaries, title="Head motion by run (as modelled)"),
             out_dir=qc_dir,
             stem="motion_by_run",
             dense=False,
@@ -553,8 +522,7 @@ def _motion_blocks(
     _note(
         facts,
         "Frames censored",
-        f"{censored:,} of {acquired:,}"
-        + (f" ({censored / acquired:.1%})" if acquired else ""),
+        f"{censored:,} of {acquired:,}" + (f" ({censored / acquired:.1%})" if acquired else ""),
     )
     medians = [run.median_fd for run in summaries if run.median_fd is not None]
     if medians:
@@ -600,7 +568,7 @@ def _carpet_blocks(
     retained_masks: List[np.ndarray] = []
     run_breaks = [0]
     voxel_mask = None
-    mask_source = "nonzero mean signal"
+    mask_source = "analysis mask"
 
     # The analysis mask decides which voxels the carpet shows, when there is one.
     # Falling back on "mean signal is not exactly zero" admits the whole field of
@@ -608,29 +576,30 @@ def _carpet_blocks(
     # -- measured here, 136,416 voxels of a 50,626-voxel brain -- so the panel
     # sampled air, the row count it reported was a fraction of the wrong total, and a
     # carpet captioned "as modelled" showed voxels the model never saw.
-    analysis_mask = _load_mask(manifest) if manifest.mask_is_analysis_mask else None
-    if analysis_mask is not None:
-        candidate = np.asanyarray(analysis_mask.dataobj).astype(bool)
-        reference = np.asanyarray(bold_imgs[0].dataobj).shape[:3]
-        if candidate.shape == reference:
-            voxel_mask = candidate
-            mask_source = "analysis mask"
+    if not manifest.mask_is_analysis_mask:
+        raise ValueError("Carpet QC requires the fitted analysis mask.")
+    analysis_mask = _load_mask(manifest)
+    if analysis_mask is None:
+        raise ValueError("Carpet QC could not load the fitted analysis mask.")
+    candidate = np.asanyarray(analysis_mask.dataobj).astype(bool)
+    reference = np.asanyarray(bold_imgs[0].dataobj).shape[:3]
+    if candidate.shape != reference:
+        raise ValueError(
+            "Carpet QC analysis mask shape does not match the modelled BOLD grid: "
+            f"{candidate.shape} != {reference}."
+        )
+    voxel_mask = candidate
 
     for index, img in enumerate(bold_imgs):
         data = np.asanyarray(img.dataobj)
         if data.ndim != 4:
             continue
-        if voxel_mask is None:
-            mean_volume = np.mean(data, axis=3)
-            voxel_mask = np.isfinite(mean_volume) & (mean_volume != 0)
         voxels = data[voxel_mask]
         mask = sample_masks[index] if sample_masks and index < len(sample_masks) else None
         if mask is not None and mask.size != voxels.shape[1]:
             mask = None
         standardised.append(carpet_figures.scale_carpet(voxels, sample_mask=mask))
-        retained_masks.append(
-            mask if mask is not None else np.ones(voxels.shape[1], dtype=bool)
-        )
+        retained_masks.append(mask if mask is not None else np.ones(voxels.shape[1], dtype=bool))
         run_breaks.append(run_breaks[-1] + int(voxels.shape[1]))
 
     if not standardised:
@@ -701,9 +670,7 @@ def _carpet_blocks(
         dvars_label=dvars_label,
         censored=censored,
         voxel_source=mask_source,
-        colour_limit=carpet_figures.carpet_colour_limit(
-            carpet, sample_mask=carpet_retained
-        ),
+        colour_limit=carpet_figures.carpet_colour_limit(carpet, sample_mask=carpet_retained),
         title="Carpet (as modelled)",
     )
     path = _save(figure, out_dir=qc_dir, stem="carpet", formats=cfg.formats)
@@ -762,7 +729,9 @@ def resolve_threshold(
     mode = str(manifest.threshold_mode or "").strip().lower()
     if mode == "z":
         threshold = float(manifest.z_threshold)
-        return (threshold, f"|z| > {threshold:.2f} (uncorrected)") if threshold > 0 else (None, "none")
+        return (
+            (threshold, f"|z| > {threshold:.2f} (uncorrected)") if threshold > 0 else (None, "none")
+        )
     if mode == "fdr":
         from fmri_pipeline.analysis.report import inference
 
@@ -893,9 +862,7 @@ def _cluster_peaks(frame: Any) -> Tuple[Tuple[str, Tuple[float, float, float]], 
     # dtype -- turning cluster 1 into "1.0", which no longer looks like an integer.
     identifiers = list(frame["Cluster ID"])
     xs, ys, zs = list(frame["X"]), list(frame["Y"]), list(frame["Z"])
-    stats = (
-        list(frame["Peak Stat"]) if "Peak Stat" in frame.columns else [None] * len(xs)
-    )
+    stats = list(frame["Peak Stat"]) if "Peak Stat" in frame.columns else [None] * len(xs)
 
     peaks: List[Tuple[str, Tuple[float, float, float]]] = []
     strengths: List[float] = []
@@ -992,13 +959,10 @@ def _first_residual_image(manifest: ContrastManifest) -> Any:
     ``None`` for a manifest written before the fit stored residuals, which is what
     keeps those reports rendering against the statistic map as they always did.
     """
-    for path in manifest.residual_paths:
-        try:
-            import nibabel as nib
+    if manifest.residual_paths:
+        import nibabel as nib
 
-            return nib.load(str(path))
-        except Exception as exc:
-            logger.info("Could not open residuals at %s (%s)", path, exc)
+        return nib.load(str(manifest.residual_paths[0]))
     return None
 
 
@@ -1055,19 +1019,18 @@ def smoothness_facts(
         # structure, and under ``threshold_mode: none`` there is no height to exclude
         # by; the residual field has nothing to exclude in the first place.
         try:
-            fwhm = coverage_figures.estimate_fwhm_from_residuals(
-                residual_img, mask=mask_img
-            )
+            fwhm = coverage_figures.estimate_fwhm_from_residuals(residual_img, mask=mask_img)
+        except ValueError as exc:
+            logger.info("Residual smoothness is not estimable (%s)", exc)
+        else:
             source = "model residuals"
-        except Exception as exc:
-            logger.info("Could not estimate smoothness from residuals (%s)", exc)
 
     if fwhm is None:
         try:
             mask, source = noise_mask(stat_img, mask_img=mask_img, threshold=threshold)
             fwhm = coverage_figures.estimate_fwhm(stat_img, mask=mask)
-        except Exception as exc:
-            logger.info("Could not estimate smoothness (%s)", exc)
+        except ValueError as exc:
+            logger.info("Map smoothness is not estimable (%s)", exc)
             return Smoothness(facts=[])
 
     facts = [coverage_figures.smoothness_note(fwhm, source=source)]
@@ -1099,9 +1062,9 @@ def _peak_values(img: Any, coords: Sequence[Tuple[float, float, float]]) -> List
 
     out: List[float] = []
     for coord in coords:
-        voxel = np.rint(
-            (np.append(np.asarray(coord, dtype=float), 1.0) @ inverse.T)[:3]
-        ).astype(int)
+        voxel = np.rint((np.append(np.asarray(coord, dtype=float), 1.0) @ inverse.T)[:3]).astype(
+            int
+        )
         if np.any(voxel < 0) or np.any(voxel >= shape):
             out.append(float("nan"))
             continue
@@ -1198,8 +1161,7 @@ def enrich_cluster_frame(
 
     def _column(values: Sequence[float]) -> List[Any]:
         return [
-            "" if position is None or not np.isfinite(values[position])
-            else values[position]
+            "" if position is None or not np.isfinite(values[position]) else values[position]
             for position in row_index
         ]
 
@@ -1291,9 +1253,7 @@ def _mni_companion(stat_map: Path) -> Optional[ClusterTableSource]:
         # Globbed rather than reconstructed: the quantity token itself contains
         # underscores -- "z_score", "effect_size" -- so splitting the name on "_" to
         # recover the trailing hash silently truncates it.
-        candidates = sorted(
-            stat_map.parent.glob(f"{head}_{_MNI_ENTITY}_stat-{quantity}_*.nii*")
-        )
+        candidates = sorted(stat_map.parent.glob(f"{head}_{_MNI_ENTITY}_stat-{quantity}_*.nii*"))
         if not candidates:
             return None
         for candidate in candidates:
@@ -1428,9 +1388,7 @@ def build_cluster_table(
         return None, ()
 
     if threshold is None:
-        values, _source = masked_stat_values(
-            nib.load(str(manifest.stat_map)), _load_mask(manifest)
-        )
+        values, _source = masked_stat_values(nib.load(str(manifest.stat_map)), _load_mask(manifest))
         threshold, threshold_label = resolve_threshold(manifest, values=values)
     if threshold is None:
         return None, ()
@@ -1672,15 +1630,22 @@ def build_contrast_section(
 
     # Both key to the cluster table's rows, so both follow it.
     with _panel(f"peak response for {manifest.contrast_name}"):
-        block = build_peak_response_block(
-            manifest=manifest, peaks=peaks, out_dir=out_dir, cfg=cfg
-        )
+        block = build_peak_response_block(manifest=manifest, peaks=peaks, out_dir=out_dir, cfg=cfg)
         if block is not None:
             blocks.append(block)
 
     with _panel(f"run consistency for {manifest.contrast_name}"):
         block = build_run_consistency_block(
             manifest=manifest, peaks=peaks, out_dir=out_dir, cfg=cfg
+        )
+        if block is not None:
+            blocks.append(block)
+
+    with _panel(f"spatial run agreement for {manifest.contrast_name}"):
+        block = build_run_effect_correlation_block(
+            manifest=manifest,
+            out_dir=out_dir,
+            cfg=cfg,
         )
         if block is not None:
             blocks.append(block)
@@ -1884,8 +1849,7 @@ def survivor_summary(
         line += f" ({surviving / n_voxels:.2%})"
     if expected_under_fitted_null is not None:
         line += (
-            f" — {expected_under_fitted_null:,.0f} expected under this map's own "
-            f"fitted null"
+            f" — {expected_under_fitted_null:,.0f} expected under this map's own " f"fitted null"
         )
     return line
 
@@ -1894,10 +1858,7 @@ def familywise_summary(summary: inference.SignFlipSummary) -> str:
     """State the familywise height, its survivors, and what its p is worth."""
     line = f"|z| > {summary.height:.2f} — {summary.survivors:,} voxels"
     if summary.floor_limited:
-        line += (
-            f"; global p = {summary.global_p:.3f}, at its floor for "
-            f"{summary.n_runs} runs"
-        )
+        line += f"; global p = {summary.global_p:.3f}, at its floor for " f"{summary.n_runs} runs"
     else:
         line += f"; global p = {summary.global_p:.3f}"
     return line
@@ -1985,11 +1946,7 @@ def _sign_flip_block(
     path = Path(manifest.sign_flip_null_tsv or "")
     if not path.exists():
         return None
-    try:
-        maxima = pd.read_csv(path, sep="\t")["max_abs_z"].tolist()
-    except Exception as exc:
-        logger.warning("Could not read the sign-flip null %s (%s)", path.name, exc)
-        return None
+    maxima = pd.read_csv(path, sep="\t")["max_abs_z"].tolist()
     if not maxima:
         return None
 
@@ -2063,9 +2020,7 @@ def build_run_contribution_block(
     if offsets is None and not influence:
         return None
 
-    rows = contributions.contribution_rows(
-        run_labels=labels, offsets=offsets, influence=influence
-    )
+    rows = contributions.contribution_rows(run_labels=labels, offsets=offsets, influence=influence)
     frame = pd.DataFrame(rows)
     if frame.shape[1] <= 1:
         return None
@@ -2123,9 +2078,7 @@ def build_run_consistency_block(
         return None
     if not peaks:
         return None
-    if not (
-        Path(manifest.run_effect_map).exists() and Path(manifest.run_variance_map).exists()
-    ):
+    if not (Path(manifest.run_effect_map).exists() and Path(manifest.run_variance_map).exists()):
         return None
 
     import nibabel as nib
@@ -2175,6 +2128,68 @@ def build_run_consistency_block(
             "Each run's own estimate is shown against the combined one. Runs differing "
             "is a measurement, not a fault — a task with habituation should show "
             "exactly that."
+        ),
+    )
+
+
+def build_run_effect_correlation_block(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+) -> Optional[html.Figure]:
+    """Show whole-mask spatial agreement between every pair of fitted runs."""
+    if manifest.run_effect_map is None or len(manifest.included_runs) < 2:
+        return None
+    if not Path(manifest.run_effect_map).is_file():
+        return None
+
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import run_consistency
+
+    correlation = run_consistency.run_effect_correlation_matrix(
+        nib.load(str(manifest.run_effect_map)),
+        _load_mask(manifest),
+    )
+    import pandas as pd
+
+    artifact_dir = out_dir / "plots" / _slug(manifest)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    matrix_path = artifact_dir / "run_effect_correlation.tsv"
+    pd.DataFrame(
+        correlation,
+        index=manifest.included_runs,
+        columns=manifest.included_runs,
+    ).to_csv(
+        matrix_path,
+        sep="\t",
+        index_label="run",
+        float_format="%.17g",
+    )
+    path = _save(
+        run_consistency.run_effect_correlation_figure(
+            correlation,
+            run_labels=manifest.included_runs,
+            title=f"{manifest.contrast_name}: whole-mask run agreement",
+        ),
+        out_dir=artifact_dir,
+        stem="run_effect_correlation",
+        dense=False,
+        formats=cfg.formats,
+    )
+    if path is None:
+        raise RuntimeError("The run-effect correlation figure was not written.")
+    return html.Figure(
+        title="Spatial agreement between runs",
+        path=path,
+        dense=False,
+        caption=(
+            "Pearson correlation between every pair of run-level contrast effect "
+            "maps, using every voxel inside the fitted analysis mask. This "
+            "measures spatial agreement without selecting peaks or applying a "
+            "threshold. A low or negative value is a measurement, not an automatic "
+            f"reason to exclude a run. Exact matrix: {matrix_path.name}."
         ),
     )
 
@@ -2270,9 +2285,7 @@ def build_tissue_block(
     if codes is None:
         return None
 
-    slices = tissue_figures.split_by_tissue(
-        stat_img, tissue_codes=codes, mask_img=mask_img
-    )
+    slices = tissue_figures.split_by_tissue(stat_img, tissue_codes=codes, mask_img=mask_img)
     if not slices:
         return None
 
@@ -2419,6 +2432,13 @@ def build_diagnostics_section(
             manifest=manifest,
             out_dir=out_dir,
         ),
+        build_model_r_squared_block(
+            manifest=manifest,
+            out_dir=out_dir,
+            cfg=cfg,
+            background=background,
+            mask_img=mask_img,
+        ),
         build_residual_carpet_block(
             manifest=manifest,
             deriv_root=deriv_root,
@@ -2542,6 +2562,69 @@ def build_model_fit_measurement_block(
             "(ddof = 0). ACF(1) = Σ(eₜ − ē)(eₜ₊₁ − ē) / Σ(eₜ − ē)². "
             f"Series space: {manifest.model_fit_series_space.replace('-', ' ', 1)}; "
             "only the manifest's retained frames are present. No criterion is applied."
+        ),
+    )
+
+
+def build_model_r_squared_block(
+    *,
+    manifest: ContrastManifest,
+    out_dir: Path,
+    cfg: FmriReportConfig,
+    background: Any,
+    mask_img: Any,
+) -> html.Figure:
+    """Persist and draw spatial whole-model R² from the exact fitted series."""
+    if manifest.mask is None:
+        raise ValueError("The R² map requires the fitted analysis mask.")
+
+    import nibabel as nib
+
+    from fmri_pipeline.analysis.report.figures import model_fit
+
+    result = model_fit.pooled_r_squared(
+        residual_paths=manifest.residual_paths,
+        predicted_paths=manifest.predicted_paths,
+        mask_path=manifest.mask,
+    )
+    artifact_dir = out_dir / "plots" / _slug(manifest)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    map_path = artifact_dir / "model_r_squared.nii.gz"
+    nib.save(result.image, str(map_path))
+    if not map_path.is_file():
+        raise RuntimeError("The whole-model R² map was not written.")
+
+    series_space = manifest.model_fit_series_space.replace("-", " ", 1)
+    path = _save(
+        stat_map_figures.stat_map_mosaic(
+            result.image,
+            bg_img=background,
+            mask_img=mask_img,
+            threshold=None,
+            two_sided=True,
+            radiological=manifest.radiological,
+            cbar_label="R²",
+            title=f"{manifest.contrast_name}: whole-model R²",
+        ),
+        out_dir=artifact_dir,
+        stem="model_r_squared",
+        formats=cfg.formats,
+    )
+    if path is None:
+        raise RuntimeError("The whole-model R² figure was not written.")
+    return html.Figure(
+        title="Whole-model R²",
+        path=path,
+        caption=(
+            "At each fitted-mask voxel, R² = 1 − ΣᵣΣₜeᵣₜ² / "
+            "ΣᵣΣₜ(Yᵣₜ − Ȳᵣ)². Total variation is centred within each run, so "
+            "between-run mean shifts cannot inflate fit. This is the fit of the "
+            "whole design, including task and nuisance regressors; it does not "
+            "isolate the experimental effect. This is unadjusted R² and generally "
+            "increases as regressors are added, so it must not be used to rank "
+            "designs with different columns. Negative values fit worse than the "
+            f"corresponding run mean. Series space: {series_space}. Raw map: "
+            f"{map_path.name}. No criterion is applied."
         ),
     )
 
@@ -2803,14 +2886,16 @@ def build_design_section(
     # The conditions this contrast weights, in the order it weights them.
     weighted = [
         str(name)
-        for name, weight in zip(
-            manifest.contrast_columns, manifest.contrast_vector or ()
-        )
+        for name, weight in zip(manifest.contrast_columns, manifest.contrast_vector or ())
         if float(weight) != 0.0
     ]
 
     for index, path in enumerate(existing):
-        run_label = manifest.included_runs[index] if index < len(manifest.included_runs) else f"run-{index + 1:02d}"
+        run_label = (
+            manifest.included_runs[index]
+            if index < len(manifest.included_runs)
+            else f"run-{index + 1:02d}"
+        )
         with _panel(f"design matrix for {run_label}"):
             frame = pd.read_csv(path, sep="\t")
             frame = frame.drop(columns=[c for c in ("frame",) if c in frame.columns])
@@ -3138,27 +3223,29 @@ def build_methods_section(manifests: Sequence[ContrastManifest]) -> html.Section
     threshold = (
         f"|z| > {first.z_threshold:.2f}, uncorrected"
         if first.threshold_mode == "z"
-        else f"Benjamini-Hochberg FDR, q = {first.fdr_q:.3f}"
-        if first.threshold_mode == "fdr"
-        else "none"
+        else (
+            f"Benjamini-Hochberg FDR, q = {first.fdr_q:.3f}"
+            if first.threshold_mode == "fdr"
+            else "none"
+        )
     )
     items = [
         ("Height threshold", threshold),
         (
             "Multiple comparisons",
-            "no familywise correction is applied to the map; each contrast's "
-            "calibration panel states where FDR and Bonferroni thresholds fall for "
-            "that map and how many voxels survive each"
-            if first.threshold_mode != "fdr"
-            else "voxelwise FDR across the analysis mask; no cluster-level correction",
+            (
+                "no familywise correction is applied to the map; each contrast's "
+                "calibration panel states where FDR and Bonferroni thresholds fall for "
+                "that map and how many voxels survive each"
+                if first.threshold_mode != "fdr"
+                else "voxelwise FDR across the analysis mask; no cluster-level correction"
+            ),
         ),
         ("Sidedness", "two-sided" if first.two_sided else "one-sided"),
         ("Confound strategy", first.confound_strategy or "unspecified"),
         (
             "Orientation",
-            "radiological (R on left)"
-            if first.radiological
-            else "neurological (L on left)",
+            "radiological (R on left)" if first.radiological else "neurological (L on left)",
         ),
     ]
     if first.cluster_min_voxels > 0:
@@ -3196,18 +3283,23 @@ def build_configuration_section(
     blocks: List[html.Block] = []
     for manifest in manifests:
         items: List[Tuple[str, str]] = list(manifest.model_settings)
-        items.append(("Smoothing", f"{manifest.smoothing_fwhm:.3g} mm FWHM" if manifest.smoothing_fwhm else "none"))
+        items.append(
+            (
+                "Smoothing",
+                f"{manifest.smoothing_fwhm:.3g} mm FWHM" if manifest.smoothing_fwhm else "none",
+            )
+        )
         items.append(
             (
                 "Signal scaling",
                 # The mode, not a yes. Voxel-mean and grand-mean scaling both answer
                 # "yes" and produce different numbers from the same data, so a bare
                 # yes does not let a reader reproduce or compare the effect sizes.
-                f"{manifest.signal_scaling_mode} ({_unit_name(manifest)})"
-                if manifest.signal_scaling and manifest.signal_scaling_mode
-                else "yes, mode not recorded"
-                if manifest.signal_scaling
-                else "none",
+                (
+                    f"{manifest.signal_scaling_mode} ({_unit_name(manifest)})"
+                    if manifest.signal_scaling and manifest.signal_scaling_mode
+                    else "yes, mode not recorded" if manifest.signal_scaling else "none"
+                ),
             )
         )
         items.append(("TR", f"{manifest.t_r:.4g} s" if manifest.t_r else "unknown"))
@@ -3216,16 +3308,16 @@ def build_configuration_section(
                 "Confound columns",
                 # Named in full. A count would not let a reader tell one "auto"
                 # resolution from another, which is the whole reason for recording it.
-                ", ".join(manifest.confound_columns)
-                if manifest.confound_columns
-                else "none recorded",
+                (
+                    ", ".join(manifest.confound_columns)
+                    if manifest.confound_columns
+                    else "none recorded"
+                ),
             )
         )
         if not items:
             continue
-        blocks.append(
-            html.KeyValues(title=f"Model · {manifest.contrast_name}", items=tuple(items))
-        )
+        blocks.append(html.KeyValues(title=f"Model · {manifest.contrast_name}", items=tuple(items)))
 
     if not blocks:
         blocks.append(
@@ -3245,9 +3337,7 @@ def build_configuration_section(
     )
 
 
-def write_configuration_json(
-    manifests: Sequence[ContrastManifest], *, out_path: Path
-) -> Path:
+def write_configuration_json(manifests: Sequence[ContrastManifest], *, out_path: Path) -> Path:
     """Write the same configuration as machine-readable JSON beside the report.
 
     The HTML section is for reading; this is for a script that has to check a cohort
@@ -3263,9 +3353,7 @@ def write_configuration_json(
             {
                 "contrast_name": manifest.contrast_name,
                 "space": manifest.space,
-                "model_settings": {
-                    label: value for label, value in manifest.model_settings
-                },
+                "model_settings": {label: value for label, value in manifest.model_settings},
                 "confound_columns": list(manifest.confound_columns),
                 "smoothing_fwhm_mm": manifest.smoothing_fwhm,
                 "signal_scaling": manifest.signal_scaling,
@@ -3298,6 +3386,7 @@ def build_subject_report(
     cfg: FmriReportConfig,
 ) -> Path:
     """Render one document covering every contrast of a subject and task."""
+    cfg.validate()
     if not manifests:
         raise ValueError("Cannot build a subject report with no contrasts.")
     validate_manifest_collection(manifests)
@@ -3310,9 +3399,7 @@ def build_subject_report(
 
     # Loaded once for the whole document. Every volume panel is drawn over it, and
     # re-reading a T1w per panel is the most expensive way to get the same image.
-    background, background_source = load_background(
-        deriv_root=Path(deriv_root), manifest=first
-    )
+    background, background_source = load_background(deriv_root=Path(deriv_root), manifest=first)
 
     # Put on the analysis mask's own grid: axis-aligned, and bounded by what was
     # modelled. Nilearn chooses slice positions across the underlay's extent, so an
@@ -3377,14 +3464,10 @@ def build_subject_report(
                     )
                 )
         if cfg.include_design_qc:
-            design_section = build_design_section(
-                manifest=manifest, out_dir=out_dir, cfg=cfg
-            )
+            design_section = build_design_section(manifest=manifest, out_dir=out_dir, cfg=cfg)
             if design_section is not None:
                 sections.append(design_section)
-        signature_section = build_signature_section(
-            manifest=manifest, out_dir=out_dir, cfg=cfg
-        )
+        signature_section = build_signature_section(manifest=manifest, out_dir=out_dir, cfg=cfg)
         if signature_section is not None:
             sections.append(signature_section)
         sections.append(

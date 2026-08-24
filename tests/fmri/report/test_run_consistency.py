@@ -14,7 +14,6 @@ import pytest
 
 from fmri_pipeline.analysis.report.figures import run_consistency
 
-
 SHAPE = (10, 10, 10)
 N_RUNS = 6
 CONSISTENT = (3.0, 3.0, 3.0)
@@ -74,9 +73,7 @@ def test_sign_agreement_separates_a_consistent_peak_from_a_one_run_peak(maps) ->
 
 
 def test_a_peak_outside_the_volume_yields_no_estimate(maps) -> None:
-    estimates = run_consistency.collect_peak_estimates(
-        [("1", (900.0, 0.0, 0.0))], **maps
-    )
+    estimates = run_consistency.collect_peak_estimates([("1", (900.0, 0.0, 0.0))], **maps)
     assert len(estimates) == 1
     assert all(not np.isfinite(value) for value in estimates[0].effects)
 
@@ -89,6 +86,86 @@ def test_the_estimates_are_read_without_a_combined_map(maps) -> None:
         run_variance_img=maps["run_variance_img"],
     )
     assert estimates[0].combined_effect is None
+
+
+def test_run_effect_correlation_uses_only_the_fitted_mask() -> None:
+    first = np.array([1.0, 2.0, 3.0, 100.0])
+    second = np.array([2.0, 4.0, 6.0, -100.0])
+    third = np.array([3.0, 2.0, 1.0, 50.0])
+    effects = np.stack((first, second, third), axis=-1).reshape(4, 1, 1, 3)
+    mask = np.array([1, 1, 1, 0], dtype=np.uint8).reshape(4, 1, 1)
+
+    correlation = run_consistency.run_effect_correlation_matrix(
+        nib.Nifti1Image(effects, np.eye(4)),
+        nib.Nifti1Image(mask, np.eye(4)),
+    )
+
+    np.testing.assert_allclose(
+        correlation,
+        np.array(
+            [
+                [1.0, 1.0, -1.0],
+                [1.0, 1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+            ]
+        ),
+    )
+
+
+def test_run_effect_correlation_requires_spatial_variation() -> None:
+    effects = np.ones((3, 1, 1, 2), dtype=np.float32)
+    mask = np.ones((3, 1, 1), dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="non-zero spatial variance"):
+        run_consistency.run_effect_correlation_matrix(
+            nib.Nifti1Image(effects, np.eye(4)),
+            nib.Nifti1Image(mask, np.eye(4)),
+        )
+
+
+@pytest.mark.parametrize("invalid_value", [np.nan, 2.0])
+def test_run_effect_correlation_rejects_a_non_binary_mask(
+    invalid_value: float,
+) -> None:
+    effects = np.arange(12, dtype=np.float32).reshape(3, 2, 1, 2)
+    mask = np.ones((3, 2, 1), dtype=np.float32)
+    mask[0, 0, 0] = invalid_value
+
+    with pytest.raises(ValueError, match="finite binary"):
+        run_consistency.run_effect_correlation_matrix(
+            nib.Nifti1Image(effects, np.eye(4)),
+            nib.Nifti1Image(mask, np.eye(4)),
+        )
+
+
+def test_run_effect_correlation_figure_labels_every_run() -> None:
+    correlation = np.array(
+        [
+            [1.0, 0.5, -0.25],
+            [0.5, 1.0, 0.1],
+            [-0.25, 0.1, 1.0],
+        ]
+    )
+    labels = ("run-01", "run-02", "run-03")
+
+    figure = run_consistency.run_effect_correlation_figure(
+        correlation,
+        run_labels=labels,
+        title="Whole-mask run agreement",
+    )
+    figure.canvas.draw()
+
+    tick_text = {
+        tick.get_text()
+        for axis in figure.axes
+        for tick in (*axis.get_xticklabels(), *axis.get_yticklabels())
+        if tick.get_text()
+    }
+    provenance = " ".join(artist.get_text() for artist in figure.texts)
+    assert set(labels) <= tick_text
+    assert "Pearson r" in provenance
+    assert "fitted analysis mask" in provenance
+    plt.close(figure)
 
 
 # --- the figure ------------------------------------------------------------
@@ -154,9 +231,7 @@ def test_too_many_peaks_are_capped_and_the_cap_is_stated(maps) -> None:
     # Past a handful the columns are narrower than their own labels, and the peaks
     # beyond the sixth are rarely what a result rests on.
     estimates = run_consistency.collect_peak_estimates(PEAKS, **maps) * 5
-    figure = run_consistency.peak_forest_figure(
-        estimates, run_labels=_labels(), max_peaks=3
-    )
+    figure = run_consistency.peak_forest_figure(estimates, run_labels=_labels(), max_peaks=3)
     assert len(figure.axes) == 3
     text = " ".join(artist.get_text() for artist in figure.texts)
     assert "3 of 10 peak(s) shown" in text

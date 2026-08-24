@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import nibabel as nib
 import numpy as np
@@ -10,6 +12,7 @@ from fmri_pipeline.analysis.report.figures import model_fit as model_fit_figures
 from fmri_pipeline.analysis.report.figures.model_fit import (
     collect_residual_carpet,
     model_fit_table,
+    pooled_r_squared,
     summarize_model_fit,
     write_model_fit_tsv,
 )
@@ -190,3 +193,151 @@ def test_pooled_residual_sd_uses_every_retained_sample_inside_the_fitted_mask(
     assert result.run_count == 2
     assert result.retained_frames == 5
     assert result.voxel_count == 2
+
+
+def test_pooled_r_squared_uses_within_run_total_variation(
+    tmp_path: Path,
+) -> None:
+    mask = _image(
+        tmp_path / "mask.nii.gz",
+        np.array([[[1]], [[1]], [[0]]], dtype=np.uint8),
+    )
+    first_prediction = np.array(
+        [
+            [[[0.0, 1.0, 2.0]]],
+            [[[0.0, 2.0, 4.0]]],
+            [[[100.0, 100.0, 100.0]]],
+        ]
+    )
+    first_residual = np.array(
+        [
+            [[[1.0, 0.0, -1.0]]],
+            [[[1.0, -2.0, 1.0]]],
+            [[[50.0, 50.0, 50.0]]],
+        ]
+    )
+    second_prediction = np.array(
+        [
+            [[[10.0, 12.0]]],
+            [[[20.0, 24.0]]],
+            [[[200.0, 200.0]]],
+        ]
+    )
+    second_residual = np.array(
+        [
+            [[[0.0, 0.0]]],
+            [[[2.0, -2.0]]],
+            [[[75.0, 75.0]]],
+        ]
+    )
+    residual_paths = (
+        _image(tmp_path / "run-01_residual.nii.gz", first_residual),
+        _image(tmp_path / "run-02_residual.nii.gz", second_residual),
+    )
+    predicted_paths = (
+        _image(tmp_path / "run-01_predicted.nii.gz", first_prediction),
+        _image(tmp_path / "run-02_predicted.nii.gz", second_prediction),
+    )
+
+    result = pooled_r_squared(
+        residual_paths=residual_paths,
+        predicted_paths=predicted_paths,
+        mask_path=mask,
+    )
+
+    expected = []
+    for voxel in range(2):
+        residual_sum_squares = 0.0
+        total_sum_squares = 0.0
+        for predicted, residual in (
+            (first_prediction, first_residual),
+            (second_prediction, second_residual),
+        ):
+            observed = predicted[voxel, 0, 0] + residual[voxel, 0, 0]
+            residual_sum_squares += float(np.sum(residual[voxel, 0, 0] ** 2))
+            total_sum_squares += float(np.sum((observed - observed.mean()) ** 2))
+        expected.append(1.0 - residual_sum_squares / total_sum_squares)
+
+    actual = np.asarray(result.image.dataobj)
+    np.testing.assert_allclose(actual[:2, 0, 0], expected)
+    assert actual[2, 0, 0] == 0.0
+    assert result.run_count == 2
+    assert result.retained_frames == 5
+    assert result.voxel_count == 2
+
+
+@pytest.mark.parametrize("invalid_value", [np.nan, 2.0])
+def test_pooled_r_squared_rejects_a_non_binary_mask(
+    tmp_path: Path,
+    invalid_value: float,
+) -> None:
+    residual, predicted, _mask_path = _artifacts(tmp_path)
+    mask_values = np.ones((2, 1, 1), dtype=np.float32)
+    mask_values[0, 0, 0] = invalid_value
+    mask = _image(tmp_path / "invalid_mask.nii.gz", mask_values)
+
+    with pytest.raises(ValueError, match="finite binary"):
+        pooled_r_squared(
+            residual_paths=(residual,),
+            predicted_paths=(predicted,),
+            mask_path=mask,
+        )
+
+
+def test_pooled_r_squared_reads_model_series_in_bounded_time_chunks(
+    tmp_path: Path,
+) -> None:
+    n_frames = 33
+    predicted_values = np.broadcast_to(
+        np.arange(n_frames, dtype=np.float32),
+        (2, 1, 1, n_frames),
+    ).copy()
+    residual_values = np.broadcast_to(
+        np.where(np.arange(n_frames) % 2 == 0, 0.5, -0.5),
+        (2, 1, 1, n_frames),
+    ).astype(np.float32, copy=True)
+
+    class ChunkOnlyProxy:
+        def __init__(self, values: np.ndarray) -> None:
+            self.values = values
+            self.slices: list[slice] = []
+
+        def __getitem__(self, key):
+            time_slice = key[-1]
+            assert isinstance(time_slice, slice)
+            assert time_slice.stop - time_slice.start <= 16
+            self.slices.append(time_slice)
+            return self.values[key]
+
+        def __array__(self, *_args, **_kwargs):
+            raise AssertionError("The complete 4D series must not be materialized.")
+
+    residual_proxy = ChunkOnlyProxy(residual_values)
+    predicted_proxy = ChunkOnlyProxy(predicted_values)
+    images = {
+        "mask": nib.Nifti1Image(np.ones((2, 1, 1), dtype=np.uint8), np.eye(4)),
+        "residual": SimpleNamespace(
+            shape=residual_values.shape,
+            affine=np.eye(4),
+            dataobj=residual_proxy,
+        ),
+        "predicted": SimpleNamespace(
+            shape=predicted_values.shape,
+            affine=np.eye(4),
+            dataobj=predicted_proxy,
+        ),
+    }
+
+    def _load(path: str):
+        return images[Path(path).stem]
+
+    with patch("nibabel.load", side_effect=_load):
+        result = pooled_r_squared(
+            residual_paths=(Path("residual"),),
+            predicted_paths=(Path("predicted"),),
+            mask_path=Path("mask"),
+        )
+
+    assert len(residual_proxy.slices) == 3
+    assert len(predicted_proxy.slices) == 3
+    assert result.retained_frames == n_frames

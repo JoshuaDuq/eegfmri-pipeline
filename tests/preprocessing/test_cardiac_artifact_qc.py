@@ -104,7 +104,7 @@ def test_direct_ecg_detection_does_not_require_analyzer_markers() -> None:
     detection = cardiac_review.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
 
     assert 25 <= len(detection.events) <= 31
-    assert detection.average_pulse_bpm == pytest.approx(60.0, abs=3.0)
+    assert detection.detected_beats_per_recording_minute == pytest.approx(60.0, abs=3.0)
     assert detection.events.shape[1] == 3
 
 
@@ -790,7 +790,26 @@ def test_the_analyzer_marker_train_is_preferred_over_channel_detection() -> None
 
     assert detection.source == "annotation-markers"
     # 1.2 s between markers is 50 bpm; the QRS train would have given 60.
-    assert detection.average_pulse_bpm == pytest.approx(50.0, abs=3.0)
+    assert detection.detected_beats_per_recording_minute == pytest.approx(50.0, abs=3.0)
+
+
+def test_marker_rate_exposes_missing_beats_over_the_recording() -> None:
+    """A long detection gap must lower completeness instead of being hidden by median RR."""
+    sfreq = 100.0
+    duration_s = 120.0
+    info = mne.create_info(["Cz", "ECG"], sfreq, ["eeg", "ecg"])
+    raw = mne.io.RawArray(np.zeros((2, int(sfreq * duration_s))), info, verbose=False)
+    onsets = np.r_[np.arange(1.0, 31.0), np.arange(90.0, 120.0)]
+    raw.set_annotations(
+        mne.Annotations(onsets, np.zeros(onsets.size), ["Pulse Artifact/R"] * onsets.size)
+    )
+    settings = cardiac_review.CardiacReviewSettings.from_mapping(
+        {"enabled": True, "marker_description": "Pulse Artifact/R"}
+    )
+
+    detection = cardiac_review.detect_ecg_events(raw, settings)
+
+    assert detection.detected_beats_per_recording_minute == pytest.approx(30.0, abs=0.1)
 
 
 def test_channel_detection_is_used_when_no_marker_train_exists() -> None:
@@ -800,7 +819,7 @@ def test_channel_detection_is_used_when_no_marker_train_exists() -> None:
     detection = cardiac_review.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
 
     assert detection.source == "ecg-channel"
-    assert detection.average_pulse_bpm == pytest.approx(60.0, abs=3.0)
+    assert detection.detected_beats_per_recording_minute == pytest.approx(60.0, abs=3.0)
 
 
 def test_neither_source_resolving_is_still_an_unusable_ecg() -> None:

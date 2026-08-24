@@ -141,11 +141,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.fmriExtraArgs = s
 			}
 		}},
-		{key: "fmri_preprocessing.fmriprep.use_aroma", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.fmriUseAroma = b
-			}
-		}},
 		{key: "fmri_preprocessing.fmriprep.skip_bids_validation", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.fmriSkipBidsValidation = b
@@ -215,9 +210,16 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.fmriLowMem = b
 			}
 		}},
-		{key: "fmri_preprocessing.fmriprep.longitudinal", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.fmriLongitudinal = b
+		{key: "fmri_preprocessing.fmriprep.subject_anatomical_reference", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "unbiased":
+					m.fmriSubjectAnatomicalReferenceIndex = 1
+				case "sessionwise":
+					m.fmriSubjectAnatomicalReferenceIndex = 2
+				default:
+					m.fmriSubjectAnatomicalReferenceIndex = 0
+				}
 			}
 		}},
 		{key: "fmri_preprocessing.fmriprep.skull_strip_template", apply: func(v interface{}) {
@@ -230,19 +232,23 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.fmriSkullStripFixedSeed = b
 			}
 		}},
-		{key: "fmri_preprocessing.fmriprep.bold2t1w_init", apply: func(v interface{}) {
+		{key: "fmri_preprocessing.fmriprep.bold2anat_init", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "auto":
+					m.fmriBold2AnatInitIndex = 1
+				case "t2w":
+					m.fmriBold2AnatInitIndex = 2
 				case "header":
-					m.fmriBold2T1wInitIndex = 1
+					m.fmriBold2AnatInitIndex = 3
 				default:
-					m.fmriBold2T1wInitIndex = 0
+					m.fmriBold2AnatInitIndex = 0
 				}
 			}
 		}},
-		{key: "fmri_preprocessing.fmriprep.bold2t1w_dof", apply: func(v interface{}) {
+		{key: "fmri_preprocessing.fmriprep.bold2anat_dof", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.fmriBold2T1wDof = n
+				m.fmriBold2AnatDof = n
 			}
 		}},
 		{key: "fmri_preprocessing.fmriprep.slice_time_ref", apply: func(v interface{}) {

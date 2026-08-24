@@ -148,8 +148,8 @@ def test_load_config_surfaces_invalid_tui_overrides_after_cache_warm(tmp_path, m
 def test_resolve_single_path_keeps_docker_image_like_values() -> None:
     config_dir = Path("/tmp/config")
     project_root = Path("/tmp/project")
-    resolved = loader._resolve_single_path("nipreps/fmriprep:25.2.4", config_dir, project_root)
-    assert resolved == "nipreps/fmriprep:25.2.4"
+    resolved = loader._resolve_single_path("nipreps/fmriprep:25.2.5", config_dir, project_root)
+    assert resolved == "nipreps/fmriprep:25.2.5"
 
 
 def test_resolve_single_path_keeps_windows_drive_absolute_paths(tmp_path) -> None:

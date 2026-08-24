@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import matplotlib
 import pandas as pd
-import pytest
 
 matplotlib.use("Agg")
 
@@ -213,9 +212,7 @@ def test_variance_removed_is_pooled_across_the_whole_cohort() -> None:
 
 def test_a_cohort_with_no_measured_variance_pools_nothing() -> None:
     """An absent measurement must not read as a measured zero."""
-    frame = decomposition_frame(
-        _cohort(_participant("0014", variance_removed=float("nan")))
-    )
+    frame = decomposition_frame(_cohort(_participant("0014", variance_removed=float("nan"))))
 
     assert variance_pooled(frame) is None
 
@@ -237,10 +234,6 @@ def test_below_the_gate_the_participants_are_listed_instead_of_summarised() -> N
 # --------------------------------------------------------------------------------------
 # Figures and table
 # --------------------------------------------------------------------------------------
-
-
-
-
 
 
 def test_the_composition_bar_shows_only_classes_that_occurred() -> None:

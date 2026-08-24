@@ -9,7 +9,6 @@ a measurement that separated nobody.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from eeg_pipeline.preprocessing.report.cohort.aggregate import BandGates
@@ -157,7 +156,9 @@ def test_the_table_reads_as_a_count_over_a_denominator() -> None:
 
 
 def test_a_stricter_gate_withholds_the_table() -> None:
-    assert multiplicity(_spread_cohort(n=12), gates=BandGates(min_subjects_for_outer_band=20)) is None
+    assert (
+        multiplicity(_spread_cohort(n=12), gates=BandGates(min_subjects_for_outer_band=20)) is None
+    )
 
 
 def test_a_metric_most_of_the_cohort_ties_on_does_not_flag_most_of_the_cohort() -> None:
@@ -188,7 +189,9 @@ def test_the_count_per_tail_is_bounded_by_the_decile_itself() -> None:
 
 def test_a_tied_group_too_large_for_the_budget_is_excluded_entirely() -> None:
     """Admitting half of a tied group would be a statement about sort order."""
-    measured = {f"{index:04d}": value for index, value in enumerate([1, 1, 1, 4, 5, 6, 7, 8, 9, 10])}
+    measured = {
+        f"{index:04d}": value for index, value in enumerate([1, 1, 1, 4, 5, 6, 7, 8, 9, 10])
+    }
 
     outer = _outer_members(measured)
 

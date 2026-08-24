@@ -17,16 +17,26 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from eeg_pipeline.preprocessing.report.organize import (  # noqa: E402
+    configure_report_rendering,
     drop_per_epoch_metadata_tables,
     drop_replaced_filtered_spectrum,
     drop_replaced_ica_ecg_panels,
     drop_replaced_panels,
     drop_replaced_per_run_bad_channels,
-    drop_replaced_raw_time_series,
     drop_superseded_mne_ica_panels,
     open_subject_report,
     place_events_with_epochs,
 )
+
+
+def test_report_rendering_uses_explicit_high_resolution_limits() -> None:
+    report = mne.Report(title="resolution", verbose="ERROR")
+
+    configure_report_rendering(report, figure_dpi=220, figure_max_width_px=2200)
+
+    assert report.img_max_res == 220
+    assert report.img_max_width == 2200
+    assert plt.rcParams["figure.dpi"] == 220
 
 
 def _mne_ica_panels(report: mne.Report) -> None:
@@ -201,27 +211,6 @@ def test_dropping_a_replaced_panel_is_scoped_to_its_section() -> None:
     assert ("Raw (original)", "Time series") not in survivors
     assert ("Raw (original)", "PSD") in survivors
     assert ("Something else", "Time series") in survivors
-
-
-def test_the_raw_butterfly_panels_are_dropped_for_both_raw_sections() -> None:
-    """The original and the filtered raw each carry one, and both are replaced."""
-    report = mne.Report(title="raw", verbose="ERROR")
-    report.add_raw(_raw(), title="Raw (original)", psd=True, butterfly=True)
-    report.add_raw(_raw(), title="Raw (filtered)", psd=True, butterfly=True)
-
-    drop_replaced_raw_time_series(report)
-
-    assert not any(element.name == "Time series" for element in report._content)
-    assert sum(element.name == "PSD" for element in report._content) == 2
-
-
-def test_dropping_the_raw_butterfly_is_safe_when_there_is_none() -> None:
-    """A report built without ``add_raw`` must not fail the stage that prunes it."""
-    report = mne.Report(title="raw", verbose="ERROR")
-
-    drop_replaced_raw_time_series(report)
-
-    assert report._content == []
 
 
 def test_the_mne_ecg_panels_are_dropped_but_the_overlay_survives() -> None:
@@ -416,9 +405,7 @@ def test_the_ocular_review_supersedes_mnes_eog_panels_like_the_cardiac_one() -> 
 
 
 def test_clean_raw_panels_go_only_where_their_replacement_exists() -> None:
-    """Two replacements added by two stages, so the drop is per panel: a report carrying
-    the continuity section but not the sensor spectra loses the butterfly and keeps the
-    spectrum."""
+    """The overview spectrum can replace PSD; the raw waveform remains complementary."""
     from eeg_pipeline.preprocessing.report.organize import drop_replaced_clean_raw_panels
 
     report = mne.Report(title="raw", verbose="ERROR")
@@ -436,13 +423,11 @@ def test_clean_raw_panels_go_only_where_their_replacement_exists() -> None:
     drop_replaced_clean_raw_panels(report)
 
     remaining = {element.name for element in report._content}
-    assert "Time series" not in remaining
+    assert "Time series" in remaining
     assert "PSD" in remaining
 
 
-def test_reopening_drops_clean_raw_panels_written_after_their_replacement(tmp_path) -> None:
-    """MNE-BIDS-Pipeline writes 'Raw (clean)' when it applies the ICA, after the
-    continuity stage that replaced its butterfly has run."""
+def test_reopening_keeps_clean_raw_waveforms_written_after_the_overview(tmp_path) -> None:
     path = tmp_path / "sub-0001_report.h5"
     report = mne.Report(title="raw", verbose="ERROR")
     figure = plt.figure()
@@ -463,7 +448,7 @@ def test_reopening_drops_clean_raw_panels_written_after_their_replacement(tmp_pa
 
     reopened = open_subject_report(path)
 
-    assert "Time series" not in {element.name for element in reopened._content}
+    assert "Time series" in {element.name for element in reopened._content}
 
 
 def test_the_events_panel_sits_ahead_of_the_panels_that_count_its_trials() -> None:
@@ -593,11 +578,15 @@ def test_a_raw_section_reduced_to_metadata_is_dropped() -> None:
     report = mne.Report(title="raw", verbose="ERROR")
     figure = plt.figure()
     report.add_figure(
-        fig=figure, title="Magnitude and step response", section="Filter response",
+        fig=figure,
+        title="Magnitude and step response",
+        section="Filter response",
         tags=("filter-response",),
     )
     report.add_figure(
-        fig=figure, title="Channels remaining per region", section="Channel and region coverage",
+        fig=figure,
+        title="Channels remaining per region",
+        section="Channel and region coverage",
         tags=("channel-coverage",),
     )
     report.add_figure(fig=figure, title="Info", section="Raw (filtered)", tags=("raw",))
@@ -618,8 +607,10 @@ def test_a_raw_section_keeps_its_metadata_while_it_still_holds_evidence() -> Non
 
     report = mne.Report(title="raw", verbose="ERROR")
     figure = plt.figure()
-    for section, tag in (("Filter response", "filter-response"),
-                         ("Channel and region coverage", "channel-coverage")):
+    for section, tag in (
+        ("Filter response", "filter-response"),
+        ("Channel and region coverage", "channel-coverage"),
+    ):
         report.add_figure(fig=figure, title=f"panel {tag}", section=section, tags=(tag,))
     report.add_figure(fig=figure, title="Info", section="Raw (clean)", tags=("raw",))
     report.add_figure(fig=figure, title="Time series", section="Raw (clean)", tags=("raw",))
@@ -755,9 +746,7 @@ def test_the_drop_logs_survive_without_the_section_that_replaces_them() -> None:
 
     report = mne.Report(title="epochs", verbose="ERROR")
     figure = plt.figure()
-    report.add_figure(
-        fig=figure, title="Drop log", section="Epochs (clean)", tags=("epochs",)
-    )
+    report.add_figure(fig=figure, title="Drop log", section="Epochs (clean)", tags=("epochs",))
     plt.close(figure)
 
     drop_replaced_epoch_drop_logs(report)
@@ -784,9 +773,7 @@ def test_the_report_javascript_is_applied_once_however_often_it_is_reopened() ->
 
 def test_reopening_a_report_applies_the_javascript(tmp_path) -> None:
     path = tmp_path / "sub-0001_report.h5"
-    mne.Report(title="subject", verbose="ERROR").save(
-        path, overwrite=True, open_browser=False
-    )
+    mne.Report(title="subject", verbose="ERROR").save(path, overwrite=True, open_browser=False)
 
     report = open_subject_report(path)
 

@@ -16,14 +16,16 @@ from typing import Callable
 import mne
 
 from eeg_pipeline.preprocessing.report.phases import SECTION_ORDER
-from eeg_pipeline.preprocessing.report.style import apply_report_css, apply_report_js
-
+from eeg_pipeline.preprocessing.report.style import (
+    DEFAULT_REPORT_FIGURE_DPI,
+    DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
+    apply_report_css,
+    apply_report_js,
+    apply_report_style,
+)
 
 #: Title MNE gives the per-epoch metadata table it renders inside an epochs section.
 _METADATA_TABLE_TITLE = "Metadata"
-
-#: Panel MNE draws for a raw recording: a butterfly of every channel over a few seconds.
-_RAW_TIME_SERIES_TITLE = "Time series"
 
 #: Panel MNE draws for a spectrum, in every section that has one.
 _SPECTRUM_TITLE = "PSD"
@@ -158,27 +160,6 @@ def drop_replaced_panels(
     report._content = [element for element in _content_elements(report) if not is_replaced(element)]
 
 
-def drop_replaced_raw_time_series(report: mne.Report) -> None:
-    """Drop MNE's raw butterfly panels, which the time-resolved quality section replaces.
-
-    The butterfly draws every channel unlabelled over a few seconds, with no amplitude
-    scale, repeated for a handful of arbitrary segments of the recording. It is the panel
-    a reviewer would reach for to answer "was this run clean throughout", and it cannot
-    answer that: the segments are not chosen for being informative, and a 63-channel
-    overlay hides the single misbehaving sensor that the question is about.
-
-    ``Amplitude over time by channel`` answers it directly — every channel, every second
-    of the run, relative to that channel's own median — so the butterfly is removed by
-    the section that adds the replacement rather than document-wide. Running the
-    continuity stage alone must not leave a report with neither panel.
-    """
-    drop_replaced_panels(
-        report,
-        section_prefix="Raw",
-        titles=(_RAW_TIME_SERIES_TITLE,),
-    )
-
-
 def drop_replaced_filtered_spectrum(report: mne.Report) -> None:
     """Drop the filtered raw spectrum, which the per-run sensor spectra replace.
 
@@ -232,20 +213,12 @@ def drop_replaced_ica_eog_panels(report: mne.Report) -> None:
 
 #: ``Raw (clean)`` panels, each paired with the tag of the section that replaces it.
 #:
-#: ``drop_replaced_raw_time_series`` already spans this section by prefix, but it runs
-#: from the continuity stage and MNE-BIDS-Pipeline writes ``Raw (clean)`` afterwards, when
-#: it applies the ICA. The panels came back after their replacement had been added and
-#: stayed, which is the same recurrence that kept MNE's ICA panels alive.
-#:
 #: The spectrum is handled here rather than by ``drop_replaced_filtered_spectrum``, which
 #: deliberately keeps the *original* raw spectrum: the full bandwidth before filtering is
 #: the report's one view of the anti-alias corner and whatever sits above the
 #: low-pass. After cleaning, nothing is left on that axis that the sensor-spectra section
 #: does not draw over the band a reader is actually reading.
-_REPLACED_CLEAN_RAW_PANELS = (
-    (_RAW_TIME_SERIES_TITLE, "run-continuity"),
-    (_SPECTRUM_TITLE, "sensor-spectra"),
-)
+_REPLACED_CLEAN_RAW_PANELS = ((_SPECTRUM_TITLE, "sensor-spectra"),)
 
 
 def drop_replaced_clean_raw_panels(report: mne.Report) -> None:
@@ -479,7 +452,28 @@ def place_events_with_epochs(report: mne.Report) -> None:
     move_tagged_content_before(report, tag=_EVENTS_TAG, anchor=before_trial_evidence)
 
 
-def open_subject_report(report_path: Path | str) -> mne.Report:
+def configure_report_rendering(
+    report: mne.Report,
+    *,
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI,
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
+) -> None:
+    """Apply explicit MNE raster limits and Matplotlib figure resolution."""
+    if figure_dpi < 100:
+        raise ValueError("figure_dpi must be at least 100 for a readable report.")
+    if figure_max_width_px < 850:
+        raise ValueError("figure_max_width_px must be at least MNE's 850 px default.")
+    apply_report_style(figure_dpi=figure_dpi)
+    report.img_max_res = float(figure_dpi)
+    report.img_max_width = int(figure_max_width_px)
+
+
+def open_subject_report(
+    report_path: Path | str,
+    *,
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI,
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
+) -> mne.Report:
     """Open an existing subject report and apply the document-wide policies to it.
 
     Every review stage reopens the same report to append its section, so wrapping
@@ -493,6 +487,11 @@ def open_subject_report(report_path: Path | str) -> mne.Report:
     nothing in its place.
     """
     report = mne.open_report(report_path)
+    configure_report_rendering(
+        report,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     apply_report_css(report)
     apply_report_js(report)
     drop_per_epoch_metadata_tables(report)
@@ -601,10 +600,9 @@ def before_trial_evidence(element: object) -> bool:
     signal.
     """
     tags = set(element.tags)
-    return (
-        bool(tags & {"epoch-rejection", "signal-preservation"})
-        or str(element.section or "").startswith("Epochs")
-    )
+    return bool(tags & {"epoch-rejection", "signal-preservation"}) or str(
+        element.section or ""
+    ).startswith("Epochs")
 
 
 def before_ica_component_review(element: object) -> bool:
@@ -628,11 +626,11 @@ __all__ = [
     "drop_replaced_ica_ecg_panels",
     "drop_replaced_panels",
     "drop_replaced_per_run_bad_channels",
-    "drop_replaced_raw_time_series",
     "drop_superseded_mne_ica_panels",
     "order_sections",
     "SECTION_ORDER",
     "move_tagged_content_before",
+    "configure_report_rendering",
     "open_subject_report",
     "place_events_with_epochs",
     "remove_tagged_content",

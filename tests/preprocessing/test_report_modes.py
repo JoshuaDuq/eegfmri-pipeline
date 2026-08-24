@@ -79,6 +79,7 @@ def test_spectra_build_for_continuous_resting_state_data(tmp_path) -> None:
     assert {element.section for element in report._content} == {
         "Sensor spectra before and after ICA",
         "Data quality over time",
+        "Muscle artifact screening",
     }
 
 
@@ -113,7 +114,10 @@ def test_spectra_respect_a_low_sampling_rate(tmp_path) -> None:
     evidence = measure_runs(
         filtered_raw_paths=[path],
         ica=ica,
-        settings=ReportSettings(spectra_line_frequency=60.0),
+        settings=ReportSettings(
+            spectra_line_frequency=60.0,
+            muscle_filter_freq_hz=None,
+        ),
     )
 
     assert evidence.spectra[0].frequencies[-1] <= 49.0

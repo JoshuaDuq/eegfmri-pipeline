@@ -55,8 +55,10 @@ class _ContrastCfg:
 
 class _PlotCfg:
     enabled = False
+    space = "native"
     include_effect_size = True
     include_standard_error = True
+    include_signatures = False
     threshold_mode = "z"
     z_threshold = 2.3
     fdr_q = 0.05
@@ -137,7 +139,7 @@ def exploding_contrast() -> SimpleNamespace:
 def run_first_level(tmp_path: Path):
     """Run ``process_subject`` against a stubbed GLM and return the manifest."""
 
-    def _run(*, contrast_cfg=None, plotting_cfg=None, fitted_model=None):
+    def _run(*, contrast_cfg=None, stats_cfg=None, fitted_model=None):
         cfg = contrast_cfg or _ContrastCfg()
         deriv = tmp_path / "derivatives"
         qc_dir = tmp_path / "qc"
@@ -191,7 +193,7 @@ def run_first_level(tmp_path: Path):
                 "0001",
                 "heat",
                 contrast_cfg=cfg,
-                plotting_cfg=plotting_cfg or _PlotCfg(),
+                stats_cfg=stats_cfg or _PlotCfg(),
                 dry_run=False,
             )
 
@@ -311,19 +313,11 @@ def test_the_acquisition_facts_survive(run_first_level) -> None:
 # --- degradation -----------------------------------------------------------
 
 
-def test_a_contrast_that_cannot_be_recomputed_still_leaves_a_manifest(
+def test_a_contrast_that_cannot_be_recomputed_surfaces_the_error(
     run_first_level, exploding_contrast
 ) -> None:
-    # By the time these are computed the GLM is fitted and the map is on disk. Losing
-    # the run to a failure computing an ancillary map would be the most expensive
-    # failure available, so the manifest is still written -- without those two fields.
-    manifest = run_first_level(fitted_model=exploding_contrast)
-    assert manifest.effect_map is None
-    assert manifest.variance_map is None
-    assert Path(manifest.stat_map).exists()
-    # Neither the fitted mask nor the design section depends on them.
-    assert manifest.mask_is_analysis_mask is True
-    assert manifest.design_matrices
+    with pytest.raises(RuntimeError, match="contrast could not be computed"):
+        run_first_level(fitted_model=exploding_contrast)
 
 
 def test_declining_the_detail_maps_leaves_them_unrecorded(run_first_level) -> None:
@@ -333,7 +327,7 @@ def test_declining_the_detail_maps_leaves_them_unrecorded(run_first_level) -> No
         include_effect_size = False
         include_standard_error = False
 
-    manifest = run_first_level(plotting_cfg=_Declined())
+    manifest = run_first_level(stats_cfg=_Declined())
     assert manifest.effect_map is None
     assert manifest.variance_map is None
     assert manifest.mask_is_analysis_mask is True

@@ -5,6 +5,7 @@ from studies.pain_study.analysis.bcg.markers import (
     CUSTOM_MARKER_PROPERTY,
     Marker,
     add_pulse_markers,
+    remove_pulse_markers,
     read_marker_file,
     write_marker_file,
 )
@@ -150,3 +151,52 @@ def test_a_beat_outside_the_recording_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="before the first sample"):
         add_pulse_markers(parsed, np.array([-0.5]), SFREQ)
+
+
+def test_removed_beats_lose_their_r_markers(tmp_path):
+    """The gap recovery de-duplicates Analyzer's marks in memory; the file must follow.
+
+    `drop_double_marks` removes the second mark inside one cardiac cycle, but the written
+    marker set was only ever added to, so it kept every one of them and disagreed with the
+    train the recovery reported.
+    """
+    parsed = read_marker_file(_write(tmp_path))
+
+    pruned = remove_pulse_markers(parsed, np.array([0.467]), SFREQ)
+
+    positions = [m.position for m in pruned.markers]
+    assert 468 not in positions
+    assert 1358 in positions
+    assert len(pruned.markers) == len(parsed.markers) - 1
+
+
+def test_removal_takes_the_r_peak_and_nothing_else(tmp_path):
+    """Removal is by marker type, not by position: the run's Stimulus train must survive."""
+    parsed = read_marker_file(_write(tmp_path))
+
+    pruned = remove_pulse_markers(parsed, np.array([0.467]), SFREQ)
+
+    stimulus = [m for m in pruned.markers if m.type == "Stimulus"]
+    assert len(stimulus) == 1 and stimulus[0].position == 900
+    assert [m for m in pruned.markers if m.type == "New Segment"]
+
+
+def test_pruning_then_adding_reproduces_the_recovered_train(tmp_path):
+    """What the file carries must equal the combined train, or the readback guard is a lie."""
+    parsed = read_marker_file(_write(tmp_path))
+
+    # 0.467 s is Analyzer's double mark; 0.7 s and 2.0 s are recovered beats.
+    written = add_pulse_markers(
+        remove_pulse_markers(parsed, np.array([0.467]), SFREQ), np.array([0.7, 2.0]), SFREQ
+    )
+
+    r_positions = sorted(m.position for m in written.markers if m.description == "R")
+    assert r_positions == [701, 1358, 2001]
+
+
+def test_removing_a_beat_that_was_never_marked_is_refused(tmp_path):
+    """Silently ignoring it would hide a de-dup train that does not match the file."""
+    parsed = read_marker_file(_write(tmp_path))
+
+    with pytest.raises(ValueError, match="no R marker"):
+        remove_pulse_markers(parsed, np.array([5.0]), SFREQ)

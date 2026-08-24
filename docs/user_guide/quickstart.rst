@@ -90,7 +90,7 @@ join EEG features, fMRI betas, and behavioral targets.
       **In:** BIDS fMRI with fMRIPrep derivatives (required for inferential
       fMRI analysis modes)
 
-      Containerized fMRIPrep (``nipreps/fmriprep:25.2.4``) · Nilearn
+      Containerized fMRIPrep (``nipreps/fmriprep:25.2.5``) · Nilearn
       ``FirstLevelModel`` (HRF ``spm``, drift ``cosine``, HP 0.008 Hz) ·
       trial-wise betas (LSA / LSS) · group one-sample GLM + max-T permutation
       (5 000 iterations) · resting-state ROI connectivity · EEG–fMRI fusion.
@@ -612,7 +612,7 @@ Use the tabs below for the full command matrix and focused examples.
            - What it does
          * - ``fmri``
            - ``preprocess``
-           - Run fMRIPrep (image ``nipreps/fmriprep:25.2.4`` by default);
+           - Run fMRIPrep (image ``nipreps/fmriprep:25.2.5`` by default);
              outputs under ``derivatives/preprocessed/fmri/``
          * - ``fmri-analysis``
            - ``first-level``

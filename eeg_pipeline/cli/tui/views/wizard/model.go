@@ -742,32 +742,31 @@ type Model struct {
 	fmriIgnoreSpec            string // Space-separated (e.g., "fieldmaps slicetiming")
 	fmriBidsFilterFile        string // Host path to BIDS filter JSON (optional)
 	fmriExtraArgs             string // Passed to fMRIPrep via shlex splitting
-	fmriUseAroma              bool
 	fmriSkipBidsValidation    bool
 	fmriStopOnFirstCrash      bool
 	fmriCleanWorkdir          bool
 	fmriSkipReconstruction    bool // fMRIPrep: --fs-no-reconall
 	fmriMemMb                 int
 	// Additional fMRIPrep options
-	fmriNThreads            int     // --nthreads (max threads across all processes)
-	fmriOmpNThreads         int     // --omp-nthreads (max threads per process)
-	fmriLowMem              bool    // --low-mem (reduce memory usage)
-	fmriLongitudinal        bool    // --longitudinal (unbiased structural template)
-	fmriCiftiOutputIndex    int     // 0: disabled, 1: 91k, 2: 170k
-	fmriSkullStripTemplate  string  // --skull-strip-template (default: OASIS30ANTs)
-	fmriSkullStripFixedSeed bool    // --skull-strip-fixed-seed (reproducibility)
-	fmriRandomSeed          int     // --random-seed (run-to-run replicability)
-	fmriDummyScans          int     // --dummy-scans (non-steady state volumes)
-	fmriBold2T1wInitIndex   int     // 0: register (default), 1: header
-	fmriBold2T1wDof         int     // --bold2t1w-dof (degrees of freedom, default: 6)
-	fmriSliceTimeRef        float64 // --slice-time-ref (0=start, 0.5=middle, 1=end)
-	fmriFdSpikeThreshold    float64 // --fd-spike-threshold (default: 0.5)
-	fmriDvarsSpikeThreshold float64 // --dvars-spike-threshold (default: 1.5)
-	fmriMeOutputEchos       bool    // --me-output-echos (multi-echo: output each echo)
-	fmriMedialSurfaceNan    bool    // --medial-surface-nan (fill medial with NaN)
-	fmriNoMsm               bool    // --no-msm (disable MSM-Sulc alignment)
-	fmriLevelIndex          int     // 0: full (default), 1: resampling, 2: minimal
-	fmriTaskId              string  // --task-id (process only specific task)
+	fmriNThreads                        int     // --nthreads (max threads across all processes)
+	fmriOmpNThreads                     int     // --omp-nthreads (max threads per process)
+	fmriLowMem                          bool    // --low-mem (reduce memory usage)
+	fmriSubjectAnatomicalReferenceIndex int     // 0: first-lex, 1: unbiased, 2: sessionwise
+	fmriCiftiOutputIndex                int     // 0: disabled, 1: 91k, 2: 170k
+	fmriSkullStripTemplate              string  // --skull-strip-template (default: OASIS30ANTs)
+	fmriSkullStripFixedSeed             bool    // --skull-strip-fixed-seed (reproducibility)
+	fmriRandomSeed                      int     // --random-seed (run-to-run replicability)
+	fmriDummyScans                      int     // --dummy-scans (non-steady state volumes)
+	fmriBold2AnatInitIndex              int     // 0: t1w, 1: auto, 2: t2w, 3: header
+	fmriBold2AnatDof                    int     // --bold2anat-dof (6, 9, or 12)
+	fmriSliceTimeRef                    float64 // --slice-time-ref (0=start, 0.5=middle, 1=end)
+	fmriFdSpikeThreshold                float64 // --fd-spike-threshold (default: 0.5)
+	fmriDvarsSpikeThreshold             float64 // --dvars-spike-threshold (default: 1.5)
+	fmriMeOutputEchos                   bool    // --me-output-echos (multi-echo: output each echo)
+	fmriMedialSurfaceNan                bool    // --medial-surface-nan (fill medial with NaN)
+	fmriNoMsm                           bool    // --no-msm (disable MSM-Sulc alignment)
+	fmriLevelIndex                      int     // 0: full (default), 1: resampling, 2: minimal
+	fmriTaskId                          string  // --task-id (process only specific task)
 
 	// fMRI UI group expansion states (for collapsible sections)
 	fmriGroupRuntimeExpanded     bool
@@ -776,7 +775,6 @@ type Model struct {
 	fmriGroupAnatomicalExpanded  bool
 	fmriGroupBoldExpanded        bool
 	fmriGroupQcExpanded          bool
-	fmriGroupDenoisingExpanded   bool
 	fmriGroupSurfaceExpanded     bool
 	fmriGroupMultiechoExpanded   bool
 	fmriGroupReproExpanded       bool
@@ -2774,7 +2772,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Defaults mirror fmri_pipeline/utils/config/fmri_config.yaml (fmri_preprocessing.*)
 		m.fmriEngineIndex = 0 // docker
-		m.fmriFmriprepImage = "nipreps/fmriprep:25.2.4"
+		m.fmriFmriprepImage = "nipreps/fmriprep:25.2.5"
 		m.fmriFmriprepOutputDir = ""
 		m.fmriFmriprepWorkDir = ""
 		m.fmriFreesurferLicenseFile = ""
@@ -2783,24 +2781,23 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriIgnoreSpec = ""
 		m.fmriBidsFilterFile = ""
 		m.fmriExtraArgs = ""
-		m.fmriUseAroma = false
 		m.fmriSkipBidsValidation = false
 		m.fmriStopOnFirstCrash = false
 		m.fmriCleanWorkdir = true
 		m.fmriSkipReconstruction = false
 		m.fmriMemMb = 0 // 0 = fMRIPrep default
 		// Additional fMRIPrep options defaults
-		m.fmriNThreads = 0            // 0 = fMRIPrep default (all available)
-		m.fmriOmpNThreads = 0         // 0 = fMRIPrep default
-		m.fmriLowMem = false          // standard memory usage
-		m.fmriLongitudinal = false    // single-session processing
-		m.fmriCiftiOutputIndex = 0    // disabled
-		m.fmriSkullStripTemplate = "" // default: OASIS30ANTs
-		m.fmriSkullStripFixedSeed = false
-		m.fmriRandomSeed = 0         // 0 = non-deterministic
+		m.fmriNThreads = 0                        // 0 = fMRIPrep default (all available)
+		m.fmriOmpNThreads = 1                     // fixed for reproducible ANTs execution
+		m.fmriLowMem = false                      // standard memory usage
+		m.fmriSubjectAnatomicalReferenceIndex = 0 // first-lex
+		m.fmriCiftiOutputIndex = 0                // disabled
+		m.fmriSkullStripTemplate = ""             // default: OASIS30ANTs
+		m.fmriSkullStripFixedSeed = true
+		m.fmriRandomSeed = 42
 		m.fmriDummyScans = 0         // 0 = auto-detect from metadata
-		m.fmriBold2T1wInitIndex = 0  // register (default)
-		m.fmriBold2T1wDof = 6        // 6 DOF rigid-body (default)
+		m.fmriBold2AnatInitIndex = 0 // explicit T1w initialization
+		m.fmriBold2AnatDof = 6       // 6 DOF rigid-body
 		m.fmriSliceTimeRef = 0.5     // middle of acquisition (default)
 		m.fmriFdSpikeThreshold = 0.5 // mm (default)
 		m.fmriDvarsSpikeThreshold = 1.5
@@ -2817,7 +2814,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupAnatomicalExpanded = false
 		m.fmriGroupBoldExpanded = false
 		m.fmriGroupQcExpanded = false
-		m.fmriGroupDenoisingExpanded = false
 		m.fmriGroupSurfaceExpanded = false
 		m.fmriGroupMultiechoExpanded = false
 		m.fmriGroupReproExpanded = false

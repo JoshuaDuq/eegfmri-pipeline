@@ -50,7 +50,7 @@ python -m pip install -e "${REPO_ROOT}[dev,ml]"
 
 mkdir -p "$(dirname "${FMRIPREP_IMAGE}")"
 if [[ ! -f "${FMRIPREP_IMAGE}" ]]; then
-    apptainer pull "${FMRIPREP_IMAGE}" docker://nipreps/fmriprep:25.2.4
+    apptainer pull "${FMRIPREP_IMAGE}" docker://nipreps/fmriprep:25.2.5
 fi
 
 python -m eeg_pipeline --help >/dev/null

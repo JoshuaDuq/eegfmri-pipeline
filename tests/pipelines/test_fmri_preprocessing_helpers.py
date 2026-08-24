@@ -103,3 +103,28 @@ class TestFmriPreprocessingHelpers(unittest.TestCase):
             platform_mod.system.return_value = "Windows"
             with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
                 module._require_supported_container_host("fMRI preprocessing")
+
+    def test_fmriprep_config_rejects_unknown_keys(self) -> None:
+        module = self._import_module()
+
+        with self.assertRaisesRegex(ValueError, "Unknown .* key"):
+            module._validate_fmriprep_config({"bold2t1w_init": "header"})
+
+    def test_fixed_skull_strip_seed_requires_one_omp_thread(self) -> None:
+        module = self._import_module()
+
+        with self.assertRaisesRegex(ValueError, "omp_nthreads=1"):
+            module._validate_fmriprep_config({"skull_strip_fixed_seed": True, "omp_nthreads": 2})
+
+    def test_fmriprep_config_rejects_invalid_scientific_ranges(self) -> None:
+        module = self._import_module()
+
+        with self.assertRaisesRegex(ValueError, "slice_time_ref"):
+            module._validate_fmriprep_config({"slice_time_ref": 1.5})
+        with self.assertRaisesRegex(ValueError, "fd_spike_threshold"):
+            module._validate_fmriprep_config({"fd_spike_threshold": 0})
+
+    def test_fmriprep_defaults_are_compatible_with_fixed_seed_reproducibility(self) -> None:
+        module = self._import_module()
+
+        module._validate_fmriprep_config({})

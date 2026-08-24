@@ -10,6 +10,12 @@ from typing import Any, Dict, Iterable, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from fmri_pipeline.analysis.cohort_config import (
+    CohortReportConfig,
+    CohortThresholdConfig,
+    cohort_report_config_from_mapping,
+    cohort_threshold_config_from_mapping,
+)
 from fmri_pipeline.utils.text import safe_slug
 
 logger = logging.getLogger(__name__)
@@ -32,9 +38,16 @@ _FIRST_LEVEL_CONTRAST_FIELDS = frozenset(
         "formula",
         "name",
         "output_type",
+        "parametric_column",
         "resample_to_freesurfer",
     }
 )
+
+
+#: Smoothing applied at second level, shared by the parametric and permutation paths
+#: so the two cannot silently diverge, and reported so the cluster-shaped corrections
+#: are interpretable. Smoothing is done upstream, at first level, if at all.
+_SECOND_LEVEL_SMOOTHING_FWHM: float | None = None
 
 
 @dataclass(frozen=True)
@@ -42,18 +55,59 @@ class SecondLevelPermutationConfig:
     enabled: bool = False
     n_permutations: int = 5000
     two_sided: bool = True
+    random_state: int = 42
+    #: Threshold-free cluster enhancement, from the same permutation run. Nilearn warns
+    #: that it "will increase the computation time considerably".
+    tfce: bool = False
+    #: Cluster-forming threshold for cluster-extent and cluster-mass FWE, **in p-scale**
+    #: -- Nilearn converts it with ``stats.t.isf`` itself, so 0.001 is the conventional
+    #: p < 0.001. ``None`` skips cluster-level inference entirely.
+    cluster_forming_p: float | None = None
 
     def normalized(self) -> "SecondLevelPermutationConfig":
-        n_permutations = int(self.n_permutations)
-        if n_permutations <= 0:
-            raise ValueError(
-                "Second-level permutation inference requires n_permutations > 0."
-            )
+        if type(self.enabled) is not bool:
+            raise TypeError("Second-level permutation enabled must be a YAML boolean.")
+        if type(self.tfce) is not bool:
+            raise TypeError("Second-level permutation tfce must be a YAML boolean.")
+        if self.cluster_forming_p is not None:
+            if type(self.cluster_forming_p) not in {int, float}:
+                raise TypeError("Second-level permutation cluster_forming_p must be a YAML number.")
+            if not 0.0 < float(self.cluster_forming_p) < 1.0:
+                raise ValueError(
+                    "Second-level permutation cluster_forming_p is a p-value and must "
+                    "lie in (0, 1)."
+                )
+        if type(self.n_permutations) is not int:
+            raise TypeError("Second-level permutation n_permutations must be an integer.")
+        if self.n_permutations <= 0:
+            raise ValueError("Second-level permutation inference requires n_permutations > 0.")
+        if type(self.two_sided) is not bool:
+            raise TypeError("Second-level permutation two_sided must be a YAML boolean.")
+        if type(self.random_state) is not int or self.random_state < 0:
+            raise TypeError("Second-level permutation random_state must be a non-negative integer.")
         return SecondLevelPermutationConfig(
-            enabled=bool(self.enabled),
-            n_permutations=n_permutations,
-            two_sided=bool(self.two_sided),
+            enabled=self.enabled,
+            n_permutations=self.n_permutations,
+            two_sided=self.two_sided,
+            random_state=self.random_state,
+            tfce=self.tfce,
+            cluster_forming_p=(
+                None if self.cluster_forming_p is None else float(self.cluster_forming_p)
+            ),
         )
+
+
+def second_level_permutation_config_from_mapping(
+    section: Dict[str, Any],
+) -> SecondLevelPermutationConfig:
+    """Build permutation config and reject misspelled YAML keys."""
+    if not isinstance(section, dict):
+        raise TypeError("fmri_group_level.permutation must be a YAML mapping")
+    known = set(SecondLevelPermutationConfig.__dataclass_fields__)
+    unknown = sorted(set(section) - known)
+    if unknown:
+        raise ValueError(f"Unknown fmri_group_level.permutation key(s): {unknown}")
+    return SecondLevelPermutationConfig(**section).normalized()
 
 
 @dataclass(frozen=True)
@@ -72,9 +126,9 @@ class SecondLevelConfig:
     group_a_value: Optional[str] = None
     group_b_value: Optional[str] = None
     write_design_matrix: bool = True
-    permutation: SecondLevelPermutationConfig = field(
-        default_factory=SecondLevelPermutationConfig
-    )
+    permutation: SecondLevelPermutationConfig = field(default_factory=SecondLevelPermutationConfig)
+    threshold: CohortThresholdConfig = field(default_factory=CohortThresholdConfig)
+    report: CohortReportConfig = field(default_factory=CohortReportConfig)
 
     def normalized(self) -> "SecondLevelConfig":
         model = str(self.model or "one-sample").strip().lower()
@@ -96,9 +150,7 @@ class SecondLevelConfig:
             )
 
         condition_labels = _normalize_optional_string_tuple(self.condition_labels)
-        if condition_labels is not None and len(condition_labels) != len(
-            contrast_names
-        ):
+        if condition_labels is not None and len(condition_labels) != len(contrast_names):
             raise ValueError(
                 "fmri_group_level.condition_labels must match "
                 "fmri_group_level.contrast_names in length."
@@ -116,9 +168,7 @@ class SecondLevelConfig:
         group_b_value = _normalize_optional_string(self.group_b_value)
 
         if model in {"one-sample", "two-sample"} and len(contrast_names) != 1:
-            raise ValueError(
-                f"{model} second-level analysis requires exactly one input contrast."
-            )
+            raise ValueError(f"{model} second-level analysis requires exactly one input contrast.")
         if model == "paired" and len(contrast_names) != 2:
             raise ValueError(
                 "paired second-level analysis requires exactly two input "
@@ -126,8 +176,7 @@ class SecondLevelConfig:
             )
         if model == "repeated-measures" and len(contrast_names) < 2:
             raise ValueError(
-                "repeated-measures second-level analysis requires at least two "
-                "input contrasts."
+                "repeated-measures second-level analysis requires at least two " "input contrasts."
             )
 
         if covariate_columns and covariates_file is None:
@@ -139,13 +188,11 @@ class SecondLevelConfig:
         if model == "two-sample":
             if covariates_file is None:
                 raise ValueError(
-                    "two-sample second-level analysis requires "
-                    "fmri_group_level.covariates_file."
+                    "two-sample second-level analysis requires " "fmri_group_level.covariates_file."
                 )
             if group_column is None:
                 raise ValueError(
-                    "two-sample second-level analysis requires "
-                    "fmri_group_level.group_column."
+                    "two-sample second-level analysis requires " "fmri_group_level.group_column."
                 )
             if group_a_value is None or group_b_value is None:
                 raise ValueError(
@@ -154,8 +201,7 @@ class SecondLevelConfig:
                 )
             if group_a_value == group_b_value:
                 raise ValueError(
-                    "fmri_group_level.group_a_value and group_b_value must "
-                    "be different."
+                    "fmri_group_level.group_a_value and group_b_value must " "be different."
                 )
         else:
             if group_column is not None or group_a_value is not None or group_b_value is not None:
@@ -171,17 +217,20 @@ class SecondLevelConfig:
                 "within-subject design."
             )
 
-        permutation = (
-            self.permutation.normalized()
-            if bool(self.permutation.enabled)
-            else SecondLevelPermutationConfig()
-        )
+        permutation = self.permutation.normalized()
 
         if model == "repeated-measures" and bool(permutation.enabled):
             raise ValueError(
                 "Repeated-measures permutation inference is unsupported because "
                 "it requires subject-level exchangeability blocks."
             )
+
+        if not isinstance(self.threshold, CohortThresholdConfig):
+            raise TypeError("fmri_group_level.threshold must be a CohortThresholdConfig")
+        if not isinstance(self.report, CohortReportConfig):
+            raise TypeError("fmri_group_level.report must be a CohortReportConfig")
+        self.threshold.validate()
+        report = self.report.normalized()
 
         return SecondLevelConfig(
             model=model,
@@ -199,6 +248,8 @@ class SecondLevelConfig:
             group_b_value=group_b_value,
             write_design_matrix=bool(self.write_design_matrix),
             permutation=permutation,
+            threshold=self.threshold,
+            report=report,
         )
 
 
@@ -359,6 +410,8 @@ def _discover_first_level_effect_size_map(
     matches: list[FirstLevelMapRecord] = []
     for contrast_dir in candidate_dirs:
         for sidecar_path in sorted(contrast_dir.glob("*.json")):
+            if sidecar_path.name.startswith("._"):
+                continue
             payload = _load_sidecar_json(sidecar_path)
             if payload.get("subject") != subject_label:
                 continue
@@ -376,18 +429,14 @@ def _discover_first_level_effect_size_map(
                 )
             run_meta = payload.get("run_meta")
             if not isinstance(run_meta, dict):
-                raise ValueError(
-                    f"Expected run_meta object in first-level sidecar: {sidecar_path}"
-                )
+                raise ValueError(f"Expected run_meta object in first-level sidecar: {sidecar_path}")
             space = str(contrast_cfg.get("fmriprep_space") or "").strip()
             if space != _REQUIRED_GROUP_SPACE:
                 continue
 
             nifti_path = sidecar_path.with_suffix("").with_suffix(".nii.gz")
             if not nifti_path.exists():
-                raise FileNotFoundError(
-                    f"Missing first-level NIfTI for sidecar: {sidecar_path}"
-                )
+                raise FileNotFoundError(f"Missing first-level NIfTI for sidecar: {sidecar_path}")
             matches.append(
                 FirstLevelMapRecord(
                     subject=subject_id,
@@ -450,9 +499,7 @@ def _validate_consistent_first_level_configs(
 
 def _first_level_model_signature(contrast_cfg: Dict[str, Any]) -> str:
     model_cfg = {
-        key: value
-        for key, value in contrast_cfg.items()
-        if key not in _FIRST_LEVEL_CONTRAST_FIELDS
+        key: value for key, value in contrast_cfg.items() if key not in _FIRST_LEVEL_CONTRAST_FIELDS
     }
     return json.dumps(model_cfg, sort_keys=True)
 
@@ -492,9 +539,7 @@ def _load_subject_covariates(
     subject_column: str,
 ) -> pd.DataFrame:
     if not covariates_file.exists():
-        raise FileNotFoundError(
-            f"Second-level covariates file does not exist: {covariates_file}"
-        )
+        raise FileNotFoundError(f"Second-level covariates file does not exist: {covariates_file}")
 
     suffix = covariates_file.suffix.lower()
     if suffix == ".tsv":
@@ -503,8 +548,7 @@ def _load_subject_covariates(
         df = pd.read_csv(covariates_file)
     else:
         raise ValueError(
-            "Second-level covariates file must be .tsv or .csv, got "
-            f"{covariates_file.name!r}."
+            "Second-level covariates file must be .tsv or .csv, got " f"{covariates_file.name!r}."
         )
 
     if subject_column not in df.columns:
@@ -519,8 +563,7 @@ def _load_subject_covariates(
             df.loc[df[subject_column].duplicated(), subject_column].unique().tolist()
         )
         raise ValueError(
-            "Second-level covariates file contains duplicate subjects: "
-            f"{duplicates}"
+            "Second-level covariates file contains duplicate subjects: " f"{duplicates}"
         )
     return df.set_index(subject_column, drop=False)
 
@@ -534,14 +577,9 @@ def _select_covariate_columns(
     if not covariate_columns:
         return pd.DataFrame(index=[_normalize_subject_id(s) for s in selected_subjects])
 
-    missing = [
-        column for column in covariate_columns if column not in cov_df.columns
-    ]
+    missing = [column for column in covariate_columns if column not in cov_df.columns]
     if missing:
-        raise ValueError(
-            "Second-level covariates file is missing requested columns: "
-            f"{missing}"
-        )
+        raise ValueError("Second-level covariates file is missing requested columns: " f"{missing}")
 
     rows: list[pd.Series] = []
     for subject in selected_subjects:
@@ -589,9 +627,7 @@ def _resolve_two_sample_groups(
     group_b_value: str,
 ) -> pd.DataFrame:
     if group_column not in cov_df.columns:
-        raise ValueError(
-            f"Second-level covariates file is missing group column {group_column!r}."
-        )
+        raise ValueError(f"Second-level covariates file is missing group column {group_column!r}.")
 
     rows: list[dict[str, Any]] = []
     for subject in selected_subjects:
@@ -610,24 +646,16 @@ def _resolve_two_sample_groups(
         rows.append(
             {
                 "subject": subject_id,
-                _safe_design_column("group", group_a_value): int(
-                    group_value == group_a_value
-                ),
-                _safe_design_column("group", group_b_value): int(
-                    group_value == group_b_value
-                ),
+                _safe_design_column("group", group_a_value): int(group_value == group_a_value),
+                _safe_design_column("group", group_b_value): int(group_value == group_b_value),
                 "group_label": group_value,
             }
         )
 
     group_df = pd.DataFrame(rows).set_index("subject", drop=False)
     counts = {
-        group_a_value: int(
-            group_df[_safe_design_column("group", group_a_value)].sum()
-        ),
-        group_b_value: int(
-            group_df[_safe_design_column("group", group_b_value)].sum()
-        ),
+        group_a_value: int(group_df[_safe_design_column("group", group_a_value)].sum()),
+        group_b_value: int(group_df[_safe_design_column("group", group_b_value)].sum()),
     }
     if min(counts.values()) == 0:
         raise ValueError(
@@ -649,9 +677,7 @@ def _validate_same_grid(paths: Sequence[Path]) -> None:
     reference_shape, reference_affine = _load_image_signature(reference_path)
     for path in paths[1:]:
         shape, affine = _load_image_signature(path)
-        if shape != reference_shape or not np.allclose(
-            affine, reference_affine, atol=1e-6
-        ):
+        if shape != reference_shape or not np.allclose(affine, reference_affine, atol=1e-6):
             raise ValueError(
                 "Second-level analysis requires all input maps to share the "
                 "same voxel grid. Conflict detected between "
@@ -730,9 +756,7 @@ def _validate_second_level_contrast_spec(
     if contrast_array.ndim != 2:
         raise ValueError("F-contrast second-level inference requires a 2D contrast matrix.")
     if contrast_array.shape[1] != len(design_columns):
-        raise ValueError(
-            "Second-level F-contrast width does not match the design matrix columns."
-        )
+        raise ValueError("Second-level F-contrast width does not match the design matrix columns.")
     if any(np.allclose(row, 0.0) for row in contrast_array):
         raise ValueError("Second-level F-contrast rows must not be all zeros.")
 
@@ -797,7 +821,7 @@ def _evaluate_second_level_contrast_expression(
     return contrast
 
 
-def _contrast_weights_for_design(
+def contrast_weights_for_design(
     *, contrast_spec: Any, design_columns: Sequence[str]
 ) -> Optional[Dict[str, float]]:
     """Map a second-level contrast onto its design columns, or return None.
@@ -810,9 +834,7 @@ def _contrast_weights_for_design(
         return None
     try:
         if isinstance(contrast_spec, str):
-            vector = _evaluate_second_level_contrast_expression(
-                contrast_spec, list(design_columns)
-            )
+            vector = _evaluate_second_level_contrast_expression(contrast_spec, list(design_columns))
         else:
             vector = np.asarray(contrast_spec, dtype=float)
     except Exception as exc:
@@ -851,7 +873,7 @@ def _write_design_matrix_files(
     from fmri_pipeline.analysis.report import style as report_style
     from fmri_pipeline.analysis.report.figures import design as design_figures
 
-    contrast = _contrast_weights_for_design(
+    contrast = contrast_weights_for_design(
         contrast_spec=contrast_spec, design_columns=list(design_matrix.columns)
     )
 
@@ -871,9 +893,7 @@ def _write_design_matrix_files(
         "design_matrix_png",
     )
     _save(
-        design_figures.regressor_correlation_figure(
-            design_matrix, run_label="second level"
-        ),
+        design_figures.regressor_correlation_figure(design_matrix, run_label="second level"),
         "second_level_design_correlation.png",
         "design_correlation_png",
     )
@@ -925,6 +945,7 @@ def _write_metadata_sidecar(
     saved_maps: Dict[str, str],
     manifest_path: Path,
     design_outputs: Dict[str, str],
+    report_path: Optional[Path] = None,
 ) -> Path:
     payload = {
         "config": asdict(config),
@@ -932,9 +953,14 @@ def _write_metadata_sidecar(
         "design_columns": list(prepared.design_matrix.columns),
         "contrast_spec": _serialize_contrast_spec(prepared.contrast_spec),
         "stat_type": prepared.stat_type,
+        # Not a config field, so it would not otherwise survive into the sidecar -- and a
+        # report rebuilt from this file states the smoothing as fact. Without it here,
+        # that statement would depend on whoever rebuilds passing the right value.
+        "smoothing_fwhm": _SECOND_LEVEL_SMOOTHING_FWHM,
         "manifest_path": str(manifest_path),
         "design_outputs": design_outputs,
         "saved_maps": saved_maps,
+        "report_path": str(report_path) if report_path is not None else None,
     }
     sidecar_path = prepared.output_dir / "second_level_metadata.json"
     sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
@@ -1325,9 +1351,7 @@ def _prepare_repeated_measures_input(
     design_rows: list[dict[str, float]] = []
     subject_ids = [_normalize_subject_id(subject) for subject in subjects]
     first_subject = subject_ids[0]
-    condition_columns = {
-        label: _safe_design_column("condition", label) for label in labels
-    }
+    condition_columns = {label: _safe_design_column("condition", label) for label in labels}
 
     for subject_index, subject in enumerate(subjects):
         subject_id = _normalize_subject_id(subject)
@@ -1419,19 +1443,11 @@ def prepare_second_level_input(
             f"Second-level fMRI analysis requires unique subjects; duplicates found: {labels}"
         )
     if len(subjects) < 2:
-        raise ValueError(
-            "Second-level fMRI analysis requires at least two selected subjects."
-        )
+        raise ValueError("Second-level fMRI analysis requires at least two selected subjects.")
 
-    input_root = (
-        Path(config.input_root).expanduser().resolve()
-        if config.input_root
-        else deriv_root
-    )
+    input_root = Path(config.input_root).expanduser().resolve() if config.input_root else deriv_root
     if not input_root.exists():
-        raise FileNotFoundError(
-            f"Second-level input root does not exist: {input_root}"
-        )
+        raise FileNotFoundError(f"Second-level input root does not exist: {input_root}")
 
     tentative_output_name = _derive_output_name(
         config=config,
@@ -1544,7 +1560,11 @@ def run_second_level_analysis(
     if progress is not None and hasattr(progress, "step"):
         progress.step("Fit second-level GLM")
 
-    model = SecondLevelModel()
+    # Passed rather than left to the default. The report states that no smoothing was
+    # applied, and every cluster-shaped correction depends on it, so the claim has to
+    # rest on an argument this pipeline made and not on what Nilearn happens to default
+    # to in the installed version.
+    model = SecondLevelModel(smoothing_fwhm=_SECOND_LEVEL_SMOOTHING_FWHM)
     model = model.fit(
         second_level_input=[str(path) for path in prepared.image_paths],
         design_matrix=prepared.design_matrix,
@@ -1574,6 +1594,15 @@ def run_second_level_analysis(
                 suffix=safe_slug(key, default="map"),
             )
         )
+    analysis_mask_img = model.masker_.mask_img_
+    saved_maps["analysis_mask"] = str(
+        _save_nifti_map(
+            image=analysis_mask_img,
+            output_dir=prepared.output_dir,
+            prefix=prefix,
+            suffix="analysis_mask",
+        )
+    )
 
     if bool(config.permutation.enabled):
         if prepared.stat_type != "t":
@@ -1584,22 +1613,53 @@ def run_second_level_analysis(
             )
         if progress is not None and hasattr(progress, "step"):
             progress.step("Run second-level permutation inference")
-        permutation_image = non_parametric_inference(
+        permutation_output = non_parametric_inference(
             second_level_input=[str(path) for path in prepared.image_paths],
             design_matrix=prepared.design_matrix,
             second_level_contrast=prepared.contrast_spec,
+            mask=analysis_mask_img,
             model_intercept=False,
             n_perm=config.permutation.n_permutations,
+            smoothing_fwhm=_SECOND_LEVEL_SMOOTHING_FWHM,
             two_sided_test=config.permutation.two_sided,
+            random_state=config.permutation.random_state,
+            threshold=config.permutation.cluster_forming_p,
+            tfce=config.permutation.tfce,
         )
-        saved_maps["permutation_logp_max_t"] = str(
-            _save_nifti_map(
-                image=permutation_image,
-                output_dir=prepared.output_dir,
-                prefix=prefix,
-                suffix="logp_max_t",
+        # Nilearn returns the voxel max-T image alone when neither TFCE nor a
+        # cluster-forming threshold was asked for, and a dict of every correction it
+        # computed once either was. All of them come out of the one permutation run, so
+        # discarding the ones that were paid for is the only way to get this wrong.
+        corrections = (
+            {"logp_max_t": permutation_output}
+            if not isinstance(permutation_output, dict)
+            else permutation_output
+        )
+        # The corrected p-maps and the statistics they were computed from. `t` is the
+        # permutation path's own t map; the parametric path computes one too, and the two
+        # must agree because they are the same contrast on the same data. Keeping it is
+        # what makes that checkable.
+        for key in (
+            "logp_max_t",
+            "logp_max_tfce",
+            "logp_max_size",
+            "logp_max_mass",
+            "t",
+            "size",
+            "mass",
+            "tfce",
+        ):
+            image = corrections.get(key)
+            if image is None:
+                continue
+            saved_maps[f"permutation_{key}"] = str(
+                _save_nifti_map(
+                    image=image,
+                    output_dir=prepared.output_dir,
+                    prefix=prefix,
+                    suffix=key,
+                )
             )
-        )
 
     design_outputs: Dict[str, str] = {}
     if bool(config.write_design_matrix):
@@ -1610,14 +1670,54 @@ def run_second_level_analysis(
         )
 
     manifest_path = _write_manifest(prepared.output_dir, prepared.manifest)
+    report_path: Optional[Path] = None
+    if config.report.enabled and config.report.html_report:
+        from fmri_pipeline.analysis.report.cohort import (
+            CohortReportInputs,
+            build_cohort_report,
+        )
+
+        if progress is not None and hasattr(progress, "step"):
+            progress.step("Render cohort report")
+        report_path = build_cohort_report(
+            inputs=CohortReportInputs(
+                task=task,
+                model=config.model,
+                output_name=prepared.output_name,
+                stat_type=prepared.stat_type,
+                output_dir=prepared.output_dir,
+                design_matrix=prepared.design_matrix,
+                contrast_spec=prepared.contrast_spec,
+                input_manifest=prepared.manifest,
+                metadata=prepared.metadata,
+                saved_maps=saved_maps,
+                design_outputs=design_outputs,
+                n_permutations=(
+                    config.permutation.n_permutations if config.permutation.enabled else None
+                ),
+                permutation_two_sided=(
+                    config.permutation.two_sided if config.permutation.enabled else None
+                ),
+                permutation_random_state=(
+                    config.permutation.random_state if config.permutation.enabled else None
+                ),
+                permutation_cluster_forming_p=(
+                    config.permutation.cluster_forming_p if config.permutation.enabled else None
+                ),
+                smoothing_fwhm=_SECOND_LEVEL_SMOOTHING_FWHM,
+            ),
+            report_config=config.report,
+            threshold_config=config.threshold,
+        )
     metadata_path = _write_metadata_sidecar(
         prepared=prepared,
         config=config,
         saved_maps=saved_maps,
         manifest_path=manifest_path,
         design_outputs=design_outputs,
+        report_path=report_path,
     )
-    return {
+    outputs = {
         "output_dir": str(prepared.output_dir),
         "output_name": prepared.output_name,
         "saved_maps": saved_maps,
@@ -1625,6 +1725,9 @@ def run_second_level_analysis(
         "metadata_path": str(metadata_path),
         "design_outputs": design_outputs,
     }
+    if report_path is not None:
+        outputs["report_path"] = str(report_path)
+    return outputs
 
 
 def load_second_level_config_section(config: Any) -> Dict[str, Any]:
@@ -1635,4 +1738,37 @@ def load_second_level_config_section(config: Any) -> Dict[str, Any]:
         second_level_cfg = config.get("fmri_group_level", {}) or {}
     if not isinstance(second_level_cfg, dict):
         raise ValueError("fmri_group_level must be a mapping when provided.")
+    known = set(SecondLevelConfig.__dataclass_fields__) | {"enabled"}
+    unknown = sorted(set(second_level_cfg) - known)
+    if unknown:
+        raise ValueError(f"Unknown fmri_group_level key(s): {unknown}")
+    for key in ("enabled", "write_design_matrix"):
+        if key in second_level_cfg and type(second_level_cfg[key]) is not bool:
+            raise TypeError(f"fmri_group_level.{key} must be a YAML boolean")
+    for key in ("contrast_names", "condition_labels", "covariate_columns"):
+        value = second_level_cfg.get(key)
+        if value is not None and (
+            not isinstance(value, (list, tuple)) or any(type(item) is not str for item in value)
+        ):
+            raise TypeError(f"fmri_group_level.{key} must be a YAML list of strings")
+    string_fields = known - {
+        "enabled",
+        "write_design_matrix",
+        "contrast_names",
+        "condition_labels",
+        "covariate_columns",
+        "permutation",
+        "threshold",
+        "report",
+    }
+    for key in string_fields:
+        value = second_level_cfg.get(key)
+        if value is not None and type(value) is not str:
+            raise TypeError(f"fmri_group_level.{key} must be a YAML string or null")
+    if "permutation" in second_level_cfg:
+        second_level_permutation_config_from_mapping(second_level_cfg["permutation"])
+    if "threshold" in second_level_cfg:
+        cohort_threshold_config_from_mapping(second_level_cfg["threshold"])
+    if "report" in second_level_cfg:
+        cohort_report_config_from_mapping(second_level_cfg["report"])
     return dict(second_level_cfg)

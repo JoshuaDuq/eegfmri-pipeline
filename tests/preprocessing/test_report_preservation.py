@@ -311,6 +311,33 @@ def test_the_section_reports_both_measurements_for_a_task() -> None:
     assert plot_preservation(reliability=reliability, alpha=alpha).axes
 
 
+def test_task_review_adds_mne_joint_evoked_plots_over_the_response_window(
+    monkeypatch,
+) -> None:
+    """Show waveform and scalp maps, using the scientifically configured window."""
+    epochs = _evoked_epochs(response_amplitude=6e-6)
+    epochs.set_montage("standard_1020", verbose="ERROR")
+    report = mne.Report(title="task", verbose="ERROR")
+    plotted_times = []
+
+    def fake_plot_joint(self, *, times, picks, show):
+        plotted_times.append(np.asarray(times))
+        assert picks == "eeg"
+        assert show is False
+        return matplotlib.pyplot.figure()
+
+    monkeypatch.setattr(mne.Evoked, "plot_joint", fake_plot_joint)
+
+    add_task_preservation_review(
+        report=report,
+        epochs=epochs,
+        settings=ReportSettings(response_window_s=(0.0, 0.2)),
+    )
+
+    assert plotted_times[0] == pytest.approx(np.linspace(0.0, 0.2, 4))
+    assert any(element.section == "Evoked responses" for element in report._content)
+
+
 def test_preservation_review_uses_the_configured_window_band_and_channels() -> None:
     epochs = _evoked_epochs(response_amplitude=6e-6)
     epochs.set_montage("standard_1020", verbose="ERROR")
@@ -388,7 +415,7 @@ def test_a_provisional_review_is_superseded_rather_than_duplicated() -> None:
     )
     add_task_preservation_review(report=report, epochs=epochs)
 
-    assert len(report._content) == 2
+    assert len(report._content) == 4
     rendered = "".join(str(element.html) for element in report._content)
     assert "Provisional" not in rendered
 

@@ -37,7 +37,7 @@ fmri_preprocessing:
   task_is_rest: false
   engine: "docker"              # "docker" or "apptainer"
   fmriprep:
-    image: "nipreps/fmriprep:25.2.4"
+    image: "nipreps/fmriprep:25.2.5"  # Pinned fMRIPrep 25.2 LTS patch release
     output_dir: null            # Default: <deriv_root>/preprocessed/fmri
     work_dir: null              # Default: <deriv_root>/work/fmriprep
     fs_license_file: null       # Default: paths.freesurfer_license, then EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt
@@ -56,6 +56,8 @@ fmri_preprocessing:
     
     # Processing level: "full" (default), "resampling", "minimal"
     level: "full"
+    output_layout: "bids"       # Required by this pipeline's derivative/report contract
+    aggregate_session_reports: 4
     
     # CIFTI output: null (disabled), "91k", or "170k"
     cifti_output: null
@@ -65,28 +67,25 @@ fmri_preprocessing:
     
     # Performance options
     nthreads: 0                 # Max threads across all processes (0 = auto)
-    omp_nthreads: 0             # Max threads per process (0 = auto)
+    omp_nthreads: 1             # Required with fixed seeds for reproducible ANTs results
     mem_mb: 0                   # Memory limit in MB (0 = auto)
     low_mem: false              # Reduce memory usage
     
     # Anatomical options
     fs_no_reconall: false       # Disable FreeSurfer recon-all
-    longitudinal: false         # Unbiased structural template (increases runtime)
+    subject_anatomical_reference: "first-lex"  # "first-lex" | "unbiased" | "sessionwise"
     skull_strip_template: "OASIS30ANTs"  # Template for brain extraction
     skull_strip_fixed_seed: true   # Fixed seed for reproducibility
     
     # BOLD processing options
-    bold2t1w_init: "register"   # "register" or "header"
-    bold2t1w_dof: 6             # Degrees of freedom for BOLD→T1w registration
+    bold2anat_init: "t1w"       # Explicit: "auto" would depend on T2w availability
+    bold2anat_dof: 6             # Degrees of freedom for BOLD→anatomical registration
     slice_time_ref: 0.5         # Slice timing reference (0=start, 0.5=middle, 1=end)
-    dummy_scans: 0              # Non-steady state volumes (0 = auto-detect)
+    dummy_scans: null           # null = fMRIPrep detection; integer >= 0 = explicit override
     
     # Quality control thresholds
     fd_spike_threshold: 0.5     # Framewise displacement threshold (mm)
     dvars_spike_threshold: 1.5  # Standardized DVARS threshold
-    
-    # Denoising
-    use_aroma: false            # ICA-AROMA denoising
     
     # Surface options
     medial_surface_nan: false   # Fill medial surface with NaN
@@ -113,7 +112,7 @@ fmri_resting_state:
   fmriprep_space: "MNI152NLin2009cAsym"
   require_fmriprep: true
   runs: null
-  confounds_strategy: "auto"
+  confounds_strategy: "motion24+wmcsf+fd+compcor"
   auto_compcor_n: 5
   high_pass_hz: 0.008
   low_pass_hz: 0.1
@@ -166,6 +165,13 @@ fmri_contrast:
   
   # Contrast type and conditions
   type: "t-test"               # "t-test" | "custom"
+
+  # Model the scoped trials as a continuous modulator instead of contrasting two of
+  # their levels. Names any numeric events column; the fit gets a response regressor
+  # plus a run-centred modulator, and the modulator is the contrast. Every scoped trial
+  # contributes, so it does not depend on any one level being present in every run.
+  # Mutually exclusive with condition_a/condition_b.
+  parametric_column: null      # e.g. "stimulus_temp", "stimulus_db", "reward_magnitude"
   
   # Condition A: column and value to select trials
   condition_a:
@@ -219,13 +225,45 @@ fmri_contrast:
   high_pass_hz: 0.008          # High-pass filter (128s period)
   low_pass_hz: null            # Optional; avoid unless you know you need it
   smoothing_fwhm: null         # Optional spatial smoothing kernel FWHM in mm
-  confounds_strategy: "auto"    # "auto" | "none" | "motion6" | "motion12" | "motion24" | "motion24+wmcsf" | "motion24+wmcsf+fd" | "motion24+wmcsf+fd+compcor"
+  confounds_strategy: "motion24+wmcsf+fd+compcor"  # Fixed across runs; "auto" is deliberately not the default
   auto_compcor_n: 5             # Number of CompCor components included when confounds_strategy includes CompCor
   write_design_matrix: false    # Write design matrix TSV/PNG under qc/
   
   # Output format
   output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta" (beta currently aliases cope/effect_size; plots/reports require z-score)
   resample_to_freesurfer: true # Auto-resample to FreeSurfer subject space
+
+###################################################################
+# fMRI Statistical Artifacts
+###################################################################
+
+fmri_stats:
+  space: "native"              # "native" | "mni" | "both"; MNI/both fits an additional standard-space model
+  include_effect_size: true    # Required for effect/evidence and dual-coded report panels
+  include_standard_error: true # Saves effect variance for uncertainty panels
+  include_signatures: true     # Evaluated only when signature maps are configured
+  threshold_mode: "z"          # "z" | "fdr" | "none"
+  z_threshold: 2.3
+  fdr_q: 0.05
+  cluster_min_voxels: 0        # Display extent filter only; 0 disables it
+  two_sided: true
+
+###################################################################
+# fMRI Subject Report (renders existing first-level derivatives only)
+###################################################################
+
+fmri_report:
+  enabled: true
+  html_report: true
+  formats: ["png"]             # Dense maps: PNG; line/design panels are also SVG
+  include_unthresholded: true  # Diagnostic only; shown separately from inference
+  include_motion_qc: true
+  include_carpet_qc: true
+  include_tsnr_qc: true
+  include_design_qc: true
+  embed_images: true           # Self-contained HTML
+  atlas_labels_img: null       # Optional study-pinned MNI label volume
+  atlas_labels_tsv: null       # Optional index/name table for atlas_labels_img
 
 ###################################################################
 # fMRI Group-Level Analysis
@@ -279,3 +317,53 @@ fmri_group_level:
     enabled: false
     n_permutations: 5000
     two_sided: true
+    random_state: 42
+    # Threshold-free cluster enhancement, from the same permutation run. Nilearn
+    # warns it increases run time considerably; measured here at ~33 min for 5000
+    # permutations over an 85k-voxel mask.
+    tfce: false
+    # Cluster-forming threshold for cluster-extent and cluster-mass FWE, in
+    # p-scale: Nilearn converts it to a t height itself, so 0.001 is the
+    # conventional p < 0.001. null skips cluster-level inference.
+    cluster_forming_p: null
+
+  # Parametric inference displayed in the cohort report. The procedure is chosen
+  # before the cohort maps are read; the report never tunes a threshold to the data.
+  threshold:
+    # "fdr" | "fpr" | "bonferroni" | "none"
+    height_control: "fdr"
+    alpha: 0.05
+    # Used only when height_control is "none".
+    uncorrected_z_threshold: 3.09
+    # Display extent filter only; this is not cluster-level corrected inference.
+    cluster_min_voxels: 0
+    two_sided: true
+    min_distance_mm: 8.0
+
+  report:
+    enabled: true
+    html_report: true
+    formats: ["png"]           # Dense maps: PNG; design/matrix panels are also SVG
+    embed_images: true
+    include_design_correlation: true  # Official Nilearn plot when 3–20 regressors
+    include_input_map_concordance: true  # Spatial correlation QC across fitted maps
+    # Refit without each participant and rethreshold. Correlation is scale-invariant,
+    # so the concordance panel above cannot see a participant who carries or suppresses
+    # the group mean by amplitude. Costs one extra fit per participant, no permutations.
+    include_leave_one_out_influence: true
+    # Residuals of the reported design against the Gaussian errors the report assumes.
+    include_residual_diagnostics: true
+    # Nilearn's view_img, inlined: self-contained, offline, roughly 0.6 MB of HTML.
+    include_interactive_viewer: true
+    include_true_discovery_proportion: true  # Nilearn ARI bound per surviving cluster
+    include_unthresholded: true
+    cluster_table_max_rows: 10  # Leading clusters in HTML; TSV always retains all rows
+    # Names the structure each cluster peak falls in. Supplied by the study, like
+    # fmri_report's, so the report needs no network. Must be an MNI label volume:
+    # second-level coordinates are MNI.
+    atlas_labels_img: null
+    atlas_labels_tsv: null
+    # Cortical mesh for the surface panel, e.g. "fsaverage". Off by default:
+    # Nilearn downloads a mesh it cannot find, and a report reading a derivatives
+    # tree offline must not fetch one as a side effect of drawing a figure.
+    surface_mesh: null

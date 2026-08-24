@@ -48,8 +48,6 @@ BEFORE = "before"
 AFTER = "after"
 
 
-
-
 def paradigm_of(continuity: Sequence[RunContinuity]) -> Paradigm:
     """Classify the paradigm from whether any run carried task events.
 
@@ -157,11 +155,10 @@ def run_table(
 
 
 def spectrum_curves(spectra: Sequence[RunSpectra]) -> pd.DataFrame:
-    """The across-channel median and worst channel per run, stage and frequency.
+    """The across-channel median and maximum envelope by run, stage, and frequency.
 
-    The worst channel travels beside the median because interference is often focal: it
-    concentrates in the sensors with the largest lead loops, so a montage median can sit
-    near zero while individual sensors are unusable.
+    The maximum envelope travels beside the median because interference is often focal.
+    Its maximizing sensor may change from bin to bin, so it is not one physical channel.
     """
     rows: list[dict[str, Any]] = []
     for run in spectra:
@@ -382,9 +379,7 @@ def pool_alpha_runs(measured: Sequence[PosteriorAlpha]) -> PosteriorAlpha | None
             np.vstack([np.asarray(entry.background_db, dtype=float) for entry in entries]),
             axis=0,
         ),
-        peak_frequency_hz=float(
-            np.median([entry.peak_frequency_hz for entry in peak_source])
-        ),
+        peak_frequency_hz=float(np.median([entry.peak_frequency_hz for entry in peak_source])),
         prominence_db=float(np.median([entry.prominence_db for entry in entries])),
         band_hz=entries[0].band_hz,
         background_residual_db=float(
@@ -435,12 +430,8 @@ def alpha_measurements(alpha: Mapping[str, PosteriorAlpha]) -> dict[str, Any]:
             measurements[f"alpha_peak_frequency_hz_{stage}"] = float(measured.peak_frequency_hz)
             measurements[f"alpha_peak_contested_{stage}"] = bool(measured.peak_is_contested)
             if np.isfinite(measured.runner_up_frequency_hz):
-                measurements[f"alpha_runner_up_hz_{stage}"] = float(
-                    measured.runner_up_frequency_hz
-                )
-                measurements[f"alpha_runner_up_gap_db_{stage}"] = float(
-                    measured.runner_up_gap_db
-                )
+                measurements[f"alpha_runner_up_hz_{stage}"] = float(measured.runner_up_frequency_hz)
+                measurements[f"alpha_runner_up_gap_db_{stage}"] = float(measured.runner_up_gap_db)
     return measurements
 
 
@@ -496,9 +487,7 @@ def build_subject_sidecar(
         ),
         spectrum_curves=spectrum_curves(spectra),
         comb_curves=comb_curves(combs),
-        channels=channel_table(
-            positions=channel_positions, bad_by_run=bad_channels_by_run
-        ),
+        channels=channel_table(positions=channel_positions, bad_by_run=bad_channels_by_run),
         # Conditions belong to a paradigm that has them. A resting-state recording that
         # arrived with condition counts was misclassified somewhere upstream, and carrying
         # them anyway would put a rest participant into a task-only panel.

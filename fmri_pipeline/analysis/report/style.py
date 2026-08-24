@@ -68,19 +68,16 @@ def orientation_label(radiological: bool = RADIOLOGICAL) -> str:
     Takes an argument rather than only reading :data:`RADIOLOGICAL`, so a panel drawn
     against a non-default convention still describes itself truthfully.
     """
-    return (
-        "radiological (R on viewer left)"
-        if radiological
-        else "neurological (L on viewer left)"
-    )
+    return "radiological (R on viewer left)" if radiological else "neurological (L on viewer left)"
 
 
 ORIENTATION_LABEL = orientation_label()
 
-#: Figures embedded in the HTML report. The report lays out around 1180 px wide, so
-#: 300 dpi produces resolution no reader sees while base64-encoding megabytes into
-#: every document.
-HTML_FIGURE_DPI = 150
+#: Dense figures embedded in the HTML report. At the report's 1180 px content width,
+#: 200 dpi keeps slice labels and fine carpet structure sharp on high-density displays
+#: without paying the size of manuscript-resolution raster output. Line figures are
+#: SVG and therefore resolution-independent.
+HTML_FIGURE_DPI = 200
 #: Figures written to disk for manuscript use, where the resolution is wanted.
 PRINT_FIGURE_DPI = 300
 
@@ -293,6 +290,33 @@ def figure_format(*, dense: bool) -> str:
     return "png" if dense else "svg"
 
 
+def save_report_figure(
+    figure: Any,
+    *,
+    out_dir: Path,
+    stem: str,
+    formats: Sequence[str],
+    dense: bool = True,
+) -> Path:
+    """Save one report figure and return its preferred HTML artifact."""
+    preferred = figure_format(dense=dense)
+    wanted = [preferred, *(fmt for fmt in formats if fmt != preferred)]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        primary: Path | None = None
+        with plot_context():
+            for fmt in wanted:
+                path = out_dir / f"{stem}.{fmt}"
+                figure.savefig(path, **savefig_kwargs(path))
+                if primary is None:
+                    primary = path
+        if primary is None:  # pragma: no cover - preferred always supplies one
+            raise RuntimeError(f"No figure artifact was written for {stem!r}.")
+        return primary
+    finally:
+        plt.close(figure)
+
+
 __all__ = [
     "COLOR_LIMIT_PERCENTILE",
     "FMRI_RC",
@@ -314,6 +338,7 @@ __all__ = [
     "plot_context",
     "robust_symmetric_limit",
     "robust_upper_limit",
+    "save_report_figure",
     "savefig_kwargs",
     "suprathreshold_limit",
 ]

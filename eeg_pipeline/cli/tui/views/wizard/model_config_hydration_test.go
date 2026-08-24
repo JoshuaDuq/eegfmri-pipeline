@@ -223,21 +223,21 @@ func TestApplyConfigKeys_HydratesFmriPathsAndPreprocessingConfig(t *testing.T) {
 			map[string]interface{}{"name": "SIG_A", "path": "maps/sig_a.nii.gz"},
 			map[string]interface{}{"name": "SIG_B", "path": "maps/sig_b.nii.gz"},
 		},
-		"fmri_preprocessing.fmriprep.level":                 "resampling",
-		"fmri_preprocessing.fmriprep.cifti_output":          "170k",
-		"fmri_preprocessing.fmriprep.task_id":               "pain",
-		"fmri_preprocessing.fmriprep.low_mem":               true,
-		"fmri_preprocessing.fmriprep.longitudinal":          true,
-		"fmri_preprocessing.fmriprep.skull_strip_template":  "NKI",
-		"fmri_preprocessing.fmriprep.bold2t1w_init":         "header",
-		"fmri_preprocessing.fmriprep.bold2t1w_dof":          9,
-		"fmri_preprocessing.fmriprep.slice_time_ref":        0.25,
-		"fmri_preprocessing.fmriprep.fd_spike_threshold":    0.6,
-		"fmri_preprocessing.fmriprep.dvars_spike_threshold": 1.7,
-		"fmri_preprocessing.fmriprep.medial_surface_nan":    true,
-		"fmri_preprocessing.fmriprep.no_msm":                true,
-		"fmri_preprocessing.fmriprep.me_output_echos":       true,
-		"fmri_preprocessing.fmriprep.random_seed":           123,
+		"fmri_preprocessing.fmriprep.level":                        "resampling",
+		"fmri_preprocessing.fmriprep.cifti_output":                 "170k",
+		"fmri_preprocessing.fmriprep.task_id":                      "pain",
+		"fmri_preprocessing.fmriprep.low_mem":                      true,
+		"fmri_preprocessing.fmriprep.subject_anatomical_reference": "unbiased",
+		"fmri_preprocessing.fmriprep.skull_strip_template":         "NKI",
+		"fmri_preprocessing.fmriprep.bold2anat_init":               "header",
+		"fmri_preprocessing.fmriprep.bold2anat_dof":                9,
+		"fmri_preprocessing.fmriprep.slice_time_ref":               0.25,
+		"fmri_preprocessing.fmriprep.fd_spike_threshold":           0.6,
+		"fmri_preprocessing.fmriprep.dvars_spike_threshold":        1.7,
+		"fmri_preprocessing.fmriprep.medial_surface_nan":           true,
+		"fmri_preprocessing.fmriprep.no_msm":                       true,
+		"fmri_preprocessing.fmriprep.me_output_echos":              true,
+		"fmri_preprocessing.fmriprep.random_seed":                  123,
 	})
 
 	if m.fmriAnalysisSignatureDir != "/external/signatures" {
@@ -258,17 +258,17 @@ func TestApplyConfigKeys_HydratesFmriPathsAndPreprocessingConfig(t *testing.T) {
 	if !m.fmriLowMem {
 		t.Fatalf("expected fmriLowMem=true")
 	}
-	if !m.fmriLongitudinal {
-		t.Fatalf("expected fmriLongitudinal=true")
+	if m.fmriSubjectAnatomicalReferenceIndex != 1 {
+		t.Fatalf("expected unbiased anatomical reference, got %d", m.fmriSubjectAnatomicalReferenceIndex)
 	}
 	if m.fmriSkullStripTemplate != "NKI" {
 		t.Fatalf("expected fmriSkullStripTemplate='NKI', got %q", m.fmriSkullStripTemplate)
 	}
-	if m.fmriBold2T1wInitIndex != 1 {
-		t.Fatalf("expected fmriBold2T1wInitIndex=1 (header), got %d", m.fmriBold2T1wInitIndex)
+	if m.fmriBold2AnatInitIndex != 3 {
+		t.Fatalf("expected fmriBold2AnatInitIndex=3 (header), got %d", m.fmriBold2AnatInitIndex)
 	}
-	if m.fmriBold2T1wDof != 9 {
-		t.Fatalf("expected fmriBold2T1wDof=9, got %d", m.fmriBold2T1wDof)
+	if m.fmriBold2AnatDof != 9 {
+		t.Fatalf("expected fmriBold2AnatDof=9, got %d", m.fmriBold2AnatDof)
 	}
 	if m.fmriSliceTimeRef != 0.25 {
 		t.Fatalf("expected fmriSliceTimeRef=0.25, got %v", m.fmriSliceTimeRef)

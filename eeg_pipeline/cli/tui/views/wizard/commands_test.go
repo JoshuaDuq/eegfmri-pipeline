@@ -665,43 +665,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsPermutationSchemeShuffle(t *testing.T) {
 	}
 }
 
-func TestBuildFmriAnalysisAdvancedArgs_DisabledCarpetAndTSNRAddsFlags(t *testing.T) {
-	m := Model{}
-	m.fmriAnalysisPlotsEnabled = true
-
-	m.fmriAnalysisPlotCarpetQC = false
-	m.fmriAnalysisPlotTSNRQC = false
-
-	args := m.buildFmriAnalysisAdvancedArgs()
-
-	if !containsString(args, "--plot-no-carpet-qc") {
-		t.Fatalf("expected --plot-no-carpet-qc in args, got: %#v", args)
-	}
-	if !containsString(args, "--plot-no-tsnr-qc") {
-		t.Fatalf("expected --plot-no-tsnr-qc in args, got: %#v", args)
-	}
-}
-
-func TestBuildFmriAnalysisAdvancedArgs_EnabledCarpetAndTSNRDoesNotAddFlags(t *testing.T) {
-	m := Model{}
-	m.fmriAnalysisPlotsEnabled = true
-
-	m.fmriAnalysisPlotCarpetQC = true
-	m.fmriAnalysisPlotTSNRQC = true
-
-	args := m.buildFmriAnalysisAdvancedArgs()
-
-	if containsString(args, "--plot-no-carpet-qc") {
-		t.Fatalf("did not expect --plot-no-carpet-qc in args, got: %#v", args)
-	}
-	if containsString(args, "--plot-no-tsnr-qc") {
-		t.Fatalf("did not expect --plot-no-tsnr-qc in args, got: %#v", args)
-	}
-}
-
 func TestBuildFmriAnalysisAdvancedArgs_SmoothingFwhmEmitted(t *testing.T) {
 	m := Model{}
-	m.fmriAnalysisPlotsEnabled = true
 	m.fmriAnalysisSmoothingFwhm = 5.0
 
 	args := m.buildFmriAnalysisAdvancedArgs()
@@ -715,27 +680,11 @@ func TestBuildFmriAnalysisAdvancedArgs_SmoothingFwhmEmitted(t *testing.T) {
 	}
 }
 
-func TestBuildFmriAnalysisAdvancedArgs_DisabledSignaturesAddsFlag(t *testing.T) {
+func TestBuildFmriAnalysisAdvancedArgs_SignatureDirEmitted(t *testing.T) {
 	m := Model{}
-	m.fmriAnalysisPlotsEnabled = true
-	m.fmriAnalysisPlotSignatures = false
-
-	args := m.buildFmriAnalysisAdvancedArgs()
-	if !containsString(args, "--plot-no-signatures") {
-		t.Fatalf("expected --plot-no-signatures in args, got: %#v", args)
-	}
-}
-
-func TestBuildFmriAnalysisAdvancedArgs_SignatureDirEmittedWhenEnabled(t *testing.T) {
-	m := Model{}
-	m.fmriAnalysisPlotsEnabled = true
-	m.fmriAnalysisPlotSignatures = true
 	m.fmriAnalysisSignatureDir = "/tmp/signatures"
 
 	args := m.buildFmriAnalysisAdvancedArgs()
-	if containsString(args, "--plot-no-signatures") {
-		t.Fatalf("did not expect --plot-no-signatures in args, got: %#v", args)
-	}
 	v, ok := argValue(args, "--signature-dir")
 	if !ok {
 		t.Fatalf("expected --signature-dir in args, got: %#v", args)

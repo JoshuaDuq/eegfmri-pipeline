@@ -5,7 +5,8 @@ import pytest
 from fmri_pipeline.analysis.plotting_config import (
     FmriReportConfig,
     FmriStatsConfig,
-    split_legacy_plotting_config,
+    report_config_from_mapping,
+    stats_config_from_mapping,
 )
 
 
@@ -25,31 +26,20 @@ def test_the_report_config_has_no_compute_triggering_fields() -> None:
 
 def test_a_moved_key_fails_with_its_new_location_named() -> None:
     with pytest.raises(ValueError, match=r"fmri_stats\.space"):
-        split_legacy_plotting_config({"space": "mni", "enabled": True})
+        report_config_from_mapping({"space": "mni", "enabled": True})
 
 
 def test_every_moved_key_is_reported_at_once() -> None:
     with pytest.raises(ValueError) as excinfo:
-        split_legacy_plotting_config(
-            {"space": "mni", "include_effect_size": True, "enabled": True}
-        )
+        report_config_from_mapping({"space": "mni", "include_effect_size": True, "enabled": True})
     message = str(excinfo.value)
     assert "space" in message and "include_effect_size" in message
 
 
 def test_a_clean_config_splits_without_complaint() -> None:
-    report = split_legacy_plotting_config({"enabled": True, "z_threshold": 3.1})
+    report = report_config_from_mapping({"enabled": True, "include_unthresholded": False})
     assert report.enabled is True
-    assert report.z_threshold == 3.1
-
-
-def test_the_report_config_still_validates_its_own_fields() -> None:
-    with pytest.raises(ValueError, match="z-threshold"):
-        FmriReportConfig(enabled=True, threshold_mode="z", z_threshold=-1).validate()
-
-
-def test_radiological_is_a_rendering_setting() -> None:
-    assert FmriReportConfig(enabled=True, radiological=True).radiological is True
+    assert report.include_unthresholded is False
 
 
 def test_the_stats_config_validates_its_space() -> None:
@@ -57,11 +47,26 @@ def test_the_stats_config_validates_its_space() -> None:
         FmriStatsConfig(space="nonsense").validate()
 
 
-def test_a_disabled_report_config_skips_validation() -> None:
-    # Nothing is rendered, so an unreachable setting is not an error.
-    FmriReportConfig(enabled=False, threshold_mode="nonsense").validate()
+def test_the_stats_mapping_rejects_unknown_compute_keys() -> None:
+    with pytest.raises(ValueError, match="Unknown fmri_stats key"):
+        stats_config_from_mapping({"space": "native", "typo": True})
+
+
+def test_the_stats_mapping_validates_inference_thresholds() -> None:
+    with pytest.raises(ValueError, match="z_threshold"):
+        stats_config_from_mapping({"threshold_mode": "z", "z_threshold": 0})
+
+
+def test_a_disabled_report_config_still_validates_reproducibility_settings() -> None:
+    with pytest.raises(ValueError, match="Unsupported plot format"):
+        FmriReportConfig(enabled=False, formats=("pdf",)).validate()
 
 
 def test_an_unknown_format_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unsupported plot format"):
         FmriReportConfig(enabled=True, formats=("pdf",)).validate()
+
+
+def test_an_unknown_report_key_is_rejected_instead_of_ignored() -> None:
+    with pytest.raises(ValueError, match="Unknown fmri_report key"):
+        report_config_from_mapping({"enabled": True, "typo": True})

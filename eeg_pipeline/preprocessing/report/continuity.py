@@ -44,6 +44,7 @@ WINDOW_SECONDS = 1.0
 #: Annotation prefix MNE uses for spans excluded from processing.
 BAD_ANNOTATION_PREFIX = "BAD"
 
+
 @dataclass(frozen=True)
 class RunContinuity:
     """Windowed amplitude over one run, with the spans that were excluded from it."""
@@ -171,6 +172,7 @@ NON_EVENT_PREFIXES = ("BAD", "EDGE", "NEW SEGMENT")
 def _event_onsets(
     raw: mne.io.BaseRaw,
     *,
+    event_descriptions: Sequence[str] | None = None,
     marker_descriptions: Sequence[str],
     non_event_prefixes: Sequence[str] = NON_EVENT_PREFIXES,
 ) -> tuple[float, ...]:
@@ -178,11 +180,17 @@ def _event_onsets(
     start = raw.first_time
     excluded = {prefix.upper() for prefix in non_event_prefixes if prefix}
     excluded.update(description.upper() for description in marker_descriptions if description)
+    exact_events = None if event_descriptions is None else frozenset(event_descriptions)
     onsets = []
     for annotation in raw.annotations:
-        description = str(annotation["description"]).upper()
-        if description.startswith(tuple(excluded)):
-            continue
+        original_description = str(annotation["description"])
+        if exact_events is not None:
+            if original_description not in exact_events:
+                continue
+        else:
+            description = original_description.upper()
+            if description.startswith(tuple(excluded)):
+                continue
         onsets.append(float(annotation["onset"] - start))
     return tuple(onsets)
 
@@ -307,6 +315,7 @@ def compute_run_continuity(
     window_seconds: float = WINDOW_SECONDS,
     edge_support_seconds: float = 0.0,
     pulse_description: str | None = None,
+    event_descriptions: Sequence[str] | None = None,
     non_event_prefixes: Sequence[str] = NON_EVENT_PREFIXES,
 ) -> RunContinuity:
     """Measure windowed amplitude across one continuous run."""
@@ -361,6 +370,7 @@ def compute_run_continuity(
         edge_support_s=float(edge_support_seconds),
         event_onsets=_event_onsets(
             raw,
+            event_descriptions=event_descriptions,
             marker_descriptions=(pulse_description or "",),
             non_event_prefixes=non_event_prefixes,
         ),
@@ -387,9 +397,7 @@ def continuity_html(runs: Sequence[RunContinuity]) -> str:
         ]
         for run in runs
     ]
-    why_it_matters = (
-        ", and only the second is recoverable by excluding the stretch that failed"
-    )
+    why_it_matters = ", and only the second is recoverable by excluding the stretch that failed"
     return (
         "<p>Amplitude in "
         f"{runs[0].window_seconds:g} s windows, expressed relative to each channel's own "
@@ -594,19 +602,12 @@ def add_continuity_section(
     section: str = "Data quality over time",
 ) -> None:
     """Append the time-resolved quality panels to a subject report."""
-    from eeg_pipeline.preprocessing.report.organize import (
-        drop_replaced_raw_time_series,
-        remove_tagged_content,
-    )
+    from eeg_pipeline.preprocessing.report.organize import remove_tagged_content
     from eeg_pipeline.preprocessing.report.style import report_image_format
 
     if not runs:
         raise ValueError("Time-resolved quality requires at least one run.")
     remove_tagged_content(report, tag="run-continuity")
-    # Paired with the panels below, which answer the same question over the whole run
-    # rather than over five arbitrary seconds of it. Dropped here rather than on open so
-    # that a report without this section keeps MNE's panel instead of losing both.
-    drop_replaced_raw_time_series(report)
     report.add_html(
         html=continuity_html(runs),
         title="When each run departed from its baseline",

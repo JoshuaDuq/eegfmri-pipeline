@@ -84,7 +84,7 @@ fmri_preprocessing:
   task_is_rest: false
   engine: "docker"  # "docker" or "apptainer"
   fmriprep:
-    image: "nipreps/fmriprep:25.2.4"  # Docker image tag or apptainer URI/path
+    image: "nipreps/fmriprep:25.2.5"  # Pinned fMRIPrep 25.2 LTS patch release
     output_dir: null  # BIDS derivatives root (null = <deriv_root>/preprocessed/fmri)
     work_dir: null  # Scratch/work directory (null = <deriv_root>/work/fmriprep)
     fs_license_file: null  # FreeSurfer license.txt (null = paths.freesurfer_license, then EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)
@@ -93,21 +93,22 @@ fmri_preprocessing:
     ignore: []  # e.g., ["fieldmaps", "slicetiming"]
     bids_filter_file: null  # Optional BIDS filter JSON (path)
     level: "full"  # "full", "resampling", or "minimal"
+    output_layout: "bids"
+    aggregate_session_reports: 4
     cifti_output: null  # Optional dense timeseries output: null, "91k", or "170k"
     task_id: null  # Optional task filter for preprocessing
     nthreads: 0  # 0 = auto
-    omp_nthreads: 0  # 0 = auto
+    omp_nthreads: 1  # Required with fixed seeds for reproducible ANTs results
     low_mem: false
-    longitudinal: false
+    subject_anatomical_reference: "first-lex"
     skull_strip_template: "OASIS30ANTs"
     skull_strip_fixed_seed: true
-    bold2t1w_init: "register"  # "register" or "header"
-    bold2t1w_dof: 6
+    bold2anat_init: "t1w"  # Explicit: "auto" would depend on T2w availability
+    bold2anat_dof: 6
     slice_time_ref: 0.5
-    dummy_scans: 0
+    dummy_scans: null  # null = fMRIPrep detection; integer >= 0 = explicit override
     fd_spike_threshold: 0.5
     dvars_spike_threshold: 1.5
-    use_aroma: false
     skip_bids_validation: false
     clean_workdir: true
     stop_on_first_crash: false
@@ -126,7 +127,7 @@ fmri_resting_state:
   fmriprep_space: "MNI152NLin2009cAsym"
   require_fmriprep: true
   runs: null
-  confounds_strategy: "auto"
+  confounds_strategy: "motion24+wmcsf+fd+compcor"
   auto_compcor_n: 5
   high_pass_hz: 0.008
   low_pass_hz: 0.1
@@ -171,11 +172,35 @@ fmri_contrast:
   high_pass_hz: 0.008
   low_pass_hz: null
   smoothing_fwhm: null
-  confounds_strategy: "auto"
+  confounds_strategy: "motion24+wmcsf+fd+compcor"
   auto_compcor_n: 5
   write_design_matrix: false
   output_type: "z-score"
   resample_to_freesurfer: true
+
+fmri_stats:
+  space: "native"
+  include_effect_size: true
+  include_standard_error: true
+  include_signatures: true
+  threshold_mode: "z"
+  z_threshold: 2.3
+  fdr_q: 0.05
+  cluster_min_voxels: 0
+  two_sided: true
+
+fmri_report:
+  enabled: true
+  html_report: true
+  formats: ["png"]
+  include_unthresholded: true
+  include_motion_qc: true
+  include_carpet_qc: true
+  include_tsnr_qc: true
+  include_design_qc: true
+  embed_images: true
+  atlas_labels_img: null
+  atlas_labels_tsv: null
 
 fmri_group_level:
   enabled: false
@@ -197,6 +222,19 @@ fmri_group_level:
     enabled: false
     n_permutations: 5000
     two_sided: true
+  report:
+    # Names the structure each cluster peak falls in. Study-pinned rather than fetched,
+    # so the report needs no network. AAL3v2 rather than Schaefer2018: Schaefer is
+    # cortical grey matter only and left every cerebellar peak in this contrast
+    # unlabelled, where AAL covers cortex, subcortex and cerebellum (9 of 10 leading
+    # peaks against 5 of 10).
+    #
+    # AAL is defined in SPM's MNI, not MNI152NLin2009cAsym, so a peak near a parcel
+    # boundary can fall on the wrong side of it by a few millimetres. That is the price
+    # of the coverage; the alternative was naming nothing at all in the cerebellum.
+    atlas_labels_img: "/Volumes/KINGSTON/EEG_fMRI_data/external/atlases/tpl-MNI152_atlas-AAL3v2_dseg.nii.gz"
+    atlas_labels_tsv: "/Volumes/KINGSTON/EEG_fMRI_data/external/atlases/tpl-MNI152_atlas-AAL3v2_dseg.tsv"
+    surface_mesh: "fsaverage"
 
 ###################################################################
 # 2. DEFINITIONS & ANCHORS
@@ -427,8 +465,6 @@ pyprep:
   # nothing failed. PyPREP's own marks are unaffected either way; they are re-measured on
   # every run rather than assumed, which is what stops a once-flagged channel ratcheting.
   #
-  # Measured before making the switch: on sub-0000, PyPREP independently flags AF4, F3 and
-  # FC6 -- every channel a human had marked -- and adds T8 that nobody had.
   consider_previous_bads: false
   overwrite_chans_tsv: true
   delete_breaks: false
@@ -449,14 +485,9 @@ ica:
   # the decomposition inside the true rank whatever the bad-channel count turns out to
   # be, which is exactly what this setting wanted.
   #
-  # A lower fraction does not do the same job. It is a *variance* criterion, and it stops
-  # early precisely when artifact owns the variance — the usual case on noisy recordings.
-  # With 0.99 on sub-0015, blink and cardiac held 85% of the variance, 22 components were
-  # fitted from a rank-62 recording, and 16 of those 22 were excluded, leaving six
-  # components to carry everything neural. The 40 dimensions outside the fit are restored
-  # unmodified by ICA.apply, so no exclusion can reach the artifact in them, and ICLabel
-  # was scoring an under-decomposed model: three of the 22 components had no confident
-  # label. The report now states the dimensions outside the fit for this reason.
+  # A lower fraction does not do the same job: it is a variance criterion and can stop
+  # early when artifact owns much of the variance. Dimensions outside the fit are restored
+  # unmodified by ICA.apply, so the report states their count explicitly.
   n_components: null
   l_freq: 1.0
   h_freq: 100.0
@@ -472,26 +503,19 @@ ica:
   # MNE-BIDS-Pipeline, whose default is 0.1 -- which is what every run of this pipeline
   # has used, so null preserves them exactly.
   #
-  # Set it where the recordings warrant it. 0.1 is well below MNE's own 0.25 default for
-  # find_bads_ecg, and it suits data carrying a ballistocardiogram, where cardiac
-  # components are unmistakable. On EEG recorded outside a scanner there is no BCG, only
-  # the small ordinary cardiac field, and the CTPS scores form one unimodal distribution
-  # with no cardiac population separating out -- so a threshold inside that distribution
-  # selects its top tail. Measured on a four-participant EEG-only cohort, 0.1 excluded
-  # 20-33 of ~57 components per participant as cardiac while the full beat train put
-  # 0-2 above 0.25 and no component correlated with the ECG lead above r = 0.30.
+  # Set this from the acquisition protocol before processing. The MNE-BIDS-Pipeline
+  # default is 0.1; ordinary EEG outside the scanner should normally use MNE's 0.25 CTPS
+  # default instead. Do not tune the threshold from a participant's component scores.
   ecg_threshold: null
   use_eog_detection: true
   require_manual_review: true
-  # True on the operator's instruction for the 2026-08-03 re-run, without a component-by-
-  # component pass. Recorded rather than left implicit, because the comment above says why
-  # it matters: ICLabel was not trained on ballistocardiogram components and under-calls
-  # them into its "other" catch-all, which this config retains, so the CTPS scoring against
-  # the recorded ECG is carrying the cardiac exclusions alone here rather than as a
-  # baseline the manual pass adjusts.
-  #
-  # Set back to false to reopen the review; epochs are then blocked until it is set again.
-  manual_review_complete: true
+  # A shipped configuration cannot attest to a human action. Run ICA and review every row
+  # of *_proc-ica_components.tsv against the component dossiers. A new ICA writes every
+  # manual_review_status as "pending"; change each to "reviewed" and fill
+  # manual_reviewed_by plus the ISO-8601 manual_reviewed_at timestamp with timezone. Then
+  # override this to true only for the separate epochs run. The epoch gate validates the
+  # row-level attestations. Set this back to false before refitting ICA.
+  manual_review_complete: false
   process_raw_clean: true
   probability_threshold: 0.8
   labels_to_keep: ["brain", "other"]
@@ -524,13 +548,9 @@ ica:
     representative_window_seconds: 10.0
     # Write this review's CTPS detections into *_proc-ica_components.tsv as exclusions.
     #
-    # MNE-BIDS-Pipeline's own ECG step builds its heartbeat epochs from the first run
-    # only, cropped to 5 minutes / n_runs around that run's midpoint: on this cohort that
-    # is ~50 s of run 1, roughly sixty beats, scoring a decomposition fitted across six
-    # runs and ~46 minutes. Cardiac artifact topography moves with head position, so components that
-    # are cardiac in runs 3-6 are never scored at all. This review already runs the same
-    # CTPS test per run over every beat in every recording, so turning this on replaces a
-    # sample with the full measurement.
+    # MNE-BIDS-Pipeline's own ECG step samples the first run, whereas a decomposition may
+    # be fitted across several runs. Cardiac topography can change with head position, so
+    # this review applies the same configured CTPS rule independently to every run.
     #
     # It changes the cleaned data, not just the report, which is why it is explicit. The
     # manual review still runs afterwards and can undo any of it; each promoted row names
@@ -556,12 +576,9 @@ ica:
     # Write the exploratory band decompositions to their own HTML beside the subject
     # report, linked from it, instead of inlining them.
     #
-    # They dominate the subject report while controlling nothing in it: on sub-0015 the
-    # five sliders were 30 MB of a 101 MB document, sitting under a guide that says
-    # ICLabel was not validated for narrow-band decompositions and that artifact removal
-    # is decided on the standard ICA. Split out, the evidence is one click away for the
-    # reader who wants it and costs nothing to the many who do not. Set false for a single
-    # self-contained file.
+    # They control nothing in the subject report, and ICLabel was not validated for
+    # narrow-band decompositions. Split out, the evidence remains one click away without
+    # crowding the authoritative broadband review. Set false for one self-contained file.
     exploratory_separate_file: true
     # Frequency ranges the AUTHORITATIVE per-component review draws a dossier over.
     #
@@ -731,6 +748,16 @@ report:
     min_subjects_for_median: 5
     min_subjects_for_outer_band: 10
   display:
+    # Raster panels (dense heatmaps and MNE figure sliders) are embedded at this
+    # resolution and maximum width. Line plots remain SVG and therefore stay sharp at
+    # any zoom. MNE's defaults are 100 dpi and 850 px; these higher limits keep labels
+    # and sensor names legible on high-density displays and in print.
+    figure_dpi: 200
+    figure_max_width_px: 2000
+    # Fixed number of scalp maps sampled uniformly across response_window_s. Times are
+    # never selected from observed peaks, which would make the QC display participant-
+    # dependent and bias visual review toward each participant's largest fluctuation.
+    evoked_topomap_count: 4
     # Percentile of absolute values defining symmetric colour limits, so that one
     # extreme component cannot flatten every other to the neutral colour.
     color_limit_percentile: 98.0
@@ -753,6 +780,10 @@ report:
     # long enough that a single window's RMS is a stable estimate.
     continuity_window_seconds: 1.0
   analysis:
+    # MNE recommends approximately three minutes from the end of a recording for bridge
+    # screening because gel can settle over time. This fixed duration is used for every
+    # run; shorter runs contribute their full duration.
+    bridge_diagnostic_duration_s: 180.0
     # Frequency interval used for the robust log-log aperiodic fit. Keep its upper edge
     # below line noise so the notch and its skirts cannot determine the slope.
     aperiodic_fit_range_hz: [2.0, 45.0]
@@ -762,8 +793,10 @@ report:
     # comb -- which a robust fit would otherwise tilt toward. Empty by default: a fit
     # should sit on the data unless there is a named reason it cannot.
     aperiodic_exclude_hz: []
-    # Post-stimulus interval used for split-half evoked reliability.
-    response_window_s: [0.0, 1.0]
+    # Interval used for split-half evoked reliability. This task delivers heat from
+    # 3–10.5 s; scoring 0–1 s would measure the pre-stimulation wait and could call a
+    # sound pain response absent.
+    response_window_s: *active_window
     # Posterior rhythm band used as signal-preservation evidence.
     alpha_band_hz: [7.0, 14.0]
     # Neighbourhood the posterior rhythm is scored against. The prominence is the peak's
@@ -772,6 +805,15 @@ report:
     # needs its reference window shifted too, or the peak is scored against a background
     # fitted where the peak now is.
     alpha_reference_band_hz: [3.0, 25.0]
+    # MNE's continuous muscle-artifact score. The documented 110–140 Hz example band
+    # is unavailable after this pipeline's 100 Hz low-pass, so use the highest clean
+    # interval below it while avoiding the 60 Hz notch. This is diagnostic only: the
+    # returned BAD_muscle annotations are shown in the report but never applied.
+    # Set the band to null only when the acquisition's sampling rate or low-pass cannot
+    # support it; an incompatible non-null band fails instead of silently changing.
+    muscle_filter_freq_hz: [70.0, 90.0]
+    muscle_zscore_threshold: 4.0
+    muscle_min_length_good_s: 0.1
   acquisition:
     # Electrode names eligible for the posterior-rhythm measurement.
     posterior_channel_pattern: '^(P[0-9z]|PO[0-9z]|O[0-9z]|Oz|POz|Pz)'

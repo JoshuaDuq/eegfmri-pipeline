@@ -18,6 +18,11 @@ from typing import Sequence
 import mne
 import numpy as np
 
+from eeg_pipeline.preprocessing.report.muscle import (
+    MuscleReview,
+    add_muscle_review,
+    compute_muscle_review,
+)
 from eeg_pipeline.preprocessing.report.rr_intervals import (
     RrIntervals,
     add_rr_interval_section,
@@ -81,6 +86,8 @@ class RunEvidence:
     #: is a difference between stages instead of a difference between estimators.
     posterior_alpha_before: list[PosteriorAlpha] = field(default_factory=list)
     posterior_alpha_after: list[PosteriorAlpha] = field(default_factory=list)
+    #: High-frequency candidate muscle periods in the continuous input to ICA.
+    muscle_artifacts: list[MuscleReview] = field(default_factory=list)
 
     @property
     def acquisition_date(self) -> str | None:
@@ -108,6 +115,7 @@ def measure_runs(
     settings: ReportSettings,
     edge_support_seconds: float = 0.0,
     beat_marker_description: str | None = None,
+    event_descriptions: Sequence[str] | None = None,
 ) -> RunEvidence:
     """Measure every per-run panel, reading and cleaning each run exactly once.
 
@@ -136,9 +144,7 @@ def measure_runs(
                 aperiodic_fit_range_hz=settings.aperiodic_fit_range_hz,
                 notch_half_width_hz=settings.notch_exclusion_half_width_hz,
                 aperiodic_exclude_hz=settings.aperiodic_exclude_hz,
-                unavailable_intervals=settings.unavailable_intervals_by_recording.get(
-                    recording_id
-                ),
+                unavailable_intervals=settings.unavailable_intervals_by_recording.get(recording_id),
             )
         )
         evidence.continuity.append(
@@ -149,6 +155,7 @@ def measure_runs(
                 # so omitting it means 'do not search'. Beats are excluded from the event
                 # rug, where a marker per second would bury the trials it exists to show.
                 pulse_description=beat_marker_description,
+                event_descriptions=event_descriptions,
                 window_seconds=settings.continuity_window_seconds,
                 edge_support_seconds=edge_support_seconds,
                 non_event_prefixes=settings.non_event_prefixes,
@@ -164,10 +171,16 @@ def measure_runs(
         else:
             evidence.rr_missing.append(recording_id)
 
-        # Measured on ``raw`` rather than ``cleaned``: the question is what the upstream
-        # upstream pulse correction left, and measuring after the exclusions would credit it
-        # for whatever MNE's decomposition removed. Costs one epoching pass over a
-        # recording already in memory.
+        if settings.muscle_filter_freq_hz is not None:
+            evidence.muscle_artifacts.append(
+                compute_muscle_review(
+                    raw,
+                    recording_id=recording_id,
+                    filter_freq_hz=settings.muscle_filter_freq_hz,
+                    threshold=settings.muscle_zscore_threshold,
+                    min_length_good_s=settings.muscle_min_length_good_s,
+                )
+            )
 
         # Both stages, on the same run, by the same estimator: the only paired measurement
         # of the rhythm the pipeline can make. A stage that measured nothing contributes
@@ -244,6 +257,8 @@ def add_run_evidence_sections(
         )
     if evidence.continuity:
         add_continuity_section(report=report, runs=evidence.continuity)
+    if evidence.muscle_artifacts:
+        add_muscle_review(report=report, reviews=evidence.muscle_artifacts)
     if evidence.rr_intervals:
         add_rr_interval_section(
             report=report,
@@ -261,6 +276,7 @@ def add_run_evidence_review(
     settings: ReportSettings,
     edge_support_seconds: float = 0.0,
     beat_marker_description: str | None = None,
+    event_descriptions: Sequence[str] | None = None,
 ) -> RunEvidence:
     """Measure every run once and append all the per-run sections."""
     evidence = measure_runs(
@@ -269,6 +285,7 @@ def add_run_evidence_review(
         settings=settings,
         edge_support_seconds=edge_support_seconds,
         beat_marker_description=beat_marker_description,
+        event_descriptions=event_descriptions,
     )
     add_run_evidence_sections(report=report, evidence=evidence, settings=settings)
     return evidence

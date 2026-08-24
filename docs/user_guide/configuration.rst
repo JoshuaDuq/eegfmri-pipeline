@@ -587,7 +587,7 @@ fMRI Preprocessing (fMRIPrep)
      - ``"docker"``
      - Container engine: ``"docker"`` or ``"apptainer"``
    * - ``fmri_preprocessing.fmriprep.image``
-     - ``"nipreps/fmriprep:25.2.4"``
+     - ``"nipreps/fmriprep:25.2.5"``
      - Docker image tag or Apptainer URI
    * - ``fmri_preprocessing.fmriprep.output_spaces``
      - ``["MNI152NLin2009cAsym","T1w"]``
@@ -601,9 +601,9 @@ fMRI Preprocessing (fMRIPrep)
    * - ``fmri_preprocessing.fmriprep.dvars_spike_threshold``
      - ``1.5``
      - DVARS spike threshold
-   * - ``fmri_preprocessing.fmriprep.bold2t1w_dof``
+   * - ``fmri_preprocessing.fmriprep.bold2anat_dof``
      - ``6``
-     - Degrees of freedom for BOLD→T1w registration
+     - Degrees of freedom for BOLD→anatomical registration
    * - ``fmri_preprocessing.fmriprep.skull_strip_template``
      - ``"OASIS30ANTs"``
      - Template for skull stripping
@@ -649,8 +649,8 @@ First-Level GLM
      - ``0.008``
      - High-pass filter (128 s period)
    * - ``fmri_contrast.confounds_strategy``
-     - ``"auto"``
-     - Nuisance regressor strategy; see :doc:`../methods/fmri/pipeline`
+     - ``"motion24+wmcsf+fd+compcor"``
+     - Fixed nuisance regressor strategy; ``"auto"`` is available only as an explicit derivative-adaptive choice
    * - ``fmri_contrast.output_type``
      - ``"z-score"``
      - Output statistic: ``"z-score"``, ``"t-stat"``, ``"cope"``, ``"beta"``
@@ -663,6 +663,83 @@ First-Level GLM
    * - ``fmri_contrast.condition_a.value``
      - ``null``
      - Value in that column identifying condition A trials
+
+fMRI Statistical Artifacts
+--------------------------
+
+``fmri_stats`` contains only choices that cause statistical derivatives to be
+computed. It is deliberately separate from ``fmri_report``, which only renders
+existing derivatives.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 40
+
+   * - Key
+     - Default
+     - Description
+   * - ``fmri_stats.space``
+     - ``"native"``
+     - ``"mni"`` or ``"both"`` explicitly requests an additional standard-space fit
+   * - ``fmri_stats.include_effect_size``
+     - ``true``
+     - Save the contrast effect map used by effect/evidence diagnostics
+   * - ``fmri_stats.include_standard_error``
+     - ``true``
+     - Save contrast variance for uncertainty diagnostics
+   * - ``fmri_stats.include_signatures``
+     - ``true``
+     - Evaluate configured standard-space signature maps; requires MNI output
+   * - ``fmri_stats.threshold_mode``
+     - ``"z"``
+     - Inferential display rule: ``"z"``, ``"fdr"``, or ``"none"``
+   * - ``fmri_stats.z_threshold`` / ``fdr_q``
+     - ``2.3`` / ``0.05``
+     - Explicit height or FDR threshold recorded in the report manifest
+   * - ``fmri_stats.cluster_min_voxels``
+     - ``0``
+     - Optional display-only extent filter; zero disables it
+
+.. _configuration-fmri-report:
+
+fMRI Subject Report
+-------------------
+
+The report command reads existing first-level manifests and never refits a model.
+Dense maps and carpets are written as 200-DPI PNG; line, design, and matrix figures
+are SVG and therefore resolution-independent.
+Whole-model :math:`R^2` and whole-mask run-effect correlations are generated from
+persisted fitted-model artifacts whenever available. They have no tuning keys: neither
+panel thresholds data, selects peaks, excludes runs, or changes the analysis.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 40
+
+   * - Key
+     - Default
+     - Description
+   * - ``fmri_report.enabled`` / ``html_report``
+     - ``true`` / ``true``
+     - Required for ``fmri-analysis report``
+   * - ``fmri_report.include_motion_qc``
+     - ``true``
+     - Run-level FD summary and motion–DVARS coupling
+   * - ``fmri_report.include_carpet_qc``
+     - ``true``
+     - Analysis-mask carpet plot aligned with motion and censoring
+   * - ``fmri_report.include_tsnr_qc``
+     - ``true``
+     - Analysis-mask tSNR map and run summaries
+   * - ``fmri_report.include_design_qc``
+     - ``true``
+     - Design matrix, VIF, correlation, efficiency, and event diagnostics
+   * - ``fmri_report.include_unthresholded``
+     - ``true``
+     - Separate diagnostic map; it is not presented as inferential evidence
+   * - ``fmri_report.embed_images``
+     - ``true``
+     - Produce a self-contained HTML document
 
 .. _configuration-second-level:
 
@@ -688,6 +765,75 @@ Second-Level (Group) Inference
    * - ``fmri_group_level.permutation.n_permutations``
      - ``5000``
      - Number of permutations
+   * - ``fmri_group_level.permutation.two_sided``
+     - ``true``
+     - Test both tails for max-T t inference; use ``false`` only for a predeclared directional hypothesis
+   * - ``fmri_group_level.permutation.random_state``
+     - ``42``
+     - Fixed seed passed to Nilearn for reproducible sampled permutations
+   * - ``fmri_group_level.permutation.tfce``
+     - ``false``
+     - Add Nilearn's threshold-free cluster enhancement to the same permutation run; considerably slower
+   * - ``fmri_group_level.permutation.cluster_forming_p``
+     - ``null``
+     - Cluster-forming threshold for cluster-extent and cluster-mass FWE, **in p-scale** (Nilearn converts it to a t height); ``null`` skips cluster-level inference
+   * - ``fmri_group_level.threshold.height_control``
+     - ``"fdr"``
+     - Parametric cohort-report procedure: ``"fdr"``, ``"fpr"``, ``"bonferroni"``, or ``"none"``
+   * - ``fmri_group_level.threshold.alpha``
+     - ``0.05``
+     - Predeclared p/q level used by the selected height-control procedure
+   * - ``fmri_group_level.threshold.uncorrected_z_threshold``
+     - ``3.09``
+     - Fixed z height used only when ``height_control: "none"``
+   * - ``fmri_group_level.threshold.cluster_min_voxels``
+     - ``0``
+     - Optional display extent filter; it is not cluster-level corrected inference
+   * - ``fmri_group_level.threshold.two_sided``
+     - ``true``
+     - Test both t-statistic tails; ignored for omnibus F tests, which are one-sided
+   * - ``fmri_group_level.threshold.min_distance_mm``
+     - ``8.0``
+     - Nilearn cluster-table subpeak separation, for display only
+   * - ``fmri_group_level.report.enabled``
+     - ``true``
+     - Write the cohort report after successful second-level inference
+   * - ``fmri_group_level.report.html_report``
+     - ``true``
+     - Render the HTML document; kept separate from ``enabled`` for explicit output control
+   * - ``fmri_group_level.report.formats``
+     - ``["png"]``
+     - Dense maps are 200-DPI PNG; design and matrix panels are also written as SVG
+   * - ``fmri_group_level.report.embed_images``
+     - ``true``
+     - Embed figures into a self-contained HTML document
+   * - ``fmri_group_level.report.include_design_correlation``
+     - ``true``
+     - Include Nilearn's regressor-correlation plot when three to twenty non-constant columns make it informative and legible
+   * - ``fmri_group_level.report.atlas_labels_img``
+     - ``null``
+     - MNI label volume naming the structure each cluster peak falls in; adds a ``Region`` column to the cluster and max-T peak tables
+   * - ``fmri_group_level.report.atlas_labels_tsv``
+     - ``null``
+     - Optional index-to-name table for ``atlas_labels_img``; without it the raw label index is reported
+   * - ``fmri_group_level.report.include_leave_one_out_influence``
+     - ``true``
+     - Refit the model without each participant and rethreshold, reporting how many voxels survive without them; costs one extra fit per participant
+   * - ``fmri_group_level.report.include_residual_diagnostics``
+     - ``true``
+     - Fit the reported design with Nilearn's ``OLSModel`` and show its residuals against the Gaussian errors the report assumes
+   * - ``fmri_group_level.report.include_interactive_viewer``
+     - ``true``
+     - Inline Nilearn's ``view_img`` volume viewer; self-contained and offline, and adds roughly 0.6 MB to the HTML
+   * - ``fmri_group_level.report.surface_mesh``
+     - ``null``
+     - Cortical mesh for the surface projection panel (e.g. ``fsaverage``); left unset the panel is skipped, because Nilearn would download a mesh it cannot find
+   * - ``fmri_group_level.report.include_true_discovery_proportion``
+     - ``true``
+     - Include Nilearn's ``cluster_level_inference`` panel, which bounds how much of each cluster is a true discovery
+   * - ``fmri_group_level.report.include_unthresholded``
+     - ``true``
+     - Include the complete z field in a collapsed diagnostic section, not as inferential evidence
 
 .. _configuration-behavior:
 

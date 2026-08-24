@@ -83,9 +83,8 @@ def test_every_per_run_measurement_is_gathered(tmp_path) -> None:
     assert len(evidence.spectra) == 1
     assert len(evidence.continuity) == 1
     assert len(evidence.rr_intervals) == 1
+    assert len(evidence.muscle_artifacts) == 1
     assert evidence.spectra[0].recording_id == "sub-0001_task-x_run-1"
-
-
 
 
 def test_configured_aperiodic_range_reaches_the_spectral_fit(tmp_path) -> None:
@@ -155,6 +154,7 @@ def test_the_report_gains_every_available_section(tmp_path) -> None:
     assert sections == {
         "Sensor spectra before and after ICA",
         "Data quality over time",
+        "Muscle artifact screening",
         "Cardiac rhythm",
     }
 

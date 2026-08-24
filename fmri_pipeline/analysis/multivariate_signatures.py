@@ -58,24 +58,6 @@ def discover_signature_files(
     return out
 
 
-def _maybe_import_nibabel():
-    try:
-        import nibabel as nib  # type: ignore
-
-        return nib
-    except Exception:
-        return None
-
-
-def _maybe_import_nilearn_image():
-    try:
-        from nilearn import image  # type: ignore
-
-        return image
-    except Exception:
-        return None
-
-
 def _validate_resampling_input(
     moving_img: Any,
     *,
@@ -103,7 +85,7 @@ def _validate_resampling_input(
     return moving_img
 
 
-def _maybe_resample_to_img(
+def _resample_to_img(
     *,
     moving_img: Any,
     target_img: Any,
@@ -112,15 +94,25 @@ def _maybe_resample_to_img(
     """
     Resample a NIfTI image onto a target image grid.
 
-    Prefers nilearn when available; falls back to nibabel resampling.
-    Raises ValueError on failure to prevent silent scientific invalidity.
+    Uses Nilearn's explicit image-resampling contract.
     """
     moving_img = _validate_resampling_input(
         moving_img,
         interpolation=interpolation,
     )
-    nilearn_image = _maybe_import_nilearn_image()
-    if nilearn_image is not None:
+    import warnings
+
+    from nilearn import image as nilearn_image  # type: ignore
+
+    # A continuous-valued scientific map can happen to contain only 0 and 1. Its
+    # semantics still require continuous interpolation; choosing nearest from its
+    # observed values would make the method dataset-dependent.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Resampling binary images with continuous or linear interpolation.*",
+            category=UserWarning,
+        )
         return nilearn_image.resample_to_img(
             moving_img,
             target_img,
@@ -128,16 +120,6 @@ def _maybe_resample_to_img(
             force_resample=True,
             copy_header=True,
         )
-
-    try:
-        from nibabel.processing import resample_from_to  # type: ignore
-
-        order = 0 if interpolation == "nearest" else 1
-        return resample_from_to(moving_img, (target_img.shape, target_img.affine), order=order)
-    except Exception as exc:
-        raise ValueError(
-            "Could not resample image to target grid (missing nilearn and/or resampling backend)."
-        ) from exc
 
 
 def _image_grids_match(left_img: Any, right_img: Any) -> bool:
@@ -151,7 +133,7 @@ def _image_grids_match(left_img: Any, right_img: Any) -> bool:
 def _mask_on_image_grid(*, mask_img: Any, image_img: Any) -> Any:
     if _image_grids_match(mask_img, image_img):
         return mask_img
-    return _maybe_resample_to_img(
+    return _resample_to_img(
         moving_img=mask_img,
         target_img=image_img,
         interpolation="nearest",
@@ -198,9 +180,8 @@ def _fill_nonfinite_background_for_resampling(*, image_img: Any, mask_img: Optio
             "resampling."
         )
 
-    nib = _maybe_import_nibabel()
-    if nib is None:
-        raise RuntimeError("Signature expression requires nibabel to prepare masked images.")
+    import nibabel as nib  # type: ignore
+
     filled = data.copy()
     filled[nonfinite] = 0.0
     return nib.Nifti1Image(filled, image_img.affine, image_img.header)
@@ -544,9 +525,7 @@ def compute_signature_expression(
     if not files:
         raise ValueError("No signature files were resolved for signature expression.")
 
-    nib = _maybe_import_nibabel()
-    if nib is None:
-        raise RuntimeError("Signature expression requires nibabel to load NIfTI images.")
+    import nibabel as nib  # type: ignore
 
     resampling = str(resampling or "image_to_weights").strip().lower().replace("-", "_")
     if resampling not in {"image_to_weights", "weights_to_image"}:
@@ -586,7 +565,7 @@ def compute_signature_expression(
                     mask_img=coverage if coverage is not None else m,
                 )
                 if not _image_grids_match(x_img, w_img):
-                    x_img = _maybe_resample_to_img(
+                    x_img = _resample_to_img(
                         moving_img=x_img, target_img=w_img, interpolation="continuous"
                     )
 
@@ -613,7 +592,7 @@ def compute_signature_expression(
                     )
                 w_on_ref = w_img
                 if tuple(getattr(w_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
-                    w_on_ref = _maybe_resample_to_img(
+                    w_on_ref = _resample_to_img(
                         moving_img=w_on_ref, target_img=img, interpolation="continuous"
                     )
                 else:
@@ -621,11 +600,11 @@ def compute_signature_expression(
                         import numpy as np
 
                         if not np.allclose(w_on_ref.affine, img.affine):
-                            w_on_ref = _maybe_resample_to_img(
+                            w_on_ref = _resample_to_img(
                                 moving_img=w_on_ref, target_img=img, interpolation="continuous"
                             )
                     except Exception:
-                        w_on_ref = _maybe_resample_to_img(
+                        w_on_ref = _resample_to_img(
                             moving_img=w_on_ref, target_img=img, interpolation="continuous"
                         )
 

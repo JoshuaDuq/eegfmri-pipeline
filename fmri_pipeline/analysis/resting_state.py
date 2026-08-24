@@ -9,6 +9,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from fmri_pipeline.analysis.confounds_selection import DEFAULT_CONFOUNDS_STRATEGY
 from fmri_pipeline.analysis.contrast_builder import (
     discover_confounds,
     discover_runless_confounds,
@@ -38,7 +39,7 @@ class RestingStateAnalysisConfig:
     fmriprep_space: str = "MNI152NLin2009cAsym"
     require_fmriprep: bool = True
     runs: Optional[list[int]] = None
-    confounds_strategy: str = "auto"
+    confounds_strategy: str = DEFAULT_CONFOUNDS_STRATEGY
     auto_compcor_n: int = 5
     high_pass_hz: Optional[float] = 0.008
     low_pass_hz: Optional[float] = 0.1
@@ -57,15 +58,15 @@ class RestingStateAnalysisConfig:
                 "fMRIPrep derivatives are required for resting-state connectivity analysis."
             )
 
-        confounds_strategy = str(self.confounds_strategy or "auto").strip().lower()
+        confounds_strategy = (
+            str(self.confounds_strategy or DEFAULT_CONFOUNDS_STRATEGY).strip().lower()
+        )
         if not confounds_strategy:
-            confounds_strategy = "auto"
+            confounds_strategy = DEFAULT_CONFOUNDS_STRATEGY
 
         connectivity_kind = str(self.connectivity_kind or "correlation").strip().lower()
         if connectivity_kind not in {"correlation"}:
-            raise ValueError(
-                f"connectivity_kind must be 'correlation', got {connectivity_kind!r}."
-            )
+            raise ValueError(f"connectivity_kind must be 'correlation', got {connectivity_kind!r}.")
 
         atlas_labels_img = _normalize_required_path(
             self.atlas_labels_img,
@@ -75,11 +76,7 @@ class RestingStateAnalysisConfig:
 
         high_pass_hz = _normalize_optional_frequency(self.high_pass_hz, "high_pass_hz")
         low_pass_hz = _normalize_optional_frequency(self.low_pass_hz, "low_pass_hz")
-        if (
-            high_pass_hz is not None
-            and low_pass_hz is not None
-            and low_pass_hz <= high_pass_hz
-        ):
+        if high_pass_hz is not None and low_pass_hz is not None and low_pass_hz <= high_pass_hz:
             raise ValueError(
                 "low_pass_hz must be greater than high_pass_hz when both are provided."
             )
@@ -117,9 +114,7 @@ def atlas_output_name(atlas_labels_img: Path | str) -> str:
 def _require_rest_brain_mask_path(bold_path: Path) -> Path:
     mask_path = discover_brain_mask_for_bold(bold_path)
     if mask_path is None or not mask_path.exists():
-        raise FileNotFoundError(
-            f"Missing fMRIPrep brain mask for resting-state run: {bold_path}"
-        )
+        raise FileNotFoundError(f"Missing fMRIPrep brain mask for resting-state run: {bold_path}")
     return mask_path
 
 
@@ -139,10 +134,7 @@ def _prepare_confounds_and_sample_mask(
 
     sample_mask: Optional[np.ndarray] = None
     if scrub_columns:
-        scrub_numeric = (
-            confounds_df[scrub_columns]
-            .apply(pd.to_numeric, errors="coerce")
-        )
+        scrub_numeric = confounds_df[scrub_columns].apply(pd.to_numeric, errors="coerce")
         if scrub_numeric.isna().any().any():
             bad_columns = scrub_numeric.columns[scrub_numeric.isna().any(axis=0)].tolist()
             raise ValueError(
@@ -157,7 +149,9 @@ def _prepare_confounds_and_sample_mask(
         elif retained_indices.size < confounds_df.shape[0]:
             sample_mask = retained_indices.astype(int, copy=False)
 
-    cleaned_confounds = confounds_df.drop(columns=scrub_columns) if scrub_columns else confounds_df.copy()
+    cleaned_confounds = (
+        confounds_df.drop(columns=scrub_columns) if scrub_columns else confounds_df.copy()
+    )
     if cleaned_confounds.shape[1] == 0:
         cleaned_confounds = None
 
@@ -292,12 +286,12 @@ def run_resting_state_analysis_for_subject(
         repetition_time = get_tr_from_bold(bold_path)
         brain_mask_path = _require_rest_brain_mask_path(bold_path)
         _validate_filter_settings(repetition_time, normalized_cfg)
-        masker_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(confounds_df)
+        masker_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(
+            confounds_df
+        )
         original_n_volumes = int(confounds_df.shape[0]) if confounds_df is not None else None
         if sample_mask is not None and sample_mask.size == 0:
-            raise ValueError(
-                f"All frames were censored for {sub_label}, run {run_num}."
-            )
+            raise ValueError(f"All frames were censored for {sub_label}, run {run_num}.")
         masker = NiftiLabelsMasker(
             labels_img=str(normalized_cfg.atlas_labels_img),
             mask_img=str(brain_mask_path),
@@ -319,9 +313,7 @@ def run_resting_state_analysis_for_subject(
                 expected_count=timeseries.shape[1],
             )
         if len(roi_labels) != timeseries.shape[1]:
-            raise ValueError(
-                "Atlas label count does not match extracted ROI time series count."
-            )
+            raise ValueError("Atlas label count does not match extracted ROI time series count.")
         _validate_roi_timeseries(timeseries, roi_labels, subject=sub_label, run_num=run_num)
 
         frame_df = pd.DataFrame(timeseries, columns=roi_labels)
@@ -336,9 +328,7 @@ def run_resting_state_analysis_for_subject(
         run_connectivity_weights.append(int(timeseries.shape[0]))
         retained_n_volumes = int(timeseries.shape[0])
         scrubbed_n_volumes = (
-            int(original_n_volumes - retained_n_volumes)
-            if original_n_volumes is not None
-            else 0
+            int(original_n_volumes - retained_n_volumes) if original_n_volumes is not None else 0
         )
         run_summaries.append(
             {
@@ -385,13 +375,12 @@ def run_resting_state_analysis_for_subject(
             columns=roi_labels,
         )
         fisher_z_path = (
-            output_dir / f"{sub_label}_task-{task}_{normalized_cfg.connectivity_kind}_connectivity_fisher_z.tsv"
+            output_dir
+            / f"{sub_label}_task-{task}_{normalized_cfg.connectivity_kind}_connectivity_fisher_z.tsv"
         )
         fisher_z_df.to_csv(fisher_z_path, sep="\t", encoding="utf-8")
 
-    labels_df = pd.DataFrame(
-        {"index": np.arange(1, len(roi_labels) + 1), "label": roi_labels}
-    )
+    labels_df = pd.DataFrame({"index": np.arange(1, len(roi_labels) + 1), "label": roi_labels})
     labels_path = output_dir / "roi_labels.tsv"
     labels_df.to_csv(labels_path, sep="\t", index=False, encoding="utf-8")
 
@@ -464,9 +453,7 @@ def _discover_rest_runs(
         runless_candidates = sorted(func_dir.glob(f"{sub_label}_task-{task}_*_bold.nii.gz"))
         runless_candidates += sorted(func_dir.glob(f"{sub_label}_task-{task}_bold.nii.gz"))
         runless_candidates = [
-            candidate
-            for candidate in runless_candidates
-            if "_run-" not in candidate.name
+            candidate for candidate in runless_candidates if "_run-" not in candidate.name
         ]
         runless_candidates = list(dict.fromkeys(runless_candidates))
         if len(runless_candidates) > 1:
@@ -646,9 +633,13 @@ def _resolve_roi_labels(
         ordered = ordered[pd.to_numeric(ordered["index"], errors="coerce").notna()]
         ordered["index"] = ordered["index"].astype(int)
         ordered = ordered[ordered["index"] > 0].sort_values("index")
-        labels = [str(value).strip() for value in ordered[name_column].tolist() if str(value).strip()]
+        labels = [
+            str(value).strip() for value in ordered[name_column].tolist() if str(value).strip()
+        ]
     else:
-        labels = [str(value).strip() for value in labels_df[name_column].tolist() if str(value).strip()]
+        labels = [
+            str(value).strip() for value in labels_df[name_column].tolist() if str(value).strip()
+        ]
 
     if len(labels) != expected_count:
         raise ValueError(

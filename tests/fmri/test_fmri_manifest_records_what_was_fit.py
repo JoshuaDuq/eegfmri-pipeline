@@ -59,26 +59,20 @@ def test_an_explicit_vector_passes_through_when_it_fits_the_design() -> None:
 def test_a_vector_of_the_wrong_length_is_refused_rather_than_recorded() -> None:
     # A misaligned vector would draw a contrast strip on the wrong regressors, which
     # is invisible in the figure.
-    vector, columns = _contrast_vector_for_design(
-        glm_result=_glm([_design()]), contrast_def=[1.0, -1.0]
-    )
-    assert vector is None
-    assert columns  # the columns are still worth recording
+    with pytest.raises(ValueError, match="2 weights for 4 design columns"):
+        _contrast_vector_for_design(glm_result=_glm([_design()]), contrast_def=[1.0, -1.0])
 
 
-def test_an_unparseable_expression_costs_the_strip_and_nothing_else() -> None:
-    vector, columns = _contrast_vector_for_design(
-        glm_result=_glm([_design()]), contrast_def="nonexistent_condition"
-    )
-    assert vector is None
-    assert columns == ["pain", "nonpain", "trans_x", "constant"]
+def test_an_unparseable_expression_surfaces() -> None:
+    with pytest.raises(ValueError):
+        _contrast_vector_for_design(
+            glm_result=_glm([_design()]), contrast_def="nonexistent_condition"
+        )
 
 
-def test_a_model_without_design_matrices_yields_nothing_to_record() -> None:
-    vector, columns = _contrast_vector_for_design(
-        glm_result=_glm([]), contrast_def="pain - nonpain"
-    )
-    assert vector is None and columns == []
+def test_a_model_without_design_matrices_surfaces() -> None:
+    with pytest.raises(ValueError, match="no design matrices"):
+        _contrast_vector_for_design(glm_result=_glm([]), contrast_def="pain - nonpain")
 
 
 # --- the effect and variance maps -----------------------------------------
@@ -114,7 +108,7 @@ def test_the_effect_and_variance_maps_come_off_the_already_fitted_model() -> Non
     effect, variance = _pipeline()._contrast_detail_maps(
         glm_result=types.SimpleNamespace(flm=model),
         contrast_def="pain - nonpain",
-        plotting_cfg=types.SimpleNamespace(),
+        stats_cfg=types.SimpleNamespace(),
     )
     assert model.calls == ["effect_size", "effect_variance"]
     assert effect is not None and variance is not None
@@ -127,24 +121,23 @@ def test_the_detail_maps_are_gated_on_intent_not_on_plotting_being_enabled() -> 
     effect, variance = _pipeline()._contrast_detail_maps(
         glm_result=types.SimpleNamespace(flm=model),
         contrast_def="pain - nonpain",
-        plotting_cfg=types.SimpleNamespace(include_effect_size=False, include_standard_error=False),
+        stats_cfg=types.SimpleNamespace(include_effect_size=False, include_standard_error=False),
     )
     assert model.calls == []
     assert effect is None and variance is None
 
 
-def test_a_failure_computing_the_detail_maps_does_not_cost_the_contrast() -> None:
-    # By this point the GLM is fitted and the map is on disk.
+def test_a_failure_computing_requested_detail_maps_surfaces() -> None:
     class _Exploding(_FakeModel):
         def compute_contrast(self, _argument, output_type: str):
             raise RuntimeError("boom")
 
-    effect, variance = _pipeline()._contrast_detail_maps(
-        glm_result=types.SimpleNamespace(flm=_Exploding()),
-        contrast_def="pain - nonpain",
-        plotting_cfg=types.SimpleNamespace(),
-    )
-    assert effect is None and variance is None
+    with pytest.raises(RuntimeError, match="boom"):
+        _pipeline()._contrast_detail_maps(
+            glm_result=types.SimpleNamespace(flm=_Exploding()),
+            contrast_def="pain - nonpain",
+            stats_cfg=types.SimpleNamespace(),
+        )
 
 
 # --- writing ---------------------------------------------------------------
@@ -160,9 +153,10 @@ def test_saving_returns_where_the_image_went(tmp_path: Path) -> None:
     assert path is not None and path.exists()
 
 
-def test_an_unwritable_path_costs_the_map_and_not_the_run(tmp_path: Path) -> None:
+def test_an_unwritable_optional_map_path_surfaces(tmp_path: Path) -> None:
     img = nib.Nifti1Image(np.ones((4, 4, 4), dtype=np.float32), np.eye(4))
-    assert _pipeline()._save_optional(img, tmp_path / "no" / "such" / "dir.nii.gz") is None
+    with pytest.raises(FileNotFoundError):
+        _pipeline()._save_optional(img, tmp_path / "no" / "such" / "dir.nii.gz")
 
 
 def test_saving_a_required_image_returns_where_it_went(tmp_path: Path) -> None:

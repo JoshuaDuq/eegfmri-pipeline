@@ -28,6 +28,8 @@ from eeg_pipeline.preprocessing.report.style import (
     BEFORE_COLOR,
     FLAG_COLOR,
     GUIDE_COLOR,
+    DEFAULT_REPORT_FIGURE_DPI,
+    DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
     draw_component_status_strip,
     report_image_format,
     apply_report_style,
@@ -190,9 +192,7 @@ def _plot_run_overlay(
         if excluded_surrogates:
             # Named, because a reader comparing subjects would otherwise see the scope
             # change between them with nothing to explain it.
-            scope += (
-                f" ({', '.join(excluded_surrogates)} bad, so outside the decomposition)"
-            )
+            scope += f" ({', '.join(excluded_surrogates)} bad, so outside the decomposition)"
     elif surrogates:
         scope = (
             f"all decomposed channels ({', '.join(surrogates)} bad, "
@@ -245,38 +245,6 @@ def _plot_run_overlay(
     return figure, len(eog_epochs)
 
 
-def _threshold_band(run_reviews: Sequence[RunOcularReview]) -> tuple[float, float] | None:
-    """Bracket the correlation at which ``find_bads_eog`` separated flagged from kept.
-
-    MNE thresholds an adaptive z-score of the scores, so the cutoff is a property of each
-    run's own distribution and no single correlation describes it. The decisions bracket
-    it exactly, though: within one run the cutoff lies above every component left
-    unflagged and at or below the lowest one flagged.
-
-    Runs disagree about where that falls, so the returned band spans every run's bracket
-    and is a statement about the session rather than about one run.
-
-    ``None`` when no run flagged anything: the cutoff is then above every score the run
-    produced and is unbounded above, and drawing a band there would put a threshold on the
-    figure that no decision supports.
-    """
-    lows: list[float] = []
-    highs: list[float] = []
-    for review in run_reviews:
-        flagged = set(review.flagged_components)
-        if not flagged:
-            continue
-        scores = np.asarray(review.absolute_scores, dtype=float)
-        kept = [score for index, score in enumerate(scores) if index not in flagged]
-        highs.append(float(min(scores[index] for index in flagged)))
-        # A run that flagged every component leaves no unflagged score to bound from
-        # below; the bracket then starts at the lowest flagged score itself.
-        lows.append(float(max(kept)) if kept else highs[-1])
-    if not highs:
-        return None
-    return min(lows), max(highs)
-
-
 def _plot_component_scores(
     run_reviews: list[RunOcularReview],
     *,
@@ -300,7 +268,6 @@ def _plot_component_scores(
         sharex=True,
         layout="constrained",
     )
-
 
     scores = np.stack([review.absolute_scores for review in run_reviews])
     medians = np.median(scores, axis=0)
@@ -352,32 +319,6 @@ def _plot_component_scores(
             label="Flagged by MNE find_bads_eog",
         )
 
-    # Where the detector drew its line, measured from the decisions it made.
-    #
-    # ``find_bads_eog`` thresholds an adaptive z-score, so there is no fixed correlation
-    # to draw and reimplementing the rule here would let the line drift away from the
-    # crosses beside it. The decisions bracket it instead: within a run the cutoff sits
-    # above every component left unflagged and no higher than the lowest one flagged.
-    # Runs disagree about where that is, so the band spans every run's bracket.
-    band = _threshold_band(run_reviews)
-    if band is not None:
-        low, high = band
-        # ``fill_between`` rather than ``axhspan``: this axis draws no patches on purpose,
-        # so that "there are no bars here" stays a checkable property of it. A shaded
-        # region is a collection and leaves that intact.
-        axis.fill_between(
-            [-0.7, component_count - 0.3],
-            low,
-            high,
-            color=FLAG_COLOR,
-            alpha=0.10,
-            linewidth=0,
-            zorder=0,
-            label="where find_bads_eog drew its line",
-        )
-        # Kept for the test that pins the bracket to the decisions it came from; the
-        # drawn span alone cannot say which scores defined it.
-        axis._eog_threshold_band = (low, high)
     axis.set(
         title=f"Absolute EOG correlation per component ({len(run_reviews)} runs)",
         ylabel="Absolute correlation",
@@ -528,6 +469,8 @@ def _write_unusable_ocular_review(
     report_path: Path,
     output_path: Path,
     unusable: Sequence[tuple[str, str]],
+    figure_dpi: float,
+    figure_max_width_px: int,
 ) -> Path:
     """Record that no run yielded a blink epoch, in the report and in the sidecar.
 
@@ -543,7 +486,11 @@ def _write_unusable_ocular_review(
         ]
     ).to_csv(output_path, sep="\t", index=False)
 
-    report = open_subject_report(report_path)
+    report = open_subject_report(
+        report_path,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     _clear_ocular_review(report)
     report.add_html(
         html=(
@@ -553,8 +500,7 @@ def _write_unusable_ocular_review(
             "<p>Reported rather than omitted, because the absence is the measurement: the "
             "ocular correction applied to this subject cannot be verified against a blink "
             "here, which is a different statement from its having been checked and found "
-            "adequate.</p>"
-            + _unusable_ocular_html(unusable, n_total=len(unusable))
+            "adequate.</p>" + _unusable_ocular_html(unusable, n_total=len(unusable))
         ),
         title=OCULAR_REPORT_TITLES[1],
         section="ICA ocular artifact review",
@@ -572,13 +518,15 @@ def generate_ica_ocular_review(
     report_path: Path,
     output_path: Path,
     settings: OcularReviewSettings,
+    figure_dpi: float = DEFAULT_REPORT_FIGURE_DPI,
+    figure_max_width_px: int = DEFAULT_REPORT_FIGURE_MAX_WIDTH_PX,
 ) -> Path:
     """Append EOG diagnostics and review-only ICA evidence to an MNE report."""
     if not settings.enabled:
         raise ValueError("generate_ica_ocular_review requires ocular_review.enabled=true.")
     if not filtered_raw_paths:
         raise ValueError("No filtered raw recordings were provided for EOG review.")
-    apply_report_style()
+    apply_report_style(figure_dpi=figure_dpi)
 
     # The blink overlays and the excluded-component marks must show the exclusions that
     # build the cleaned data, which live in the component table rather than the ICA file.
@@ -622,6 +570,8 @@ def generate_ica_ocular_review(
             report_path=report_path,
             output_path=output_path,
             unusable=unusable,
+            figure_dpi=figure_dpi,
+            figure_max_width_px=figure_max_width_px,
         )
 
     read_component_statuses(
@@ -633,7 +583,11 @@ def generate_ica_ocular_review(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(output_path, sep="\t", index=False)
 
-    report = open_subject_report(report_path)
+    report = open_subject_report(
+        report_path,
+        figure_dpi=figure_dpi,
+        figure_max_width_px=figure_max_width_px,
+    )
     _clear_ocular_review(report)
     # MNE's own EOG panels measure the same two quantities this section is about to render
     # per run, for one concatenated recording and with no indication of how many blinks

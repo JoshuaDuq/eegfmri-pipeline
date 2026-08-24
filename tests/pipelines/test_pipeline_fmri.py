@@ -75,6 +75,12 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             space: str = "mni"
             include_effect_size: bool = True
             include_standard_error: bool = True
+            include_signatures: bool = False
+            threshold_mode: str = "z"
+            z_threshold: float = 2.3
+            fdr_q: float = 0.05
+            cluster_min_voxels: int = 0
+            two_sided: bool = True
 
             def normalized(self):
                 return self
@@ -117,7 +123,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                     flm=flm_resample,
                     mask_img="img",
                 ),
-                "def",
+                "cond_a",
                 None,
             )
 
@@ -140,12 +146,8 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             },
         ):
             cfg = ContrastCfg()
-            p.process_subject(
-                "0001", "task", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False
-            )
-            p.process_subject(
-                "0001", "task", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False
-            )
+            p.process_subject("0001", "task", contrast_cfg=cfg, stats_cfg=PlotCfg(), dry_run=False)
+            p.process_subject("0001", "task", contrast_cfg=cfg, stats_cfg=PlotCfg(), dry_run=False)
 
         self.assertEqual(cfg.fmriprep_space, "T1w")
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
@@ -155,7 +157,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         # reporting module has since been deleted outright, so this is now
         # structural rather than asserted.
 
-    def test_mni_save_and_contrast_compute_exceptions_surface(self):
+    def test_mni_save_exception_surfaces(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
 
         tmp = Path(tempfile.mkdtemp())
@@ -181,16 +183,17 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             space: str = "both"
             include_effect_size: bool = True
             include_standard_error: bool = True
+            include_signatures: bool = False
+            threshold_mode: str = "z"
+            z_threshold: float = 2.3
+            fdr_q: float = 0.05
+            cluster_min_voxels: int = 0
+            two_sided: bool = True
 
             def normalized(self):
                 return self
 
-        class BoomFLM:
-            def compute_contrast(self, *args, **kwargs):
-                raise RuntimeError("boom")
-
         flm_boom = make_mock_fitted_model(runs=1)
-        flm_boom.compute_contrast = BoomFLM().compute_contrast
         run_meta_boom = make_mock_run_meta(runs=1)
 
         def _build(**kwargs):
@@ -198,7 +201,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                 "img",
                 run_meta_boom,
                 SimpleNamespace(flm=flm_boom, mask_img="img"),
-                "def",
+                "cond_a",
                 None,
             )
 
@@ -225,7 +228,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "save-fail"):
                 p.process_subject(
-                    "0001", "t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False
+                    "0001", "t", contrast_cfg=Cfg(), stats_cfg=PlotCfg(), dry_run=False
                 )
 
     def test_mni_build_exception_surfaces(self):
@@ -254,6 +257,12 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             space: str = "mni"
             include_effect_size: bool = True
             include_standard_error: bool = True
+            include_signatures: bool = False
+            threshold_mode: str = "z"
+            z_threshold: float = 2.3
+            fdr_q: float = 0.05
+            cluster_min_voxels: int = 0
+            two_sided: bool = True
 
             def normalized(self):
                 return self
@@ -273,7 +282,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                     flm=flm_mni,
                     mask_img="img",
                 ),
-                "def",
+                "cond_a",
                 None,
             )
 
@@ -295,7 +304,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "mni-build-fail"):
                 p.process_subject(
-                    "0001", "t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False
+                    "0001", "t", contrast_cfg=Cfg(), stats_cfg=PlotCfg(), dry_run=False
                 )
 
 
@@ -369,6 +378,9 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
             patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"),
             patch("fmri_pipeline.pipelines.fmri_preprocessing._stream_subprocess") as mock_stream,
         ):
+            mock_stream.side_effect = lambda *_args, **_kwargs: (
+                p.deriv_root / "preprocessed" / "fmri" / "sub-0001.html"
+            ).write_text("<html></html>", encoding="utf-8")
             p.process_subject("sub-0001", task="", progress=progress, dry_run=False)
 
         cmd = mock_stream.call_args.args[0]
@@ -721,7 +733,7 @@ class TestFmriDeep(unittest.TestCase):
                     flm=flm_full,
                     mask_img="img",
                 ),
-                "def",
+                "cond_a",
                 None,
             ),
             resample_to_freesurfer=lambda img, fs_dir: img,
@@ -737,7 +749,7 @@ class TestFmriDeep(unittest.TestCase):
             {"fmri_pipeline.analysis.contrast_builder": fake_builder, "nibabel": fake_nib},
         ):
             p.process_subject(
-                "0001", task="task", contrast_cfg=contrast_cfg, plotting_cfg=None, dry_run=False
+                "0001", task="task", contrast_cfg=contrast_cfg, stats_cfg=None, dry_run=False
             )
 
         out_dir = (
@@ -793,6 +805,12 @@ class TestFmriDeep(unittest.TestCase):
             space: str = "native"
             include_effect_size: bool = True
             include_standard_error: bool = True
+            include_signatures: bool = False
+            threshold_mode: str = "z"
+            z_threshold: float = 2.3
+            fdr_q: float = 0.05
+            cluster_min_voxels: int = 0
+            two_sided: bool = True
 
             def normalized(self):
                 return self
@@ -810,7 +828,7 @@ class TestFmriDeep(unittest.TestCase):
                     flm=flm_branch,
                     mask_img="img",
                 ),
-                "def",
+                "cond_a",
                 None,
             ),
             resample_to_freesurfer=lambda img, fs_dir: img,
@@ -834,7 +852,7 @@ class TestFmriDeep(unittest.TestCase):
                 "0001",
                 task="task",
                 contrast_cfg=contrast_cfg,
-                plotting_cfg=plotting_cfg,
+                stats_cfg=plotting_cfg,
                 dry_run=False,
             )
 
@@ -868,6 +886,9 @@ class TestFmriDeep(unittest.TestCase):
             patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"),
             patch("fmri_pipeline.pipelines.fmri_preprocessing._stream_subprocess") as mock_stream,
         ):
+            mock_stream.side_effect = lambda *_args, **_kwargs: (
+                p.deriv_root / "preprocessed" / "fmri" / "sub-0001.html"
+            ).write_text("<html></html>", encoding="utf-8")
             p.process_subject(
                 "0001",
                 task="",
@@ -1011,7 +1032,7 @@ class TestFmriCompletion(unittest.TestCase):
                     flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x"),
                     mask_img="img",
                 ),
-                "def",
+                "cond_a",
                 None,
             ),
             resample_to_freesurfer=lambda img, fs_dir, **kw: img,
@@ -1063,6 +1084,12 @@ class TestFmriCompletion(unittest.TestCase):
             space: str = "both"
             include_effect_size: bool = True
             include_standard_error: bool = True
+            include_signatures: bool = False
+            threshold_mode: str = "z"
+            z_threshold: float = 2.3
+            fdr_q: float = 0.05
+            cluster_min_voxels: int = 0
+            two_sided: bool = True
 
             def normalized(self):
                 return self
@@ -1080,7 +1107,7 @@ class TestFmriCompletion(unittest.TestCase):
                     flm=flm_mni_branch,
                     mask_img="img",
                 ),
-                "def",
+                "cond_a",
                 None,
             )
 
@@ -1113,7 +1140,7 @@ class TestFmriCompletion(unittest.TestCase):
                 "0001",
                 "t",
                 contrast_cfg=Cfg(),
-                plotting_cfg=PlotCfg(),
+                stats_cfg=PlotCfg(),
                 dry_run=False,
                 progress=progress,
             )
@@ -1161,24 +1188,23 @@ class TestFmriCompletion(unittest.TestCase):
                         "fs_license_file": str(lic),
                         "output_spaces": ["T1w"],
                         "ignore": ["slicetiming"],
-                        "use_aroma": True,
                         "skip_bids_validation": True,
                         "clean_workdir": True,
                         "stop_on_first_crash": True,
                         "fs_no_reconall": True,
                         "mem_mb": 4096,
                         "nthreads": 2,
-                        "omp_nthreads": 2,
+                        "omp_nthreads": 1,
                         "low_mem": True,
-                        "longitudinal": True,
+                        "subject_anatomical_reference": "unbiased",
                         "cifti_output": "91k",
                         "level": "minimal",
                         "skull_strip_template": "MNI",
                         "skull_strip_fixed_seed": True,
                         "random_seed": 7,
                         "dummy_scans": 2,
-                        "bold2t1w_init": "header",
-                        "bold2t1w_dof": 12,
+                        "bold2anat_init": "header",
+                        "bold2anat_dof": 12,
                         "slice_time_ref": 0.3,
                         "fd_spike_threshold": 0.2,
                         "dvars_spike_threshold": 1.2,
@@ -1197,6 +1223,14 @@ class TestFmriCompletion(unittest.TestCase):
 
         with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"):
             p.process_subject("0001", task="", progress=_NoopProgress(), dry_run=True)
+
+        command = p.logger.info.call_args.args[1]
+        self.assertIn("--bold2anat-init header", command)
+        self.assertIn("--bold2anat-dof 12", command)
+        self.assertIn("--subject-anatomical-reference unbiased", command)
+        self.assertNotIn("--bold2t1w", command)
+        self.assertNotIn("--longitudinal", command)
+        self.assertNotIn("--use-aroma", command)
 
     def test_fmri_preprocessing_validate_and_error_branches(self):
         from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline

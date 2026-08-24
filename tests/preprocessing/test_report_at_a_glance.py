@@ -50,6 +50,36 @@ def test_headline_numbers_are_lifted_out_of_the_record() -> None:
     assert "16" in document
 
 
+def test_bridge_candidates_are_visible_before_scrolling() -> None:
+    document = at_a_glance_html(
+        _record(
+            _stage(
+                "report-review",
+                "2026-08-22T20:00:00+00:00",
+                n_bridged_pairs=2,
+            )
+        )
+    )
+
+    assert "Unique candidate bridged pairs" in document
+    assert ">2<" in document
+
+
+def test_highest_muscle_screened_fraction_is_visible_before_scrolling() -> None:
+    document = at_a_glance_html(
+        _record(
+            _stage(
+                "report-review",
+                "2026-08-22T20:00:00+00:00",
+                max_muscle_artifact_fraction=0.1234,
+            )
+        )
+    )
+
+    assert "Highest candidate muscle fraction" in document
+    assert "12.3%" in document
+
+
 def test_only_measurements_that_were_recorded_appear() -> None:
     """An EEG-only dataset has no scanner stage, and rest has no trial retention.
 
@@ -169,7 +199,7 @@ def test_an_unrecognised_measurement_is_left_to_its_own_section() -> None:
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_a_non_finite_measurement_is_omitted_rather_than_printed(value: float) -> None:
-    """"nan" on the landing panel reads as a measured value, and it is not one."""
+    """ "nan" on the landing panel reads as a measured value, and it is not one."""
     document = at_a_glance_html(
         _record(_stage("band-ica-report", "2026-07-25T23:51:09+00:00", variance_removed=value))
     )
@@ -236,4 +266,4 @@ def test_headlines_point_at_no_scanner_section():
     from eeg_pipeline.preprocessing.report.at_a_glance import HEADLINES
 
     assert all("Analyzer" not in headline.section for headline in HEADLINES)
-    assert len(HEADLINES) == 14
+    assert len(HEADLINES) == 16

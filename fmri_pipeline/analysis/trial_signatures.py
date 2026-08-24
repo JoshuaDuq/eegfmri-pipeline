@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from fmri_pipeline.analysis.confounds_selection import DEFAULT_CONFOUNDS_STRATEGY
 from fmri_pipeline.analysis.contrast_builder import discover_runless_confounds
 from fmri_pipeline.analysis.multivariate_signatures import (
     _fill_nonfinite_background_for_resampling,
@@ -385,9 +386,7 @@ def _prepare_summary_signature_inputs(
     summary_name: str,
 ) -> Tuple[Any, Any, Any]:
     if not run_brain_masks:
-        raise ValueError(
-            f"{summary_name} signature expression requires at least one brain mask."
-        )
+        raise ValueError(f"{summary_name} signature expression requires at least one brain mask.")
     coverage_mask = _union_masks_to_target(run_brain_masks, summary_img)
     prepared_img = _fill_nonfinite_background_for_resampling(
         image_img=summary_img,
@@ -398,9 +397,9 @@ def _prepare_summary_signature_inputs(
 
 
 def _normalize_confounds_strategy(strategy: str) -> str:
-    normalized = str(strategy or "auto").strip().lower()
+    normalized = str(strategy or DEFAULT_CONFOUNDS_STRATEGY).strip().lower()
     if normalized in {"", "default"}:
-        return "auto"
+        return DEFAULT_CONFOUNDS_STRATEGY
     return normalized
 
 
@@ -1005,7 +1004,11 @@ def _combine_effect_images(
 
     method = (method or "variance").strip().lower()
     if method == "mean":
-        out = np.nanmean(eff, axis=0)
+        finite = np.isfinite(eff)
+        counts = finite.sum(axis=0)
+        totals = np.where(finite, eff, 0.0).sum(axis=0)
+        out = np.full(totals.shape, np.nan, dtype=float)
+        np.divide(totals, counts, out=out, where=counts > 0)
         header = ref_img.header.copy()
         header.set_data_dtype(np.float32)
         return nib.Nifti1Image(out.astype(np.float32), ref_img.affine, header)

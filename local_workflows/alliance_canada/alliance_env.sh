@@ -37,7 +37,7 @@ export FS_LICENSE_FILE="${ALLIANCE_PROJECT_ROOT}/licenses/license.txt"
 
 # Prefer a pre-pulled .sif path. A docker:// URI is acceptable only when the
 # cluster permits Apptainer image pulls from compute jobs.
-export FMRIPREP_IMAGE="${ALLIANCE_PROJECT_ROOT}/containers/fmriprep_25.2.4.sif"
+export FMRIPREP_IMAGE="${ALLIANCE_PROJECT_ROOT}/containers/fmriprep_25.2.5.sif"
 export SIGNATURE_ROOT="${ALLIANCE_PROJECT_ROOT}/external"
 
 # fMRIPrep task restriction used by the narrow upload manifest.

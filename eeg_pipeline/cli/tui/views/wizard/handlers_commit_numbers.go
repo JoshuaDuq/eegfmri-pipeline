@@ -1006,16 +1006,16 @@ func (m *Model) commitFmriNumber(val float64) {
 			m.fmriNThreads = int(val)
 		}
 	case optFmriOmpNThreads:
-		if val >= 0 {
+		if val >= 1 {
 			m.fmriOmpNThreads = int(val)
 		}
 	case optFmriMemMb:
 		if val >= 0 {
 			m.fmriMemMb = int(val)
 		}
-	case optFmriBold2T1wDof:
-		if val >= 0 {
-			m.fmriBold2T1wDof = int(val)
+	case optFmriBold2AnatDof:
+		if val == 6 || val == 9 || val == 12 {
+			m.fmriBold2AnatDof = int(val)
 		}
 	case optFmriSliceTimeRef:
 		if val >= 0 && val <= 1 {

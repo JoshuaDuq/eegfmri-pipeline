@@ -342,7 +342,36 @@ Supported designs:
      - Within-subject multi-condition model across two or more contrasts.
 
 Optional permutation inference (``--group-permutation-inference``) adds max-T
-permutation inference for second-level t-contrasts.
+permutation inference for second-level t-contrasts. ``random_state`` is passed
+explicitly to :func:`nilearn.glm.second_level.non_parametric_inference`, so the
+sampled permutations are reproducible.
+
+The cohort HTML report is written after a successful fit when
+``fmri_group_level.report.enabled`` is true. Its GLM panels follow Nilearn's
+second-level reporting examples and use the corresponding public APIs:
+
+- :func:`nilearn.plotting.plot_design_matrix` with ``rescale=False`` and
+  :func:`nilearn.plotting.plot_contrast_matrix` for the exact fitted design and test;
+- :func:`nilearn.plotting.plot_design_matrix_correlation` for a diagnostic
+  regressor-correlation panel when the matrix has three to twenty non-constant columns;
+- :func:`nilearn.glm.threshold_stats_img` for the predeclared parametric height
+  control (FDR at :math:`q=0.05` by default);
+- :func:`nilearn.reporting.get_clusters_table` for peaks and cluster sizes;
+- :func:`nilearn.plotting.plot_stat_map` and
+  :func:`nilearn.plotting.plot_glass_brain` for slice and projection views.
+
+The report also records the exact input manifest, design rank, residual degrees of
+freedom, analysis mask, group effect and standard error for t contrasts, and max-T
+familywise-corrected :math:`-\log_{10}(p)` when permutation inference was requested.
+An omnibus F test is one-sided by definition and therefore never displays a negative
+tail or a single signed effect estimate. The optional extent filter is labelled as a
+display filter, not cluster-level corrected inference. Subjects and exclusions are
+never selected from the observed cohort maps. The inferential procedure
+and level are predeclared; under FDR, Nilearn necessarily derives the corresponding
+numeric z height from the observed p-value distribution. The report states the
+contrast-specific permutation scheme and exchangeability assumption, permutation
+sidedness, and the smallest attainable permutation p-value,
+:math:`1/(N_{perm}+1)`.
 
 .. warning::
 
@@ -424,9 +453,9 @@ Trial-Wise Outputs
 Stage 5 — Reporting and QC
 ----------------------------
 
-Self-contained HTML report (``--plot-html-report``).
-
-Statistical visualizations per space (native and/or MNI):
+``fmri-analysis report`` renders a self-contained HTML document from first-level
+manifests and never refits a model. Statistical choices come from ``fmri_stats``;
+rendering choices come from ``fmri_report``.
 
 .. list-table::
    :header-rows: 1
@@ -434,18 +463,26 @@ Statistical visualizations per space (native and/or MNI):
 
    * - Plot
      - Description
-   * - ``slices``
-     - Mosaic stat-map overlay (thresholded and unthresholded)
-   * - ``glass``
-     - Glass-brain projection
-   * - ``hist``
-     - Z-statistic voxel-distribution histogram with threshold lines
-   * - ``clusters``
-     - Cluster/peak table via ``nilearn.reporting.get_clusters_table``
+   * - Preprocessing QC
+     - Motion/FD/stdDVARS, fitted-mask carpet, tSNR, and coverage
+   * - Design QC
+     - Design matrices, event timing, regressor correlation, VIF, and efficiency
+   * - Statistical maps
+     - Thresholded and diagnostic unthresholded mosaics, glass brain, effect/evidence, and standard error
+   * - Calibration
+     - Voxel-distribution null calibration, explicit thresholds, clusters, and peaks
+   * - Model diagnostics
+     - Whole-model :math:`R^2`, prediction/residual carpets, residual spread, and autocorrelation
+   * - Across-run agreement
+     - Peak-wise estimates, whole-mask effect-map correlations, and leave-one-run-out influence
 
 QC diagnostics: motion QC (FD and DVARS time series), carpet plot (voxel × time
 matrix, z-scored, clipped to ±3), tSNR map, design matrix images and TSVs,
 design QC summary (regressor count, max absolute correlation, condition number, max VIF).
+Whole-model :math:`R^2` is reconstructed from the persisted prediction and residual
+series with total variation centred within each run. The across-run correlation matrix
+uses every fitted-mask voxel and a fixed -1 to +1 colour scale; it does not select
+peaks, threshold maps, score runs, or change the fitted model.
 
 Thresholding modes: ``z`` (default, \|z\| > 2.3), ``fdr`` (BH :math:`q = 0.05`), ``none``.
 
@@ -605,14 +642,12 @@ Output Layout
    │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-z_score_<hash>.nii.gz
    │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-effect_size_<hash>.nii.gz
    │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-z_score_<hash>.json   # provenance sidecar
-   │       │   ├── qc/
-   │       │   │   ├── <prefix>_run-XX_design_matrix.tsv
-   │       │   │   ├── <prefix>_run-XX_design_matrix.png
-   │       │   │   ├── motion_qc.{png,svg}
-   │       │   │   ├── carpet_qc.{png,svg}
-   │       │   │   └── tsnr_map.{png,svg}
-   │       │   ├── plots/
-   │       │   └── report.html                                                       # --plot-html-report
+   │       │   ├── report_manifest.json
+   │       │   ├── qc/*_design_matrix.tsv
+   │       │   ├── *_desc-modelResponseResidual_bold_<hash>.nii.gz
+   │       │   └── *_desc-modelResponsePredicted_bold_<hash>.nii.gz
+   │       ├── sub-XXXX_task-<task>_report.html              # fmri-analysis report
+   │       ├── plots/                                        # report artifacts
    │       ├── beta_series/task-<task>/contrast-<name>/    # mode=beta-series (LSA)
    │       │   ├── trials.tsv
    │       │   ├── signatures/
@@ -639,5 +674,10 @@ Output Layout
        └── fmri/second_level/task-<task>/model-<model>/contrast-<name>/
            ├── group_task-<task>_model-<model>_contrast-<name>_stat-z_score.nii.gz
            ├── group_task-<task>_model-<model>_contrast-<name>_stat-effect_size.nii.gz
+           ├── group_task-<task>_model-<model>_contrast-<name>_stat-analysis_mask.nii.gz
+           ├── input_manifest.tsv
            ├── second_level_metadata.json
-           └── qc/second_level_design_matrix.{tsv,png}
+           ├── qc/second_level_design_matrix.{tsv,png}
+           └── report/
+               ├── group_task-<task>_model-<model>_contrast-<name>_report.html
+               └── plots/          # PNG/SVG panels, cluster TSV, derived SE NIfTI

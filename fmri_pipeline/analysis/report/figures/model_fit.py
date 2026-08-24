@@ -9,7 +9,11 @@ from typing import Sequence, Tuple
 
 import numpy as np
 
+from fmri_pipeline.analysis.report.figures._validation import validated_binary_mask
+
 Quartiles = Tuple[float, float, float]
+
+MODEL_FIT_CHUNK_FRAMES = 16
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,118 @@ class ResidualStandardDeviationMap:
     run_count: int
     retained_frames: int
     voxel_count: int
+
+
+@dataclass(frozen=True)
+class RSquaredMap:
+    """Pooled voxelwise model R² on the fitted-mask grid."""
+
+    image: object
+    run_count: int
+    retained_frames: int
+    voxel_count: int
+
+
+def pooled_r_squared(
+    *,
+    residual_paths: Sequence[Path],
+    predicted_paths: Sequence[Path],
+    mask_path: Path,
+) -> RSquaredMap:
+    """Compute whole-model R² pooled across runs without mixing run means."""
+    import nibabel as nib
+
+    residuals = tuple(Path(path) for path in residual_paths)
+    predictions = tuple(Path(path) for path in predicted_paths)
+    if not residuals or len(residuals) != len(predictions):
+        raise ValueError("The R² map requires equal non-empty residual and prediction series.")
+
+    mask_image = nib.load(str(mask_path))
+    mask = validated_binary_mask(mask_image)
+    voxel_count = int(mask.sum())
+
+    residual_sum_squares = np.zeros(voxel_count, dtype=np.float64)
+    total_sum_squares = np.zeros(voxel_count, dtype=np.float64)
+    retained_frames = 0
+    for run_index, (residual_path, predicted_path) in enumerate(
+        zip(residuals, predictions), start=1
+    ):
+        residual_image = nib.load(str(residual_path))
+        predicted_image = nib.load(str(predicted_path))
+        _validate_run_geometry(
+            label=f"Run {run_index}",
+            residual_image=residual_image,
+            predicted_image=predicted_image,
+            mask_image=mask_image,
+        )
+        if residual_image.shape[3] < 2:
+            raise ValueError(f"Run {run_index} requires at least two retained frames.")
+
+        run_mean = np.zeros(voxel_count, dtype=np.float64)
+        run_sum_squared_deviations = np.zeros(voxel_count, dtype=np.float64)
+        run_frames = 0
+        for frame_start in range(0, residual_image.shape[3], MODEL_FIT_CHUNK_FRAMES):
+            frame_stop = min(
+                frame_start + MODEL_FIT_CHUNK_FRAMES,
+                residual_image.shape[3],
+            )
+            frame_slice = (..., slice(frame_start, frame_stop))
+            residual = np.asarray(
+                residual_image.dataobj[frame_slice],
+                dtype=np.float32,
+            )[mask]
+            predicted = np.asarray(
+                predicted_image.dataobj[frame_slice],
+                dtype=np.float32,
+            )[mask]
+            if not np.isfinite(residual).all() or not np.isfinite(predicted).all():
+                raise ValueError(f"Run {run_index} model-fit series contain non-finite values.")
+
+            observed = predicted + residual
+            chunk_frames = int(observed.shape[1])
+            chunk_mean = observed.mean(axis=1, dtype=np.float64)
+            chunk_centered = observed - chunk_mean[:, np.newaxis]
+            chunk_sum_squared_deviations = np.einsum(
+                "ij,ij->i",
+                chunk_centered,
+                chunk_centered,
+                dtype=np.float64,
+            )
+            combined_frames = run_frames + chunk_frames
+            mean_difference = chunk_mean - run_mean
+            run_sum_squared_deviations += chunk_sum_squared_deviations
+            run_sum_squared_deviations += (
+                mean_difference**2 * run_frames * chunk_frames / combined_frames
+            )
+            run_mean += mean_difference * chunk_frames / combined_frames
+            run_frames = combined_frames
+
+            residual_sum_squares += np.einsum(
+                "ij,ij->i",
+                residual,
+                residual,
+                dtype=np.float64,
+            )
+
+        total_sum_squares += run_sum_squared_deviations
+        retained_frames += run_frames
+
+    if np.any(total_sum_squares <= 0):
+        raise ValueError("The R² map contains voxels with undefined total variation.")
+    r_squared = 1.0 - residual_sum_squares / total_sum_squares
+    if not np.isfinite(r_squared).all():
+        raise ValueError("The R² map contains non-finite fitted-mask values.")
+
+    volume = np.zeros(mask_image.shape, dtype=np.float32)
+    volume[mask] = r_squared
+    header = mask_image.header.copy()
+    header.set_data_dtype(np.float32)
+    return RSquaredMap(
+        image=nib.Nifti1Image(volume, mask_image.affine, header),
+        run_count=len(residuals),
+        retained_frames=retained_frames,
+        voxel_count=voxel_count,
+    )
 
 
 def pooled_residual_standard_deviation(
@@ -469,12 +585,14 @@ def write_model_fit_tsv(
 
 
 __all__ = [
+    "RSquaredMap",
     "ResidualStandardDeviationMap",
     "ResidualCarpet",
     "RunModelFitMeasurements",
     "collect_residual_carpet",
     "model_fit_table",
     "pooled_residual_standard_deviation",
+    "pooled_r_squared",
     "summarize_model_fit",
     "write_model_fit_tsv",
 ]

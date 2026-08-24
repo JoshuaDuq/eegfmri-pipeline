@@ -215,6 +215,21 @@ def test_the_section_renders_and_replaces_on_rebuild() -> None:
     assert plot_run_continuity(run).axes
 
 
+def test_continuity_keeps_mne_raw_waveforms_for_visual_qc() -> None:
+    """A summary heatmap complements, but cannot replace, the sensor waveform."""
+    raw = _raw(n_channels=2)
+    run = compute_run_continuity(raw, recording_id="run-1")
+    report = mne.Report(title="continuity", verbose="ERROR")
+    report.add_raw(raw, title="Raw (original)", psd=False, butterfly=True)
+
+    add_continuity_section(report=report, runs=[run])
+
+    assert any(
+        element.section == "Raw (original)" and element.name == "Time series"
+        for element in report._content
+    )
+
+
 def test_an_empty_section_is_an_error_rather_than_a_blank_panel() -> None:
     report = mne.Report(title="continuity", verbose="ERROR")
 
@@ -295,7 +310,7 @@ def test_the_excursion_axis_is_not_scaled_by_the_transient_it_excludes() -> None
 
 
 def test_task_events_are_carried_so_an_excursion_can_be_read_against_trials() -> None:
-    """"A +12 dB excursion at 5.5 min" is a fact about the recording; "it covers four
+    """ "A +12 dB excursion at 5.5 min" is a fact about the recording; "it covers four
     trials" is the one that decides what to do about it. Scanner and artifact marks are
     not events and must not pad the rug."""
     raw = _raw()
@@ -454,6 +469,26 @@ def test_acquisition_markers_are_not_drawn_as_task_events() -> None:
     )
 
     assert run.event_onsets == (20.0,)
+
+
+def test_exact_event_descriptions_define_the_trial_rug() -> None:
+    """A configured condition list is stronger evidence than guessing by exclusion."""
+    raw = _raw()
+    raw.set_annotations(
+        mne.Annotations(
+            onset=[5.0, 10.0, 15.0, 20.0],
+            duration=[0.0] * 4,
+            description=["stimulus/heat", "Response/R", "Volume/V  1", "Cardiac/R"],
+        )
+    )
+
+    run = compute_run_continuity(
+        raw,
+        recording_id="run-1",
+        event_descriptions=("stimulus/heat",),
+    )
+
+    assert run.event_onsets == (5.0,)
 
 
 def _clean_epochs(n_epochs=8, n_channels=6):

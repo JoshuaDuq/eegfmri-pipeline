@@ -281,9 +281,7 @@ def test_the_cluster_caption_states_the_search_volume_in_resels(tmp_path: Path) 
         cluster_min_voxels=10,
         threshold=2.3,
     )
-    assert any(
-        "search volume" in fact and "resels" in fact for fact in smoothness.facts
-    )
+    assert any("search volume" in fact and "resels" in fact for fact in smoothness.facts)
 
 
 # --- smoothness from the residual field -----------------------------------
@@ -350,9 +348,10 @@ def test_volume_panels_are_drawn_over_the_discovered_anatomy(tmp_path: Path) -> 
     background = nib.Nifti1Image(np.ones((16, 16, 16), dtype=np.float32), np.eye(4))
     with patch("fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic") as mosaic:
         mosaic.side_effect = RuntimeError("stop after the call is recorded")
-        subject.build_contrast_section(
-            manifest=manifest, out_dir=tmp_path, cfg=_cfg(), background=background
-        )
+        with pytest.raises(RuntimeError, match="stop after"):
+            subject.build_contrast_section(
+                manifest=manifest, out_dir=tmp_path, cfg=_cfg(), background=background
+            )
     assert mosaic.call_args.kwargs["bg_img"] is background
 
 
@@ -385,12 +384,13 @@ def test_the_report_trims_the_underlay_to_what_was_modelled(tmp_path: Path) -> N
             side_effect=_record,
         ),
     ):
-        subject.build_subject_report(
-            manifests=[manifest],
-            deriv_root=tmp_path,
-            out_path=tmp_path / "report.html",
-            cfg=_cfg(),
-        )
+        with pytest.raises(RuntimeError, match="stop after"):
+            subject.build_subject_report(
+                manifests=[manifest],
+                deriv_root=tmp_path,
+                out_path=tmp_path / "report.html",
+                cfg=_cfg(),
+            )
 
     drawn = captured["bg"]
     assert drawn is not None
@@ -471,36 +471,30 @@ def test_the_carpet_is_built_from_the_analysis_mask_not_the_field_of_view(
         raise RuntimeError("stop once the call is recorded")
 
     with patch("fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record):
-        subject.build_qc_sections(
-            manifests=[manifest],
-            deriv_root=tmp_path,
-            out_dir=tmp_path,
-            cfg=_cfg(include_tsnr_qc=False),
-        )
+        with pytest.raises(RuntimeError, match="stop once"):
+            subject.build_qc_sections(
+                manifests=[manifest],
+                deriv_root=tmp_path,
+                out_dir=tmp_path,
+                cfg=_cfg(include_tsnr_qc=False),
+            )
     assert captured.get("voxel_source") == "analysis mask"
 
 
-def test_the_carpet_falls_back_when_no_fitted_mask_was_recorded(tmp_path: Path) -> None:
+def test_the_carpet_requires_the_fitted_analysis_mask(tmp_path: Path) -> None:
     manifest = _manifest(
         tmp_path,
         bold_paths=(_bold(tmp_path, "run-01_bold.nii.gz"),),
         included_runs=("run-01",),
         mask_is_analysis_mask=False,
     )
-    captured = {}
-
-    def _record(*_args, **kwargs):
-        captured.update(kwargs)
-        raise RuntimeError("stop once the call is recorded")
-
-    with patch("fmri_pipeline.analysis.report.figures.carpet.carpet_figure", _record):
+    with pytest.raises(ValueError, match="fitted analysis mask"):
         subject.build_qc_sections(
             manifests=[manifest],
             deriv_root=tmp_path,
             out_dir=tmp_path,
             cfg=_cfg(include_tsnr_qc=False),
         )
-    assert captured.get("voxel_source") == "nonzero mean signal"
 
 
 # --- units ----------------------------------------------------------------

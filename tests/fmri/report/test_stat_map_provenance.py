@@ -175,6 +175,35 @@ def test_the_magnitude_limit_comes_from_the_positive_values_only() -> None:
     plt.close(figure)
 
 
+# --- corrected evidence --------------------------------------------------
+
+
+def test_corrected_evidence_starts_its_scale_at_the_fwe_cutoff() -> None:
+    img, mask = _magnitude_img()
+    cutoff = -np.log10(0.05)
+    with patch("nilearn.plotting.plot_stat_map") as mock_plot:
+        mock_plot.return_value.figure = None
+        try:
+            stat_maps.evidence_mosaic(img, mask_img=mask, threshold=cutoff)
+        except Exception:
+            pass
+    kwargs = mock_plot.call_args.kwargs
+    assert kwargs["threshold"] == pytest.approx(cutoff)
+    assert kwargs["vmin"] == pytest.approx(cutoff)
+    assert kwargs["symmetric_cbar"] is False
+    assert kwargs["cmap"] == "inferno"
+
+
+def test_corrected_evidence_reports_only_the_drawn_range() -> None:
+    img, mask = _magnitude_img()
+    cutoff = -np.log10(0.05)
+    figure = stat_maps.evidence_mosaic(img, mask_img=mask, threshold=cutoff)
+    provenance = _provenance(figure)
+    assert f"−log10(p) ≥ {cutoff:.3g}" in provenance
+    assert "scale starts at the FWE cutoff" in provenance
+    plt.close(figure)
+
+
 # --- the dual-coded panel scales inside the mask too ----------------------
 
 

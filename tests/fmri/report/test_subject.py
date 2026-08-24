@@ -142,14 +142,15 @@ def test_qc_is_built_once_for_a_subject_with_several_contrasts(tmp_path: Path) -
     manifests = [_manifest(tmp_path, "a"), _manifest(tmp_path, "b")]
     with patch("fmri_pipeline.analysis.report.figures.volumes.compute_tsnr") as mock_tsnr:
         mock_tsnr.side_effect = RuntimeError("stop here")
-        subject.build_qc_sections(
-            manifests=manifests, deriv_root=tmp_path, out_dir=tmp_path, cfg=_cfg()
-        )
+        with pytest.raises(RuntimeError, match="stop here"):
+            subject.build_qc_sections(
+                manifests=manifests, deriv_root=tmp_path, out_dir=tmp_path, cfg=_cfg()
+            )
     # Two contrasts, one tSNR computation.
     assert mock_tsnr.call_count == 1
 
 
-def test_qc_returns_a_section_even_when_every_panel_fails(tmp_path: Path) -> None:
+def test_qc_surfaces_panel_failures(tmp_path: Path) -> None:
     with (
         patch(
             "fmri_pipeline.analysis.report.figures.volumes.compute_tsnr",
@@ -160,13 +161,13 @@ def test_qc_returns_a_section_even_when_every_panel_fails(tmp_path: Path) -> Non
             side_effect=RuntimeError("boom"),
         ),
     ):
-        sections = subject.build_qc_sections(
-            manifests=[_manifest(tmp_path)],
-            deriv_root=tmp_path,
-            out_dir=tmp_path,
-            cfg=_cfg(),
-        )
-    assert sections
+        with pytest.raises(RuntimeError, match="boom"):
+            subject.build_qc_sections(
+                manifests=[_manifest(tmp_path)],
+                deriv_root=tmp_path,
+                out_dir=tmp_path,
+                cfg=_cfg(),
+            )
 
 
 def test_qc_is_labelled_as_modelled_not_as_preprocessed(tmp_path: Path) -> None:
@@ -192,12 +193,13 @@ def test_qc_uses_the_exact_retained_frame_indices(tmp_path: Path) -> None:
         raise RuntimeError("stop once the call is recorded")
 
     with patch("fmri_pipeline.analysis.report.figures.carpet.scale_carpet", _record):
-        subject.build_qc_sections(
-            manifests=[manifest],
-            deriv_root=tmp_path,
-            out_dir=tmp_path,
-            cfg=_cfg(include_tsnr_qc=False),
-        )
+        with pytest.raises(RuntimeError, match="stop once"):
+            subject.build_qc_sections(
+                manifests=[manifest],
+                deriv_root=tmp_path,
+                out_dir=tmp_path,
+                cfg=_cfg(include_tsnr_qc=False),
+            )
 
     first_mask = captured["sample_masks"][0]
     assert first_mask.tolist() == [False, *([True] * 19)]
@@ -256,7 +258,7 @@ def test_diagnostics_include_the_exact_model_response_residual_carpet(
         cfg=_cfg(include_unthresholded=False),
     )
 
-    carpet = section.blocks[1]
+    carpet = section.blocks[2]
     assert carpet.title == "Model-response residual carpet"
     assert carpet.path == (tmp_path / "plots" / "contrast-heat-warm" / "residual_carpet.png")
     assert carpet.path.is_file()
@@ -274,7 +276,7 @@ def test_diagnostics_include_the_pooled_residual_standard_deviation_map(
         cfg=_cfg(include_unthresholded=False),
     )
 
-    residual_sd = section.blocks[2]
+    residual_sd = section.blocks[3]
     artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
     assert residual_sd.title == "Pooled residual standard deviation"
     assert residual_sd.path == artifact_dir / "residual_standard_deviation.png"
@@ -295,7 +297,7 @@ def test_diagnostics_include_residual_autocorrelation_at_acquired_lags(
         cfg=_cfg(include_unthresholded=False),
     )
 
-    residual_acf = section.blocks[3]
+    residual_acf = section.blocks[4]
     artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
     assert residual_acf.title == "Residual autocorrelation by run"
     assert residual_acf.path == artifact_dir / "residual_autocorrelation.svg"
@@ -304,6 +306,27 @@ def test_diagnostics_include_residual_autocorrelation_at_acquired_lags(
     assert "original acquired-frame indices differ by k" in residual_acf.caption
     assert "unwhitened model-response" in residual_acf.caption
     assert "No criterion is applied" in residual_acf.caption
+
+
+def test_diagnostics_include_the_spatial_whole_model_r_squared_map(
+    tmp_path: Path,
+) -> None:
+    section = subject.build_diagnostics_section(
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(include_unthresholded=False),
+    )
+
+    r_squared = section.blocks[1]
+    artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
+    assert r_squared.title == "Whole-model R²"
+    assert r_squared.path == artifact_dir / "model_r_squared.png"
+    assert r_squared.path.is_file()
+    assert (artifact_dir / "model_r_squared.nii.gz").is_file()
+    assert "within each run" in r_squared.caption
+    assert "task and nuisance" in r_squared.caption
+    assert "No criterion is applied" in r_squared.caption
 
 
 def test_each_contrast_gets_its_own_anchor(tmp_path: Path) -> None:
@@ -726,7 +749,10 @@ def test_the_analysis_mask_reaches_the_colour_limit(tmp_path: Path) -> None:
     nib.save(nib.Nifti1Image(mask, np.eye(4)), str(mask_path))
 
     manifest = _manifest(tmp_path, mask=mask_path)
-    with patch("fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic") as mosaic:
+    with (
+        patch("fmri_pipeline.analysis.report.figures.stat_maps.stat_map_mosaic") as mosaic,
+        patch.object(subject, "_save", return_value=tmp_path / "stat.png"),
+    ):
         mosaic.return_value = None
         subject.build_contrast_section(manifest=manifest, out_dir=tmp_path, cfg=_cfg())
 
@@ -789,12 +815,13 @@ def test_the_analysis_mask_reaches_the_tsnr_computation(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path, "masked-qc", mask=mask_path)
     with patch("fmri_pipeline.analysis.report.figures.volumes.compute_tsnr") as compute:
         compute.side_effect = RuntimeError("stop after the call is inspected")
-        subject.build_qc_sections(
-            manifests=[manifest],
-            deriv_root=tmp_path,
-            out_dir=tmp_path,
-            cfg=_cfg(include_carpet_qc=False),
-        )
+        with pytest.raises(RuntimeError, match="stop after"):
+            subject.build_qc_sections(
+                manifests=[manifest],
+                deriv_root=tmp_path,
+                out_dir=tmp_path,
+                cfg=_cfg(include_carpet_qc=False),
+            )
 
     assert compute.called
     assert compute.call_args.kwargs.get("mask_img") is not None
@@ -1050,6 +1077,15 @@ def test_the_contrast_section_carries_a_run_consistency_panel(tmp_path: Path) ->
     )
     titles = [getattr(block, "title", "") for block in section.blocks]
     assert "Run consistency at each peak" in titles
+    assert "Spatial agreement between runs" in titles
+    correlation = next(
+        block
+        for block in section.blocks
+        if getattr(block, "title", "") == "Spatial agreement between runs"
+    )
+    matrix_path = tmp_path / "out" / "plots" / "contrast-heat-warm" / "run_effect_correlation.tsv"
+    assert matrix_path.is_file()
+    assert matrix_path.name in correlation.caption
 
 
 def test_a_contrast_without_run_level_maps_simply_has_no_such_panel(
@@ -1236,13 +1272,21 @@ def test_threshold_caption_names_the_p_floor_when_it_binds():
     from fmri_pipeline.analysis.report.subject import _threshold_table_caption
 
     summary = inference.SignFlipSummary(
-        height=7.02, survivors=38, global_p=0.0606, p_floor=0.0606,
-        n_runs=6, n_patterns=32, observed_max=8.87,
+        height=7.02,
+        survivors=38,
+        global_p=0.0606,
+        p_floor=0.0606,
+        n_runs=6,
+        n_patterns=32,
+        observed_max=8.87,
     )
     caption = _threshold_table_caption(
         inference.threshold_context(
             np.random.default_rng(0).standard_normal(5000),
-            applied_threshold=2.3, fdr_q=0.05, alpha=0.05, two_sided=True,
+            applied_threshold=2.3,
+            fdr_q=0.05,
+            alpha=0.05,
+            two_sided=True,
             sign_flip=summary,
         )
     )
@@ -1259,10 +1303,18 @@ def test_threshold_caption_drops_the_stale_no_correction_claim():
     caption = _threshold_table_caption(
         inference.threshold_context(
             np.random.default_rng(0).standard_normal(5000),
-            applied_threshold=2.3, fdr_q=0.05, alpha=0.05, two_sided=True,
+            applied_threshold=2.3,
+            fdr_q=0.05,
+            alpha=0.05,
+            two_sided=True,
             sign_flip=inference.SignFlipSummary(
-                height=7.02, survivors=38, global_p=0.0606, p_floor=0.0606,
-                n_runs=6, n_patterns=32, observed_max=8.87,
+                height=7.02,
+                survivors=38,
+                global_p=0.0606,
+                p_floor=0.0606,
+                n_runs=6,
+                n_patterns=32,
+                observed_max=8.87,
             ),
         )
     )
@@ -1350,9 +1402,7 @@ def test_coordinates_travel_with_their_own_peak():
     """Reordering must not shear labels away from coordinates."""
     from fmri_pipeline.analysis.report.subject import _cluster_peaks
 
-    frame = _cluster_frame(
-        [(1, -50, 23, -2, 3.0), (2, 55, -7, 31, -9.0), (3, 10, 10, 10, 5.0)]
-    )
+    frame = _cluster_frame([(1, -50, 23, -2, 3.0), (2, 55, -7, 31, -9.0), (3, 10, 10, 10, 5.0)])
     assert _cluster_peaks(frame) == (
         ("2", (55.0, -7.0, 31.0)),
         ("3", (10.0, 10.0, 10.0)),
@@ -1540,9 +1590,7 @@ def test_survivor_line_states_the_expected_count_beside_the_observed():
     """
     from fmri_pipeline.analysis.report.subject import survivor_summary
 
-    line = survivor_summary(
-        surviving=8463, n_voxels=50626, expected_under_fitted_null=8001.4
-    )
+    line = survivor_summary(surviving=8463, n_voxels=50626, expected_under_fitted_null=8001.4)
     assert "8,463" in line
     assert "50,626" in line
     assert "16.72%" in line
@@ -1553,9 +1601,7 @@ def test_survivor_line_states_the_expected_count_beside_the_observed():
 def test_survivor_line_without_a_fitted_null_states_only_what_it_has():
     from fmri_pipeline.analysis.report.subject import survivor_summary
 
-    line = survivor_summary(
-        surviving=8463, n_voxels=50626, expected_under_fitted_null=None
-    )
+    line = survivor_summary(surviving=8463, n_voxels=50626, expected_under_fitted_null=None)
     assert "8,463 of 50,626" in line
     assert "fitted null" not in line
 
@@ -1563,9 +1609,7 @@ def test_survivor_line_without_a_fitted_null_states_only_what_it_has():
 def test_survivor_line_survives_an_empty_mask():
     from fmri_pipeline.analysis.report.subject import survivor_summary
 
-    assert "0" in survivor_summary(
-        surviving=0, n_voxels=0, expected_under_fitted_null=None
-    )
+    assert "0" in survivor_summary(surviving=0, n_voxels=0, expected_under_fitted_null=None)
 
 
 def test_familywise_line_carries_the_floor_when_it_binds():
@@ -1574,8 +1618,13 @@ def test_familywise_line_carries_the_floor_when_it_binds():
 
     line = familywise_summary(
         inference.SignFlipSummary(
-            height=7.02, survivors=38, global_p=0.0606, p_floor=0.0606,
-            n_runs=6, n_patterns=32, observed_max=8.87,
+            height=7.02,
+            survivors=38,
+            global_p=0.0606,
+            p_floor=0.0606,
+            n_runs=6,
+            n_patterns=32,
+            observed_max=8.87,
         )
     )
     assert "7.02" in line and "38" in line
@@ -1589,8 +1638,13 @@ def test_familywise_line_omits_the_floor_note_when_it_does_not_bind():
 
     line = familywise_summary(
         inference.SignFlipSummary(
-            height=6.0, survivors=120, global_p=0.008, p_floor=0.0155,
-            n_runs=8, n_patterns=128, observed_max=9.1,
+            height=6.0,
+            survivors=120,
+            global_p=0.008,
+            p_floor=0.0155,
+            n_runs=8,
+            n_patterns=128,
+            observed_max=9.1,
         )
     )
     assert "6.00" in line and "120" in line
@@ -1635,9 +1689,7 @@ def test_marker_caption_is_empty_without_peaks():
 
 
 def _run_effect_map(tmp_path, name, per_run_means):
-    data = np.stack(
-        [np.full((12, 12, 12), v, dtype=np.float32) for v in per_run_means], axis=-1
-    )
+    data = np.stack([np.full((12, 12, 12), v, dtype=np.float32) for v in per_run_means], axis=-1)
     path = tmp_path / name
     nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
     return path
@@ -1687,10 +1739,7 @@ def test_run_contributions_merge_the_influence_table(tmp_path: Path) -> None:
 
 def test_run_contributions_absent_without_any_measurement(tmp_path: Path) -> None:
     assert (
-        subject.build_run_contribution_block(
-            manifest=_manifest(tmp_path), out_dir=tmp_path
-        )
-        is None
+        subject.build_run_contribution_block(manifest=_manifest(tmp_path), out_dir=tmp_path) is None
     )
 
 

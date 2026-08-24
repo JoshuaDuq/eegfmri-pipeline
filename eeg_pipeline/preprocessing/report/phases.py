@@ -31,7 +31,9 @@ PHASES: tuple[Phase, ...] = (
         "What came in",
         (
             "Channel and region coverage",
+            "Electrode bridging",
             "Data quality over time",
+            "Muscle artifact screening",
             "Raw (original)",
             "Raw (filtered)",
         ),
@@ -59,6 +61,7 @@ PHASES: tuple[Phase, ...] = (
         (
             "Events",
             "Epoch rejection",
+            "Evoked responses",
             "Signal preservation",
             "Epochs (before cleaning)",
             "Epochs (clean)",

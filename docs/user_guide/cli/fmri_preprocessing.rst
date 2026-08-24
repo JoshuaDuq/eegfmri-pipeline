@@ -96,7 +96,7 @@ Key Options
      - from config (default: disabled)
    * - ``--fmriprep-image``
      - Container image tag or URI
-     - ``nipreps/fmriprep:25.2.4``
+     - ``nipreps/fmriprep:25.2.5``
    * - ``--fmriprep-output-dir``
      - Parent output directory (fMRIPrep writes to ``<output_dir>/fmriprep``)
      - ``<deriv_root>/preprocessed/fmri``
@@ -134,11 +134,11 @@ Key Options
      - Max threads across all processes (``0`` = auto)
      - ``0``
    * - ``--omp-nthreads``
-     - Max threads per process (``0`` = auto)
-     - ``0``
+     - Max threads per process; fixed to one for reproducible ANTs execution
+     - ``1``
    * - ``--dummy-scans``
-     - Non-steady-state volumes to discard
-     - ``0`` (auto-detect)
+     - Explicit non-steady-state volumes to discard
+     - omitted (fMRIPrep detection)
    * - ``--random-seed``
      - Reproducibility seed for fMRIPrep stochastic steps
      - ``42``
@@ -148,11 +148,14 @@ Key Options
    * - ``--skull-strip-fixed-seed``
      - Use a fixed seed for skull-stripping
      - enabled
-   * - ``--bold2t1w-init``
-     - BOLD-to-T1w initialization strategy (``register`` or ``header``)
-     - ``register``
-   * - ``--bold2t1w-dof``
-     - Degrees of freedom for BOLD-to-T1w registration
+   * - ``--subject-anatomical-reference``
+     - Anatomical reference strategy across sessions
+     - ``first-lex``
+   * - ``--bold2anat-init``
+     - BOLD-to-anatomical initialization strategy
+     - ``t1w``
+   * - ``--bold2anat-dof``
+     - Degrees of freedom for BOLD-to-anatomical registration
      - ``6``
    * - ``--slice-time-ref``
      - Slice timing reference fraction (0=start, 0.5=middle, 1=end)
@@ -187,15 +190,9 @@ Key Options
    * - ``--stop-on-first-crash`` / ``--no-stop-on-first-crash``
      - Stop immediately after first crash report
      - disabled
-   * - ``--use-aroma`` / ``--no-use-aroma``
-     - Enable or disable ICA-AROMA denoising
-     - disabled
    * - ``--fs-no-reconall`` / ``--fs-reconall``
      - Disable or enable FreeSurfer ``recon-all``
      - enabled
-   * - ``--longitudinal``
-     - Create unbiased structural template (longitudinal mode)
-     - disabled
 
 .. note::
 

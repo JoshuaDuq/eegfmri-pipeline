@@ -13,6 +13,8 @@ import inspect
 import sys
 from unittest.mock import Mock
 
+import mne_bids
+import numpy as np
 import pytest
 
 _REAL_IMPORTS = (
@@ -111,9 +113,7 @@ def test_an_unreadable_mne_signature_raises_rather_than_guessing(monkeypatch) ->
     from eeg_pipeline.pipelines import preprocessing as module
 
     module._mne_annotation_event_pattern.cache_clear()
-    monkeypatch.setattr(
-        mne, "events_from_annotations", lambda raw, **kwargs: None, raising=True
-    )
+    monkeypatch.setattr(mne, "events_from_annotations", lambda raw, **kwargs: None, raising=True)
     try:
         with pytest.raises(RuntimeError, match="MNE's signature has changed"):
             module._mne_annotation_event_pattern()
@@ -126,3 +126,57 @@ def test_ordinary_conditions_are_untouched(pipeline) -> None:
     _write_events(pipeline.bids_root, ["painful", "neutral", "Volume/V  1"])
 
     assert pipeline._detect_conditions_from_bids("thermalactive") == ["neutral", "painful"]
+
+
+def test_analysis_metadata_columns_do_not_replace_bids_event_descriptions(pipeline) -> None:
+    """Conditions must name the annotations MNE-BIDS creates, not arbitrary metadata."""
+    directory = pipeline.bids_root / "sub-0001" / "eeg"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "sub-0001_task-thermalactive_run-1_events.tsv").write_text(
+        "onset\tduration\ttrial_type\tcondition\n"
+        "0\t0\tStimulus\thigh-pain\n"
+        "1\t0\tStimulus\tlow-pain\n",
+        encoding="utf-8",
+    )
+    pipeline.config["preprocessing.condition_column"] = "condition"
+
+    assert pipeline._detect_conditions_from_bids("thermalactive") == ["Stimulus"]
+
+
+def test_ambiguous_bids_values_use_mne_bids_hierarchical_descriptions(pipeline) -> None:
+    """Mirror the public annotation names produced by ``read_raw_bids``."""
+    directory = pipeline.bids_root / "sub-0001" / "eeg"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "sub-0001_task-thermalactive_run-1_events.tsv").write_text(
+        "onset\tduration\ttrial_type\tvalue\n" "0\t0\tStimulus\t1\n" "1\t0\tStimulus\t2\n",
+        encoding="utf-8",
+    )
+
+    assert pipeline._detect_conditions_from_bids("thermalactive") == [
+        "Stimulus/1",
+        "Stimulus/2",
+    ]
+
+
+def test_event_descriptions_are_taken_from_public_mne_bids_api(
+    pipeline,
+    monkeypatch,
+) -> None:
+    """Do not maintain a second, subtly different implementation of MNE-BIDS rules."""
+    directory = pipeline.bids_root / "sub-0001" / "eeg"
+    directory.mkdir(parents=True, exist_ok=True)
+    events_path = directory / "sub-0001_task-thermalactive_run-1_events.tsv"
+    events_path.write_text(
+        "onset\tduration\ttrial_type\tvalue\n0\t0\tnan\t1\n1\t0\tnan\t2\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def annotation_kwargs(path, *, verbose):
+        calls.append((path, verbose))
+        return {"description": np.array(["nan/1", "nan/2"])}
+
+    monkeypatch.setattr(mne_bids, "events_file_to_annotation_kwargs", annotation_kwargs)
+
+    assert pipeline._detect_conditions_from_bids("thermalactive") == ["nan/1", "nan/2"]
+    assert calls == [(events_path, "ERROR")]

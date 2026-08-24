@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from fmri_pipeline.analysis.multivariate_signatures import (
-    _maybe_resample_to_img,
+    _resample_to_img,
     compute_signature_expression,
     discover_signature_files,
 )
@@ -123,7 +123,7 @@ def test_resample_to_img_rejects_nonfinite_voxels_in_continuous_resampling() -> 
             ValueError,
             match="continuous resampling does not support non-finite voxels",
         ):
-            _maybe_resample_to_img(
+            _resample_to_img(
                 moving_img=effect_img,
                 target_img=target_img,
                 interpolation="continuous",

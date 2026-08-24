@@ -129,18 +129,8 @@ def test_the_score_panel_uses_markers_not_bars_on_the_log_axis() -> None:
     assert len(figure.axes[1].patches) > 0
 
 
-def test_the_panel_shows_where_the_detector_drew_its_line() -> None:
-    """Crosses said which components were flagged and never said why.
-
-    ``find_bads_eog`` thresholds an adaptive z-score, so there is no fixed correlation to
-    print -- but the decisions themselves bracket the cutoff: within a run it lies above
-    every unflagged component and at or below every flagged one. On sub-0012 a component
-    at r=0.3 was flagged while one at r=0.2 was not, and the panel gave a reader nothing
-    to reconcile that with.
-
-    Measured from the decisions rather than by reimplementing MNE's rule, so the band
-    cannot drift away from the flags drawn beside it.
-    """
+def test_the_panel_does_not_fabricate_a_raw_score_cutoff() -> None:
+    """MNE thresholds iterative z-scores, not a monotone raw-correlation boundary."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -155,11 +145,9 @@ def test_the_panel_shows_where_the_detector_drew_its_line() -> None:
         for collection in figure.axes[0].collections
         if isinstance(collection, PolyCollection)
     ]
-    assert spans, "the decision boundary is not drawn"
-    low, high = figure.axes[0]._eog_threshold_band
-    # Above every score the run left unflagged, and no higher than the lowest it flagged.
-    assert low == pytest.approx(0.06)
-    assert high == pytest.approx(0.30)
+    assert not spans
+    labels = [text.get_text() for text in figure.axes[0].get_legend().get_texts()]
+    assert not any("drew its line" in label for label in labels)
 
 
 def test_a_run_that_flagged_nothing_gets_no_invented_boundary() -> None:

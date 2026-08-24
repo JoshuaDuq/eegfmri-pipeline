@@ -13,6 +13,7 @@ with itself, which looks like a reassuringly small correction rather than a bug.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import mne
@@ -24,6 +25,11 @@ EXCLUDED_STATUS = "bad"
 
 _ICA_SUFFIX = "_proc-ica_ica.fif"
 _COMPONENTS_SUFFIX = "_proc-ica_components.tsv"
+_MANUAL_REVIEW_COLUMNS = (
+    "manual_review_status",
+    "manual_reviewed_by",
+    "manual_reviewed_at",
+)
 
 
 def components_path_for_ica(ica_path: Path) -> Path:
@@ -59,6 +65,69 @@ def reviewed_exclusions(path: Path, *, component_count: int) -> list[int]:
     statuses = read_component_statuses(path, component_count=component_count)
     excluded = statuses.loc[statuses["status"] == EXCLUDED_STATUS, "component"]
     return [int(component) for component in excluded]
+
+
+def initialize_manual_review_attestation(path: Path) -> pd.DataFrame:
+    """Mark every component of a newly fitted decomposition as awaiting review."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"ICA component status table does not exist: {path}")
+    frame = pd.read_csv(path, sep="\t", keep_default_na=False)
+    read_component_statuses(path, component_count=len(frame))
+    frame["manual_review_status"] = "pending"
+    frame["manual_reviewed_by"] = ""
+    frame["manual_reviewed_at"] = ""
+    frame.to_csv(path, sep="\t", index=False)
+    return frame
+
+
+def validate_manual_review_attestation(path: Path) -> pd.DataFrame:
+    """Require an explicit human decision record for every ICA component.
+
+    ``manual_review_complete`` is a workflow request, not evidence. The component table
+    is the exclusion source of truth, so the attestation lives on each of its rows: who
+    reviewed that component, when, and whether the pass is complete. Extra columns are
+    retained by all component-table writers in this package.
+    """
+    if not Path(path).is_file():
+        raise FileNotFoundError(f"ICA component status table does not exist: {path}")
+    frame = pd.read_csv(path, sep="\t", keep_default_na=False)
+    missing = [column for column in _MANUAL_REVIEW_COLUMNS if column not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"Manual ICA review attestation is missing {missing} in {path}. Add "
+            "manual_review_status='reviewed', manual_reviewed_by, and an ISO-8601 "
+            "manual_reviewed_at value to every component row after inspection."
+        )
+    read_component_statuses(path, component_count=len(frame))
+
+    review_status = frame["manual_review_status"].astype(str).str.strip().str.lower()
+    incomplete = frame.loc[review_status != "reviewed", "component"].tolist()
+    if incomplete:
+        raise ValueError(f"ICA components are not reviewed in {path}: {incomplete}")
+
+    reviewers = frame["manual_reviewed_by"].astype(str).str.strip()
+    missing_reviewers = frame.loc[reviewers.isin({"", "n/a", "nan"}), "component"].tolist()
+    if missing_reviewers:
+        raise ValueError(
+            f"Manual ICA review has no reviewer for components {missing_reviewers} in {path}."
+        )
+
+    invalid_dates = []
+    for component, value in zip(frame["component"], frame["manual_reviewed_at"], strict=True):
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            invalid_dates.append(int(component))
+            continue
+        if parsed.tzinfo is None:
+            invalid_dates.append(int(component))
+    if invalid_dates:
+        raise ValueError(
+            "manual_reviewed_at must be an ISO-8601 timestamp with timezone for "
+            f"components {invalid_dates} in {path}."
+        )
+    return frame
 
 
 def promote_exclusions(
@@ -115,8 +184,10 @@ def read_ica_with_reviewed_exclusions(ica_path: Path) -> mne.preprocessing.ICA:
 __all__ = [
     "EXCLUDED_STATUS",
     "components_path_for_ica",
+    "initialize_manual_review_attestation",
     "promote_exclusions",
     "read_component_statuses",
     "read_ica_with_reviewed_exclusions",
     "reviewed_exclusions",
+    "validate_manual_review_attestation",
 ]

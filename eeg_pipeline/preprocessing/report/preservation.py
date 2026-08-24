@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from eeg_pipeline.preprocessing.report.settings import ReportSettings
 
 from eeg_pipeline.preprocessing.report.aperiodic import aperiodic_line_db, fit_aperiodic
+from eeg_pipeline.preprocessing.report.evoked import add_evoked_response_review
 from eeg_pipeline.preprocessing.report.spectra import (
     MICROVOLT_REFERENCE_DB,
     POWER_UNIT_LABEL,
@@ -134,11 +135,10 @@ def resolvable_prominence_threshold(
     if n_search_bins < _MINIMUM_BINS_FOR_EXTREME_VALUE:
         return _SMALL_SEARCH_FACTOR * _EXTRAPOLATION_INFLATION
     scale = math.sqrt(2.0 * math.log(n_search_bins))
-    location = scale - (math.log(math.log(n_search_bins)) + math.log(4.0 * math.pi)) / (
-        2.0 * scale
-    )
+    location = scale - (math.log(math.log(n_search_bins)) + math.log(4.0 * math.pi)) / (2.0 * scale)
     gumbel = location - math.log(-math.log(1.0 - false_positive_rate)) / scale
     return gumbel * _EXTRAPOLATION_INFLATION
+
 
 #: Window the split halves are correlated over, in seconds from stimulus onset.
 #:
@@ -225,9 +225,7 @@ def _spatial_correlation_by_time(odd: np.ndarray, even: np.ndarray) -> np.ndarra
     odd_centered = odd - odd.mean(axis=0, keepdims=True)
     even_centered = even - even.mean(axis=0, keepdims=True)
     numerator = np.sum(odd_centered * even_centered, axis=0)
-    denominator = np.sqrt(
-        np.sum(odd_centered**2, axis=0) * np.sum(even_centered**2, axis=0)
-    )
+    denominator = np.sqrt(np.sum(odd_centered**2, axis=0) * np.sum(even_centered**2, axis=0))
     correlation = np.full(odd.shape[1], np.nan, dtype=float)
     valid = denominator > 0.0
     correlation[valid] = numerator[valid] / denominator[valid]
@@ -277,9 +275,7 @@ def compute_split_half_reliability(
     # no response, 2r / (1 + r) walks straight out of the correlation range, and the
     # panel ends up printing an impossible number in the one section whose job is to say
     # whether anything survived preprocessing.
-    corrected = (
-        (2.0 * correlation / (1.0 + correlation)) if correlation > 0.0 else None
-    )
+    corrected = (2.0 * correlation / (1.0 + correlation)) if correlation > 0.0 else None
     return SplitHalfReliability(
         n_trials=n_used,
         times_s=np.asarray(picked.times, dtype=float),
@@ -312,9 +308,7 @@ class PosteriorAlpha:
     #: height over a background the reader could not see. Prominence is the whole
     #: measurement here — absolute alpha power varies by an order of magnitude between
     #: participants — so the line is not decoration, it is what the number means.
-    background_db: np.ndarray = field(
-        default_factory=lambda: np.empty(0), compare=False
-    )
+    background_db: np.ndarray = field(default_factory=lambda: np.empty(0), compare=False)
     #: RMS roughness of the background the prominence is measured against, in decibels.
     #:
     #: The scale that decides whether a prominence means anything. Carried from the
@@ -415,9 +409,7 @@ class PosteriorAlpha:
 _RIVAL_SEPARATION_HZ = 1.0
 
 
-def _runner_up(
-    frequencies: np.ndarray, excess: np.ndarray, *, peak: int
-) -> tuple[float, float]:
+def _runner_up(frequencies: np.ndarray, excess: np.ndarray, *, peak: int) -> tuple[float, float]:
     """The next-highest separate peak in the band, and how far below the winner it is.
 
     Local maxima rather than bins: every bin beside the winner is lower than it, so a
@@ -430,14 +422,11 @@ def _runner_up(
     if excess.size < 3:
         return float("nan"), float("inf")
     interior = excess[1:-1]
-    is_maximum = np.r_[
-        False, (interior > excess[:-2]) & (interior >= excess[2:]), False
-    ]
+    is_maximum = np.r_[False, (interior > excess[:-2]) & (interior >= excess[2:]), False]
     candidates = [
         index
         for index in np.flatnonzero(is_maximum)
-        if abs(float(frequencies[index]) - float(frequencies[peak]))
-        >= _RIVAL_SEPARATION_HZ
+        if abs(float(frequencies[index]) - float(frequencies[peak])) >= _RIVAL_SEPARATION_HZ
     ]
     if not candidates:
         return float("nan"), float("inf")
@@ -859,6 +848,13 @@ def add_task_preservation_review(
         reliability=reliability,
         alpha=alpha,
         section=section,
+        analysis_status=analysis_status,
+    )
+    add_evoked_response_review(
+        report=report,
+        epochs=epochs,
+        response_window_s=resolved.response_window_s,
+        topomap_count=resolved.evoked_topomap_count,
         analysis_status=analysis_status,
     )
     return reliability, alpha

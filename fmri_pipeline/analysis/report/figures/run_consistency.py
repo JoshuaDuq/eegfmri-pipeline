@@ -1,4 +1,4 @@
-"""Whether a first-level effect is carried by every run or by one of them.
+"""Whether a first-level effect is carried consistently across runs.
 
 A first-level contrast over several runs is a fixed-effects combination, weighted
 equally per run: a noisy run contributes its effect at full strength while inflating
@@ -6,9 +6,9 @@ the variance. An effect resting entirely on run 4 and an effect present in all s
 produce the same map, the same z, and the same cluster table -- and nothing else in
 this report tells them apart.
 
-The panel is a forest plot per cluster peak: each run's own estimate with its
-confidence interval, against the combined estimate the result section reports. Read for
-whether the run estimates straddle the combined one or scatter around it.
+The peak forest plot compares each run's estimate with the combined estimate. The
+whole-mask correlation matrix complements it without selecting peaks: it measures
+spatial agreement between every pair of run-level effect maps.
 
 Nothing is scored. Runs disagreeing is not by itself a fault -- a task with a learning
 or habituation effect should show exactly that -- so the panel measures the spread and
@@ -17,21 +17,20 @@ leaves the interpretation to the reader.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from fmri_pipeline.analysis.report.figures._validation import validated_binary_mask
 from fmri_pipeline.analysis.report.style import (
     GUIDE_COLOR,
     OKABE_ITO,
+    SIGNED_CMAP,
     annotate_provenance,
     plot_context,
 )
-
-logger = logging.getLogger(__name__)
 
 #: Multiplier turning a standard error into a 95% interval under a normal reference.
 #:
@@ -83,9 +82,9 @@ def _sample(volume: Any, coordinate: Sequence[float]) -> np.ndarray:
     """
     data = np.asarray(volume.get_fdata())
     inverse = np.linalg.inv(np.asarray(volume.affine))
-    voxel = np.rint(
-        (np.append(np.asarray(coordinate, dtype=float), 1.0) @ inverse.T)[:3]
-    ).astype(int)
+    voxel = np.rint((np.append(np.asarray(coordinate, dtype=float), 1.0) @ inverse.T)[:3]).astype(
+        int
+    )
     shape = np.asarray(data.shape[:3])
     if np.any(voxel < 0) or np.any(voxel >= shape):
         return np.full(data.shape[3] if data.ndim == 4 else 1, np.nan)
@@ -118,9 +117,7 @@ def collect_peak_estimates(
             combined_effect = float(values[0]) if values.size else None
         if combined_variance_img is not None:
             values = _sample(combined_variance_img, coordinate)
-            combined_error = (
-                float(np.sqrt(max(values[0], 0.0))) if values.size else None
-            )
+            combined_error = float(np.sqrt(max(values[0], 0.0))) if values.size else None
 
         collected.append(
             PeakRunEstimates(
@@ -133,6 +130,74 @@ def collect_peak_estimates(
             )
         )
     return collected
+
+
+def run_effect_correlation_matrix(
+    run_effect_img: Any,
+    mask_img: Any,
+) -> np.ndarray:
+    """Correlate every pair of run-level effect maps inside the fitted mask."""
+    effects = np.asanyarray(run_effect_img.dataobj, dtype=np.float64)
+    mask = validated_binary_mask(mask_img)
+    if effects.ndim != 4 or effects.shape[3] < 2:
+        raise ValueError("Run-effect correlation requires a 4D image with at least two runs.")
+    if mask.ndim != 3 or mask.shape != effects.shape[:3]:
+        raise ValueError("The fitted analysis mask must match the run-effect grid.")
+    if not np.allclose(run_effect_img.affine, mask_img.affine):
+        raise ValueError("The fitted analysis mask and run-effect maps must share an affine.")
+    fitted_effects = effects[mask]
+    if not np.isfinite(fitted_effects).all():
+        raise ValueError("Run-effect maps contain non-finite fitted-mask values.")
+    if np.any(np.var(fitted_effects, axis=0, dtype=np.float64) <= 0):
+        raise ValueError("Every run-effect map requires non-zero spatial variance.")
+    return np.corrcoef(fitted_effects, rowvar=False)
+
+
+def run_effect_correlation_figure(
+    correlation: np.ndarray,
+    *,
+    run_labels: Sequence[str],
+    title: str = "",
+) -> plt.Figure:
+    """Draw the whole-mask Pearson correlation between run-level effect maps."""
+    from nilearn import plotting
+
+    matrix = np.asarray(correlation, dtype=float)
+    labels = tuple(str(label) for label in run_labels)
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError("Run-effect correlation must be a square matrix.")
+    if matrix.shape[0] < 2 or len(labels) != matrix.shape[0]:
+        raise ValueError("Run labels must match at least two correlation rows.")
+    if not np.isfinite(matrix).all() or not np.allclose(matrix, matrix.T):
+        raise ValueError("Run-effect correlation must be finite and symmetric.")
+
+    size = max(4.2, 0.62 * len(labels) + 2.1)
+    with plot_context():
+        figure, axis = plt.subplots(figsize=(size, size), constrained_layout=True)
+        plotting.plot_matrix(
+            matrix,
+            labels=labels,
+            axes=axis,
+            colorbar=True,
+            cmap=SIGNED_CMAP,
+            tri="lower",
+            reorder=False,
+            vmin=-1.0,
+            vmax=1.0,
+        )
+        if title:
+            axis.set_title(title)
+        annotate_provenance(
+            figure,
+            [
+                f"{len(labels)} run(s)",
+                "Pearson r across effect-size voxels",
+                "voxels: fitted analysis mask",
+                "fixed scale −1 to +1; diagonal omitted",
+                "no threshold or run scoring",
+            ],
+        )
+        return figure
 
 
 def peak_forest_figure(
@@ -155,8 +220,7 @@ def peak_forest_figure(
 
     n_runs = max(len(estimate.effects) for estimate in shown)
     labels = [
-        str(run_labels[i]) if i < len(run_labels) else f"run-{i + 1:02d}"
-        for i in range(n_runs)
+        str(run_labels[i]) if i < len(run_labels) else f"run-{i + 1:02d}" for i in range(n_runs)
     ]
 
     with plot_context():
@@ -177,18 +241,14 @@ def peak_forest_figure(
             # The combined estimate as a band, so every run is read against it rather
             # than against zero alone. Zero still gets its own line: it is what "no
             # difference" means, and the band is not centred on it.
-            if estimate.combined_effect is not None and np.isfinite(
-                estimate.combined_effect
-            ):
+            if estimate.combined_effect is not None and np.isfinite(estimate.combined_effect):
                 axis.axvline(
                     estimate.combined_effect,
                     color=OKABE_ITO["orange"],
                     linewidth=1.2,
                     zorder=1,
                 )
-                if estimate.combined_error is not None and np.isfinite(
-                    estimate.combined_error
-                ):
+                if estimate.combined_error is not None and np.isfinite(estimate.combined_error):
                     axis.axvspan(
                         estimate.combined_effect - _CI95 * estimate.combined_error,
                         estimate.combined_effect + _CI95 * estimate.combined_error,
@@ -213,9 +273,7 @@ def peak_forest_figure(
             )
 
             x, y, z = estimate.coordinate
-            axis.set_title(
-                f"peak {estimate.label}\n({x:+.0f}, {y:+.0f}, {z:+.0f})", fontsize=8.5
-            )
+            axis.set_title(f"peak {estimate.label}\n({x:+.0f}, {y:+.0f}, {z:+.0f})", fontsize=8.5)
             axis.set_xlabel(effect_units)
 
         axes[0].set_yticks(np.arange(n_runs))
@@ -223,17 +281,17 @@ def peak_forest_figure(
         axes[0].set_ylim(n_runs - 0.5, -0.5)
 
         agreements = [
-            estimate.sign_agreement
-            for estimate in shown
-            if np.isfinite(estimate.sign_agreement)
+            estimate.sign_agreement for estimate in shown if np.isfinite(estimate.sign_agreement)
         ]
         # Kept short. annotate_provenance puts every entry on one line, and a strip
         # wider than the axes forces the tight bounding box to grow -- which padded
         # this figure to twice the width of the panels it describes.
         provenance = [
-            f"{n_runs} run(s) · {len(shown)} of {len(estimates)} peak(s) shown"
-            if len(shown) < len(estimates)
-            else f"{n_runs} run(s) · {len(shown)} peak(s)",
+            (
+                f"{n_runs} run(s) · {len(shown)} of {len(estimates)} peak(s) shown"
+                if len(shown) < len(estimates)
+                else f"{n_runs} run(s) · {len(shown)} peak(s)"
+            ),
             "dot: that run's estimate, bar: 95% interval",
             "orange: the combined estimate and its interval",
         ]
@@ -250,4 +308,6 @@ __all__ = [
     "PeakRunEstimates",
     "collect_peak_estimates",
     "peak_forest_figure",
+    "run_effect_correlation_matrix",
+    "run_effect_correlation_figure",
 ]

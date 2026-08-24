@@ -505,8 +505,6 @@ func (m *Model) toggleFmriAdvancedOption() {
 		m.fmriGroupBoldExpanded = !m.fmriGroupBoldExpanded
 	case optFmriGroupQc:
 		m.fmriGroupQcExpanded = !m.fmriGroupQcExpanded
-	case optFmriGroupDenoising:
-		m.fmriGroupDenoisingExpanded = !m.fmriGroupDenoisingExpanded
 	case optFmriGroupSurface:
 		m.fmriGroupSurfaceExpanded = !m.fmriGroupSurfaceExpanded
 	case optFmriGroupMultiecho:
@@ -564,8 +562,8 @@ func (m *Model) toggleFmriAdvancedOption() {
 	case optFmriSkipReconstruction:
 		m.fmriSkipReconstruction = !m.fmriSkipReconstruction
 		m.useDefaultAdvanced = false
-	case optFmriLongitudinal:
-		m.fmriLongitudinal = !m.fmriLongitudinal
+	case optFmriSubjectAnatomicalReference:
+		m.fmriSubjectAnatomicalReferenceIndex = (m.fmriSubjectAnatomicalReferenceIndex + 1) % 3
 		m.useDefaultAdvanced = false
 	case optFmriSkullStripTemplate:
 		m.startTextEdit(textFieldFmriSkullStripTemplate)
@@ -575,10 +573,10 @@ func (m *Model) toggleFmriAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// BOLD processing
-	case optFmriBold2T1wInit:
-		m.fmriBold2T1wInitIndex = (m.fmriBold2T1wInitIndex + 1) % 2
+	case optFmriBold2AnatInit:
+		m.fmriBold2AnatInitIndex = (m.fmriBold2AnatInitIndex + 1) % 4
 		m.useDefaultAdvanced = false
-	case optFmriBold2T1wDof:
+	case optFmriBold2AnatDof:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optFmriSliceTimeRef:
@@ -594,11 +592,6 @@ func (m *Model) toggleFmriAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optFmriDvarsSpikeThreshold:
 		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-
-	// Denoising
-	case optFmriUseAroma:
-		m.fmriUseAroma = !m.fmriUseAroma
 		m.useDefaultAdvanced = false
 
 	// Surface

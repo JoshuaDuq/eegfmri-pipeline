@@ -40,6 +40,8 @@ Modes
      - Least-squares-separate (LSS) trial betas
    * - ``rest``
      - Resting-state ROI connectivity analysis (atlas-based, Fisher-z averaged across runs)
+   * - ``report``
+     - Render the self-contained subject report from existing first-level derivatives; never fits a model
 
 For full methods, see :doc:`../../methods/fmri/pipeline`.
 
@@ -61,10 +63,8 @@ Examples
            --input-source fmriprep --fmriprep-space MNI152NLin2009cAsym \
            --cond-a-value stimulation --cond-b-value fixation_rest
 
-         # With plots and a self-contained HTML report
-         eeg-pipeline fmri-analysis first-level --subject 0001 \
-           --cond-a-value stimulation --cond-b-value fixation_rest \
-           --plots --plot-html-report
+         # Render the report after fitting (settings come from fmri_report in YAML)
+         eeg-pipeline fmri-analysis report --subject 0001 --task pain
 
    .. tab-item:: Second-level
 
@@ -74,6 +74,12 @@ Examples
          eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002 \
            --group-model one-sample \
            --group-contrast-names stimulation_vs_rest
+
+         # The cohort report is enabled by YAML default; disable it explicitly if needed
+         eeg-pipeline fmri-analysis second-level --all-subjects \
+           --group-model one-sample \
+           --group-contrast-names stimulation_vs_rest \
+           --no-group-report
 
    .. tab-item:: Beta-series
 
@@ -124,7 +130,7 @@ Key Options
      - ``spm``
    * - ``--confounds-strategy``
      - ``auto``, ``none``, ``motion6``…``motion24+wmcsf+fd``
-     - ``auto``
+     - ``motion24+wmcsf+fd+compcor``
    * - ``--smoothing-fwhm``
      - Spatial smoothing kernel (mm)
      - ``null``
@@ -143,15 +149,15 @@ Key Options
    * - ``--group-permutation-inference``
      - Add max-T permutation inference to second-level mode; avoid this for repeated-measures designs until restricted permutations are implemented
      - disabled
+   * - ``--group-report`` / ``--no-group-report``
+     - Enable or disable the self-contained cohort HTML report written beside the second-level maps
+     - enabled by ``fmri_group_level.report.enabled``
    * - ``--no-require-fmriprep``
      - Permit fallback to raw BIDS BOLD when matching fMRIPrep preprocessed BOLD is missing
      - disabled (strict fMRIPrep required by default)
-   * - ``--plots``
-     - Generate per-subject figures
-     - disabled
-   * - ``--plot-html-report``
-     - Write self-contained HTML report
-     - disabled
+   * - ``--report-dir``
+     - Override the report output root in ``report`` mode
+     - derivatives root
    * - ``--write-design-matrix``
      - Save design matrices (TSV + PNG)
      - first-level: disabled; second-level: enabled
@@ -166,7 +172,7 @@ Key Options
       Containerized fMRIPrep preprocessing (run before analysis).
 
    :doc:`../configuration`
-      ``fmri_contrast``, ``fmri_group_level``, and ``fmri_resting_state`` config sections.
+      ``fmri_contrast``, ``fmri_stats``, ``fmri_report``, ``fmri_group_level``, and ``fmri_resting_state`` config sections.
 
    :doc:`../data_layout`
       fMRI BIDS layout and required ``*_bold.json`` sidecar fields.

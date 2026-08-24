@@ -120,24 +120,28 @@ def _provenance(
     limit_source: str = "",
 ) -> List[str]:
     """Build the self-description line for a map panel."""
-    lines = [f"n = {values.size:,} voxels"]
     # The clipped fraction has to describe the voxels the panel draws. Taken over the
     # whole mask on a thresholded panel it is a property of a population the reader
     # cannot see, and it reads far lower than the saturation actually shown: the
     # sub-threshold voxels that dominate the count are nowhere near the colour limit.
+    lines: List[str] = []
     shown = values
     if threshold:
         comparison = "|z|" if two_sided else "z"
-        lines.append(f"{comparison} > {float(threshold):.2f}")
         compared = np.abs(values) if two_sided else values
         shown = values[compared > float(threshold)]
+        # Both counts, and which is which. A bare "n = <mask size>" sitting next to the
+        # threshold reads as the number of voxels that passed it -- on this cohort that
+        # was 85,326 against 5,882 actually drawn, a fourteen-fold misreading, and the
+        # strip gave a reader nothing to catch it with.
+        lines.append(f"{shown.size:,} of {values.size:,} mask voxels drawn")
+        lines.append(f"{comparison} > {float(threshold):.2f}")
     else:
+        lines.append(f"n = {values.size:,} voxels")
         lines.append("unthresholded")
     fraction = clipped_fraction(shown, limit=limit) if shown.size else 0.0
     scope = "of drawn voxels" if threshold else ""
-    limit_line = (
-        f"colour limit ±{limit:.2f} ({fraction:.1%} clipped{f' {scope}' if scope else ''})"
-    )
+    limit_line = f"colour limit ±{limit:.2f} ({fraction:.1%} clipped{f' {scope}' if scope else ''})"
     if limit_source:
         # Which voxels the limit came from changes it substantially, so a reader
         # comparing two panels needs to know.
@@ -175,9 +179,7 @@ def stat_map_mosaic(
     from nilearn import plotting
 
     values, limit_source = _masked_values(stat_img, mask_img)
-    resolved_vmax = _resolve_vmax(
-        stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img
-    )
+    resolved_vmax = _resolve_vmax(stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img)
     plotted = apply_sidedness(stat_img, two_sided=two_sided)
 
     def draw(figure, rect, direction, cuts):
@@ -296,9 +298,7 @@ def magnitude_mosaic(
             n_cuts=n_cuts,
             title=title,
             radiological=radiological,
-            colorbar=ColorbarSpec(
-                cmap=cmap, vmin=0.0, vmax=resolved_vmax, label=cbar_label
-            ),
+            colorbar=ColorbarSpec(cmap=cmap, vmin=0.0, vmax=resolved_vmax, label=cbar_label),
             provenance=[
                 f"n = {positive.size:,} voxels",
                 *extra_provenance,
@@ -309,6 +309,176 @@ def magnitude_mosaic(
                 orientation_label(radiological),
             ],
         )
+
+
+def evidence_mosaic(
+    img: Any,
+    *,
+    threshold: float,
+    bg_img: Any = None,
+    mask_img: Any = None,
+    vmax: Optional[float] = None,
+    radiological: bool = False,
+    title: str = "",
+    cbar_label: str = "−log10(p FWE)",
+    n_cuts: int = DEFAULT_CUTS_PER_ROW,
+    extra_provenance: Sequence[str] = (),
+) -> Any:
+    """Draw corrected non-negative evidence above a predeclared p cutoff.
+
+    Nilearn's second-level association example draws permutation-corrected
+    ``−log10(p)`` with a sequential inferno ramp whose lower colour limit is the
+    corrected-p threshold. Keeping the colour scale below that cutoff would devote
+    most of the ramp to values the panel deliberately does not show.
+    """
+    from nilearn import plotting
+
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError("An evidence panel requires a finite threshold > 0.")
+    values, limit_source = _masked_values(img, mask_img)
+    surviving = values[np.isfinite(values) & (values >= threshold)]
+    if surviving.size == 0:
+        raise ValueError("An evidence panel requires at least one surviving voxel.")
+    resolved_vmax = float(vmax) if vmax is not None else robust_upper_limit(surviving)
+    resolved_vmax = max(resolved_vmax, float(np.nextafter(threshold, np.inf)))
+
+    def draw(figure, rect, direction, cuts):
+        plotting.plot_stat_map(
+            img,
+            bg_img=bg_img,
+            display_mode=direction,
+            cut_coords=list(cuts),
+            threshold=float(threshold),
+            colorbar=False,
+            vmin=float(threshold),
+            vmax=resolved_vmax,
+            cmap="inferno",
+            dim=0,
+            black_bg=False,
+            symmetric_cbar=False,
+            annotate=False,
+            radiological=radiological,
+            figure=figure,
+            axes=rect,
+        )
+
+    with plot_context():
+        return mosaic_figure(
+            draw,
+            reference_img=img,
+            mask_img=mask_img,
+            n_cuts=n_cuts,
+            title=title,
+            radiological=radiological,
+            colorbar=ColorbarSpec(
+                cmap="inferno",
+                vmin=float(threshold),
+                vmax=resolved_vmax,
+                label=cbar_label,
+            ),
+            provenance=[
+                f"n = {surviving.size:,} voxels",
+                f"−log10(p) ≥ {threshold:.3g}",
+                *extra_provenance,
+                f"scale {threshold:.3g}–{resolved_vmax:.3g} "
+                f"({float(np.mean(surviving > resolved_vmax)):.1%} clipped)"
+                + (f", from {limit_source}" if limit_source else ""),
+                "corrected evidence: the scale starts at the FWE cutoff",
+                orientation_label(radiological),
+            ],
+        )
+
+
+def evidence_ortho(
+    img: Any,
+    *,
+    threshold: float,
+    cut_coords: Tuple[float, float, float],
+    bg_img: Any = None,
+    mask_img: Any = None,
+    vmax: Optional[float] = None,
+    radiological: bool = False,
+    title: str = "",
+    cbar_label: str = "−log10(p FWE)",
+    extra_provenance: Sequence[str] = (),
+) -> Any:
+    """Draw corrected evidence at one explicitly reported peak coordinate.
+
+    Sparse max-T results can disappear between the regularly spaced slices of a
+    whole-brain mosaic. Nilearn's documented ``plot_stat_map`` orthogonal view is
+    therefore centred on the strongest corrected peak, while the companion table
+    retains every corrected cluster and subpeak.
+    """
+    from nilearn import plotting
+
+    if len(cut_coords) != 3 or not np.isfinite(cut_coords).all():
+        raise ValueError("An orthogonal evidence panel requires three finite cut coordinates.")
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError("An evidence panel requires a finite threshold > 0.")
+    values, limit_source = _masked_values(img, mask_img)
+    surviving = values[np.isfinite(values) & (values >= threshold)]
+    if surviving.size == 0:
+        raise ValueError("An evidence panel requires at least one surviving voxel.")
+    resolved_vmax = float(vmax) if vmax is not None else robust_upper_limit(surviving)
+    resolved_vmax = max(resolved_vmax, float(np.nextafter(threshold, np.inf)))
+
+    with plot_context():
+        figure = plt.figure(figsize=(9.2, 3.5))
+        figure.patch.set_facecolor("white")
+        plotting.plot_stat_map(
+            img,
+            bg_img=bg_img,
+            display_mode="ortho",
+            cut_coords=tuple(float(value) for value in cut_coords),
+            threshold=float(threshold),
+            colorbar=False,
+            vmin=float(threshold),
+            vmax=resolved_vmax,
+            cmap="inferno",
+            dim=0,
+            black_bg=False,
+            symmetric_cbar=False,
+            annotate=True,
+            draw_cross=True,
+            radiological=radiological,
+            figure=figure,
+            axes=(0.02, 0.07, 0.84, 0.84),
+        )
+        draw_colorbar(
+            figure,
+            ColorbarSpec(
+                cmap="inferno",
+                vmin=float(threshold),
+                vmax=resolved_vmax,
+                label=cbar_label,
+            ),
+            rect=(0.905, 0.16, 0.016, 0.66),
+        )
+        if title:
+            figure.text(
+                0.02,
+                0.965,
+                title,
+                ha="left",
+                va="center",
+                fontsize=11,
+                fontweight="bold",
+            )
+        annotate_provenance(
+            figure,
+            [
+                f"n = {surviving.size:,} surviving voxels",
+                f"−log10(p) ≥ {threshold:.3g}",
+                *extra_provenance,
+                f"scale {threshold:.3g}–{resolved_vmax:.3g} "
+                f"({float(np.mean(surviving > resolved_vmax)):.1%} clipped)"
+                + (f", from {limit_source}" if limit_source else ""),
+                f"crosshair = ({cut_coords[0]:.1f}, {cut_coords[1]:.1f}, "
+                f"{cut_coords[2]:.1f}) mm MNI152",
+                orientation_label(radiological),
+            ],
+        )
+        return figure
 
 
 def dual_coded_mosaic(
@@ -445,9 +615,7 @@ def _annotate_peaks(
         else [str(i) for i in range(1, len(peak_coords) + 1)]
     )
     if len(labels) != len(peak_coords):
-        raise ValueError(
-            f"Got {len(labels)} peak labels for {len(peak_coords)} coordinates."
-        )
+        raise ValueError(f"Got {len(labels)} peak labels for {len(peak_coords)} coordinates.")
 
     display.add_markers(
         [tuple(c) for c in peak_coords],
@@ -504,9 +672,7 @@ def glass_brain(
     from nilearn import plotting
 
     values, limit_source = _masked_values(stat_img, mask_img)
-    resolved_vmax = _resolve_vmax(
-        stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img
-    )
+    resolved_vmax = _resolve_vmax(stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img)
     with plot_context():
         # Laid out here for the same reasons as the mosaics: nilearn draws its title
         # inside the axes, where on a glass brain it lands on the sagittal projection,
@@ -542,7 +708,12 @@ def glass_brain(
         )
         if title:
             figure.text(
-                0.02, 0.965, title, ha="left", va="center", fontsize=11,
+                0.02,
+                0.965,
+                title,
+                ha="left",
+                va="center",
+                fontsize=11,
                 fontweight="bold",
             )
         annotate_provenance(
@@ -569,7 +740,79 @@ def glass_brain(
 __all__ = [
     "apply_sidedness",
     "dual_coded_mosaic",
+    "evidence_ortho",
     "glass_brain",
     "magnitude_mosaic",
     "stat_map_mosaic",
 ]
+
+
+def surface_projection(
+    stat_img: Any,
+    *,
+    mask_img: Any = None,
+    threshold: Optional[float] = None,
+    vmax: Optional[float] = None,
+    two_sided: bool = True,
+    mesh: str = "fsaverage",
+    title: str = "",
+    cbar_label: str = "z",
+) -> Any:
+    """Project a volume onto the inflated cortical surface, lateral and medial.
+
+    The mosaic and the glass brain both answer "where in the volume". Neither shows how
+    far a cluster runs along a gyrus, because a slice cuts across the sheet the signal
+    sits on: one cluster spread thinly over a bank of cortex and one compact blob can
+    occupy the same slices and look alike there.
+
+    Cortex only, and said so on the figure. Nilearn samples the volume between the white
+    and pial surfaces, so cerebellum, brainstem and subcortex are absent by construction
+    rather than by threshold -- a distinction that is invisible in the picture and would
+    otherwise read as "nothing survived there".
+
+    ``cbar_tick_format`` is not left at Nilearn's ``'%i'``. A z scale runs over a couple
+    of units, so integer ticks collapse the bar to a column of repeated values; Nilearn
+    warns about it and then draws it anyway.
+    """
+    from nilearn.plotting import plot_img_on_surf
+
+    values, limit_source = _masked_values(stat_img, mask_img)
+    resolved_vmax = _resolve_vmax(stat_img, threshold=threshold, vmax=vmax, mask_img=mask_img)
+    with plot_context():
+        figure, _ = plot_img_on_surf(
+            apply_sidedness(stat_img, two_sided=two_sided),
+            surf_mesh=mesh,
+            mask_img=mask_img,
+            hemispheres=["left", "right"],
+            views=["lateral", "medial"],
+            threshold=float(threshold) if threshold else None,
+            cmap=SIGNED_CMAP,
+            colorbar=True,
+            cbar_tick_format="%.2g",
+            vmax=resolved_vmax,
+            symmetric_cbar=True,
+            inflate=True,
+            title=title or None,
+        )
+        figure.patch.set_facecolor("white")
+        # Nilearn sizes this figure 4x5in. The provenance strip is a single line roughly
+        # 11in wide, and the tight bounding box that keeps the strip in the output then
+        # expands the canvas to the text -- stranding the brains in the left third of a
+        # mostly empty panel. Widened to the strip so the four views fill what they cost.
+        figure.set_size_inches(11.0, 7.0)
+        annotate_provenance(
+            figure,
+            [
+                *_provenance(
+                    values,
+                    threshold=threshold,
+                    limit=resolved_vmax,
+                    two_sided=two_sided,
+                    limit_source=limit_source,
+                ),
+                f"cortical surface projection onto {mesh}",
+                "cerebellum, brainstem and subcortex are not represented",
+                f"colour bar in {cbar_label}",
+            ],
+        )
+        return figure

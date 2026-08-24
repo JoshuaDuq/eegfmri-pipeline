@@ -9,9 +9,11 @@ import pytest
 
 from eeg_pipeline.preprocessing.ica_exclusions import (
     components_path_for_ica,
+    initialize_manual_review_attestation,
     read_component_statuses,
     read_ica_with_reviewed_exclusions,
     reviewed_exclusions,
+    validate_manual_review_attestation,
 )
 
 
@@ -70,6 +72,31 @@ def test_component_table_path_keeps_the_session_entities(tmp_path) -> None:
     assert components_path_for_ica(ica_path).name == "sub-0001_ses-01_proc-ica_components.tsv"
 
 
+def test_new_decomposition_resets_manual_attestation_to_pending(tmp_path) -> None:
+    path = tmp_path / "sub-0001_proc-ica_components.tsv"
+    pd.DataFrame(
+        {
+            "component": [0, 1],
+            "status": ["bad", "good"],
+            "status_description": ["blink", ""],
+            "manual_review_status": ["reviewed", "reviewed"],
+            "manual_reviewed_by": ["AB", "AB"],
+            "manual_reviewed_at": [
+                "2026-08-22T14:30:00-04:00",
+                "2026-08-22T14:30:00-04:00",
+            ],
+        }
+    ).to_csv(path, sep="\t", index=False)
+
+    initialize_manual_review_attestation(path)
+    frame = pd.read_csv(path, sep="\t", keep_default_na=False)
+
+    assert frame["manual_review_status"].tolist() == ["pending", "pending"]
+    assert frame["manual_reviewed_by"].tolist() == ["", ""]
+    assert frame["manual_reviewed_at"].tolist() == ["", ""]
+    assert frame["status"].tolist() == ["bad", "good"]
+
+
 def test_a_path_that_is_not_an_ica_solution_is_rejected(tmp_path) -> None:
     with pytest.raises(ValueError, match="ICA path"):
         components_path_for_ica(tmp_path / "sub-0001_proc-icafit_epo.fif")
@@ -89,6 +116,67 @@ def test_component_table_must_cover_every_component(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="invalid"):
         read_component_statuses(components_path_for_ica(ica_path), component_count=3)
+
+
+def test_manual_review_requires_a_component_by_component_attestation(tmp_path) -> None:
+    path = tmp_path / "sub-0001_proc-ica_components.tsv"
+    _write_components(path, ["bad", "good", "good"])
+
+    with pytest.raises(ValueError, match="manual_review_status"):
+        validate_manual_review_attestation(path)
+
+
+def test_manual_review_attestation_names_reviewer_and_time_for_every_component(
+    tmp_path,
+) -> None:
+    path = tmp_path / "sub-0001_proc-ica_components.tsv"
+    frame = pd.DataFrame(
+        {
+            "component": [0, 1, 2],
+            "status": ["bad", "good", "good"],
+            "status_description": ["blink", "retained after inspection", "neural"],
+            "manual_review_status": ["reviewed"] * 3,
+            "manual_reviewed_by": ["AB"] * 3,
+            "manual_reviewed_at": ["2026-08-22T14:30:00-04:00"] * 3,
+        }
+    )
+    frame.to_csv(path, sep="\t", index=False)
+
+    attested = validate_manual_review_attestation(path)
+
+    assert attested["manual_review_status"].tolist() == ["reviewed"] * 3
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("manual_review_status", "pending", "not reviewed"),
+        ("manual_reviewed_by", "", "reviewer"),
+        ("manual_reviewed_at", "not-a-date", "ISO-8601"),
+    ],
+)
+def test_incomplete_manual_attestation_is_rejected(
+    tmp_path, column: str, value: str, message: str
+) -> None:
+    path = tmp_path / "sub-0001_proc-ica_components.tsv"
+    frame = pd.DataFrame(
+        {
+            "component": [0, 1],
+            "status": ["bad", "good"],
+            "status_description": ["blink", "neural"],
+            "manual_review_status": ["reviewed", "reviewed"],
+            "manual_reviewed_by": ["AB", "AB"],
+            "manual_reviewed_at": [
+                "2026-08-22T14:30:00-04:00",
+                "2026-08-22T14:30:00-04:00",
+            ],
+        }
+    )
+    frame.loc[1, column] = value
+    frame.to_csv(path, sep="\t", index=False)
+
+    with pytest.raises(ValueError, match=message):
+        validate_manual_review_attestation(path)
 
 
 def test_run_evidence_cleans_each_run_with_the_reviewed_exclusions(monkeypatch, tmp_path) -> None:
@@ -120,7 +208,7 @@ def test_run_evidence_cleans_each_run_with_the_reviewed_exclusions(monkeypatch, 
     evidence = run_evidence.measure_runs(
         filtered_raw_paths=[run_path],
         ica=_FakeIca(),
-        settings=ReportSettings(),
+        settings=ReportSettings(muscle_filter_freq_hz=None),
     )
 
     assert applied_exclusions == [[0, 3]]

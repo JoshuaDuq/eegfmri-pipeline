@@ -8,8 +8,6 @@ evidence, and the places where a missing measurement must stay missing.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import numpy as np
 import pytest
 
@@ -296,8 +294,6 @@ def test_an_unresolvable_peak_contributes_no_frequency_at_all() -> None:
     # The prominence is still recorded, and so is the count of participants without a
     # resolvable rhythm, which is a cohort measurement in its own right.
     assert measurements["alpha_prominence_db_after"] == pytest.approx(1.2)
-
-
 
 
 # --------------------------------------------------------------------------------------

@@ -26,25 +26,19 @@ func (m Model) getFmriPreprocessingOptions() []optionType {
 	// Anatomical group
 	options = append(options, optFmriGroupAnatomical)
 	if m.fmriGroupAnatomicalExpanded {
-		options = append(options, optFmriSkipReconstruction, optFmriLongitudinal, optFmriSkullStripTemplate, optFmriSkullStripFixedSeed)
+		options = append(options, optFmriSkipReconstruction, optFmriSubjectAnatomicalReference, optFmriSkullStripTemplate, optFmriSkullStripFixedSeed)
 	}
 
 	// BOLD processing group
 	options = append(options, optFmriGroupBold)
 	if m.fmriGroupBoldExpanded {
-		options = append(options, optFmriBold2T1wInit, optFmriBold2T1wDof, optFmriSliceTimeRef, optFmriDummyScans)
+		options = append(options, optFmriBold2AnatInit, optFmriBold2AnatDof, optFmriSliceTimeRef, optFmriDummyScans)
 	}
 
 	// Quality control group
 	options = append(options, optFmriGroupQc)
 	if m.fmriGroupQcExpanded {
 		options = append(options, optFmriFdSpikeThreshold, optFmriDvarsSpikeThreshold)
-	}
-
-	// Denoising group
-	options = append(options, optFmriGroupDenoising)
-	if m.fmriGroupDenoisingExpanded {
-		options = append(options, optFmriUseAroma)
 	}
 
 	// Surface group
@@ -242,44 +236,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	}
 
 	if isFirstLevel {
-		options = append(options, optFmriAnalysisGroupPlotting)
-		if m.fmriAnalysisGroupPlottingExpanded {
-			options = append(options, optFmriAnalysisPlotsEnabled, optFmriAnalysisPlotHTML, optFmriAnalysisPlotSpace)
-
-			// Thresholding
-			options = append(options, optFmriAnalysisPlotThresholdMode, optFmriAnalysisPlotZThreshold)
-			if m.fmriAnalysisPlotThresholdModeIndex%3 == 1 { // fdr
-				options = append(options, optFmriAnalysisPlotFdrQ)
-			}
-			options = append(options, optFmriAnalysisPlotClusterMinVoxels)
-
-			// Scaling
-			options = append(options, optFmriAnalysisPlotVmaxMode)
-			if m.fmriAnalysisPlotVmaxModeIndex%3 == 2 { // manual
-				options = append(options, optFmriAnalysisPlotVmaxManual)
-			}
-
-			// Content
-			options = append(options,
-				optFmriAnalysisPlotIncludeUnthresholded,
-				optFmriAnalysisPlotFormatPNG,
-				optFmriAnalysisPlotFormatSVG,
-				optFmriAnalysisPlotTypeSlices,
-				optFmriAnalysisPlotTypeGlass,
-				optFmriAnalysisPlotTypeHist,
-				optFmriAnalysisPlotTypeClusters,
-				optFmriAnalysisPlotEffectSize,
-				optFmriAnalysisPlotStandardError,
-				optFmriAnalysisPlotMotionQC,
-				optFmriAnalysisPlotCarpetQC,
-				optFmriAnalysisPlotTSNRQC,
-				optFmriAnalysisPlotDesignQC,
-				optFmriAnalysisPlotEmbedImages,
-				optFmriAnalysisPlotSignatures,
-				optFmriAnalysisSignatureDir,
-				optFmriAnalysisSignatureMaps,
-			)
-		}
+		options = append(options, optFmriAnalysisSignatureDir, optFmriAnalysisSignatureMaps)
 	} else if mode == "trial-signatures" {
 		options = append(options, optFmriTrialSigGroup)
 		if m.fmriTrialSigGroupExpanded {

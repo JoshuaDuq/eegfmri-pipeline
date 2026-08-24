@@ -43,6 +43,12 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
             space: str = "native"
             include_effect_size: bool = True
             include_standard_error: bool = True
+            include_signatures: bool = False
+            threshold_mode: str = "z"
+            z_threshold: float = 2.3
+            fdr_q: float = 0.05
+            cluster_min_voxels: int = 0
+            two_sided: bool = True
 
             def normalized(self):
                 return self
@@ -55,7 +61,7 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
                 "img",
                 run_meta,
                 SimpleNamespace(flm=flm, mask_img="img"),
-                "def",
+                "cond_a",
                 None,
             ),
             resample_to_freesurfer=lambda img, fs_dir: img,
@@ -80,7 +86,7 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
                 "0001",
                 task="pain",
                 contrast_cfg=ContrastCfg(),
-                plotting_cfg=PlotCfg(),
+                stats_cfg=PlotCfg(),
                 dry_run=False,
             )
 
@@ -112,7 +118,7 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
                 "img",
                 run_meta,
                 SimpleNamespace(flm=flm, mask_img="img"),
-                "def",
+                "cond_a",
                 None,
             ),
             resample_to_freesurfer=lambda img, fs_dir: img,
@@ -135,6 +141,6 @@ class TestFmriPipelineStrictFailures(unittest.TestCase):
                     "0001",
                     task="pain",
                     contrast_cfg=ContrastCfg(),
-                    plotting_cfg=None,
+                    stats_cfg=None,
                     dry_run=False,
                 )

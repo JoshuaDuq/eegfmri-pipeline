@@ -30,7 +30,6 @@ from eeg_pipeline.preprocessing.report.cohort.sidecar import (
 )
 from eeg_pipeline.preprocessing.report.continuity import RunContinuity
 from eeg_pipeline.preprocessing.report.spectra import RunSpectra, StageSpectrum
-from studies.pain_study.analysis.gradient.comb import VolumeTiming
 from studies.pain_study.analysis.gradient.locked import VolumeLockedAverage
 
 FREQUENCIES = np.arange(1.0, 41.0, 1.0)
@@ -87,7 +86,6 @@ def _write_participant(root, subject: str, *, level: float, n_runs: int, flagged
         _run_evidence(subject, index + 1, level=level, flagged_s=flagged_s)
         for index in range(n_runs)
     ]
-    timing = VolumeTiming(n_volumes=300, repetition_time_s=2.0, interval_jitter_s=0.004)
     sidecar = build_subject_sidecar(
         subject=subject,
         task="thermalactive",

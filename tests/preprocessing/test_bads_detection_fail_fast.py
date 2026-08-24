@@ -8,6 +8,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+
+def test_break_annotations_are_omitted_from_pyprep_measurements() -> None:
+    from eeg_pipeline.preprocessing.pipeline.preprocess import (
+        _pyprep_reject_by_annotation,
+    )
+
+    assert _pyprep_reject_by_annotation(delete_breaks=True) == "omit"
+    assert _pyprep_reject_by_annotation(delete_breaks=False) is None
+
+
 from eeg_pipeline.preprocessing.pipeline.preprocess import (
     _find_bad_channels_by_ransac,
     run_bads_detection,
@@ -244,9 +254,10 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
     class FakeNoisyChannels:
         outputs = iter([["Cz"], [], []])
 
-        def __init__(self, raw, random_state=None) -> None:
+        def __init__(self, raw, random_state=None, reject_by_annotation=None) -> None:
             random_states.append(random_state)
             raw_bad_snapshots.append(list(raw.info["bads"]))
+            assert reject_by_annotation is None
 
         def find_bad_by_nan_flat(self) -> None:
             return None
@@ -456,7 +467,8 @@ def test_clean_recording_logs_no_bad_channels_rather_than_an_empty_name(
             return "existing"
 
     class FakeNoisyChannels:
-        def __init__(self, raw, random_state=None) -> None:
+        def __init__(self, raw, random_state=None, reject_by_annotation=None) -> None:
+            assert reject_by_annotation is None
             return None
 
         def find_bad_by_nan_flat(self) -> None:

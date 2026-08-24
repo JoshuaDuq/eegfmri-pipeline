@@ -65,7 +65,7 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         "--fmriprep-output-dir",
         type=str,
         default=None,
-        help="Output directory (BIDS derivatives root); fMRIPrep writes into <output_dir>/fmriprep",
+        help="Output directory for BIDS derivatives and fMRIPrep visual reports",
     )
     grp.add_argument(
         "--fmriprep-work-dir",
@@ -102,19 +102,6 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         type=str,
         default=None,
         help="Optional BIDS filter file (JSON)",
-    )
-    grp.add_argument(
-        "--use-aroma",
-        dest="use_aroma",
-        action="store_true",
-        default=None,
-        help="Enable ICA-AROMA",
-    )
-    grp.add_argument(
-        "--no-use-aroma",
-        dest="use_aroma",
-        action="store_false",
-        help="Disable ICA-AROMA",
     )
     grp.add_argument(
         "--skip-bids-validation",
@@ -202,10 +189,10 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Reduce memory usage",
     )
     grp2.add_argument(
-        "--longitudinal",
-        action="store_true",
+        "--subject-anatomical-reference",
+        choices=["first-lex", "unbiased", "sessionwise"],
         default=None,
-        help="Create unbiased structural template",
+        help="How anatomical references are constructed across sessions",
     )
     grp2.add_argument(
         "--cifti-output",
@@ -241,19 +228,20 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         "--dummy-scans",
         type=int,
         default=None,
-        help="Number of non-steady state volumes (0=auto)",
+        help="Explicit number of non-steady-state volumes (omit for detection)",
     )
     grp2.add_argument(
-        "--bold2t1w-init",
-        choices=["register", "header"],
+        "--bold2anat-init",
+        choices=["auto", "t1w", "t2w", "header"],
         default=None,
-        help="BOLD to T1w initialization method",
+        help="BOLD-to-anatomical initialization method",
     )
     grp2.add_argument(
-        "--bold2t1w-dof",
+        "--bold2anat-dof",
         type=int,
+        choices=[6, 9, 12],
         default=None,
-        help="Degrees of freedom for BOLD→T1w (default: 6)",
+        help="Degrees of freedom for BOLD-to-anatomical registration",
     )
     grp2.add_argument(
         "--slice-time-ref",
@@ -327,8 +315,6 @@ def _update_fmri_config_from_args(args: argparse.Namespace, config: Any) -> None
     if args.bids_filter_file:
         fmriprep_cfg["bids_filter_file"] = args.bids_filter_file
 
-    if args.use_aroma is not None:
-        fmriprep_cfg["use_aroma"] = bool(args.use_aroma)
     if args.skip_bids_validation is not None:
         fmriprep_cfg["skip_bids_validation"] = bool(args.skip_bids_validation)
     if args.clean_workdir is not None:
@@ -350,8 +336,8 @@ def _update_fmri_config_from_args(args: argparse.Namespace, config: Any) -> None
         fmriprep_cfg["omp_nthreads"] = int(args.omp_nthreads)
     if getattr(args, "low_mem", None):
         fmriprep_cfg["low_mem"] = True
-    if getattr(args, "longitudinal", None):
-        fmriprep_cfg["longitudinal"] = True
+    if getattr(args, "subject_anatomical_reference", None):
+        fmriprep_cfg["subject_anatomical_reference"] = args.subject_anatomical_reference
     if getattr(args, "cifti_output", None):
         fmriprep_cfg["cifti_output"] = args.cifti_output
     if getattr(args, "level", None):
@@ -364,10 +350,10 @@ def _update_fmri_config_from_args(args: argparse.Namespace, config: Any) -> None
         fmriprep_cfg["random_seed"] = int(args.random_seed)
     if getattr(args, "dummy_scans", None) is not None:
         fmriprep_cfg["dummy_scans"] = int(args.dummy_scans)
-    if getattr(args, "bold2t1w_init", None):
-        fmriprep_cfg["bold2t1w_init"] = args.bold2t1w_init
-    if getattr(args, "bold2t1w_dof", None) is not None:
-        fmriprep_cfg["bold2t1w_dof"] = int(args.bold2t1w_dof)
+    if getattr(args, "bold2anat_init", None):
+        fmriprep_cfg["bold2anat_init"] = args.bold2anat_init
+    if getattr(args, "bold2anat_dof", None) is not None:
+        fmriprep_cfg["bold2anat_dof"] = int(args.bold2anat_dof)
     if getattr(args, "slice_time_ref", None) is not None:
         fmriprep_cfg["slice_time_ref"] = float(args.slice_time_ref)
     if getattr(args, "fd_spike_threshold", None) is not None:

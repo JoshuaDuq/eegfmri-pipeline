@@ -765,9 +765,7 @@ def test_add_standard_review_creates_one_authoritative_carousel_per_band() -> No
         tfr=np.ones((2, 1, 1)),
     )
     settings = BandIcaReportSettings()
-    reviews = [
-        BandReviewData(band=band, diagnostics=diagnostics) for band in settings.review_bands
-    ]
+    reviews = [BandReviewData(band=band, diagnostics=diagnostics) for band in settings.review_bands]
     figures = [[Mock(), Mock()] for _ in settings.review_bands]
 
     with (
@@ -978,6 +976,69 @@ def test_retained_epochs_are_mapped_by_original_mne_selection_values() -> None:
     assert pre_ica_epochs.selection.tolist() == [0, 2]
     assert clean_epochs.selection.tolist() == [2]
     assert retained_epochs.selection.tolist() == [2]
+
+
+def test_manual_review_refresh_rebuilds_dossiers_from_current_decisions(
+    monkeypatch, tmp_path
+) -> None:
+    from eeg_pipeline.preprocessing import band_ica_report
+
+    epochs = object()
+    ica = SimpleNamespace(n_components_=2)
+    labels = [object(), object()]
+    statuses = pd.DataFrame(
+        {
+            "component": [0, 1],
+            "status": ["bad", "good"],
+            "status_description": ["reviewed blink", "retained after review"],
+        }
+    )
+    captured = {}
+    monkeypatch.setattr(band_ica_report.mne, "read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr(
+        band_ica_report,
+        "read_ica_with_reviewed_exclusions",
+        lambda path: ica,
+    )
+    monkeypatch.setattr(
+        band_ica_report,
+        "components_path_for_ica",
+        lambda path: tmp_path / "components.tsv",
+    )
+    monkeypatch.setattr(
+        band_ica_report,
+        "read_component_statuses",
+        lambda path, component_count: statuses,
+    )
+    monkeypatch.setattr(
+        band_ica_report,
+        "_label_components",
+        lambda **kwargs: labels,
+    )
+
+    def fake_add(**kwargs):
+        captured.update(kwargs)
+        return "summary"
+
+    monkeypatch.setattr(band_ica_report, "_add_standard_component_review", fake_add)
+
+    result = band_ica_report.refresh_standard_component_review(
+        report=object(),
+        epochs_path=tmp_path / "epochs.fif",
+        ica_path=tmp_path / "sub-0001_proc-ica_ica.fif",
+        filtered_raw_paths=[tmp_path / "raw.fif"],
+        settings=BandIcaReportSettings(),
+        analysis_status="Finalized — manually reviewed exclusions",
+    )
+
+    assert result == "summary"
+    assert captured["ica"] is ica
+    assert captured["epochs"] is epochs
+    assert captured["labels"] == labels
+    assert captured["status_descriptions"] == (
+        "reviewed blink",
+        "retained after review",
+    )
 
 
 def _document_html(html: str) -> str:
@@ -1638,8 +1699,7 @@ def test_the_standard_review_forwards_the_exclusion_reasons_it_was_given() -> No
         patch(
             "eeg_pipeline.preprocessing.band_ica_report._build_band_review_data",
             side_effect=[
-                BandReviewData(band=band, diagnostics=diagnostics)
-                for band in settings.review_bands
+                BandReviewData(band=band, diagnostics=diagnostics) for band in settings.review_bands
             ],
         ),
         patch(
@@ -1787,9 +1847,7 @@ def _dossier_diagnostics(*, components=2, epochs=5, times=40, with_activity=True
         tfr_frequencies=np.linspace(1.0, 100.0, 8),
         tfr_times=np.linspace(-1.0, 2.0, 6),
         tfr=rng.normal(0, 1, (components, 8, 6)),
-        epoch_activity=(
-            rng.normal(0, 1, (components, epochs, times)) if with_activity else None
-        ),
+        epoch_activity=(rng.normal(0, 1, (components, epochs, times)) if with_activity else None),
         activity_times=np.linspace(-1.0, 2.0, times) if with_activity else None,
         epoch_variance=rng.gamma(2.0, 1.0, (components, epochs)) if with_activity else None,
     )
@@ -1844,9 +1902,7 @@ def test_epoch_variance_is_measured_before_the_display_decimation() -> None:
     rng = np.random.default_rng(0)
     samples = _ACTIVITY_DISPLAY_COLUMNS * 4
     data = rng.normal(0, 1, (3, 2, samples))
-    sources = mne.EpochsArray(
-        data, mne.create_info(["I0", "I1"], 100.0, "misc"), verbose="ERROR"
-    )
+    sources = mne.EpochsArray(data, mne.create_info(["I0", "I1"], 100.0, "misc"), verbose="ERROR")
 
     activity, times, variance = _epoch_activity(sources, settings=BandIcaReportSettings())
 
@@ -2043,9 +2099,7 @@ def test_the_variance_panel_is_bounded_and_says_what_it_pushed_off() -> None:
     variance[0, 3] = 1e-15
     variance[0, 9] = 3e-15
     diagnostics = _dossier_diagnostics(components=1, epochs=20, times=30)
-    diagnostics = type(diagnostics)(
-        **{**vars(diagnostics), "epoch_variance": variance}
-    )
+    diagnostics = type(diagnostics)(**{**vars(diagnostics), "epoch_variance": variance})
     review = BandReviewData(
         band=BandIcaDefinition("b", "Broadband 1–100 Hz", 1.0, 100.0),
         diagnostics=diagnostics,

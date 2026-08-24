@@ -60,14 +60,13 @@ WELCH_SECONDS = 4.0
 SPREAD_PERCENTILES = (10.0, 90.0)
 
 
-
 @dataclass(frozen=True)
 class StageSpectrum:
     """One stage of one run, collapsed across channels.
 
-    The maximum is carried alongside the median because they answer different questions:
-    the median describes the montage, the maximum describes its worst sensor, and a focal
-    residual moves only the second.
+    The frequency-wise maximum is carried alongside the median because a focal residual
+    can leave the median untouched. It is an envelope: the maximizing sensor may change
+    at every frequency and must not be described as one physical "worst channel".
     """
 
     median_db: np.ndarray
@@ -77,8 +76,8 @@ class StageSpectrum:
     aperiodic: AperiodicFit | None
 
     @property
-    def worst_channel_gap_db(self) -> float:
-        """Widest gap between the worst channel and the median, over the whole band."""
+    def maximum_envelope_gap_db(self) -> float:
+        """Widest gap between the maximum envelope and median over the band."""
         return float(np.max(self.max_db - self.median_db))
 
 
@@ -257,17 +256,14 @@ def compute_run_spectra(
     # decomb manifest reports unavailable. For a persistent narrowband feature that is
     # instrumental rather than neural -- an equipment line, a residual comb -- which a
     # robust fit would otherwise tilt toward. Empty unless a study names a reason.
-    excluded = (
-        tuple(
-            notch_windows(
-                line_frequency,
-                fmax=upper,
-                half_width=notch_half_width_hz,
-                unavailable_intervals=unavailable_intervals,
-            )
+    excluded = tuple(
+        notch_windows(
+            line_frequency,
+            fmax=upper,
+            half_width=notch_half_width_hz,
+            unavailable_intervals=unavailable_intervals,
         )
-        + tuple((float(low), float(high)) for low, high in aperiodic_exclude_hz)
-    )
+    ) + tuple((float(low), float(high)) for low, high in aperiodic_exclude_hz)
     return RunSpectra(
         recording_id=recording_id,
         frequencies=frequencies,
@@ -289,7 +285,7 @@ def compute_run_spectra(
 
 
 def _draw_stage(axis: plt.Axes, spectra: RunSpectra, stage: StageSpectrum, color: str, label: str):
-    """Draw one stage's median, across-channel spread, worst channel, and fitted slope."""
+    """Draw one stage's median, spread, maximum envelope, and fitted slope."""
     axis.fill_between(
         spectra.frequencies,
         stage.spread_low_db,
@@ -299,8 +295,8 @@ def _draw_stage(axis: plt.Axes, spectra: RunSpectra, stage: StageSpectrum, color
         linewidth=0,
     )
     axis.plot(spectra.frequencies, stage.median_db, color=color, linewidth=1.2, label=label)
-    # The worst channel is the point of the panel: a focal residual leaves the median
-    # untouched and shows up here alone.
+    # A focal residual leaves the median untouched and shows up in this envelope. The
+    # maximizing sensor can differ between adjacent frequencies.
     axis.plot(
         spectra.frequencies,
         stage.max_db,
@@ -353,7 +349,8 @@ def plot_run_spectra(
         title=(
             f"{spectra.recording_id} · {spectra.n_channels} good EEG channels\n"
             f"median (solid), {low_percentile:g}-{high_percentile:g}th percentile across "
-            "channels (shaded), worst channel (dotted), aperiodic fit (dashed)"
+            "channels (shaded), frequency-wise maximum envelope (dotted), "
+            "aperiodic fit (dashed)"
         ),
         ylabel=f"PSD ({POWER_UNIT_LABEL})",
     )
@@ -371,7 +368,7 @@ def plot_run_spectra(
         spectra.after.median_db - spectra.before.median_db,
         color=GUIDE_COLOR,
         linewidth=1.0,
-        label="median channel",
+        label="median across channels",
     )
     difference_axis.plot(
         spectra.frequencies,
@@ -379,7 +376,7 @@ def plot_run_spectra(
         color=GUIDE_COLOR,
         linewidth=0.8,
         linestyle=":",
-        label="worst channel",
+        label="maximum envelopes (not a paired sensor)",
     )
     difference_axis.axhline(0.0, color="black", linewidth=0.8)
     difference_axis.set(
@@ -460,7 +457,7 @@ def spectra_summary_html(spectra: Sequence[RunSpectra]) -> str:
         Column("exponent", group="After ICA"),
         Column("offset (dB re 1 µV²/Hz)", group="After ICA"),
         Column("Δ exponent"),
-        Column("Worst channel above median (dB)"),
+        Column("Frequency-wise maximum above median (dB)"),
     )
     rows = [
         [
@@ -468,7 +465,7 @@ def spectra_summary_html(spectra: Sequence[RunSpectra]) -> str:
             *_aperiodic_values(run.before.aperiodic),
             *_aperiodic_values(run.after.aperiodic),
             None if run.exponent_change is None else format(run.exponent_change, "+.2f"),
-            f"{run.after.worst_channel_gap_db:.1f}",
+            f"{run.after.maximum_envelope_gap_db:.1f}",
         ]
         for run in spectra
     ]
@@ -550,9 +547,7 @@ def add_spectra_section(
             line_frequency=line_frequency,
             marked_frequencies=marked_frequencies,
             notch_half_width_hz=notch_half_width_hz,
-            unavailable_intervals=(unavailable_intervals_by_recording or {}).get(
-                run.recording_id
-            ),
+            unavailable_intervals=(unavailable_intervals_by_recording or {}).get(run.recording_id),
         )
         for run in spectra
     ]
