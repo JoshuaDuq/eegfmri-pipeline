@@ -14,12 +14,14 @@ from eeg_pipeline.analysis.utilities.bids_metadata import (
     ensure_task_events_json,
 )
 from eeg_pipeline.utils.data.preprocessing import (
+    data_relative_onsets,
     ensure_dataset_description,
     filter_annotations,
     find_brainvision_vhdrs,
     get_run_index,
     normalize_string,
     parse_subject_id,
+    set_annotations_at_absolute_onsets,
     set_channel_types,
     set_montage,
 )
@@ -136,9 +138,8 @@ def _discard_unrecorded_terminal_volumes(
         return
 
     sample_indices = raw.time_as_index(
-        raw.annotations.onset,
+        data_relative_onsets(raw),
         use_rounding=True,
-        origin=raw.annotations.orig_time,
     )
     valid_mask = (sample_indices >= 0) & (sample_indices < raw.n_times)
     if valid_mask.all():
@@ -177,7 +178,7 @@ def _discard_unrecorded_terminal_volumes(
         "Discarding %d terminal volume marker(s) without a recorded output sample.",
         invalid_indices.size,
     )
-    raw.set_annotations(raw.annotations[valid_mask])
+    set_annotations_at_absolute_onsets(raw, raw.annotations[valid_mask])
 
 
 def run_raw_to_bids(

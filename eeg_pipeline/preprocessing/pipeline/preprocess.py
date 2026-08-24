@@ -10,6 +10,8 @@ from joblib import Parallel, delayed
 from mne_bids import get_bids_path_from_fname, get_entities_from_fname, read_raw_bids
 from mne_bids_pipeline._logging import gen_log_kwargs, logger
 
+from eeg_pipeline.utils.data.preprocessing import set_annotations_at_absolute_onsets
+
 from . import utils
 from . import io
 
@@ -133,13 +135,19 @@ def _mark_breaks_bad(
     )
     removed_dur = float(np.sum(annot_breaks.duration)) if len(annot_breaks) else 0.0
     if len(annot_breaks):
+        # Without a meas_date annotate_break reports onsets relative to the data
+        # start, while raw.annotations.onset is on the absolute timeline. Lift the
+        # breaks onto the absolute timeline so the two agree before they are merged.
+        break_onsets = np.asarray(annot_breaks.onset, dtype=float)
+        if annot_breaks.orig_time is None:
+            break_onsets = break_onsets + raw.first_time
         bad_breaks = mne.Annotations(
-            onset=annot_breaks.onset,
+            onset=break_onsets,
             duration=annot_breaks.duration,
             description=["BAD_break"] * len(annot_breaks),
             orig_time=annot_breaks.orig_time,
         )
-        raw.set_annotations(raw.annotations + bad_breaks)
+        set_annotations_at_absolute_onsets(raw, raw.annotations + bad_breaks)
     return annot_breaks, removed_dur
 
 
