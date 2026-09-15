@@ -196,7 +196,24 @@ def residual_autocorrelation_figure(
     tr: float,
     title: str = "",
 ):
-    """Draw one median-and-IQR acquired-lag ACF panel per run."""
+    """Draw every run's acquired-lag residual ACF on one axis.
+
+    One axis, not one panel per run. What a reader consults this figure for is whether
+    a run departs from the others -- whitening that worked on five runs and not the
+    sixth, a run whose residuals carry structure the model left behind. Six separate
+    panels put that comparison entirely in the reader's memory: measured on this
+    study, the six lag-1 medians span 0.036 to 0.065, a difference invisible across
+    six axes and obvious on one.
+
+    The report already makes this argument against itself. Its variance-inflation
+    panel is drawn once over all runs because "six near-identical bar charts made a
+    reader hold six pictures in mind to answer one question", and the between-run
+    spread "was never shown at all". Both sentences applied here unchanged.
+
+    The interquartile band is drawn for the run whose median is highest, rather than
+    for every run: six overlapping bands are a wash of colour that hides the lines
+    they belong to, and the widest is the one that bounds the rest.
+    """
     import matplotlib.pyplot as plt
 
     from fmri_pipeline.analysis.report.style import (
@@ -207,8 +224,6 @@ def residual_autocorrelation_figure(
     )
 
     measured = _validated_runs(runs, tr=tr)
-    column_count = min(3, len(measured))
-    row_count = int(np.ceil(len(measured) / column_count))
     limits = np.asarray(
         [value for run in measured for quartile in run.quartiles for value in quartile],
         dtype=float,
@@ -217,78 +232,74 @@ def residual_autocorrelation_figure(
     upper = max(0.0, float(limits.max()))
     padding = max(0.05, 0.08 * (upper - lower))
 
+    # The run whose lag-1 median is largest carries the band: it is the one whose
+    # residuals retain most structure, and its quartiles bound the others.
+    banded = max(measured, key=lambda run: float(run.quartiles[0][1]))
+    palette = (
+        "blue",
+        "vermillion",
+        "bluish_green",
+        "orange",
+        "reddish_purple",
+        "sky_blue",
+        "yellow",
+        "black",
+    )
+
     with plot_context():
-        figure, axes = plt.subplots(
-            row_count,
-            column_count,
-            figsize=(3.55 * column_count, 2.45 * row_count + 0.45),
-            sharex=True,
-            sharey=True,
-            constrained_layout=True,
-            squeeze=False,
+        figure, axis = plt.subplots(figsize=(7.4, 4.2), constrained_layout=True)
+
+        band_lags = np.asarray(banded.lags_frames, dtype=float) * float(tr)
+        band_quartiles = np.asarray(banded.quartiles, dtype=float)
+        axis.fill_between(
+            band_lags,
+            band_quartiles[:, 0],
+            band_quartiles[:, 2],
+            color=OKABE_ITO["sky_blue"],
+            alpha=0.22,
+            linewidth=0,
+            label=f"voxel IQR ({banded.label})",
         )
-        flat_axes = axes.ravel()
-        for panel_index, (axis, run) in enumerate(zip(flat_axes, measured)):
+        for index, run in enumerate(measured):
             lag_seconds = np.asarray(run.lags_frames, dtype=float) * float(tr)
             quartiles = np.asarray(run.quartiles, dtype=float)
-            axis.fill_between(
-                lag_seconds,
-                quartiles[:, 0],
-                quartiles[:, 2],
-                color=OKABE_ITO["sky_blue"],
-                alpha=0.28,
-                linewidth=0,
-                label="Voxel IQR",
-            )
             axis.plot(
                 lag_seconds,
                 quartiles[:, 1],
-                color=OKABE_ITO["blue"],
-                linewidth=1.4,
-                label="Median",
+                color=OKABE_ITO[palette[index % len(palette)]],
+                linewidth=1.3,
+                label=run.label,
             )
-            axis.axhline(
-                0.0,
-                color=GUIDE_COLOR,
-                linewidth=0.8,
-                linestyle=":",
-                label="_nolegend_",
-            )
-            axis.set_title(run.label, fontsize=9)
-            axis.set_ylim(lower - padding, upper + padding)
-            axis.set_xlabel("Lag (s)")
-            if panel_index % column_count == 0:
-                axis.set_ylabel("Residual autocorrelation")
-            minimum_pairs = min(run.valid_pairs)
-            maximum_pairs = max(run.valid_pairs)
-            pair_range = (
-                f"{minimum_pairs:,}"
-                if minimum_pairs == maximum_pairs
-                else f"{minimum_pairs:,}–{maximum_pairs:,}"
-            )
-            axis.text(
-                0.02,
-                0.04,
-                f"{pair_range} retained pairs/voxel",
-                transform=axis.transAxes,
-                fontsize=6.5,
-                color=GUIDE_COLOR,
-                va="bottom",
-            )
-
-        for axis in flat_axes[len(measured) :]:
-            figure.delaxes(axis)
-        flat_axes[0].legend(loc="best", frameon=False, fontsize=7)
+        axis.axhline(
+            0.0, color=GUIDE_COLOR, linewidth=0.8, linestyle=":", label="_nolegend_"
+        )
+        axis.set_ylim(lower - padding, upper + padding)
+        axis.set_xlabel("Lag (s)")
+        axis.set_ylabel("Residual autocorrelation (voxel median)")
+        axis.legend(
+            loc="upper right", frameon=False, fontsize=7, ncol=2 if len(measured) > 4 else 1
+        )
         if title:
-            figure.suptitle(title)
+            axis.set_title(title)
+
+        # The pair counts used to sit one per panel. On a single axis they belong in
+        # the strip, as the range across every run and lag drawn.
+        pair_bounds = [pairs for run in measured for pairs in run.valid_pairs]
+        pair_range = (
+            f"{min(pair_bounds):,}"
+            if min(pair_bounds) == max(pair_bounds)
+            else f"{min(pair_bounds):,}–{max(pair_bounds):,}"
+        )
         maximum_lag = max(run.lags_frames[-1] for run in measured)
         annotate_provenance(
             figure,
             [
+                f"{len(measured)} run(s)",
                 f"{measured[0].voxel_count:,} fitted-mask voxels per run",
                 f"lags 1–{maximum_lag} acquired frames "
                 f"({float(tr):.3g}–{maximum_lag * float(tr):.3g} s)",
-                "line: voxel median · band: voxel IQR",
+                f"{pair_range} retained pairs per voxel",
+                f"line: voxel median per run · band: voxel IQR for {banded.label}",
                 "unwhitened model-response residuals",
                 "zero line is a reference; no criterion is applied",
             ],

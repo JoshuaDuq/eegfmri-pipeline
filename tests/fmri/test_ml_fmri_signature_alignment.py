@@ -25,6 +25,12 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                         "metric": "dot",
                         "normalization": "none",
                         "round_decimals": 3,
+                        "timing_audit": {
+                            "onset_offset_s": 3.0,
+                            "onset_tolerance_s": 0.010,
+                            "plateau_duration_s": 7.5,
+                            "duration_tolerance_s": 0.010,
+                        },
                     }
                 }
             }
@@ -62,7 +68,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                     "signature": ["NPS", "NPS"],
                     "dot": [1.25, 2.50],
                     # fMRI plateau-like timing/duration
-                    "onset": [21.532, 64.465],
+                    "onset": [25.150, 68.084],
                     "duration": [7.5, 7.5],
                 }
             )
@@ -74,7 +80,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 {
                     "run": ["run-01", "run-01"],
                     "trial_index": [1, 2],
-                    "onset": [21.532, 64.465],
+                    "onset": [25.150, 68.084],
                     "duration": [7.5, 7.5],
                     "events_trial_number": [1, 2],
                 }
@@ -108,6 +114,12 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                         "metric": "dot",
                         "normalization": "none",
                         "round_decimals": 3,
+                        "timing_audit": {
+                            "onset_offset_s": 3.0,
+                            "onset_tolerance_s": 0.010,
+                            "plateau_duration_s": 7.5,
+                            "duration_tolerance_s": 0.010,
+                        },
                     }
                 }
             }
@@ -142,7 +154,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                     "trial_index": [1],
                     "signature": ["NPS"],
                     "dot": [9.99],
-                    "onset": [21.532],
+                    "onset": [25.150],
                     "duration": [7.5],
                 }
             ).to_csv(sig_dir / "trial_signature_expression_sub_9999.tsv", sep="\t", index=False)
@@ -153,7 +165,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                     "trial_index": [1],
                     "signature": ["NPS"],
                     "dot": [1.11],
-                    "onset": [21.532],
+                    "onset": [25.150],
                     "duration": [7.5],
                 }
             ).to_csv(sig_dir / "trial_signature_expression_sub_0001.tsv", sep="\t", index=False)
@@ -192,6 +204,12 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                         "metric": "dot",
                         "normalization": "none",
                         "round_decimals": 3,
+                        "timing_audit": {
+                            "onset_offset_s": 3.0,
+                            "onset_tolerance_s": 0.010,
+                            "plateau_duration_s": 7.5,
+                            "duration_tolerance_s": 0.010,
+                        },
                     }
                 }
             }
@@ -221,7 +239,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
             pd.DataFrame(
                 {
                     "run_num": [1, 1],
-                    "onset": [10.123, 20.568],
+                    "onset": [13.123, 23.568],
                     "duration": [7.5, 7.5],
                     "signature": ["NPS", "NPS"],
                     "dot": [3.0, 4.0],
@@ -251,6 +269,12 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                         "metric": "dot",
                         "normalization": "none",
                         "round_decimals": 3,
+                        "timing_audit": {
+                            "onset_offset_s": 3.0,
+                            "onset_tolerance_s": 0.010,
+                            "plateau_duration_s": 7.5,
+                            "duration_tolerance_s": 0.010,
+                        },
                     }
                 }
             }
@@ -282,7 +306,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 {
                     "run_num": [1, 1, 1],
                     "trial_index": [1, 1, 2],
-                    "onset": [10.0, 10.0, 20.0],
+                    "onset": [13.0, 13.0, 23.0],
                     "duration": [7.5, 7.5, 7.5],
                     "signature": ["NPS", "NPS", "NPS"],
                     "dot": [1.0, 1.0, 2.0],
@@ -299,7 +323,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                     logger=logging.getLogger(__name__),
                 )
 
-    def test_raises_when_trial_and_onset_alignment_disagree(self):
+    def test_raises_when_paired_onsets_miss_the_protocol_offset(self):
         from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject
 
         cfg = DotConfig(
@@ -312,6 +336,12 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                         "metric": "dot",
                         "normalization": "none",
                         "round_decimals": 3,
+                        "timing_audit": {
+                            "onset_offset_s": 3.0,
+                            "onset_tolerance_s": 0.010,
+                            "plateau_duration_s": 7.5,
+                            "duration_tolerance_s": 0.010,
+                        },
                     }
                 }
             }
@@ -350,7 +380,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 }
             ).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
 
-            with self.assertRaisesRegex(ValueError, "ambiguous.*alignment"):
+            with self.assertRaisesRegex(ValueError, "protocol offset"):
                 _load_fmri_signature_target_for_subject(
                     subject_raw="0001",
                     task="task",
@@ -360,7 +390,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                     logger=logging.getLogger(__name__),
                 )
 
-    def test_raises_when_trial_and_onset_alignment_match_different_rows(self):
+    def test_raises_when_a_trial_identifier_pairs_a_distant_fmri_row(self):
         from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject
 
         cfg = DotConfig(
@@ -373,6 +403,12 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                         "metric": "dot",
                         "normalization": "none",
                         "round_decimals": 3,
+                        "timing_audit": {
+                            "onset_offset_s": 3.0,
+                            "onset_tolerance_s": 0.010,
+                            "plateau_duration_s": 7.5,
+                            "duration_tolerance_s": 0.010,
+                        },
                     }
                 }
             }
@@ -411,7 +447,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 }
             ).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
 
-            with self.assertRaisesRegex(ValueError, "ambiguous.*alignment"):
+            with self.assertRaisesRegex(ValueError, "protocol offset"):
                 _load_fmri_signature_target_for_subject(
                     subject_raw="0001",
                     task="task",

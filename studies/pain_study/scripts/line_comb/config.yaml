@@ -20,7 +20,7 @@ paths:
   # produces that copy, so it has to read the uncleaned root. Left inheriting, it would
   # read its own output and write bids_output/eeg_linecleaned_linecleaned.
   # Repo-relative, matching diagnosis_dir and removal_dir below; run from the repo root.
-  bids_root: "data/bids_output/eeg"
+  bids_root: "data/bids_output/bids_analyzer_archive/eeg"
   source_data: null
   deriv_root: null
 

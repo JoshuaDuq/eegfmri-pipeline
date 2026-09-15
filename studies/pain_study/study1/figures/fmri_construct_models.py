@@ -147,6 +147,11 @@ def fit_subject_effects(
                     category=RuntimeWarning,
                     module=r"scipy\.linalg\._basic",
                 )
+            warnings.filterwarnings(
+                "ignore",
+                message=r"\[MultiNiftiMasker\.fit\] Generation of a mask has been requested",
+                category=RuntimeWarning,
+            )
             model.fit(
                 run_images,
                 events=[design.events for design in estimand_designs],

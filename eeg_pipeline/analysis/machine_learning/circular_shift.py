@@ -4,30 +4,40 @@ from __future__ import annotations
 
 import numpy as np
 
+#: A run needs at least this many retained trials before a within-run circular shift
+#: says anything. Below it the cycle is too short for the shifted series to be
+#: meaningfully different from the observed one.
+MIN_RETAINED_TRIALS = 8
 
-def admissible_circular_shifts(
+
+def circular_shift_group(n_retained: int) -> tuple[int, ...]:
+    """Return every within-run circular shift, the identity included.
+
+    The upper-tail permutation p-value is justified by the transformations forming a
+    group under composition, with the observed statistic as the identity element. The
+    full cycle is that group; any subset of it generally is not. Selecting, say, the
+    shifts of largest minimum displacement leaves ``{5, 6}`` for an intact 11-trial run,
+    and composing shift 5 with itself gives the excluded shift 10 -- so the ordinary
+    upper-tail calculation loses its randomization argument, and its calibration with it.
+    """
+    count = int(n_retained)
+    if count <= 0:
+        return tuple()
+    return tuple(range(count))
+
+
+def is_permutation_valid_run(
     trial_indices: np.ndarray,
     *,
-    min_retained_trials: int = 8,
-    original_block_length: int = 11,
-) -> tuple[int, ...]:
-    """Return shifts with the largest minimum displacement in original trial space."""
+    min_retained_trials: int = MIN_RETAINED_TRIALS,
+) -> bool:
+    """Whether a run retained enough trials to carry a circular shift at all."""
     retained = np.asarray(trial_indices, dtype=int)
-    if retained.size < min_retained_trials:
-        return tuple()
-
-    shift_distances: list[tuple[int, int]] = []
-    for shift in range(1, retained.size):
-        source_trials = np.roll(retained, shift)
-        forward_distance = (retained - source_trials) % int(original_block_length)
-        circular_distance = np.minimum(
-            forward_distance,
-            int(original_block_length) - forward_distance,
-        )
-        shift_distances.append((int(shift), int(np.min(circular_distance))))
-
-    maximum_distance = max(distance for _shift, distance in shift_distances)
-    return tuple(shift for shift, distance in shift_distances if distance == maximum_distance)
+    return bool(retained.size >= int(min_retained_trials) and retained.size >= 2)
 
 
-__all__ = ["admissible_circular_shifts"]
+__all__ = [
+    "MIN_RETAINED_TRIALS",
+    "circular_shift_group",
+    "is_permutation_valid_run",
+]

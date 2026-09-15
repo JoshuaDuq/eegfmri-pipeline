@@ -1009,6 +1009,13 @@ class PreprocessingPipeline(PipelineBase):
             n_jobs=n_jobs,
         )
         self._harmonize_filtered_raw_bads_for_mne_concat(subjects, task)
+
+        # Before ICA: the peripheral artifact proxy is a nuisance covariate for artifact
+        # that EEG cleaning is meant to remove, so measuring it afterwards would quantify
+        # what survived rather than what was there.
+        if not task_is_rest:
+            self._write_preclean_artifact_proxy(subjects=subjects, task=task)
+
         self._run_mne_bids_pipeline(
             self._get_ica_decomposition_steps(),
             subjects=subjects,
@@ -1260,6 +1267,7 @@ class PreprocessingPipeline(PipelineBase):
                     bids_root=self.bids_root,
                     epochs_path=task_epochs_path,
                     config=self.config,
+                    deriv_root=self.deriv_root,
                     conditions=conditions,
                     overwrite=True,
                     # These are the pre-ICA task epochs, before any rejection: that is what
@@ -2480,6 +2488,23 @@ class PreprocessingPipeline(PipelineBase):
         detected = self._detect_conditions_from_bids(task)
         return list(detected) if detected else None
 
+    def _write_preclean_artifact_proxy(self, *, subjects: List[str], task: Optional[str]) -> None:
+        from eeg_pipeline.utils.data.preprocessing import write_preclean_artifact_proxy
+
+        if not task:
+            return
+        conditions = self._resolve_epoch_conditions(task)
+        for subj in self._resolve_bad_harmonization_subjects(subjects):
+            write_preclean_artifact_proxy(
+                subject=subj,
+                task=task,
+                bids_root=self.bids_root,
+                deriv_root=self.deriv_root,
+                config=self.config,
+                conditions=conditions,
+                _logger=self.logger,
+            )
+
     def _write_clean_events_tsv(self, *, subjects: List[str], task: str) -> None:
         from eeg_pipeline.infra.paths import find_clean_epochs_path
         from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
@@ -2511,6 +2536,7 @@ class PreprocessingPipeline(PipelineBase):
                     bids_root=self.bids_root,
                     epochs_path=epochs_path,
                     config=self.config,
+                    deriv_root=self.deriv_root,
                     conditions=conditions,
                     overwrite=overwrite,
                     _logger=self.logger,

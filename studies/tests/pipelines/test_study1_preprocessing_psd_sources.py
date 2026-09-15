@@ -534,7 +534,7 @@ def _write_processed_triplet(
     sampling_interval_us: int = 1000,
 ) -> Path:
     subject = participant_directory.replace("sub_", "sub-").split("_", maxsplit=1)[0]
-    directory = tmp_path / subject / "eeg" / "brainvision_processed_1khz"
+    directory = tmp_path / subject / "eeg" / "analyzer_brainvision_processed_1khz"
     directory.mkdir(parents=True, exist_ok=True)
     if (directory / f"{stem}.vhdr").exists():
         stem = stem.replace("_scannerpulse_corrected", "_duplicate_scannerpulse_corrected")

@@ -35,7 +35,18 @@ CROP_MARGIN_MM = 12.0
 #: held under 6% of the peak in-plane area and rendered as specks -- a seventh of the
 #: panel spent on nothing a reader can read. Selecting on area rather than on position
 #: is what keeps every tile a slice worth looking at.
-MIN_SLICE_AREA_FRACTION = 0.25
+#:
+#: The floor sets the *endpoints* and the interior cuts are spaced evenly between
+#: them, so too low a value costs more than a couple of weak tiles: it stretches the
+#: spacing and under-samples the middle of the brain, where the anatomy is. Measured
+#: on this study's mask at 0.25, the endpoints landed at z = -48 and +72, x = +-63 and
+#: y = -96 -- skull, temporal pole and vertex. At 0.4 they land at z = -39 and +66,
+#: x = +-57 and y = -90, which keeps the frontal pole and the cerebellum in frame
+#: while spending no tile on a speck.
+#:
+#: Overridable per panel through ``mosaic_figure(min_area_fraction=...)`` for a mask
+#: this default does not suit -- a partial-brain acquisition, or an ROI.
+MIN_SLICE_AREA_FRACTION = 0.4
 
 _AXIS_OF = {"x": 0, "y": 1, "z": 2}
 

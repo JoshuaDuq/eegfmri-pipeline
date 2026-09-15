@@ -37,10 +37,17 @@ Prespecified Study 1 criteria are evaluated for the selected primary cell before
 summarized. The criteria are met when the cell shows a predictive gain
 $\Delta R^2_{\mathrm{LOSO}} \ge 0.02$, a confidence-interval lower bound $\ge 0.005$, a
 Holm-corrected $p \le 0.05$, a staged nuisance-adjusted sensitivity gain $\ge 0.005$, a positive
-within-subject gain, satisfied temporal negative controls, satisfied artifact-censoring robustness,
-and a split-half reliability $\ge 0.4$ on at least 30 trials. Missing diagnostic fields do not pass
-these criteria. The output records `confirmatory_criteria_met` and `unmet_criteria`; it does not
-assign an automatic interpretation label to the Study 2 maps.
+within-subject gain, satisfied artifact-censoring robustness, and at least 30 reliability trials.
+Missing diagnostic fields do not pass these criteria. The output records
+`confirmatory_criteria_met` and `unmet_criteria`; it does not assign an automatic interpretation
+label to the Study 2 maps.
+
+Two criteria are configured off rather than removed, because both asserted more than the underlying
+statistic supports. The split-half reliability threshold scored participant-by-temperature cell
+means, which data with no reliable residual trial signal already passes; and the temporal
+negative-control criterion read a nonsignificant comparison window as evidence of absence, a
+verdict Study 1 no longer emits. Re-enable the temporal criterion only alongside a
+paired-difference or equivalence test that can actually fail.
 
 ## 2. Frozen Model and Prediction-Derived Score
 
@@ -53,10 +60,19 @@ variance within the held-out subject; a zero-variance score does not meet the so
 The primary analysis uses this single combined score rather than a per-band decomposition, which
 avoids the collinearity between spectral contributions of one decoder.
 
-The combined score is the frozen linear predictor in the transformed residual-target space,
-equivalently the sum of the band-specific contributions $\eta_\alpha$, $\eta_\beta$, and
-$\eta_\gamma$. The band-specific contributions are retained for the secondary mutually adjusted
-analysis (Section 10).
+Two scales are involved and the tables name both. `eta_combined` is the held-out prediction on the
+raw residual-target scale — what Study 1 delivers, and what this stage standardizes and
+correlates. `eta_bands_linear_predictor` is the frozen linear predictor in the transformed
+residual-target space, and it is exactly the sum of the band-specific contributions $\eta_\alpha$,
+$\eta_\beta$, and $\eta_\gamma$ retained for the secondary mutually adjusted analysis
+(Section 10). The Yeo-Johnson inverse relating the two is monotone but not linear, so the band
+contributions are not shares of `eta_combined` and must not be reported as such. The Haufe patterns
+are likewise patterns of the transformed linear model.
+
+Each row of the source-stage table carries `source_row`, the declared mapping from that trial to
+its row of the subject's source-power array, joined on `subject_id`, `run` and `trial_id` from the
+index the source-power stage writes. Source power is addressed by `source_row` and never by a
+sequential position assigned after censoring.
 
 ## 3. Sensor-Level Pattern Estimation
 
@@ -111,7 +127,16 @@ to voltage time series filtered into each modeled band. Alpha and beta are filte
 bands. Gamma is filtered separately in the three retained scanner-clean intervals, converted to
 native-space source-level Hilbert log-ratio power in each interval, morphed to fsaverage as scalar
 log-ratio maps, and combined as a bandwidth-weighted log-ratio mean to preserve the single Study 2
-contribution label $\gamma$ without reintroducing the excluded scanner windows. The primary source
+contribution label $\gamma$ without reintroducing the excluded scanner windows.
+
+The band edges above are nominal passbands, not stopbands. The filters use MNE's automatic
+transition bandwidths, so the 43–56 Hz interval attenuates a line at 41.1 Hz by well under 1 dB,
+and Morlet power has nonzero spectral bandwidth of its own. Excluding the scanner windows from the
+nominal passband therefore does not by itself show that scanner lines are absent from the gamma
+estimate. **Required before interpreting gamma:** audit the effective end-to-end response of the
+preprocessing and estimator chain, and measure residual line contamination on the retained
+recordings as delivered by the current Decomb stage, rather than reasoning from the nominal edges.
+The primary source
 time series uses the cortical surface-normal component from the loose-orientation inverse
 (constraint 0.2), and instantaneous power envelopes are computed with the Hilbert transform before
 surface morphing. Source-power construction mirrors the Study 1 individual-channel spectral-power
@@ -131,6 +156,13 @@ reconstruction fails visual quality control, the boundary element model fails, m
 positions are unavailable, fewer than 90% of retained EEG channels have valid locations, mean
 coregistration error exceeds 5 mm or its maximum exceeds 10 mm, the forward solution contains
 rank-deficient channels, or morphing to fsaverage fails.
+
+The exclusion is enforced, not merely recorded. The `source-model-qc` stage writes
+`source_model_qc.tsv`, and the source-stage, band-unique and target-permutation stages read it and
+drop every subject whose `source_model_criteria_met` is false before computing any map. A subject
+missing from that table is an error rather than a silent exclusion, so a participant is never
+dropped here for a missing QC row. The per-band QC tables therefore list the retained source
+cohort.
 
 The cortical point-spread full width at half maximum is computed per subject from each individual
 forward and inverse operator and morphed to fsaverage. The cohort median point-spread FWHM and its

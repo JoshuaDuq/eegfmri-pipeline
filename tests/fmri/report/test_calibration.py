@@ -336,11 +336,14 @@ def test_the_panel_states_how_many_voxels_it_drew() -> None:
 
 def test_a_large_map_is_subsampled_and_says_so() -> None:
     # 50,000 points is a solid block of ink that hides its own density, and the file
-    # it produces dominates the report's size.
+    # it produces dominates the report's size. The strip names both strata, because a
+    # reader has to be able to tell "no voxel came close" from "the ones that did
+    # were not drawn".
     effect, stat, _error = _paired(n=60_000)
     figure = distributions.effect_versus_evidence_figure(effect, stat)
     text = " ".join(artist.get_text() for artist in figure.texts)
-    assert "random sample" in text
+    assert "core voxels sampled" in text
+    assert "drawn" in text
     drawn = figure.axes[0].collections[0].get_offsets()
     assert len(drawn) < 60_000
     plt.close(figure)
@@ -523,8 +526,8 @@ def _summary(**overrides) -> inference.SignFlipSummary:
     params = dict(
         height=7.02,
         survivors=38,
-        global_p=0.0606,
-        p_floor=0.0606,
+        global_p=0.03125,
+        p_floor=0.03125,
         n_runs=6,
         n_patterns=32,
         observed_max=8.87,
@@ -535,16 +538,16 @@ def _summary(**overrides) -> inference.SignFlipSummary:
 
 def test_p_floor_accounts_for_the_identity_tie():
     """The unflipped pattern is always in the null and always ties the observed max."""
-    assert inference.sign_flip_p_floor(6) == pytest.approx(2 / 33)
-    assert inference.sign_flip_p_floor(3) == pytest.approx(2 / 5)
+    assert inference.sign_flip_p_floor(6) == pytest.approx(1 / 32)
+    assert inference.sign_flip_p_floor(3) == pytest.approx(1 / 4)
 
 
-def test_six_runs_cannot_reach_a_map_level_p_below_0_05():
+def test_six_runs_can_reach_a_map_level_p_below_0_05():
     """Stated as a property, because it decides whether the p is worth printing."""
-    assert inference.sign_flip_p_floor(6) > 0.05
-    assert inference.sign_flip_p_floor(7) < 0.05
-    assert _summary().floor_limited is True
-    assert _summary(p_floor=0.031, n_runs=7).floor_limited is False
+    assert inference.sign_flip_p_floor(5) > 0.05
+    assert inference.sign_flip_p_floor(6) < 0.05
+    assert _summary().floor_limited is False
+    assert _summary(p_floor=0.0625, n_runs=5).floor_limited is True
 
 
 def test_threshold_context_carries_a_sign_flip_summary():
@@ -556,6 +559,13 @@ def test_threshold_context_carries_a_sign_flip_summary():
 def test_sign_flip_is_optional():
     """A single-run contrast has no null; the table must still build."""
     assert _context(_values()).sign_flip is None
+
+
+def test_sign_flip_table_keeps_its_two_sided_rejection_region():
+    context = _context(_values(), two_sided=False, sign_flip=_summary())
+    _, rows = distributions.threshold_table(context)
+    sign_flip_row = next(row for row in rows if "sign-flip" in row.lower())
+    assert "|z|" in sign_flip_row
 
 
 def test_threshold_table_gains_a_sign_flip_row():
@@ -643,3 +653,63 @@ def test_a_one_sided_threshold_is_drawn_once():
     assert verticals.count(2.3) == 1
     assert -2.3 not in verticals
     plt.close(figure)
+
+
+def test_effect_versus_evidence_draws_every_tail_voxel() -> None:
+    # A uniform sample kept 16% of the tail and, on the study's own map, none of it:
+    # the panel's x axis reached +-0.55 while the map reached +-3.45, so both
+    # threshold lines sat in empty canvas. The tail is what the panel is read for.
+    rng = np.random.default_rng(0)
+    stat = np.concatenate([rng.normal(0, 0.09, 75_000), np.array([-3.45, 2.9, 3.1, 3.45])])
+    effect = stat * 0.04
+
+    figure = distributions.effect_versus_evidence_figure(
+        effect, stat, threshold=2.3, two_sided=True
+    )
+    try:
+        drawn = np.concatenate(
+            [c.get_offsets().data[:, 0] for c in figure.axes[0].collections]
+        )
+    finally:
+        plt.close(figure)
+
+    for extreme in (-3.45, 3.45):
+        assert np.isclose(drawn, extreme).any(), f"|z| = {extreme} was sampled away"
+    assert drawn.size < stat.size, "the dense core should still be subsampled"
+
+
+def test_effect_versus_evidence_is_reproducible_across_calls() -> None:
+    rng = np.random.default_rng(1)
+    stat = rng.normal(0, 1.0, 40_000)
+    effect = stat * 0.05
+
+    def _drawn() -> np.ndarray:
+        figure = distributions.effect_versus_evidence_figure(effect, stat, threshold=2.3)
+        try:
+            return np.sort(
+                np.concatenate(
+                    [c.get_offsets().data[:, 0] for c in figure.axes[0].collections]
+                )
+            )
+        finally:
+            plt.close(figure)
+
+    np.testing.assert_array_equal(_drawn(), _drawn())
+
+
+def test_null_calibration_axis_top_tracks_the_largest_bin() -> None:
+    # The fitted null underflows to exactly zero in its tails, so matplotlib's log
+    # autoscaler set the top from a denormal minimum: measured 3.70e19 against a
+    # largest bin count of ~1,800, leaving the data in the bottom 18% of the panel.
+    rng = np.random.default_rng(0)
+    values = rng.normal(0.0, 0.03, 75_788)
+
+    figure = _figure(values)
+    try:
+        axis = figure.axes[0]
+        top = axis.get_ylim()[1]
+        tallest = max(patch.get_height() for patch in axis.patches)
+    finally:
+        plt.close(figure)
+
+    assert top < tallest * 100, f"axis top {top:.3g} against a tallest bin of {tallest:.0f}"

@@ -60,6 +60,29 @@ class VarianceThreshold(BaseEstimator, TransformerMixin):
         return self._vt.get_feature_names_out(input_features=input_features)
 
 
+def validate_subject_missingness(
+    values: np.ndarray,
+    groups: np.ndarray,
+    max_missingness: float,
+) -> None:
+    """Enforce participant coverage on retained features before any imputation."""
+    values = np.asarray(values, dtype=float)
+    groups = np.asarray(groups)
+    if values.ndim != 2 or groups.shape != (len(values),):
+        raise ValueError("Subject missingness requires a feature matrix and aligned group labels.")
+    if values.shape[1] == 0:
+        raise ValueError("Subject missingness requires at least one retained feature.")
+    if not 0.0 <= max_missingness <= 1.0:
+        raise ValueError("Maximum subject missingness must be in [0, 1].")
+    for group in np.unique(groups):
+        missingness = float(np.mean(~np.isfinite(values[groups == group])))
+        if missingness > max_missingness:
+            raise ValueError(
+                f"Missingness limit exceeded: subject {group} has {missingness:.1%} "
+                f"missingness on retained features, exceeding {max_missingness:.1%}."
+            )
+
+
 class MissingnessThreshold(BaseEstimator, TransformerMixin):
     """Drop features with missingness exceeding a given threshold.
 
@@ -87,27 +110,15 @@ class MissingnessThreshold(BaseEstimator, TransformerMixin):
         missing_rates = np.isnan(X_arr).sum(axis=0) / n_samples
         self.support_mask_ = missing_rates <= self.max_feature_missingness
 
-        # 2. Subject missingness
-        if groups is not None:
-            X_retained = X_arr[:, self.support_mask_]
-            unique_groups = np.unique(groups)
-            for group in unique_groups:
-                group_mask = groups == group
-                if not np.any(group_mask):
-                    continue
-                group_missing = np.isnan(X_retained[group_mask]).sum() / (
-                    group_mask.sum() * X_retained.shape[1]
-                )
-                if group_missing > self.max_subject_missingness:
-                    raise ValueError(
-                        f"Missingness limit exceeded: subject {group} has {group_missing:.1%} "
-                        f"missingness on retained features, exceeding {self.max_subject_missingness:.1%}."
-                    )
-
         if not np.any(self.support_mask_):
             raise ValueError(
                 f"All features dropped due to exceeding {self.max_feature_missingness:.1%} "
                 "missingness limit."
+            )
+
+        if groups is not None:
+            validate_subject_missingness(
+                X_arr[:, self.support_mask_], groups, self.max_subject_missingness
             )
 
         return self

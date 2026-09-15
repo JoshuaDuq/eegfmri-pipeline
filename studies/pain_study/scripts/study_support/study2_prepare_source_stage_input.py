@@ -20,6 +20,10 @@ from studies.pain_study.study2.contributions import (
     standardize_contribution_scores,
 )
 from studies.pain_study.study2.source_stage_design import contribution_bands
+from studies.pain_study.study2.source_stage_trials import (
+    SOURCE_TRIAL_INDEX_COLUMNS,
+    SOURCE_TRIAL_KEY_COLUMNS,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,7 +79,11 @@ def build_config(args: argparse.Namespace) -> dict:
     return config
 
 
-def build_source_stage_frame(context, config) -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_source_stage_frame(
+    context,
+    config,
+    source_trials: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     bands = contribution_bands(config)
     raw_scores = compute_held_out_contribution_scores(
         context,
@@ -90,19 +98,61 @@ def build_source_stage_frame(context, config) -> tuple[pd.DataFrame, pd.DataFram
     )
 
     frame = context.meta.copy().reset_index(drop=True)
-    frame["trial_id"] = np.arange(len(frame), dtype=int)
+    # The contribution scores are keyed by position in the model matrix, so that position
+    # is the join key. The recording's own trial_id has to survive untouched: it is half
+    # of the identity the source rows are matched on.
+    frame["model_row"] = np.arange(len(frame), dtype=int)
     frame["trial_index_within_run"] = pd.to_numeric(
         frame["within_run_trial"],
         errors="raise",
     )
     standardized_columns = ["trial_id", *(f"{column}_z" for column in score_columns)]
     frame = frame.merge(
-        standardized_scores[standardized_columns],
-        on="trial_id",
+        standardized_scores[standardized_columns].rename(columns={"trial_id": "model_row"}),
+        on="model_row",
         how="inner",
         validate="one_to_one",
     )
-    return frame.drop(columns=["trial_id"]), qc
+    return _join_source_rows(frame, source_trials), qc
+
+
+def _join_source_rows(frame: pd.DataFrame, source_trials: pd.DataFrame) -> pd.DataFrame:
+    missing = [
+        column for column in SOURCE_TRIAL_INDEX_COLUMNS if column not in source_trials.columns
+    ]
+    if missing:
+        raise ValueError(f"Study 2 source-trial index is missing columns: {missing}.")
+
+    keys = list(SOURCE_TRIAL_KEY_COLUMNS)
+    left = _normalized_trial_keys(frame, table_name="source-stage frame")
+    right = _normalized_trial_keys(
+        source_trials.loc[:, list(SOURCE_TRIAL_INDEX_COLUMNS)],
+        table_name="source-trial index",
+    )
+    merged = left.merge(right, on=keys, how="left", validate="one_to_one")
+    unmatched = merged["source_row"].isna()
+    if unmatched.any():
+        unresolved = merged.loc[unmatched, keys].to_dict("records")[:5]
+        raise ValueError(
+            f"{int(unmatched.sum())} model trials have no source row; first unresolved: "
+            f"{unresolved}."
+        )
+    merged["source_row"] = merged["source_row"].astype(int)
+    return merged
+
+
+def _normalized_trial_keys(frame: pd.DataFrame, *, table_name: str) -> pd.DataFrame:
+    missing = [column for column in SOURCE_TRIAL_KEY_COLUMNS if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Study 2 {table_name} is missing trial identity columns: {missing}.")
+    normalized = frame.copy()
+    normalized["subject_id"] = normalized["subject_id"].astype(str)
+    for column in ("run", "trial_id"):
+        values = pd.to_numeric(normalized[column], errors="coerce")
+        if values.isna().any():
+            raise ValueError(f"Study 2 {table_name} requires finite {column} values.")
+        normalized[column] = values.astype(int)
+    return normalized
 
 
 def main() -> None:
@@ -115,7 +165,14 @@ def main() -> None:
         task=args.task,
         config=_study1_capable_config(config),
     )
-    frame, contribution_qc = build_source_stage_frame(context, config)
+    source_trials_path = paths.source_trial_index_path(config)
+    if not source_trials_path.exists():
+        raise FileNotFoundError(
+            "Study 2 source-stage input needs the source-trial index written by the "
+            f"source-power stage: {source_trials_path}"
+        )
+    source_trials = pd.read_csv(source_trials_path, sep="\t")
+    frame, contribution_qc = build_source_stage_frame(context, config, source_trials)
 
     output_path = paths.source_stage_frame_path(config)
     output_path.parent.mkdir(parents=True, exist_ok=True)

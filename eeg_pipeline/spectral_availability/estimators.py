@@ -60,6 +60,29 @@ def morlet_half_support(
     return frequency_array / cycle_array * np.sqrt(np.log(2.0))
 
 
+#: How far MNE's Morlet kernel is carried either side of its centre, in standard
+#: deviations. ``mne.time_frequency.morlet`` builds its time base as
+#: ``arange(0, 5 * sigma_t, 1 / sfreq)`` and mirrors it, so a coefficient at time t is a
+#: weighted sum of the signal over t +/- this many sigma_t.
+_MORLET_TRUNCATION_SIGMAS = 5.0
+
+
+def morlet_temporal_half_support(
+    frequencies: ArrayLike,
+    n_cycles: ArrayLike,
+) -> NDArray[np.float64]:
+    """Return how far either side of its own time point each Morlet coefficient reads, in seconds.
+
+    This is the temporal counterpart of :func:`morlet_half_support`. Selecting
+    coefficients inside a window after the fact does not restrict what they were computed
+    from: a coefficient within this distance of a window edge carries signal from beyond
+    it. A window narrower than twice this cannot be measured at that frequency at all.
+    """
+    frequency_array, cycle_array = _spectral_geometry(frequencies, n_cycles)
+    sigma_t = cycle_array / (2.0 * np.pi * frequency_array)
+    return _MORLET_TRUNCATION_SIGMAS * sigma_t
+
+
 def multitaper_tfr_half_support(
     frequencies: ArrayLike,
     n_cycles: ArrayLike,

@@ -1081,3 +1081,143 @@ def test_the_summary_table_carries_the_confound_columns() -> None:
     assert "r with elapsed time" in table
     assert "r with drift" in table
     assert any("r with elapsed time" in row for row in rows)
+
+
+def test_raster_conditions_defaults_to_every_task_regressor() -> None:
+    # Filtering to the contrast's own weighted columns collapsed the panel to a single
+    # lane for any single-regressor contrast -- a parametric modulator, a main effect
+    # against implicit baseline. Separability, blocking and interleaving all need two.
+    columns = [
+        "main_temp",
+        "param_temp",
+        "vas_rating",
+        "trans_x",
+        "rot_x",
+        "drift_1",
+        "constant",
+    ]
+    chosen = design.raster_conditions(columns, weighted=["param_temp"], mode="task")
+    assert chosen == ["main_temp", "param_temp", "vas_rating"]
+
+
+def test_raster_conditions_can_still_be_narrowed_to_the_contrast() -> None:
+    columns = ["main_temp", "param_temp", "trans_x", "constant"]
+    assert design.raster_conditions(columns, weighted=["param_temp"], mode="weighted") == [
+        "param_temp"
+    ]
+
+
+def test_raster_conditions_rejects_an_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="raster_conditions"):
+        design.raster_conditions(["a"], weighted=["a"], mode="sideways")
+
+
+def test_the_raster_marks_which_conditions_the_contrast_weights() -> None:
+    # Drawing every task condition is only readable if the weighted ones are still
+    # identifiable; the VIF panel already uses orange for exactly this.
+    onsets = [{"main_temp": np.array([10.0]), "param_temp": np.array([20.0])}]
+    figure = design.event_raster_figure(
+        onsets,
+        run_labels=["run-01"],
+        condition_names=["main_temp", "param_temp"],
+        weighted=["param_temp"],
+        tr_seconds=1.0,
+    )
+    try:
+        legend = figure.axes[0].get_legend()
+        labels = [entry.get_text() for entry in legend.get_texts()]
+    finally:
+        plt.close(figure)
+
+    assert any("param_temp" in label and "weighted" in label for label in labels)
+    assert any(label == "main_temp" for label in labels)
+
+
+def test_modelled_nuisance_conditions_are_their_own_block() -> None:
+    # The block was labelled "Task (8)" while carrying three nuis_* columns, so the
+    # count disagreed with the prefix the pipeline itself uses to mark them.
+    columns = [
+        "main_temp",
+        "nuis_fixation_rest",
+        "param_temp",
+        "trans_x",
+        "drift_1",
+        "constant",
+    ]
+    ordered, groups = design.classify_regressors(columns)
+    names = {group.name: group.size for group in groups}
+
+    assert names["Task"] == 2
+    assert names["Modelled nuisance"] == 1
+    # Ordering still groups by role, and nuisance conditions stay beside the task ones.
+    assert ordered[:3] == ["main_temp", "param_temp", "nuis_fixation_rest"]
+
+
+def test_a_custom_nuisance_prefix_is_honoured() -> None:
+    # The prefix is a naming convention, not a fact about any paradigm.
+    _ordered, groups = design.classify_regressors(
+        ["main_temp", "junk_blink"], nuisance_prefixes=("junk_",)
+    )
+    assert {group.name for group in groups} == {"Task", "Modelled nuisance"}
+
+
+def test_the_raster_still_draws_modelled_nuisance_conditions() -> None:
+    # They have onsets, and what the weighted condition is interleaved against is
+    # exactly what the panel is read for.
+    chosen = design.raster_conditions(
+        ["main_temp", "nuis_rest", "trans_x", "constant"],
+        weighted=["main_temp"],
+        mode="task",
+    )
+    assert chosen == ["main_temp", "nuis_rest"]
+
+
+def test_every_raster_condition_gets_its_own_colour() -> None:
+    # Two conditions drawn in the same colour cannot be told apart, which defeats the
+    # comparison the panel exists for. Okabe-Ito has exactly as many entries as the
+    # raster's condition cap, so no assignment ever needs to repeat one.
+    names = [f"cond_{index}" for index in range(design.MAX_RASTER_CONDITIONS)]
+    onsets = [{name: np.array([10.0 * index]) for index, name in enumerate(names)}]
+    figure = design.event_raster_figure(
+        onsets,
+        run_labels=["run-01"],
+        condition_names=names,
+        weighted=[names[3]],
+        tr_seconds=1.0,
+    )
+    try:
+        colours = [
+            tuple(np.ravel(handle.get_color()))
+            for handle in figure.axes[0].get_legend().legend_handles
+        ]
+    finally:
+        plt.close(figure)
+
+    assert len(set(colours)) == len(names), "two conditions share a colour"
+
+
+def test_the_raster_title_clears_its_legend() -> None:
+    # The legend sits above the axes; with enough conditions it wraps to a second row
+    # and the title landed on top of it. Compared as rendered boxes rather than as a
+    # pad value, because overlap is the property that matters.
+    names = [f"cond_{index}" for index in range(6)]
+    figure = design.event_raster_figure(
+        [{name: np.array([10.0]) for name in names}],
+        run_labels=["run-01"],
+        condition_names=names,
+        weighted=[names[0]],
+        tr_seconds=1.0,
+        title="a title",
+    )
+    try:
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        axis = figure.axes[0]
+        title_box = axis.title.get_window_extent(renderer)
+        legend_box = axis.get_legend().get_window_extent(renderer)
+    finally:
+        plt.close(figure)
+
+    assert title_box.y0 >= legend_box.y1 - 1.0, (
+        f"title starts at y {title_box.y0:.1f}, legend ends at {legend_box.y1:.1f}"
+    )

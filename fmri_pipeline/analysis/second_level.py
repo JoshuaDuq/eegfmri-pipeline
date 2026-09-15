@@ -1526,6 +1526,32 @@ def prepare_second_level_input(
     return prepared
 
 
+def _build_permutation_design(design_matrix: pd.DataFrame, contrast_spec: Any) -> pd.DataFrame:
+    """Express a t-contrast as one tested column while retaining every nuisance effect.
+
+    Nilearn's permutation wrapper drops all columns with nonzero contrast weights
+    from its nuisance model. A basis along the contrast and its null space preserves
+    the original model and makes the tested coefficient proportional to c @ beta.
+    """
+    from scipy.linalg import norm, null_space
+
+    columns = list(design_matrix.columns)
+    _validate_second_level_contrast_spec(
+        contrast_spec=contrast_spec, design_columns=columns, stat_type="t"
+    )
+    contrast = (
+        _evaluate_second_level_contrast_expression(contrast_spec, columns)
+        if isinstance(contrast_spec, str)
+        else np.asarray(contrast_spec, dtype=float)
+    )
+    direction = contrast / norm(contrast)
+    basis = np.column_stack([direction, null_space(direction[None, :])])
+    names = ["tested_contrast", *[f"nuisance_{i}" for i in range(1, len(columns))]]
+    return pd.DataFrame(
+        design_matrix.to_numpy(dtype=float) @ basis, columns=names, index=design_matrix.index
+    )
+
+
 def run_second_level_analysis(
     *,
     config: SecondLevelConfig,
@@ -1615,8 +1641,8 @@ def run_second_level_analysis(
             progress.step("Run second-level permutation inference")
         permutation_output = non_parametric_inference(
             second_level_input=[str(path) for path in prepared.image_paths],
-            design_matrix=prepared.design_matrix,
-            second_level_contrast=prepared.contrast_spec,
+            design_matrix=_build_permutation_design(prepared.design_matrix, prepared.contrast_spec),
+            second_level_contrast="tested_contrast",
             mask=analysis_mask_img,
             model_intercept=False,
             n_perm=config.permutation.n_permutations,

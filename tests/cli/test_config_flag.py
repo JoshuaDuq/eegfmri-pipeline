@@ -57,7 +57,7 @@ def test_validate_config_only_reports_without_reading_derivatives(tmp_path, caps
     from eeg_pipeline.utils.config.loader import load_config
 
     study = tmp_path / "study.yaml"
-    study.write_text('extends: "eeg_only"\n', encoding="utf-8")
+    study.write_text('extends: "rest"\n', encoding="utf-8")
 
     args = argparse.Namespace(
         mode="config",

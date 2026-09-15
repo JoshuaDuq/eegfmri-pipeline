@@ -2918,3 +2918,163 @@ def test_parametric_column_describes_the_contrast_not_the_model() -> None:
     from fmri_pipeline.analysis.second_level import _FIRST_LEVEL_CONTRAST_FIELDS
 
     assert "parametric_column" in _FIRST_LEVEL_CONTRAST_FIELDS
+
+
+@pytest.mark.parametrize("method", ["beta-series", "lss"])
+def test_trial_signature_scoring_uses_each_runs_own_coverage_mask(
+    tmp_path: Path,
+    method: str,
+) -> None:
+    """Each trial must be scored against the mask its own run was fitted in.
+
+    Voxels outside the fitted run mask come back as zero-valued beta background but
+    still sit inside the fixed scoring extent, so a truncated run yields attenuated
+    targets whose support statistics look untouched. Coverage has to be enforced per
+    trial; the condition summaries' union of contributing run masks cannot establish
+    it for any individual trial.
+    """
+    nib = pytest.importorskip("nibabel")
+
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=[1, 2],
+        task="pain",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="none",
+        method=method,
+        write_condition_betas=False,
+        write_trial_betas=False,
+        write_trial_variances=False,
+    )
+
+    signature_root = tmp_path / "signatures"
+    signature_root.mkdir()
+    signature_path = signature_root / "sig.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4)), signature_path)
+    signature_mask_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4))
+
+    truncated_voxel = (0, 0, 0)
+    discovered_runs = []
+    mask_paths = {}
+    run_mask_data = {}
+    for run_num in (1, 2):
+        bold_path = tmp_path / f"run-{run_num:02d}_bold.nii.gz"
+        events_path = tmp_path / f"run-{run_num:02d}_events.tsv"
+        mask_path = tmp_path / f"run-{run_num:02d}_mask.nii.gz"
+        nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 4), dtype=np.float32), np.eye(4)), bold_path)
+        pd.DataFrame(
+            {
+                "onset": [0.0, 1.0],
+                "duration": [1.0, 1.0],
+                "trial_type": ["pain", "rest"],
+            }
+        ).to_csv(events_path, sep="\t", index=False)
+        mask_data = np.ones((2, 2, 2), dtype=np.uint8)
+        # Run 2 is truncated: this voxel was never fitted there.
+        mask_data[truncated_voxel] = int(run_num == 1)
+        nib.save(nib.Nifti1Image(mask_data, np.eye(4)), mask_path)
+        run_mask_data[run_num] = mask_data
+        discovered_runs.append((run_num, bold_path, events_path, None))
+        mask_paths[bold_path] = mask_path
+
+    class FakeFirstLevelModel:
+        def __init__(self, run_num: int):
+            columns = (
+                [
+                    f"trial_run-{run_num:02d}_001_a",
+                    f"trial_run-{run_num:02d}_002_b",
+                ]
+                if method == "beta-series"
+                else ["target"]
+            )
+            self.design_matrices_ = [pd.DataFrame(np.ones((4, len(columns))), columns=columns)]
+
+        def fit(self, *_args, **_kwargs):
+            return self
+
+        def compute_contrast(self, _contrast, *, output_type):
+            data = np.ones((2, 2, 2), dtype=np.float32)
+            if output_type == "effect_variance":
+                return nib.Nifti1Image(data, np.eye(4))
+            return nib.Nifti1Image(data, np.eye(4))
+
+    trial_calls: list[dict] = []
+    # LSS fits one model per trial; beta-series fits one per run.
+    models_per_run = 2 if method == "lss" else 1
+    models = iter(
+        FakeFirstLevelModel(run_num) for run_num in (1, 2) for _ in range(models_per_run)
+    )
+
+    def capture_signature_call(**kwargs):
+        trial_calls.append(kwargs)
+        return [
+            SignatureResult(
+                name="SIG",
+                weight_path=signature_path,
+                n_voxels=8,
+                dot=1.0,
+                cosine=1.0,
+                pearson_r=1.0,
+            )
+        ]
+
+    with (
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._discover_runs",
+            return_value=discovered_runs,
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+            side_effect=lambda bold_path: mask_paths[bold_path],
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+            return_value=2.0,
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+            side_effect=lambda **kwargs: next(models),
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._validate_design_matrices",
+            return_value=None,
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures.compute_signature_expression",
+            side_effect=capture_signature_call,
+        ),
+    ):
+        run_trial_signature_extraction_for_subject(
+            bids_fmri_root=tmp_path,
+            bids_derivatives=tmp_path,
+            deriv_root=tmp_path / "derivatives",
+            subject="0001",
+            cfg=cfg,
+            signature_root=signature_root,
+            signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+            signature_mask_img=signature_mask_img,
+        )
+
+    # Two trials per run, then the condition/group summaries.
+    per_trial_calls = trial_calls[:4]
+    assert len(per_trial_calls) == 4
+
+    for call in per_trial_calls:
+        assert call["mask_img"] is signature_mask_img
+        assert call["coverage_mask_img"] is not None
+
+    run_one_coverage = per_trial_calls[0]["coverage_mask_img"].get_fdata()
+    run_two_coverage = per_trial_calls[2]["coverage_mask_img"].get_fdata()
+    assert bool(run_one_coverage[truncated_voxel])
+    assert not bool(run_two_coverage[truncated_voxel])

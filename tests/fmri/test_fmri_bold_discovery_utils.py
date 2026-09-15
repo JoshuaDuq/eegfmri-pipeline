@@ -18,6 +18,7 @@ from fmri_pipeline.utils.bold_discovery import (
     get_tr_from_bold,
     select_confounds_for_glm,
     select_consistent_run_source,
+    slice_time_ref_from_bold,
     select_confound_columns,
     select_confounds,
     validate_design_matrices,
@@ -142,6 +143,7 @@ def test_build_first_level_model_coerces_and_filters_optional_float_settings() -
             self,
             *,
             t_r: float,
+            slice_time_ref: float,
             hrf_model: str,
             drift_model: str | None,
             high_pass: float | None,
@@ -155,6 +157,7 @@ def test_build_first_level_model_coerces_and_filters_optional_float_settings() -
         ) -> None:
             self.params = {
                 "t_r": t_r,
+                "slice_time_ref": slice_time_ref,
                 "hrf_model": hrf_model,
                 "drift_model": drift_model,
                 "high_pass": high_pass,
@@ -483,3 +486,91 @@ def test_select_consistent_run_source_uses_raw_only_when_no_preproc_exists() -> 
 
     assert source == "bids_raw"
     assert preproc_by_run == {1: None, 2: None}
+
+
+def test_slice_time_ref_from_bold_divides_start_time_by_tr(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0014_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    bold_path.with_name("sub-0014_task-thermalactive_run-01_desc-preproc_bold.json").write_text(
+        json.dumps(
+            {
+                "RepetitionTime": 0.9,
+                "SliceTimingCorrected": True,
+                "StartTime": 0.416,
+            }
+        )
+    )
+
+    assert slice_time_ref_from_bold(bold_path, tr=0.9) == pytest.approx(0.416 / 0.9)
+
+
+def test_slice_time_ref_from_bold_is_zero_without_slice_timing_correction(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0014_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    bold_path.with_name("sub-0014_task-thermalactive_run-01_desc-preproc_bold.json").write_text(
+        json.dumps({"RepetitionTime": 0.9, "SliceTimingCorrected": False})
+    )
+
+    assert slice_time_ref_from_bold(bold_path, tr=0.9) == 0.0
+
+
+def test_slice_time_ref_from_bold_rejects_corrected_data_without_start_time(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0014_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    bold_path.with_name("sub-0014_task-thermalactive_run-01_desc-preproc_bold.json").write_text(
+        json.dumps({"RepetitionTime": 0.9, "SliceTimingCorrected": True})
+    )
+
+    with pytest.raises(ValueError, match="StartTime"):
+        slice_time_ref_from_bold(bold_path, tr=0.9)
+
+
+def test_slice_time_ref_from_bold_rejects_start_time_beyond_one_tr(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0014_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    bold_path.with_name("sub-0014_task-thermalactive_run-01_desc-preproc_bold.json").write_text(
+        json.dumps({"RepetitionTime": 0.9, "SliceTimingCorrected": True, "StartTime": 1.4})
+    )
+
+    with pytest.raises(ValueError, match="StartTime"):
+        slice_time_ref_from_bold(bold_path, tr=0.9)
+
+
+def test_build_first_level_model_samples_the_design_at_the_slice_timing_reference() -> None:
+    class FakeFirstLevelModel:
+        def __init__(self, **kwargs) -> None:
+            self.params = kwargs
+
+    fake_first_level = types.ModuleType("nilearn.glm.first_level")
+    fake_first_level.FirstLevelModel = FakeFirstLevelModel
+    fake_glm = types.ModuleType("nilearn.glm")
+    fake_glm.first_level = fake_first_level
+    fake_nilearn = types.ModuleType("nilearn")
+    fake_nilearn.glm = fake_glm
+
+    cfg = SimpleNamespace(
+        low_pass_hz=None,
+        high_pass_hz=0.008,
+        hrf_model="spm",
+        drift_model="cosine",
+        smoothing_fwhm=None,
+    )
+
+    with patch.dict(
+        sys.modules,
+        {
+            "nilearn": fake_nilearn,
+            "nilearn.glm": fake_glm,
+            "nilearn.glm.first_level": fake_first_level,
+        },
+    ):
+        model = build_first_level_model(tr=0.9, cfg=cfg, slice_time_ref=0.416 / 0.9)
+
+    assert model.params["slice_time_ref"] == pytest.approx(0.416 / 0.9)
+
+
+def test_slice_time_ref_from_bold_is_zero_without_a_sidecar(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0014_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+
+    assert slice_time_ref_from_bold(bold_path, tr=0.9) == 0.0

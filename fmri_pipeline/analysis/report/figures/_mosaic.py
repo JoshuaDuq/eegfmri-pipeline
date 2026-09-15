@@ -33,8 +33,15 @@ from typing import Any, Callable, Optional, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fmri_pipeline.analysis.report.figures._display import cut_coords_for
-from fmri_pipeline.analysis.report.style import GUIDE_COLOR
+from fmri_pipeline.analysis.report.figures._display import (
+    MIN_SLICE_AREA_FRACTION,
+    cut_coords_for,
+)
+from fmri_pipeline.analysis.report.style import (
+    GUIDE_COLOR,
+    PROVENANCE_FONTSIZE,
+    wrap_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +224,32 @@ def draw_colorbar(
             )
 
 
+def stamp_empty(figure: plt.Figure, message: str) -> None:
+    """Write across a panel that drew no voxels, saying why.
+
+    Drawing the panel rather than suppressing it is right: an absent panel is
+    ambiguous between "nothing survived" and "the stage failed", and this report's
+    standing principle is to show measurements rather than hide them. What was missing
+    is the statement *on the figure*. The count lived in 6.5-point grey at the foot of
+    the provenance strip, so a reader scanning the report saw a bare brain and had to
+    hunt for the reason.
+
+    Placed over the tile grid rather than beside it, because the empty tiles are what
+    the reader is trying to interpret.
+    """
+    figure.text(
+        (_LEFT + _RIGHT) / 2.0,
+        (_BOTTOM + _TOP) / 2.0,
+        message,
+        ha="center",
+        va="center",
+        fontsize=10,
+        color=GUIDE_COLOR,
+        bbox={"facecolor": "white", "edgecolor": "#d0d0d0", "boxstyle": "round,pad=0.5"},
+        zorder=10,
+    )
+
+
 def mosaic_figure(
     plot_row: Callable[[plt.Figure, Tuple[float, float, float, float], str, Sequence[float]], None],
     *,
@@ -224,6 +257,7 @@ def mosaic_figure(
     mask_img: Any = None,
     directions: Sequence[Tuple[str, str]] = DEFAULT_DIRECTIONS,
     n_cuts: int = DEFAULT_CUTS_PER_ROW,
+    min_area_fraction: float = MIN_SLICE_AREA_FRACTION,
     title: str = "",
     provenance: Sequence[str] = (),
     colorbar: Optional[ColorbarSpec] = None,
@@ -252,7 +286,13 @@ def mosaic_figure(
 
     for index, (direction, name) in enumerate(rows):
         y0 = _TOP - (index + 1) * band
-        cuts = cut_coords_for(reference_img, direction, n_cuts, mask_img=mask_img)
+        cuts = cut_coords_for(
+            reference_img,
+            direction,
+            n_cuts,
+            mask_img=mask_img,
+            min_area_fraction=min_area_fraction,
+        )
         rect = (_LEFT, y0 + 0.030, _RIGHT - _LEFT, band - 0.042)
         try:
             plot_row(figure, rect, direction, cuts)
@@ -288,15 +328,24 @@ def mosaic_figure(
         # Placed inside the canvas rather than through annotate_provenance's
         # below-canvas strip: this figure sets its own axes rectangles, so there is
         # already a reserved band and no tight bounding box to grow into it.
-        figure.text(
-            _LEFT - 0.008,
-            _PROVENANCE_Y,
-            "  ·  ".join(str(line) for line in provenance if line),
-            ha="left",
-            va="center",
-            fontsize=6.5,
-            color=GUIDE_COLOR,
+        #
+        # Wrapped to the tile grid's width all the same. The band is reserved for one
+        # line, so a longer strip would otherwise run past _RIGHT and widen the saved
+        # image exactly as it did below the canvas.
+        wrapped = wrap_provenance(
+            provenance, width_points=(_RIGHT - _LEFT) * figwidth * 72.0
         )
+        step = (PROVENANCE_FONTSIZE * 1.45) / figure.get_figheight() / 72.0
+        for index, line in enumerate(reversed(wrapped)):
+            figure.text(
+                _LEFT - 0.008,
+                _PROVENANCE_Y + index * step,
+                line,
+                ha="left",
+                va="center",
+                fontsize=PROVENANCE_FONTSIZE,
+                color=GUIDE_COLOR,
+            )
     return figure
 
 
@@ -322,5 +371,6 @@ __all__ = [
     "ColorbarSpec",
     "draw_colorbar",
     "mosaic_figure",
+    "stamp_empty",
     "suppressed_band",
 ]

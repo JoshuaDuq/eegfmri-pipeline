@@ -21,9 +21,10 @@ import logging
 import shutil
 import subprocess
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, List, Tuple
+from typing import Any, Callable, Dict, Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -46,7 +47,11 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     is_effective_permutation,
     safe_pearsonr,
 )
-from eeg_pipeline.analysis.machine_learning.circular_shift import admissible_circular_shifts
+from eeg_pipeline.analysis.machine_learning.circular_shift import (
+    MIN_RETAINED_TRIALS,
+    circular_shift_group,
+    is_permutation_valid_run,
+)
 from eeg_pipeline.analysis.machine_learning.pipelines import (
     create_elasticnet_pipeline,
     create_ridge_pipeline,
@@ -338,17 +343,12 @@ def _validate_permutation_trial_indices(
     return trial_arr.astype(int)
 
 
-def _admissible_circular_shifts(
-    trial_indices: np.ndarray,
-    *,
-    min_retained_trials: int = 8,
-    original_block_length: int = 11,
-) -> tuple[int, ...]:
-    return admissible_circular_shifts(
-        trial_indices,
-        min_retained_trials=min_retained_trials,
-        original_block_length=original_block_length,
-    )
+def _circular_shift_group(trial_indices: np.ndarray) -> tuple[int, ...]:
+    """The shifts a run may be permuted by, or nothing if the run is too short."""
+    retained = np.asarray(trial_indices, dtype=int)
+    if not is_permutation_valid_run(retained):
+        return tuple()
+    return circular_shift_group(retained.size)
 
 
 def _trial_index_ordered_indices(
@@ -401,16 +401,15 @@ def _permutation_indices_by_scheme(
                     run_global_idx,
                     trial_indices_arr,
                 )
-                admissible_shifts = _admissible_circular_shifts(
-                    trial_indices_arr[run_global_idx],
-                )
-                if not admissible_shifts:
+                shift_group = _circular_shift_group(trial_indices_arr[run_global_idx])
+                if not shift_group:
                     raise ValueError(
-                        "circular_shift_within_run requires permutation-valid runs "
-                        "with at least 8 retained trials and a nonzero maximally "
-                        "separated circular shift."
+                        "circular_shift_within_run requires permutation-valid runs with at "
+                        f"least {MIN_RETAINED_TRIALS} retained trials."
                     )
-                shift = int(rng.choice(np.asarray(admissible_shifts, dtype=int)))
+                # Uniform over the whole cycle, identity included: a draw is a group
+                # element, not a choice among the shifts that move trials furthest.
+                shift = int(rng.choice(np.asarray(shift_group, dtype=int)))
                 source_indices[run_global_idx] = np.roll(
                     source_indices[run_global_idx],
                     shift,
@@ -556,8 +555,7 @@ def filter_circular_shift_permutation_rows(
             block_mask = subject_blocks == block_id
             block_indices = subject_indices[block_mask]
             block_indices = _trial_index_ordered_indices(block_indices, trial_indices)
-            admissible_shifts = _admissible_circular_shifts(trial_indices[block_indices])
-            if admissible_shifts:
+            if is_permutation_valid_run(trial_indices[block_indices]):
                 valid_run_mask[block_indices] = True
                 continue
             invalid_run_records.append(
@@ -3589,6 +3587,161 @@ def _fit_estimator_with_optional_groups(
     return estimator.fit(X, y, **fit_params)
 
 
+@dataclass(frozen=True)
+class _InnerSplitData:
+    """One inner split's features and targets, transformed inside that split."""
+
+    X_fit: np.ndarray
+    y_fit: np.ndarray
+    X_score: np.ndarray
+    y_score: np.ndarray
+
+
+@dataclass(frozen=True)
+class _StagedResidualPreprocessor:
+    """The staged residual pipeline's learned parameters, fitted on one set of rows.
+
+    Everything here is learned from data: which features clear the missingness policy,
+    the medians that fill their gaps, the nuisance coefficients regressed out of features
+    and target, and the Yeo-Johnson fit applied to the residual target. That makes it a
+    preprocessing stage, and a preprocessing stage fitted on rows that later serve as
+    validation rows is leakage. It therefore has to be refitted inside every training
+    split it is asked to serve, including each inner split of the hyperparameter search.
+    """
+
+    columns: Tuple[str, ...]
+    feature_support: np.ndarray
+    feature_medians: np.ndarray
+    feature_coefficients: np.ndarray
+    target_coefficients: np.ndarray
+    power_transform: Any
+    n_fit_rows: int
+    max_subject_missingness: float
+
+    def _design(self, meta: pd.DataFrame, rows: np.ndarray, *, check_rank: bool) -> np.ndarray:
+        from eeg_pipeline.analysis.machine_learning.target_residualization import _design_matrix
+
+        return _design_matrix(meta.iloc[rows], self.columns, check_rank=check_rank)
+
+    def transform_features(
+        self,
+        X: np.ndarray,
+        meta: pd.DataFrame,
+        rows: np.ndarray,
+        groups: np.ndarray,
+    ) -> np.ndarray:
+        from eeg_pipeline.analysis.machine_learning.preprocessing import validate_subject_missingness
+
+        values = _finite_feature_block(X, rows)[:, self.feature_support]
+        validate_subject_missingness(values, np.asarray(groups)[rows], self.max_subject_missingness)
+        filled = np.where(np.isnan(values), self.feature_medians[None, :], values)
+        return filled - self._design(meta, rows, check_rank=False) @ self.feature_coefficients
+
+    def nuisance_prediction(self, meta: pd.DataFrame, rows: np.ndarray) -> np.ndarray:
+        return self._design(meta, rows, check_rank=False) @ self.target_coefficients
+
+    def transform_target(
+        self,
+        y: np.ndarray,
+        meta: pd.DataFrame,
+        rows: np.ndarray,
+    ) -> np.ndarray:
+        residual = np.asarray(y, dtype=float)[rows] - self.nuisance_prediction(meta, rows)
+        return self.power_transform.transform(residual.reshape(-1, 1)).flatten()
+
+    def inverse_transform_target(self, values: np.ndarray) -> np.ndarray:
+        return self.power_transform.inverse_transform(
+            np.asarray(values, dtype=float).reshape(-1, 1)
+        ).flatten()
+
+
+def _finite_feature_block(X: np.ndarray, rows: np.ndarray) -> np.ndarray:
+    values = np.asarray(X, dtype=float)[np.asarray(rows, dtype=int)].copy()
+    values[~np.isfinite(values)] = np.nan
+    return values
+
+
+def _fit_staged_residual_preprocessor(
+    *,
+    X: np.ndarray,
+    y: np.ndarray,
+    meta: pd.DataFrame,
+    groups: np.ndarray,
+    rows: np.ndarray,
+    columns: Tuple[str, ...],
+    config: Any,
+) -> _StagedResidualPreprocessor:
+    """Learn the staged residual pipeline from ``rows`` alone."""
+    from sklearn.preprocessing import PowerTransformer
+
+    from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+    from eeg_pipeline.analysis.machine_learning.preprocessing import validate_subject_missingness
+    from eeg_pipeline.analysis.machine_learning.target_residualization import _design_matrix
+
+    cfg = get_ml_config(config)
+    fit_rows = np.asarray(rows, dtype=int)
+    values = _finite_feature_block(X, fit_rows)
+
+    # Before the least-squares solve, not after it: a NaN anywhere in a column makes the
+    # whole column's fitted coefficients and residuals NaN, which reads downstream as a
+    # feature that was never measured rather than one value that was missing.
+    max_missing = float(cfg.get("max_feature_missingness", 0.05))
+    missing_rate = (
+        np.isnan(values).sum(axis=0) / values.shape[0]
+        if values.shape[0]
+        else np.ones(values.shape[1])
+    )
+    support = missing_rate <= max_missing
+    if not np.any(support):
+        raise ValueError(
+            f"Every feature exceeds the {max_missing:.1%} missingness limit on this "
+            "training split; nothing is left to residualize."
+        )
+
+    kept = values[:, support]
+    max_subject_missingness = float(cfg.get("max_subject_missingness", 0.10))
+    validate_subject_missingness(kept, np.asarray(groups)[fit_rows], max_subject_missingness)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "All-NaN slice encountered", RuntimeWarning)
+        medians = np.nanmedian(kept, axis=0)
+    if not np.all(np.isfinite(medians)):
+        raise ValueError(
+            "A feature retained by the missingness policy has no finite training value "
+            "to impute from."
+        )
+    imputed = np.where(np.isnan(kept), medians[None, :], kept)
+
+    design = _design_matrix(meta.iloc[fit_rows], columns, check_rank=True)
+    feature_coefficients, *_ = np.linalg.lstsq(design, imputed, rcond=None)
+
+    y_fit = np.asarray(y, dtype=float)[fit_rows]
+    if not np.all(np.isfinite(y_fit)):
+        raise ValueError("Staged residual learning requires finite training target values.")
+    if y_fit.size <= design.shape[1]:
+        raise ValueError(
+            "Staged residual learning requires more training rows than nuisance parameters: "
+            f"rows={y_fit.size}, parameters={design.shape[1]}."
+        )
+    target_coefficients, *_ = np.linalg.lstsq(design, y_fit, rcond=None)
+
+    power_transform = PowerTransformer(
+        method=cfg.get("power_transformer_method", "yeo-johnson"),
+        standardize=cfg.get("power_transformer_standardize", True),
+    )
+    power_transform.fit((y_fit - design @ target_coefficients).reshape(-1, 1))
+
+    return _StagedResidualPreprocessor(
+        columns=tuple(columns),
+        feature_support=support,
+        feature_medians=medians,
+        feature_coefficients=feature_coefficients,
+        target_coefficients=target_coefficients,
+        power_transform=power_transform,
+        n_fit_rows=int(fit_rows.size),
+        max_subject_missingness=max_subject_missingness,
+    )
+
+
 def _fit_subject_weighted_inner_cv_estimator(
     *,
     base_estimator: Any,
@@ -3597,32 +3750,58 @@ def _fit_subject_weighted_inner_cv_estimator(
     y_train: np.ndarray,
     groups_train: np.ndarray,
     inner_splits: int,
+    inner_preprocessor: Optional[Callable[[np.ndarray, np.ndarray], _InnerSplitData]] = None,
 ) -> Any:
+    """Select hyperparameters by subject-weighted inner cross-validation.
+
+    ``inner_preprocessor`` rebuilds the staged residual pipeline from each inner training
+    split. Without it, the features and targets handed in here were transformed using the
+    whole outer training cohort, so every inner validation participant's own data helped
+    shape the numbers used to score it -- and the selection is no longer nested.
+    """
     inner_cv = create_inner_cv(groups_train, inner_splits)
     candidates = list(ParameterGrid(param_grid))
     if not candidates:
         raise ValueError("Model comparison inner CV received an empty parameter grid.")
 
+    splits = [
+        (np.asarray(inner_train_idx, dtype=int), np.asarray(inner_test_idx, dtype=int))
+        for inner_train_idx, inner_test_idx in inner_cv.split(X_train, y_train, groups_train)
+    ]
+    prepared = [
+        (
+            inner_preprocessor(inner_train_idx, inner_test_idx)
+            if inner_preprocessor is not None
+            else _InnerSplitData(
+                X_fit=X_train[inner_train_idx],
+                y_fit=y_train[inner_train_idx],
+                X_score=X_train[inner_test_idx],
+                y_score=y_train[inner_test_idx],
+            )
+        )
+        for inner_train_idx, inner_test_idx in splits
+    ]
+
     best_params: dict[str, Any] | None = None
     best_score = -np.inf
     for params in candidates:
         subject_scores: list[float] = []
-        for inner_train_idx, inner_test_idx in inner_cv.split(X_train, y_train, groups_train):
+        for (inner_train_idx, inner_test_idx), split in zip(splits, prepared):
             estimator = clone(base_estimator)
             estimator.set_params(**params)
             _fit_estimator_with_optional_groups(
                 estimator,
-                X_train[inner_train_idx],
-                y_train[inner_train_idx],
+                split.X_fit,
+                split.y_fit,
                 groups_train[inner_train_idx],
             )
-            fold_pred = estimator.predict(X_train[inner_test_idx])
+            fold_pred = estimator.predict(split.X_score)
             subject_scores.extend(
                 _subject_weighted_r2_scores(
-                    y_true=y_train[inner_test_idx],
+                    y_true=split.y_score,
                     y_pred=np.asarray(fold_pred, dtype=float),
                     groups=groups_train[inner_test_idx],
-                    train_mean=float(np.mean(y_train[inner_train_idx])),
+                    train_mean=float(np.mean(split.y_fit)),
                 )
             )
 
@@ -3686,47 +3865,71 @@ def model_comparison_cv_predictions(
         current_pipe = clone(pipe)
         current_param_grid = resolved_param_grid.copy()
         pt = None
+        inner_preprocessor = None
 
         if target_residualization_columns:
             if residualization_strategy == "staged_residual_learning":
-                from sklearn.preprocessing import PowerTransformer
-                from eeg_pipeline.analysis.machine_learning.config import get_ml_config
-
-                cfg = get_ml_config(config)
-                pt = PowerTransformer(
-                    method=cfg.get("power_transformer_method", "yeo-johnson"),
-                    standardize=cfg.get("power_transformer_standardize", True),
-                )
-
-                nuisance_fit = fit_nuisance_model_for_fold(
+                staged_columns = tuple(target_residualization_columns)
+                # Fitted on the outer training rows for the final refit; the inner
+                # hyperparameter search refits it inside each of its own training splits.
+                staged = _fit_staged_residual_preprocessor(
+                    X=X,
                     y=y,
                     meta=meta,
-                    train_idx=train_idx,
-                    test_idx=test_idx,
-                    columns=target_residualization_columns,
+                    groups=groups,
+                    rows=train_idx,
+                    columns=staged_columns,
+                    config=config,
                 )
-                y_train = pt.fit_transform(nuisance_fit.train_residual.reshape(-1, 1)).flatten()
-                y_test = nuisance_fit.test_target
-                nuisance_test_prediction = nuisance_fit.test_prediction
-                residualization_details = nuisance_fit.details
+                pt = staged.power_transform
+                y_train = staged.transform_target(y, meta, train_idx)
+                y_test = np.asarray(y, dtype=float)[test_idx]
+                nuisance_test_prediction = staged.nuisance_prediction(meta, test_idx)
+                residualization_details = {
+                    "columns": list(staged_columns),
+                    "n_parameters": int(staged.target_coefficients.size),
+                    "n_train": int(np.asarray(train_idx).size),
+                    "n_test": int(np.asarray(test_idx).size),
+                }
 
-                from eeg_pipeline.analysis.machine_learning.target_residualization import (
-                    _design_matrix,
-                )
+                X_train = staged.transform_features(X, meta, train_idx, groups)
+                X_test = staged.transform_features(X, meta, test_idx, groups)
 
-                design_train = _design_matrix(
-                    meta.iloc[train_idx],
-                    tuple(target_residualization_columns),
-                    check_rank=True,
-                )
-                design_test = _design_matrix(
-                    meta.iloc[test_idx],
-                    tuple(target_residualization_columns),
-                    check_rank=False,
-                )
-                coeffs_X, *_ = np.linalg.lstsq(design_train, X_train, rcond=None)
-                X_train = X_train - design_train @ coeffs_X
-                X_test = X_test - design_test @ coeffs_X
+                train_rows = np.asarray(train_idx, dtype=int)
+
+                def inner_preprocessor(
+                    inner_train_idx: np.ndarray,
+                    inner_test_idx: np.ndarray,
+                    *,
+                    _rows: np.ndarray = train_rows,
+                    _columns: Tuple[str, ...] = staged_columns,
+                ) -> _InnerSplitData:
+                    fit_rows = _rows[np.asarray(inner_train_idx, dtype=int)]
+                    score_rows = _rows[np.asarray(inner_test_idx, dtype=int)]
+                    inner_staged = _fit_staged_residual_preprocessor(
+                        X=X,
+                        y=y,
+                        meta=meta,
+                        groups=groups,
+                        rows=fit_rows,
+                        columns=_columns,
+                        config=config,
+                    )
+                    # Harmonized on the inner training subjects too, so the feature set
+                    # this candidate is scored on is defined by the same rows that fitted it.
+                    X_fit, X_score, _ = _apply_fold_feature_harmonization_foldwise(
+                        inner_staged.transform_features(X, meta, fit_rows, groups),
+                        inner_staged.transform_features(X, meta, score_rows, groups),
+                        groups[fit_rows],
+                        harmonization_mode,
+                        n_covariates=len(covariates) if covariates else 0,
+                    )
+                    return _InnerSplitData(
+                        X_fit=X_fit,
+                        y_fit=inner_staged.transform_target(y, meta, fit_rows),
+                        X_score=X_score,
+                        y_score=inner_staged.transform_target(y, meta, score_rows),
+                    )
 
                 from sklearn.compose import TransformedTargetRegressor
 
@@ -3772,6 +3975,7 @@ def model_comparison_cv_predictions(
                 y_train=y_train,
                 groups_train=groups_train,
                 inner_splits=inner_splits,
+                inner_preprocessor=inner_preprocessor,
             )
             fold_pred = estimator.predict(X_test)
             best_params_repr = str(getattr(estimator, "best_params_", {}))
@@ -3962,6 +4166,11 @@ def _model_comparison_permutation_p_value(
     if not 0.0 <= max_invalid_fraction < 1.0:
         raise ValueError("machine_learning.cv.max_invalid_permutation_fraction must be in [0, 1).")
     max_attempts = int(np.ceil(int(n_perm) / (1.0 - max_invalid_fraction)))
+    # Under circular shift the draw itself is the randomization: every element of the
+    # cycle, the identity included, belongs to the null. Discarding the draws that move
+    # fewest labels would reimpose exactly the non-group restriction that invalidates the
+    # upper-tail calculation, so the changed fraction is recorded rather than enforced.
+    enforce_effective_permutation = requested_scheme != "circular_shift_within_run"
     residualization_strategy = _resolve_target_residualization_strategy(config)
     use_staged_residual_permutation = (
         bool(target_residualization_columns)
@@ -4003,7 +4212,7 @@ def _model_comparison_permutation_p_value(
                     y_perm[fold_indices],
                     min_changed_fraction=min_changed_fraction,
                 )
-                if not effective:
+                if enforce_effective_permutation and not effective:
                     effective_permutation = False
                     break
 
@@ -4024,14 +4233,13 @@ def _model_comparison_permutation_p_value(
                     target_residualization_columns=target_residualization_columns,
                     collect_records=True,
                 )
-                fold_scores.extend(
-                    float(rec[score_column])
-                    for rec in permutation_result.records
-                    if np.isfinite(rec.get(score_column, np.nan))
-                )
+                if len(permutation_result.records) != 1:
+                    effective_permutation = False
+                    break
+                fold_scores.append(float(permutation_result.records[0].get(score_column, np.nan)))
             if not effective_permutation:
                 continue
-            if fold_scores:
+            if len(fold_scores) == len(outer_folds) and np.all(np.isfinite(fold_scores)):
                 null_score = float(np.mean(fold_scores))
                 if np.isfinite(null_score):
                     null_scores.append(null_score)
@@ -4046,7 +4254,7 @@ def _model_comparison_permutation_p_value(
             requested_scheme=requested_scheme,
             min_changed_fraction=min_changed_fraction,
         )
-        if not effective:
+        if enforce_effective_permutation and not effective:
             continue
         permutation_result = model_comparison_cv_predictions(
             model_name=model_name,
@@ -4066,11 +4274,10 @@ def _model_comparison_permutation_p_value(
             collect_records=True,
         )
         fold_scores = [
-            float(rec[score_column])
+            float(rec.get(score_column, np.nan))
             for rec in permutation_result.records
-            if np.isfinite(rec.get(score_column, np.nan))
         ]
-        if fold_scores:
+        if len(fold_scores) == len(outer_folds) and np.all(np.isfinite(fold_scores)):
             null_score = float(np.mean(fold_scores))
             if np.isfinite(null_score):
                 null_scores.append(null_score)
@@ -4130,6 +4337,103 @@ def _within_subject_centered_prediction_metrics(
         "within_subject_centered_nuisance_r2": nuisance_r2,
         "within_subject_centered_delta_r2": full_r2 - nuisance_r2,
     }
+
+
+WITHIN_CONDITION_COLUMN_KEY = "machine_learning.evaluation.within_condition_column"
+
+
+def _within_condition_prediction_metrics(
+    predictions: ModelComparisonPredictions,
+    groups: np.ndarray,
+    meta: pd.DataFrame,
+    config: Any,
+) -> Dict[str, Any]:
+    """Score held-out predictions within each participant's repetitions of one condition.
+
+    Removing participant means leaves each participant's temperature-response curve in
+    the signal, so the primary estimand is still partly answered by knowing which
+    condition a trial was. Centring within participant *and* condition removes that too:
+    what is left is the trial-to-trial fluctuation at a fixed stimulus level, which is
+    the quantity the within-person claim is about. Reported descriptively -- nothing
+    here is refitted or calibrated on these outcomes.
+    """
+    column = str(get_config_value(config, WITHIN_CONDITION_COLUMN_KEY, "stimulus_temp")).strip()
+    empty = {
+        "within_condition_centered_full_r2": float("nan"),
+        "within_condition_centered_nuisance_r2": float("nan"),
+        "within_condition_centered_delta_r2": float("nan"),
+        "within_condition_centered_n_subjects": 0,
+        "within_condition_centered_n_trials": 0,
+        "within_condition_column": column,
+    }
+    if column not in meta.columns:
+        return empty
+
+    group_array = np.asarray(groups)
+    target = np.asarray(predictions.evaluation_target, dtype=float)
+    full = np.asarray(predictions.full_prediction, dtype=float)
+    nuisance = np.asarray(predictions.nuisance_prediction, dtype=float)
+    if not (group_array.shape == target.shape == full.shape == nuisance.shape):
+        raise ValueError("Within-condition prediction metrics require aligned 1D arrays.")
+    if len(meta) != len(target):
+        raise ValueError("Within-condition prediction metrics require one meta row per trial.")
+    conditions = meta[column].to_numpy()
+
+    full_scores: list[float] = []
+    nuisance_scores: list[float] = []
+    n_trials = 0
+    for subject_id in np.unique(group_array):
+        subject_mask = group_array == subject_id
+        cells = _within_condition_cells(subject_mask, conditions)
+        if not cells:
+            continue
+        centered_target = _center_within_cells(target, cells)
+        denominator = float(centered_target @ centered_target)
+        if denominator <= 1.0e-12:
+            continue
+        centered_full = _center_within_cells(full, cells)
+        centered_nuisance = _center_within_cells(nuisance, cells)
+        full_residual = centered_target - centered_full
+        nuisance_residual = centered_target - centered_nuisance
+        full_scores.append(1.0 - float(full_residual @ full_residual) / denominator)
+        nuisance_scores.append(1.0 - float(nuisance_residual @ nuisance_residual) / denominator)
+        n_trials += int(sum(cell.size for cell in cells))
+
+    if not full_scores:
+        return empty
+    # Equal participant weighting, matching the primary endpoint.
+    full_r2 = float(np.mean(full_scores))
+    nuisance_r2 = float(np.mean(nuisance_scores))
+    return {
+        "within_condition_centered_full_r2": full_r2,
+        "within_condition_centered_nuisance_r2": nuisance_r2,
+        "within_condition_centered_delta_r2": full_r2 - nuisance_r2,
+        "within_condition_centered_n_subjects": int(len(full_scores)),
+        "within_condition_centered_n_trials": int(n_trials),
+        "within_condition_column": column,
+    }
+
+
+def _within_condition_cells(
+    subject_mask: np.ndarray,
+    conditions: np.ndarray,
+) -> list[np.ndarray]:
+    """Row indices of each condition cell the participant repeated at least twice.
+
+    A cell seen once centres to exactly zero and carries no within-condition
+    information, so it is excluded rather than counted as a trial that was scored.
+    """
+    subject_rows = np.flatnonzero(subject_mask)
+    cells: list[np.ndarray] = []
+    for condition in pd.unique(conditions[subject_rows]):
+        cell_rows = subject_rows[conditions[subject_rows] == condition]
+        if cell_rows.size >= 2:
+            cells.append(cell_rows)
+    return cells
+
+
+def _center_within_cells(values: np.ndarray, cells: list[np.ndarray]) -> np.ndarray:
+    return np.concatenate([values[cell] - values[cell].mean() for cell in cells])
 
 
 def run_model_comparison_ml(
@@ -4354,6 +4658,14 @@ def run_model_comparison_ml(
             groups,
         )
         summary[model_name].update(centered_metrics)
+        summary[model_name].update(
+            _within_condition_prediction_metrics(
+                observed_predictions[model_name],
+                groups,
+                meta,
+                config,
+            )
+        )
         if "r2_nuisance" in model_rows.columns:
             nuisance_r2_vals = pd.to_numeric(
                 model_rows["r2_nuisance"],

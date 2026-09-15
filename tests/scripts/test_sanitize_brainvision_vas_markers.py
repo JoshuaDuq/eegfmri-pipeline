@@ -62,7 +62,7 @@ def test_discover_cohort_recordings_includes_original_and_processed_layouts(
 ) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     original_dir = tmp_path / "sub-0001" / "eeg" / "original_untrimmed_5khz"
-    processed_dir = tmp_path / "sub-0001" / "eeg" / "brainvision_processed_1khz"
+    processed_dir = tmp_path / "sub-0001" / "eeg" / "analyzer_brainvision_processed_1khz"
     original_dir.mkdir(parents=True)
     processed_dir.mkdir(parents=True)
     _write_raw_brainvision_recording(original_dir, basename)
@@ -75,7 +75,7 @@ def test_discover_cohort_recordings_includes_original_and_processed_layouts(
     recordings = discover_cohort_recordings(tmp_path)
 
     assert [(recording.source_layout, recording.run) for recording in recordings] == [
-        ("brainvision_processed_1khz", 1),
+        ("analyzer_brainvision_processed_1khz", 1),
         ("original_untrimmed_5khz", 1),
     ]
 
@@ -201,7 +201,7 @@ def test_stage_recording_reuses_signal_and_changes_only_vas_annotation(tmp_path:
 def test_stage_recording_preserves_processed_layout_and_accepts_1khz(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0015_2026-07-13_10h50.22.477" "_scannerpulse_corrected"
     source_data_root = tmp_path / "source_data"
-    raw_dir = source_data_root / "sub-0015" / "eeg" / "brainvision_processed_1khz"
+    raw_dir = source_data_root / "sub-0015" / "eeg" / "analyzer_brainvision_processed_1khz"
     raw_dir.mkdir(parents=True)
     source_vhdr = _write_raw_brainvision_recording(
         raw_dir,
@@ -214,7 +214,7 @@ def test_stage_recording_preserves_processed_layout_and_accepts_1khz(tmp_path: P
 
     staged_vhdr = Path(manifest_row["staged_vhdr"])
     assert staged_vhdr.relative_to(tmp_path / "staged") == source_vhdr.relative_to(source_data_root)
-    assert manifest_row["source_layout"] == "brainvision_processed_1khz"
+    assert manifest_row["source_layout"] == "analyzer_brainvision_processed_1khz"
     assert manifest_row["sampling_frequency_hz"] == 1_000.0
 
 

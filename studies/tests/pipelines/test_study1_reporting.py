@@ -207,7 +207,7 @@ def _event_row(
     rating: float,
 ) -> dict[str, object]:
     return {
-        "run": run,
+        "run_id": run,
         "trial_number": trial_number,
         "stimulus_temp": stimulus_temp,
         "selected_surface": 1,

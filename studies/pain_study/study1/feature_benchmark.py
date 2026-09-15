@@ -122,6 +122,17 @@ def feature_benchmark_config(
     feature_config["machine_learning.fmri_signature.round_decimals"] = int(
         get_config_value(config, "study1.targets.round_decimals", 3)
     )
+    # The loader audits trial pairing against the protocol's own timing, so the
+    # benchmark's copy of the target config has to carry the study's contract with it.
+    for key in (
+        "onset_offset_s",
+        "onset_tolerance_s",
+        "plateau_duration_s",
+        "duration_tolerance_s",
+    ):
+        feature_config[f"machine_learning.fmri_signature.timing_audit.{key}"] = (
+            get_config_value(config, f"study1.targets.timing_audit.{key}", None)
+        )
     feature_config["machine_learning.preprocessing.subject_standardize_features"] = False
     feature_config["machine_learning.preprocessing.variance_threshold_grid"] = [0.0]
     excluded_channels = get_config_value(

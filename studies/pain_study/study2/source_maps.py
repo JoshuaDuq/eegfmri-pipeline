@@ -227,33 +227,40 @@ def _align_source_power_to_frame(
     if source_arr.ndim != 2:
         raise ValueError(f"Study 2 source_power must be 2D, got shape {source_arr.shape}.")
 
-    trial_column = require_config_string(config, "study2.contributions.trial_column")
-    if trial_column not in frame.columns:
+    # The declared mapping from the source-trial index, not the trial's own identifier:
+    # censoring moves trials within the frame without moving the source-power rows.
+    source_row_column = require_config_string(config, "study2.contributions.source_row_column")
+    if source_row_column not in frame.columns:
         raise ValueError(
-            f"Study 2 source-stage frame is missing required trial column '{trial_column}'."
+            f"Study 2 source-stage frame is missing required source row column "
+            f"'{source_row_column}'."
         )
 
-    trial_ids = _source_power_trial_indices(frame[trial_column], n_source_rows=source_arr.shape[0])
-    return _validate_source_power(source_arr[trial_ids, :], n_trials=len(frame))
+    source_rows = _source_power_row_indices(
+        frame[source_row_column], n_source_rows=source_arr.shape[0]
+    )
+    return _validate_source_power(source_arr[source_rows, :], n_trials=len(frame))
 
 
-def _source_power_trial_indices(trial_ids: pd.Series, *, n_source_rows: int) -> np.ndarray:
-    values = pd.to_numeric(trial_ids, errors="raise").to_numpy(dtype=float)
+def _source_power_row_indices(source_rows: pd.Series, *, n_source_rows: int) -> np.ndarray:
+    values = pd.to_numeric(source_rows, errors="raise").to_numpy(dtype=float)
     if values.ndim != 1:
-        raise ValueError("Study 2 source-stage trial IDs must be one-dimensional.")
+        raise ValueError("Study 2 source rows must be one-dimensional.")
     if not np.all(np.isfinite(values)):
-        raise ValueError("Study 2 source-stage trial IDs must be finite.")
+        raise ValueError("Study 2 source rows must be finite.")
 
     rounded = np.rint(values)
     if not np.allclose(values, rounded):
-        raise ValueError("Study 2 source-stage trial IDs must be integers.")
+        raise ValueError("Study 2 source rows must be integers.")
     indices = rounded.astype(int) - 1
     if np.any(indices < 0) or np.any(indices >= n_source_rows):
         raise ValueError(
-            "Study 2 source-stage trial IDs exceed source_power row bounds: "
+            "Study 2 source rows exceed source_power row bounds: "
             f"min={int(indices.min()) + 1}, max={int(indices.max()) + 1}, "
             f"n_source_rows={n_source_rows}."
         )
+    if len(np.unique(indices)) != len(indices):
+        raise ValueError("Study 2 source rows must address each source-power row at most once.")
     return indices
 
 

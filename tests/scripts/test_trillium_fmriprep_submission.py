@@ -13,14 +13,20 @@ def test_cluster_profiles_define_fmriprep_memory() -> None:
     rorqual_profile = (WORKFLOW_DIR / "clusters" / "rorqual.sh").read_text()
     trillium_profile = (WORKFLOW_DIR / "clusters" / "trillium.sh").read_text()
 
-    assert 'FMRIPREP_SLURM_MEMORY="700G"' in rorqual_profile
+    # Measured peak RSS on rorqual was 18.5-24.2 GB per subject (job 21081408,
+    # anatomical stage). 700G forced every task onto the 9-node cpularge partition;
+    # 64G fits cpubase, which has 314 nodes, so the array runs concurrently.
+    assert 'FMRIPREP_SLURM_MEMORY="64G"' in rorqual_profile
     assert 'FMRIPREP_SLURM_MEMORY=""' in trillium_profile
 
 
-def test_trillium_fmriprep_requests_six_hours() -> None:
+def test_trillium_fmriprep_requests_twelve_hours() -> None:
+    # Full recon-all plus seven BOLD runs does not fit in six hours. Rorqual bands
+    # wall time (3h, 12h, 24h, ...), so 12:00:00 buys headroom inside the same
+    # cpularge_*_b2 partition a six-hour request already lands in -- no queue cost.
     env_file = (WORKFLOW_DIR / "alliance_env.sh").read_text()
 
-    assert 'export ALLIANCE_TIME="06:00:00"' in env_file
+    assert 'export ALLIANCE_TIME="12:00:00"' in env_file
 
 
 def test_trillium_fmriprep_uses_explicit_fmriprep_memory_mb() -> None:

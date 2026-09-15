@@ -44,6 +44,7 @@ from studies.pain_study.study2.source_maps import (
 from studies.pain_study.study2.source_model_qc import evaluate_source_model_qc
 from studies.pain_study.study2.sensor_patterns import compute_sensor_pattern_summary
 from studies.pain_study.study2.source_stage_design import contribution_bands
+from studies.pain_study.study2.source_stage_trials import build_source_trial_index
 from studies.pain_study.study2.source_power import (
     apply_sloreta_inverse,
     build_surface_forward_model,
@@ -177,8 +178,10 @@ def _resolve_anatomy(config: Any, *, subject_id: str) -> _AnatomyPaths:
     )
 
 
-def _load_subject_epochs(config: Any, *, subject_id: str, task: str, logger: Any) -> Any:
-    epochs, _events = load_epochs_for_analysis(
+def _load_subject_epochs(
+    config: Any, *, subject_id: str, task: str, logger: Any
+) -> tuple[Any, pd.DataFrame]:
+    epochs, events = load_epochs_for_analysis(
         subject_id,
         task,
         preload=True,
@@ -190,6 +193,10 @@ def _load_subject_epochs(config: Any, *, subject_id: str, task: str, logger: Any
         raise FileNotFoundError(
             f"Study 2 source-power found no clean epochs for {subject_id} (task={task})."
         )
+    if events is None:
+        raise FileNotFoundError(
+            f"Study 2 source-power found no clean events for {subject_id} (task={task})."
+        )
     excluded = [
         str(channel)
         for channel in require_config_value(config, "study2.source_modeling.rank_excluded_channels")
@@ -197,7 +204,7 @@ def _load_subject_epochs(config: Any, *, subject_id: str, task: str, logger: Any
     present = [channel for channel in excluded if channel in epochs.ch_names]
     if present:
         epochs.drop_channels(present)
-    return epochs
+    return epochs, events
 
 
 def source_power_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
@@ -265,10 +272,18 @@ def run_source_power(context: "Study2StageContext") -> None:
         "study2.source_modeling.common_source_space_spacing",
     )
 
+    trial_indices: list[pd.DataFrame] = []
     for subject_id in context.subjects:
         anatomy = _resolve_anatomy(config, subject_id=subject_id)
-        epochs = _load_subject_epochs(
+        epochs, events = _load_subject_epochs(
             config, subject_id=subject_id, task=context.task, logger=context.logger
+        )
+        trial_indices.append(
+            build_source_trial_index(
+                subject_id=subject_id,
+                events=events,
+                n_source_rows=len(epochs),
+            )
         )
         forward = build_surface_forward_model(
             epochs.info,
@@ -366,8 +381,13 @@ def run_source_power(context: "Study2StageContext") -> None:
             )
             del subband_extractions, extraction, power_logratio
             gc.collect()
-        del forward, noise_cov, inverse_operator, source_morph, epochs
+        del forward, noise_cov, inverse_operator, source_morph, epochs, events
         gc.collect()
+
+    write_tsv(
+        pd.concat(trial_indices, ignore_index=True),
+        paths.source_trial_index_path(config),
+    )
 
 
 def gate_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
@@ -524,13 +544,74 @@ def run_point_spread(context: "Study2StageContext") -> None:
 
 def _source_map_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
-    required = [paths.source_stage_frame_path(config)]
+    required = [
+        paths.source_stage_frame_path(config),
+        paths.source_model_qc_path(config),
+    ]
     for subject_id in context.subjects:
         for band in contribution_bands(config):
             required.append(
                 paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             )
     return tuple(required)
+
+
+def source_model_eligible_subjects(config: Any, subjects: tuple[str, ...]) -> tuple[str, ...]:
+    """Subjects the source-model QC stage cleared, in the order they were requested.
+
+    The QC stage only records its verdict; nothing downstream used to read it, so a
+    subject with a coregistration error above threshold still reached the source maps.
+    Every requested subject must appear in the table: a silent absence would drop a
+    participant here for a missing QC row rather than for a failed criterion.
+    """
+    qc_path = paths.source_model_qc_path(config)
+    if not qc_path.exists():
+        raise FileNotFoundError(
+            f"Study 2 source eligibility requires the source-model QC table: {qc_path}"
+        )
+    qc = pd.read_csv(qc_path, sep="\t")
+    require_columns(
+        qc,
+        ("subject_id", "source_model_criteria_met"),
+        name="Study 2 source-model QC",
+    )
+    verdicts = {
+        str(subject_id): bool(criteria_met)
+        for subject_id, criteria_met in zip(
+            qc["subject_id"].astype(str), qc["source_model_criteria_met"].astype(bool)
+        )
+    }
+    missing = [subject_id for subject_id in subjects if subject_id not in verdicts]
+    if missing:
+        raise ValueError(f"Study 2 source-model QC has no verdict for subjects: {missing}.")
+    return tuple(subject_id for subject_id in subjects if verdicts[subject_id])
+
+
+def _source_eligible_frame_and_subjects(
+    context: "Study2StageContext",
+    frame: pd.DataFrame,
+    *,
+    log_label: str,
+) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    config = context.config
+    eligible = source_model_eligible_subjects(config, tuple(context.subjects))
+    excluded = tuple(subject_id for subject_id in context.subjects if subject_id not in eligible)
+    if excluded:
+        context.logger.info(
+            "Study 2 %s excludes %d subject(s) failing source-model QC: %s.",
+            log_label,
+            len(excluded),
+            ",".join(excluded),
+        )
+    if not eligible:
+        raise ValueError(f"Study 2 {log_label} has no subject passing source-model QC.")
+    require_columns(frame, ("subject_id",), name="Study 2 source-stage frame")
+    retained = frame.loc[frame["subject_id"].astype(str).isin(eligible)].reset_index(drop=True)
+    if retained.empty:
+        raise ValueError(
+            f"Study 2 {log_label} source-stage frame has no rows for a QC-eligible subject."
+        )
+    return retained, eligible
 
 
 def _run_source_map_family(
@@ -544,11 +625,14 @@ def _run_source_map_family(
 ) -> None:
     config = context.config
     frame = pd.read_csv(paths.source_stage_frame_path(config), sep="\t")
+    frame, eligible_subjects = _source_eligible_frame_and_subjects(
+        context, frame, log_label=log_label
+    )
 
     for band in contribution_bands(config):
         result = compute_maps(
             frame,
-            _source_power_by_subject(config, subjects=context.subjects, band=band),
+            _source_power_by_subject(config, subjects=eligible_subjects, band=band),
             band=band,
             config=config,
         )
@@ -1064,6 +1148,7 @@ def target_permutations_required_inputs(context: "Study2StageContext") -> tuple[
     config = context.config
     required = [
         paths.source_stage_frame_path(config),
+        paths.source_model_qc_path(config),
         study1_model_comparison_path(_study1_capable_config(config)),
     ]
     for subject_id in context.subjects:
@@ -1079,17 +1164,20 @@ def run_target_permutations(context: "Study2StageContext") -> None:
     config = context.config
     bands = contribution_bands(config)
     frame = pd.read_csv(paths.source_stage_frame_path(config), sep="\t")
+    frame, eligible_subjects = _source_eligible_frame_and_subjects(
+        context, frame, log_label="target-permutations"
+    )
     source_power_by_band = {
         band: {
             subject_id: np.load(
                 paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             )
-            for subject_id in context.subjects
+            for subject_id in eligible_subjects
         }
         for band in bands
     }
     model_context = load_study1_model_context(
-        subjects=list(context.subjects),
+        subjects=list(eligible_subjects),
         task=context.task,
         config=_study1_capable_config(config),
         logger=context.logger,

@@ -228,6 +228,35 @@ def _validate_manifest_support(
             )
 
 
+def _validate_spatial_provenance(*, name: str, entry: dict[str, Any], checksum: str) -> None:
+    """Require declared spatial evidence; image grids alone cannot establish registration."""
+    required = ("space", "source_space", "spatial_reference")
+    for field in required:
+        if not isinstance(entry.get(field), str) or not entry[field].strip():
+            raise ValueError(f"Study 1 spatial provenance for {name} must define {field}.")
+    space = entry["space"].strip().lower()
+    source_space = entry["source_space"].strip().lower()
+    published_siips1 = "da9992717887ed3ec038d3f87887a7f3d061384f382855dc717e6fafbc70198c"
+    if name == "SIIPS1" and checksum == published_siips1 and space == "mni152nlin2009casym":
+        raise ValueError(
+            "The unmodified published SIIPS1 map cannot be declared MNI152NLin2009cAsym. "
+            "Supply independently validated spatial assets; grid resampling is not registration."
+        )
+    if source_space == space:
+        return
+    transform = entry.get("transform")
+    if not isinstance(transform, dict):
+        raise ValueError(f"Study 1 spatial provenance for {name} requires a transform record.")
+    for field in ("source_sha256", "method", "reference", "validation"):
+        if not isinstance(transform.get(field), str) or not transform[field].strip():
+            raise ValueError(f"Study 1 transform provenance for {name} must define {field}.")
+    source_checksum = transform["source_sha256"].strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", source_checksum) is None or source_checksum == checksum:
+        raise ValueError(
+            f"Study 1 transform for {name} requires a valid source_sha256 different from the output."
+        )
+
+
 def _validate_manifest_entry(
     *,
     name: str,
@@ -258,6 +287,7 @@ def _validate_manifest_entry(
     if not checksum:
         raise ValueError(f"Study 1 signature manifest entry for {name} must define sha256.")
     actual_checksum = _sha256(image_path)
+    _validate_spatial_provenance(name=name, entry=entry, checksum=actual_checksum)
     if checksum != actual_checksum:
         raise ValueError(
             f"Study 1 signature manifest checksum mismatch for {name}: "
@@ -433,11 +463,6 @@ def nuisance_source_columns(config: Any) -> tuple[str, ...]:
                 f"covariates, got raw columns: {json.dumps(replacements, sort_keys=True)}."
             )
     return columns
-
-
-def residualization_columns_for_target_table(config: Any, table_path: Path) -> tuple[str, ...]:
-    target_table = pd.read_parquet(table_path)
-    return resolve_residualization_columns(frame=target_table, config=config)
 
 
 def target_residualization_columns_for_target_table(
@@ -794,6 +819,7 @@ def _compute_convolved_nuisance_columns(
 
     from nilearn.glm.first_level.hemodynamic_models import compute_regressor  # type: ignore
     from fmri_pipeline.utils.bold_discovery import (
+        bold_frame_times,
         discover_fmriprep_preproc_bold,
         get_tr_from_bold,
     )
@@ -833,7 +859,7 @@ def _compute_convolved_nuisance_columns(
         import nibabel as nib  # type: ignore
 
         n_scans = int(nib.load(str(bold_path)).shape[3])
-        frame_times = np.arange(n_scans, dtype=float) * tr
+        frame_times = bold_frame_times(bold_path, tr=tr, n_scans=n_scans)
 
         confounds_path = discover_confounds(
             bids_derivatives=deriv_root,
@@ -1153,7 +1179,6 @@ __all__ = [
     "nuisance_regression_enabled",
     "nuisance_source_columns",
     "prepare_primary_targets",
-    "residualization_columns_for_target_table",
     "resolve_residualization_columns",
     "resolve_target_residualization_columns",
     "target_residualization_columns_for_target_table",

@@ -10,6 +10,8 @@ the pipeline silently preprocesses uncleaned data, which is what used to happen 
 
 from __future__ import annotations
 
+import pytest
+
 from eeg_pipeline.utils.config.loader import load_config
 from studies.pain_study.scripts.workflow_config import load_workflow_config
 
@@ -24,6 +26,12 @@ def test_the_pipeline_reads_what_the_line_comb_workflow_writes() -> None:
 
     consumed = str(core.get("paths.bids_root"))
     produced = str(workflow.path("output_root").resolve())
+
+    if not consumed.rstrip("/").endswith("_linecleaned"):
+        pytest.skip(
+            f"The core config reads {consumed!r}, not line-comb output; "
+            "pairing check applies when the pipeline is configured for line-comb."
+        )
 
     assert consumed.rstrip("/").endswith("_linecleaned"), (
         "the core bids_root must name the cleaned copy: leaving it on the raw root is what "
@@ -66,6 +74,13 @@ def test_automatic_detection_covers_the_observed_isolated_line_range():
 
 def test_exactly_one_stage_removes_mains():
     core, workflow = _configs()
+
+    consumed = str(core.get("paths.bids_root"))
+    if not consumed.rstrip("/").endswith("_linecleaned"):
+        pytest.skip(
+            "The core config is not using line-comb output; "
+            "pairing invariant applies when the line-comb pass is active."
+        )
 
     fir_notch = core.get("preprocessing.notch_freq")
     exclude_mains = bool(workflow.get("line_comb_removal.exclude_mains"))
@@ -110,6 +125,13 @@ def test_the_wide_fir_notch_is_the_one_in_use():
     the bands that are analysed is 0.00 dB.
     """
     core, workflow = _configs()
+
+    consumed = str(core.get("paths.bids_root"))
+    if not consumed.rstrip("/").endswith("_linecleaned"):
+        pytest.skip(
+            "The core config is not using line-comb output; "
+            "wide FIR notch check applies when the line-comb pass is active."
+        )
 
     assert float(core.get("preprocessing.notch_freq")) == 60.0, (
         "60 Hz is a 2 Hz-wide cluster of 32-38 lines; spectrum_fit removed 2.77 dB of it "

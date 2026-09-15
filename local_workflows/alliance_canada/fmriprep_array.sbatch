@@ -56,6 +56,11 @@ subject_work_dir="${FMRIPREP_WORK_ROOT}/sub-${subject}"
 mkdir -p "${subject_work_dir}"
 mkdir -p "${NUMBA_CACHE_DIR}"
 
+# FreeSurfer removes IsRunning only on a clean exit, so a wall-clock kill leaves it
+# behind and the next recon-all refuses to resume past it. Slurm runs one array task
+# per subject, so any lock present as this task starts belongs to a dead run.
+rm -f "${FMRIPREP_DERIV_ROOT}/preprocessed/fmri/sourcedata/freesurfer/sub-${subject}/scripts/IsRunning"*
+
 read -r -a output_spaces <<< "${FMRIPREP_OUTPUT_SPACES}"
 
 cmd=(

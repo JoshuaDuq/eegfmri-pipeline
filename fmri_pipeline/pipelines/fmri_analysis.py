@@ -298,6 +298,34 @@ class FmriAnalysisPipeline(PipelineBase):
         )
         return effect, variance
 
+    def _inference_z_map(self, *, glm_result: Any, contrast_def: Any, contrast_img: Any,
+                         output_type_actual: str) -> Any:
+        """The z-scaled statistic every threshold in the report is quoted against.
+
+        Written whatever ``output_type`` the study asked for. Nilearn's
+        :func:`~nilearn.glm.threshold_stats_img` takes an image "presumably in z
+        scale" and states that otherwise the computed threshold is "not rigorous and
+        likely meaningless"; the applied height, FDR, Bonferroni and the random-field
+        height are all z quantities, so all four need this map rather than whichever
+        one the study chose to report its magnitudes in.
+
+        Measured on this study before it existed: ``output_type: cope`` wrote the
+        effect size as the contrast map, the manifest recorded it as both ``stat_map``
+        and ``effect_map``, and the report thresholded a percent-signal-change map at
+        |z| > 2.30 -- a height its maximum of 0.67 could never reach, so every subject
+        reported no result whatever the data said.
+
+        Returns ``contrast_img`` itself when that is already the z map, so the common
+        case costs no extra ``compute_contrast``.
+        """
+        if str(output_type_actual).strip().lower() in {"z_score", "z-score"}:
+            return contrast_img
+        flm = getattr(glm_result, "flm", None)
+        if flm is None:
+            raise ValueError("Cannot compute the inference z map without the fitted model.")
+        argument = _contrast_arg_for_model_runs(flm, contrast_def)
+        return flm.compute_contrast(argument, output_type="z_score")
+
     def _run_level_maps(
         self,
         *,
@@ -560,6 +588,12 @@ class FmriAnalysisPipeline(PipelineBase):
         native_effect, native_variance = self._contrast_detail_maps(
             glm_result=glm_result, contrast_def=contrast_def, stats_cfg=stats_cfg
         )
+        native_z = self._inference_z_map(
+            glm_result=glm_result,
+            contrast_def=contrast_def,
+            contrast_img=contrast_img,
+            output_type_actual=output_type_actual,
+        )
         analysis_mask_img = getattr(glm_result, "mask_img", None)
 
         # Optional: resample to FreeSurfer subject space for downstream EEG integration.
@@ -585,6 +619,11 @@ class FmriAnalysisPipeline(PipelineBase):
                 native_effect = resample_to_freesurfer(native_effect, fs_subject_dir)
             if native_variance is not None:
                 native_variance = resample_to_freesurfer(native_variance, fs_subject_dir)
+            if native_z is not None and native_z is not contrast_img:
+                native_z = resample_to_freesurfer(native_z, fs_subject_dir)
+            elif native_z is contrast_img:
+                # Already resampled above as the contrast map itself.
+                native_z = contrast_img
             if analysis_mask_img is not None:
                 analysis_mask_img = resample_to_freesurfer(
                     analysis_mask_img, fs_subject_dir, interpolation="nearest"
@@ -599,6 +638,17 @@ class FmriAnalysisPipeline(PipelineBase):
         )
         variance_path = self._save_optional(
             native_variance, out_dir / f"{stem}_stat-effect_variance_{cfg_hash}.nii.gz"
+        )
+        # The map the report thresholds. Identical to ``nifti_path`` when the study
+        # asked for z-score, so nothing is written twice in the common case.
+        z_path = (
+            nifti_path
+            if native_z is contrast_img
+            else self._save_required(
+                native_z,
+                out_dir / f"{stem}_stat-z_score_{cfg_hash}.nii.gz",
+                artifact_name="inference z map",
+            )
         )
         # The mask the GLM was actually fitted inside: the intersection across runs.
         # The report previously recorded a mask *discovered* from the preprocessing
@@ -658,7 +708,9 @@ class FmriAnalysisPipeline(PipelineBase):
             subject=sub_label,
             task=task,
             contrast_name=contrast_name,
-            stat_map=nifti_path,
+            # Always the z map: every height the report quotes is a z quantity.
+            stat_map=z_path,
+            stat_map_output_type="z_score",
             run_meta=run_meta,
             residual_paths=model_fit_paths.residuals,
             predicted_paths=model_fit_paths.predicted,

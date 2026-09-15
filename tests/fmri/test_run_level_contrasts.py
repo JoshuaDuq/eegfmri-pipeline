@@ -241,10 +241,10 @@ def test_the_pipeline_writes_the_sign_flip_null_and_run_influence(split_model, t
     assert "desc-signflipnull" in fields["sign_flip_null_tsv"].name
     assert "desc-runinfluence" in fields["run_influence_tsv"].name
 
-    # Four runs give 2**3 distinct sign patterns, and the floor is 2/(8+1).
+    # Four runs give 2**3 distinct sign patterns, and the floor is 1/8.
     assert fields["sign_flip_n_runs"] == 4
     assert fields["sign_flip_n_patterns"] == 8
-    assert fields["sign_flip_p_floor"] == pytest.approx(2 / 9)
+    assert fields["sign_flip_p_floor"] == pytest.approx(1 / 8)
     assert fields["sign_flip_global_p"] >= fields["sign_flip_p_floor"]
     assert len(pd.read_csv(fields["sign_flip_null_tsv"], sep="\t")) == 8
 

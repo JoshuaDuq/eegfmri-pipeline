@@ -20,7 +20,11 @@ from eeg_pipeline.utils.analysis.artifact_qc import (
 )
 from eeg_pipeline.utils.config.loader import get_config_value
 from fmri_pipeline.analysis.contrast_builder import discover_confounds
-from fmri_pipeline.utils.bold_discovery import discover_fmriprep_preproc_bold, get_tr_from_bold
+from fmri_pipeline.utils.bold_discovery import (
+    bold_frame_times,
+    discover_fmriprep_preproc_bold,
+    get_tr_from_bold,
+)
 
 _EPS = 1.0e-12
 _SUPPORTED_HRF_MODELS = {"spm", "glover"}
@@ -487,7 +491,7 @@ def _motion_nuisance_table(
             raise ValueError(
                 f"{label} vector length mismatch for {confounds_path}: confounds={confound_values.size}, scans={n_scans}."
             )
-        frame_times = np.arange(n_scans, dtype=float) * tr
+        frame_times = bold_frame_times(bold_path, tr=tr, n_scans=n_scans)
         trial_values = [
             _convolved_confound_for_trial(
                 onset=float(row.onset),

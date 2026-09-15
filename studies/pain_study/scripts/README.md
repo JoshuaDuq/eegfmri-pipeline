@@ -62,7 +62,7 @@ python -m studies.pain_study.scripts.conversion.organize_source_eeg \
 
 This copies original 5 kHz triplets into `sub-*/eeg/original_untrimmed_5khz/`. If legacy
 BrainVision-processed 1 kHz files are present, it also moves them into
-`sub-*/eeg/brainvision_processed_1khz/`; they are not required by the native pipeline. By default
+`sub-*/eeg/analyzer_brainvision_processed_1khz/`; they are not required by the native pipeline. By default
 the organizer discovers every unorganized `sub-*` EEG directory. Repeat `--subject <ID>` to
 restrict a run.
 
@@ -76,7 +76,7 @@ Converts BrainVision (`.vhdr`) source files to BIDS EEG format using `mne-bids`.
 
 `--source-layout` names which directory under `sub-*/eeg/` holds the generation to
 convert, because a participant directory holds several. It defaults to
-`brainvision_processed_1khz`, this paradigm's Analyzer-corrected export. A study whose
+`analyzer_brainvision_processed_1khz`, this paradigm's Analyzer-corrected export. A study whose
 source is the original acquisition — one recorded outside the scanner, with no Analyzer
 stage — passes `--source-layout original_untrimmed_5khz` instead.
 

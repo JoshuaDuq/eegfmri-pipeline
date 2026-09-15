@@ -23,14 +23,14 @@ study2:
       min_delta_r2: 0.02
       min_delta_r2_lower_ci: 0.005
       min_level2_delta_r2: 0.005
-      min_target_split_half_reliability: 0.4
+      min_target_split_half_reliability: null
       min_target_reliability_n_trials: 30
       require_positive_within_subject_delta_r2: true
-      require_temporal_negative_controls: true
+      require_temporal_negative_controls: false
       require_artifact_censoring_robustness: true
   contributions:
     subject_column: "subject_id"
-    trial_column: "trial_id"
+    source_row_column: "source_row"
     combined_column: "eta_combined"
     combined_standardized_column: "eta_combined_z"
     alpha_column: "eta_alpha"

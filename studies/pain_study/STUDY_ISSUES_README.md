@@ -20,6 +20,57 @@ Follow-up:
 
 ## Issues
 
+### 2026-09-09 - `sub-0016` - Thermode Trigger Never Recorded, `Stim_on` Substituted
+
+Study/stage: EEG acquisition; FASTR 1 kHz EEG BIDS conversion (`bids_output/eeg`) and
+every thermode-locked Study 1 analysis reading this participant.
+
+Issue: All six `sub-0016` thermal runs carry 11 `Stim_on/S  1` markers and zero
+`Trig_therm/T  1`. The gap is in the acquisition, not in processing: `Trig_therm` is
+absent from all four generations of the participant's data, `original_untrimmed_5khz`
+included, so nothing holds it. sub-0015 (2026-07-13) and sub-0018 (2026-08-06) both
+carry 11 of each, which isolates the fault to the 2026-07-29 session -- the thermode's
+trigger line was not feeding the amplifier that day. The paradigm's other markers
+(`Iti_start`, `Painq_on`, `Rating_on`) each recorded 11, and the baseline carries
+neither marker, which is normal.
+
+The two are not the same event. `Stim_on` is PsychoPy's software marker, written when
+the script commands the stimulus; `Trig_therm` is the thermode's hardware echo
+confirming it fired. In runs holding both, `Trig_therm` follows `Stim_on` by 5-10 ms
+(mean 9 ms) -- the device round-trip.
+
+Decision: Convert with `--canonicalize-thermode-markers`, rewriting the 11 `Stim_on`
+markers as `Trig_therm/T  1`, so all 126 thermal runs carry 11 thermode events. The flag
+is a no-op on the other 120 runs, which already hold exactly 11 canonical markers.
+sub-0016's thermode onsets are therefore ~9 ms early against the rest of the cohort.
+That bias is accepted rather than corrected: shifting the onsets by the cohort mean
+would put a modelled number in the delivered events table in place of a recorded one.
+
+Follow-up: Treat sub-0016 as ~9 ms early wherever thermode-locked timing matters at that
+scale -- ERP latency measures in particular. Add the offset at analysis time, or exclude
+the participant, if a result turns on latencies finer than roughly 20 ms.
+
+### 2026-09-08 - Cohort - EEG Trim Ends One TR After The Last Volume Marker
+
+Study/stage: 5 kHz source trimming (`original_trimmed_5khz`) and EEG BIDS conversion.
+
+Issue: The previous trim cut from the first `Volume,V  1` marker through that last
+marker as the final sample. A volume marker is the start of a volume, so that dropped
+the last TR — or the fraction of it that was recorded after EEG stopped. Dummy volumes
+the scanner plays before the first marker are not in the saved BOLD NIfTI; when EEG has
+fewer markers than 570 BOLD volumes, the missing volumes are at the end of the scan.
+
+Decision: Re-trim from `original_untrimmed_5khz`. Start at the first `Volume` of the
+first contiguous 0.9 s block (EEG t = 0 = BOLD volume 1). End one TR after that block's
+last marker, clipped to the recording end. Keep a later scanner restart out of the file
+(sub-0000 run 1 keeps its first 570-volume block). The previous last-marker-as-final-sample
+files are in `data/source_data/_archive/original_trimmed_5khz_last_marker_end/`. How the
+live files were cut is in each `sub-*/eeg/original_trimmed_5khz/README.md`.
+
+Follow-up: `step0_trimmed_raw_5khz/` is a flat copy of the old trim and is stale until
+rebuilt. Analyzer 1 kHz BIDS was produced from the old trim and still ends on the last
+marker; it does not gain the recovered last-TR samples until that chain is re-run.
+
 ### 2026-08-03 - `sub-0000` Run 1 - Two Scanner Acquisitions In One Run
 
 Study/stage: EEG BIDS conversion and every Study 1 analysis reading this run.

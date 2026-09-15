@@ -2,9 +2,10 @@
 """One-off repair for runs where the scanner stopped and restarted mid-recording.
 
 Use this when a single BIDS EEG run holds more than one scanner acquisition. The
-EEG keeps recording across the break, so ``trim_to_volume_bounds`` -- which crops
-between the first and last volume marker -- leaves the scanner-off gap and the
-second acquisition inside the run. Nothing downstream can tell the two apart:
+EEG keeps recording across the break, so a first-to-last-marker crop -- without
+splitting on the scanner-off gap -- leaves the gap and the second acquisition
+inside the run. The current trim keeps only the first contiguous volume block;
+this script remains the repair for files produced before that change. Nothing downstream can tell the two apart:
 both blocks spell their volumes ``Volume/V  1``.
 
 The repair keeps the *first* contiguous volume block and drops everything after

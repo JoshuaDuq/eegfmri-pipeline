@@ -47,10 +47,10 @@ more than one of them is still an error rather than a preference order.
 """
 DEFAULT_SOURCE_DIRECTORY = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v2/"
-    "sub-0015/eeg/brainvision_processed_1khz"
+    "sub-0015/eeg/analyzer_brainvision_processed_1khz"
 )
-DEFAULT_EVENTS_DIRECTORY = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg/sub-0015/eeg")
-DEFAULT_OUTPUT_DIRECTORY = Path("outputs/matlab_exports/sub-0015/brainvision_processed_1khz")
+DEFAULT_EVENTS_DIRECTORY = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/bids_analyzer_archive/eeg/sub-0015/eeg")
+DEFAULT_OUTPUT_DIRECTORY = Path("outputs/matlab_exports/sub-0015/analyzer_brainvision_processed_1khz")
 DEFAULT_CLEAN_MNE_DIRECTORY = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/"
     "brainvision_analyzer_mne_preprocessing_sub-0015/preprocessed/eeg/sub-0015/eeg"

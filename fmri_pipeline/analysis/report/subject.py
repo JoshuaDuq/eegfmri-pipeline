@@ -27,6 +27,7 @@ from fmri_pipeline.analysis.report.figures import stat_maps as stat_map_figures
 from fmri_pipeline.analysis.report.figures import volumes as volume_figures
 from fmri_pipeline.analysis.report.manifest import (
     ContrastManifest,
+    stat_map_is_z_scaled,
     validate_manifest_artifacts,
     validate_manifest_collection,
 )
@@ -35,6 +36,12 @@ from fmri_pipeline.analysis.report.style import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Clusters rendered in the subject report's HTML table before it is capped.
+#:
+#: The TSV beside the table is always complete, so this decides how much of the
+#: tail a reader has to click through to, not what is recorded.
+DEFAULT_CLUSTER_TABLE_MAX_ROWS = 20
 
 
 class SummaryFacts:
@@ -393,6 +400,20 @@ def build_qc_sections(
                 if first.mask_is_analysis_mask
                 else "as recorded in the manifest; not verified against the fitted model"
             )
+            # A binary mask drawn over anatomy can only say that the mask covers the
+            # brain. What a coverage panel is consulted for is where coverage was lost,
+            # and the analysis mask is an intersection -- so the voxels some runs hold
+            # and others do not are discarded before the panel is drawn. Counting them
+            # back out of the runs themselves is what gives the panel something to say.
+            contribution_img = None
+            if len(bold_imgs) > 1:
+                try:
+                    contribution_img = coverage_figures.run_contribution_map(bold_imgs)
+                except Exception as exc:
+                    logger.info(
+                        "Could not count per-run coverage (%s); drawing the mask alone.",
+                        exc,
+                    )
             path = _save(
                 coverage_figures.coverage_figure(
                     nib.load(str(first.mask)),
@@ -400,18 +421,24 @@ def build_qc_sections(
                     extent_note=extent_note,
                     radiological=first.radiological,
                     title="Analysis mask",
+                    contribution_img=contribution_img,
+                    n_runs=len(bold_imgs),
                 ),
                 out_dir=qc_dir,
                 stem="coverage",
                 formats=cfg.formats,
             )
             if path:
-                blocks.append(
-                    html.Figure(
-                        title="Coverage",
-                        path=path,
-                        caption="Voxels outside this mask were not tested.",
+                caption = "Voxels outside this mask were not tested."
+                if contribution_img is not None:
+                    caption += (
+                        " Colour counts how many runs reach each voxel. The model was"
+                        " fitted in the intersection, so a voxel short of the full"
+                        " count is one the intersection discarded — which is where"
+                        " coverage was lost, and to which runs."
                     )
+                blocks.append(
+                    html.Figure(title="Coverage", path=path, caption=caption)
                 )
 
     return [
@@ -560,8 +587,6 @@ def _carpet_blocks(
     deriv_root: Path,
 ) -> List[html.Block]:
     """Build the carpet panel from already-loaded runs."""
-    import pandas as pd
-
     from fmri_pipeline.analysis.report.assets import discover_plot_assets
 
     standardised: List[np.ndarray] = []
@@ -610,29 +635,7 @@ def _carpet_blocks(
     # Otherwise a censored frame sets the limit it was meant to fall outside.
     carpet_retained = np.concatenate(retained_masks) if retained_masks else None
 
-    fd_parts: List[np.ndarray] = []
-    dvars_frames: List[Any] = []
-    for path in manifest.confounds_paths:
-        try:
-            frame = pd.read_csv(str(path), sep="\t")
-        except OSError:
-            continue
-        # The first frame of a run has no defined framewise displacement.
-        # Substituting zero draws a dip to "no motion" at every run boundary,
-        # which is a fabricated measurement; matplotlib gaps a NaN.
-        fd_parts.append(
-            frame["framewise_displacement"].to_numpy(dtype=float)
-            if "framewise_displacement" in frame.columns
-            else np.full(len(frame), np.nan)
-        )
-        dvars_frames.append(frame)
-
-    fd = np.concatenate(fd_parts) if fd_parts else None
-    dvars, dvars_label = _concatenated_dvars(dvars_frames)
-    if fd is not None and fd.size != carpet.shape[1]:
-        fd = None
-    if dvars is not None and dvars.size != carpet.shape[1]:
-        dvars = None
+    fd, dvars, dvars_label = _acquired_motion_traces(manifest, n_frames=carpet.shape[1])
 
     codes, source = (None, "none")
     with _panel("tissue segmentation"):
@@ -711,6 +714,21 @@ def masked_stat_values(stat_img: Any, mask_img: Any) -> Tuple[np.ndarray, str]:
     return data[finite], "all voxels (no usable mask)"
 
 
+def contrast_is_thresholdable(manifest: ContrastManifest) -> bool:
+    """Whether this contrast's z-scale inference panels mean anything.
+
+    One gate for the whole inference chain. The applied height, the FDR and Bonferroni
+    heights, the random-field height and the fitted null are all z quantities, so a
+    ``stat_map`` that is not z-scaled invalidates them together rather than one at a
+    time.
+    """
+    return stat_map_is_z_scaled(
+        stat_map_output_type=manifest.stat_map_output_type,
+        stat_map=manifest.stat_map,
+        effect_map=manifest.effect_map,
+    )
+
+
 def resolve_threshold(
     manifest: ContrastManifest, *, values: np.ndarray
 ) -> Tuple[Optional[float], str]:
@@ -725,7 +743,27 @@ def resolve_threshold(
     threshold is a property of this contrast rather than a number carried over from a
     config file. It returns ``None`` when Benjamini-Hochberg rejects nothing, which is
     a finding and is stated as one.
+
+    Returns no height at all when ``stat_map`` is not a z-scaled statistic. Every mode
+    here is a z quantity -- the configured height directly, and the FDR height through
+    the normal tail its p-values are read from -- and Nilearn states that on a non-z
+    input the computed threshold is "not rigorous and likely meaningless". Refusing is
+    what the shipped behaviour did not do: a study configured with ``output_type:
+    cope`` had its effect map thresholded at |z| > 2.30, a height a map whose maximum
+    was 0.67 percent signal change could never reach, and every subject reported no
+    result regardless of the data.
     """
+    if not contrast_is_thresholdable(manifest):
+        kind = (
+            f"a {manifest.stat_map_output_type} map"
+            if manifest.stat_map_output_type
+            else "an effect map"
+        )
+        return None, (
+            f"the recorded statistic is {kind}, not z-scaled, so no z height applies "
+            "to it"
+        )
+
     mode = str(manifest.threshold_mode or "").strip().lower()
     if mode == "z":
         threshold = float(manifest.z_threshold)
@@ -1039,8 +1077,8 @@ def smoothness_facts(
         with _panel("search volume in resels"):
             search_resels = coverage_figures.search_volume_resels(mask_img, fwhm=fwhm)
             facts.append(
-                f"the search volume is {search_resels:,.0f} resels, which is what the "
-                f"random-field height in the threshold table corrects over"
+                f"the search volume is {search_resels:,.0f} resels, used in the "
+                "volume-only random-field approximation in the threshold table"
             )
     if cluster_min_voxels > 0:
         resels = coverage_figures.extent_in_resels(
@@ -1363,6 +1401,7 @@ def build_cluster_table(
     threshold_label: str = "",
     extra_facts: Sequence[str] = (),
     labeller: Any = None,
+    max_rows: int = DEFAULT_CLUSTER_TABLE_MAX_ROWS,
 ) -> Tuple[Optional[html.Table], Tuple[Tuple[str, Tuple[float, float, float]], ...]]:
     """Return the cluster table and its peak coordinates.
 
@@ -1409,7 +1448,9 @@ def build_cluster_table(
 
     plots_dir.mkdir(parents=True, exist_ok=True)
     tsv_path = plots_dir / "clusters.tsv"
+    # Written before the display cap, so the file is always the complete table.
     frame.to_csv(tsv_path, sep="\t", index=False)
+    shown, cap_note = cap_cluster_rows(frame, limit=int(max_rows))
 
     caption_parts = [
         "two-sided" if manifest.two_sided else "one-sided",
@@ -1418,6 +1459,8 @@ def build_cluster_table(
     ]
     caption_parts.extend(enrichment_notes)
     caption_parts.extend(str(fact) for fact in extra_facts if fact)
+    if cap_note:
+        caption_parts.append(cap_note)
     if manifest.cluster_min_voxels > 0:
         caption_parts.append(
             f"clusters smaller than {manifest.cluster_min_voxels} voxels removed for "
@@ -1428,11 +1471,50 @@ def build_cluster_table(
     return (
         html.Table(
             title="Clusters and peaks",
-            html=for_display(frame).to_html(index=False, border=0, classes=""),
+            html=for_display(shown).to_html(index=False, border=0, classes=""),
             tsv_path=tsv_path,
             caption="; ".join(caption_parts),
         ),
         peaks,
+    )
+
+
+def cap_cluster_rows(frame: Any, *, limit: int) -> Tuple[Any, str]:
+    """Trim the cluster table for display, keeping its strongest clusters.
+
+    The table lists every surviving cluster, which is right for the TSV and wrong for
+    the page. Measured on sub-0003 once inference runs on the z map rather than on the
+    effect map: 288 rows over 224 clusters at |z| > 2.3, which is a wall of numbers no
+    reader scans and which no longer reads as a result. The cohort report already caps
+    its own table for the same reason.
+
+    Whole clusters, never part of one. Nilearn writes secondary local maxima as extra
+    rows -- ``1a``, ``1b`` -- beneath the parent they belong to, and a cut placed
+    between a parent and its sub-peaks would leave rows keyed to a cluster the table no
+    longer contains.
+
+    Returns the trimmed frame and a note naming what was left out, empty when nothing
+    was. The TSV beside the table is always complete, so this hides nothing: it moves
+    the tail one click away.
+    """
+    if limit <= 0 or len(frame) <= limit:
+        return frame, ""
+
+    identifiers = frame["Cluster ID"].astype(str)
+    # A parent row's identifier is all digits; ``1a`` belongs to ``1``.
+    parents = identifiers.str.rstrip("abcdefghijklmnopqrstuvwxyz")
+    kept_parents: List[str] = []
+    for parent in parents:
+        if parent not in kept_parents:
+            if len(kept_parents) >= limit:
+                break
+            kept_parents.append(parent)
+    shown = frame[parents.isin(kept_parents)]
+    total = int(parents.nunique())
+    return (
+        shown,
+        f"showing the {len(kept_parents)} strongest of {total} clusters; "
+        "the TSV beside this table has every one",
     )
 
 
@@ -1555,6 +1637,7 @@ def build_contrast_section(
                 threshold_label=threshold_label,
                 extra_facts=smoothness.facts,
                 labeller=resolve_labeller(manifest, cfg),
+                max_rows=cfg.cluster_table_max_rows,
             )
 
         with _panel(f"thresholded panel for {manifest.contrast_name}"):
@@ -1575,7 +1658,9 @@ def build_contrast_section(
             if path:
                 blocks.append(html.Figure(title="Stat map · thresholded", path=path))
 
-        if supports_glass_brain(manifest.space):
+        # Kept on by default: the projection catches a cluster that falls between two
+        # mosaic tiles, which is the one reading the mosaic beside it cannot offer.
+        if cfg.include_glass_brain and supports_glass_brain(manifest.space):
             with _panel(f"glass brain for {manifest.contrast_name}"):
                 marked = _marker_peaks(peaks)
                 path = _save(
@@ -1685,6 +1770,26 @@ def build_contrast_section(
             if block is not None:
                 blocks.append(block)
 
+    # Every row of the threshold table and every curve on the calibration panel is a z
+    # quantity. On a map that is not z-scaled they would restate the same error in two
+    # more places, each looking like a measurement. The sign-flip panel below is not
+    # affected: its null is enumerated at fit time on the model's own z map, which is
+    # why it was the one row of the old threshold table that disagreed with the rest.
+    thresholdable = contrast_is_thresholdable(manifest)
+    if not thresholdable:
+        blocks.append(
+            html.Note(
+                text=(
+                    "No z-scale inference for this contrast: "
+                    f"{threshold_label}. The threshold table and the calibration panel "
+                    "are omitted, because every height they quote assumes a z-scaled "
+                    "statistic. The effect, uncertainty and run-consistency panels "
+                    "above are unaffected, and the run sign-flip null below is "
+                    "computed on the model's own z map and remains valid."
+                )
+            )
+        )
+
     with _panel(f"threshold calibration for {manifest.contrast_name}"):
         context = inference.threshold_context(
             values,
@@ -1717,33 +1822,38 @@ def build_contrast_section(
                 familywise_summary(context.sign_flip),
             )
 
-        path = _save(
-            distribution_figures.null_calibration_figure(
-                values,
-                context=context,
-                mask_source=mask_source,
-                title=f"{manifest.contrast_name}: threshold calibration",
-            ),
-            out_dir=plots_dir,
-            stem="threshold_calibration",
-            dense=False,
-            formats=cfg.formats,
+        path = (
+            _save(
+                distribution_figures.null_calibration_figure(
+                    values,
+                    context=context,
+                    mask_source=mask_source,
+                    title=f"{manifest.contrast_name}: threshold calibration",
+                ),
+                out_dir=plots_dir,
+                stem="threshold_calibration",
+                dense=False,
+                formats=cfg.formats,
+            )
+            if thresholdable
+            else None
         )
         # The counts as a table. They rode in the figure's legend as four sentences of
         # 7-point type occupying a third of the canvas -- a results table drawn in the
         # wrong medium, beside the very lines it described.
-        table_html, rows = distribution_figures.threshold_table(context)
-        plots_dir.mkdir(parents=True, exist_ok=True)
-        tsv_path = plots_dir / "thresholds.tsv"
-        tsv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
-        blocks.append(
-            html.Table(
-                title="Thresholds and survivors",
-                html=table_html,
-                tsv_path=tsv_path,
-                caption=_threshold_table_caption(context),
+        if thresholdable:
+            table_html, rows = distribution_figures.threshold_table(context)
+            plots_dir.mkdir(parents=True, exist_ok=True)
+            tsv_path = plots_dir / "thresholds.tsv"
+            tsv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            blocks.append(
+                html.Table(
+                    title="Thresholds and survivors",
+                    html=table_html,
+                    tsv_path=tsv_path,
+                    caption=_threshold_table_caption(context),
+                )
             )
-        )
 
         # Beneath the calibration panel: that one shows where the thresholds fall on
         # the map's voxel distribution, this one where the observed maximum falls
@@ -1779,20 +1889,13 @@ def build_contrast_section(
     )
 
 
-#: What the calibration panel says about why the map is over-dispersed.
-#:
-#: The previous wording blamed "unmodelled autocorrelation", which this study's own
-#: data contradicts: median residual ACF(1) runs 0.05-0.07 across runs, far too small
-#: to widen a null to sigma 1.51. Naming a cause the report elsewhere measures and
-#: refutes is worse than naming none, so this points at the three panels that carry
-#: the evidence instead of asserting a mechanism.
 CALIBRATION_CAPTION = (
-    "Where each threshold in the table above falls on the map's own distribution, "
-    "with the fitted null beside the theoretical N(0, 1) the threshold assumes. "
-    "Over-dispersion relative to N(0, 1) is a measurement, not an assumption: this "
-    "panel states the fitted null's centre and width, the residual autocorrelation "
-    "panel states what the residuals do, and the run-level panels state what each run "
-    "contributes. Nothing in a thresholded mosaic reveals any of the three."
+    "The observed z distribution is shown against N(0, 1) and a Gaussian fitted "
+    "using its median and MAD. Distributional width is a measurement, not an assumption, "
+    "but it does not identify null variance: true signal, model misspecification and "
+    "spatial dependence can all affect the fit. The fitted-null comparisons are "
+    "exploratory. Residual autocorrelation and run-level panels provide separate "
+    "diagnostics; this histogram does not establish the cause of a departure from N(0, 1)."
 )
 
 
@@ -1857,10 +1960,9 @@ def survivor_summary(
 def familywise_summary(summary: inference.SignFlipSummary) -> str:
     """State the familywise height, its survivors, and what its p is worth."""
     line = f"|z| > {summary.height:.2f} — {summary.survivors:,} voxels"
+    line += f"; global p = {summary.global_p:.3f}"
     if summary.floor_limited:
-        line += f"; global p = {summary.global_p:.3f}, at its floor for " f"{summary.n_runs} runs"
-    else:
-        line += f"; global p = {summary.global_p:.3f}"
+        line += f"; attainable p floor {summary.p_floor:.3f} for {summary.n_runs} runs"
     return line
 
 
@@ -1895,10 +1997,13 @@ def _sign_flip_summary(
 def _threshold_table_caption(context: inference.ThresholdContext) -> str:
     """Describe the table, including what the sign-flip row is and is not worth."""
     caption = (
-        "Every count is stated against both nulls where both apply: the count "
-        "expected under N(0, 1) is what an over-dispersed map makes look like "
-        "enrichment, and the count expected under the map's own fitted null is what "
-        "the observed survivors have to exceed to be a finding."
+        "Expected counts assume all tested voxels follow the stated null. The "
+        "Gaussian fitted to this map is an exploratory diagnostic: signal and "
+        "spatial dependence can affect its centre and width, so its counts and "
+        "FDR thresholds do not establish calibrated error control. Random-field "
+        "heights use a volume-only approximation, omitting mask boundary terms; "
+        "they require a sufficiently smooth, approximately stationary Gaussian "
+        "null field and are not validated FWE thresholds for this dataset."
     )
 
     sign_flip = context.sign_flip
@@ -1910,21 +2015,18 @@ def _threshold_table_caption(context: inference.ThresholdContext) -> str:
         )
 
     caption += (
-        f" The sign-flip row is the one whose null is this data's own: "
-        f"{sign_flip.n_patterns} exact sign patterns over {sign_flip.n_runs} runs, "
-        f"exchangeable by run, assuming nothing about the distribution the other rows "
-        f"assume. Global p = {sign_flip.global_p:.3f}"
+        f" The sign-flip row enumerates {sign_flip.n_patterns} exact sign patterns "
+        f"over {sign_flip.n_runs} runs. It requires independent runs with null "
+        f"contrast errors symmetric about zero. Global p = {sign_flip.global_p:.3f}, "
+        f"with an attainable floor of {sign_flip.p_floor:.3f}. The identity is "
+        "included once. Voxels must strictly exceed the discrete critical height."
     )
     if sign_flip.floor_limited:
         caption += (
-            f", which is the smallest value this test can return: the unflipped "
-            f"pattern is always a member of the null and always ties the observed "
-            f"maximum, so with {sign_flip.n_runs} runs no map-level p below "
-            f"{sign_flip.p_floor:.3f} is reachable. The height is unaffected by that "
-            f"floor."
+            f" With {sign_flip.n_runs} runs no map-level p below "
+            f"{sign_flip.p_floor:.3f} is reachable; the exact test cannot identify "
+            "survivors at the 5% familywise level."
         )
-    else:
-        caption += f" against a floor of {sign_flip.p_floor:.3f}."
     return caption + (
         " No cluster-extent correction is applied; the sign-flip height is "
         "familywise-corrected over voxels, not over extent."
@@ -1968,16 +2070,13 @@ def _sign_flip_block(
         path=saved,
         dense=False,
         caption=(
-            "Every threshold in the table above assumes a distribution for the map's "
-            "voxels; this one assumes only that the runs are exchangeable in sign. "
-            "Each step is one relabelling of which runs count positively, recombined "
-            "exactly as the reported map combines all of them, and its position on "
-            "the horizontal axis is that recombination's largest |z| anywhere in the "
-            "mask. Read the familywise height where the curve crosses 0.95, and the "
-            "observed value's separation as the flat stretch above the null's last "
-            "step. The unflipped pattern is itself one of the steps, which is why the "
-            "curve reaches 1 at the observed value and why the p cannot fall below "
-            "its floor."
+            "Each step is the maximum |z| in the analysis mask for one run sign "
+            "pattern, recombined using the fitted model's pooling rule. Validity "
+            "requires independent runs with symmetric null contrast errors. The "
+            "critical height is the first step reaching at least 0.95; only values "
+            "strictly above it survive. Global p is the fraction of patterns whose "
+            "maxima equal or exceed the observed maximum, including the identity "
+            "once. The observed maximum need not be the largest in this distribution."
         ),
     )
 
@@ -2445,12 +2544,19 @@ def build_diagnostics_section(
             out_dir=out_dir,
             cfg=cfg,
         ),
-        build_residual_standard_deviation_block(
-            manifest=manifest,
-            out_dir=out_dir,
-            cfg=cfg,
-            background=background,
-            mask_img=mask_img,
+        # Off by default: the pooled residual SD map is the standard-error map again
+        # (r = 0.944 on this study, ratio CV 12%), and the standard-error panel is the
+        # one that bears on the contrast's precision.
+        (
+            build_residual_standard_deviation_block(
+                manifest=manifest,
+                out_dir=out_dir,
+                cfg=cfg,
+                background=background,
+                mask_img=mask_img,
+            )
+            if cfg.include_residual_sd_map
+            else None
         ),
         build_residual_autocorrelation_block(
             manifest=manifest,
@@ -2518,7 +2624,9 @@ def build_diagnostics_section(
     return html.Section(
         slug=f"{_slug(manifest)}-diagnostics",
         title=f"Diagnostics: {manifest.contrast_name}",
-        blocks=tuple(blocks),
+        # A panel switched off by configuration contributes ``None`` rather than an
+        # empty block, so the section is not left holding a hole to render.
+        blocks=tuple(block for block in blocks if block is not None),
         collapsed=True,
     )
 
@@ -2629,6 +2737,48 @@ def build_model_r_squared_block(
     )
 
 
+def _acquired_motion_traces(
+    manifest: ContrastManifest, *, n_frames: int
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], str]:
+    """Framewise displacement and DVARS on the acquired-frame axis, concatenated.
+
+    Shared by both carpets. A carpet and its motion traces are only diagnostic on one
+    time axis -- the question either answers is whether structure in the voxels lines
+    up with movement of the head -- so a carpet drawn without them cannot be read for
+    the thing it is drawn for.
+
+    Returns ``None`` for a trace whose length does not match the carpet, rather than
+    padding it: a motion trace silently misaligned against the voxels is worse than an
+    absent one, since the panel still looks as though the two were compared.
+    """
+    import pandas as pd
+
+    fd_parts: List[np.ndarray] = []
+    dvars_frames: List[Any] = []
+    for path in manifest.confounds_paths:
+        try:
+            frame = pd.read_csv(str(path), sep="\t")
+        except OSError:
+            continue
+        # The first frame of a run has no defined framewise displacement.
+        # Substituting zero draws a dip to "no motion" at every run boundary,
+        # which is a fabricated measurement; matplotlib gaps a NaN.
+        fd_parts.append(
+            frame["framewise_displacement"].to_numpy(dtype=float)
+            if "framewise_displacement" in frame.columns
+            else np.full(len(frame), np.nan)
+        )
+        dvars_frames.append(frame)
+
+    fd = np.concatenate(fd_parts) if fd_parts else None
+    dvars, dvars_label = _concatenated_dvars(dvars_frames)
+    if fd is not None and fd.size != n_frames:
+        fd = None
+    if dvars is not None and dvars.size != n_frames:
+        dvars = None
+    return fd, dvars, dvars_label
+
+
 def build_residual_carpet_block(
     *,
     manifest: ContrastManifest,
@@ -2668,6 +2818,13 @@ def build_residual_carpet_block(
         mask_path=manifest.mask,
         tissue_codes=tissue_codes,
     )
+    # The same traces the QC carpet carries, on the same acquired-frame axis. Without
+    # them the panel cannot answer what a residual carpet is read for -- whether the
+    # structure that survived the model is still tracking the head -- and answering it
+    # meant scrolling between two figures of different heights and matching by eye.
+    fd, dvars, dvars_label = _acquired_motion_traces(
+        manifest, n_frames=residual_carpet.values.shape[1]
+    )
     path = _save(
         carpet_figures.carpet_figure(
             residual_carpet.values,
@@ -2676,6 +2833,9 @@ def build_residual_carpet_block(
             tr=float(manifest.t_r),
             run_boundaries=residual_carpet.run_boundaries,
             run_labels=manifest.included_runs,
+            fd=fd,
+            dvars=dvars,
+            dvars_label=dvars_label,
             not_retained=residual_carpet.not_retained,
             voxel_source="fitted analysis mask",
             voxel_count_total=residual_carpet.total_voxels,
@@ -2823,7 +2983,11 @@ def build_residual_autocorrelation_block(
             "At each fitted-mask voxel and acquired-frame lag k, ACF(k) = "
             "Σ(eₜ − ē)(eₜ₊ₖ − ē) / Σ(eₜ − ē)². A pair is included only when "
             "both retained samples' original acquired-frame indices differ by k. "
-            "Lines are voxel medians; bands are the 25th–75th percentiles. "
+            "One line per run, each the voxel median, on one axis: what this panel "
+            "is read for is whether a run departs from the others, and that "
+            "comparison is only available when the runs share an axis. The band is "
+            "the 25th–75th percentile across voxels for the run whose lag-1 median "
+            "is largest, which bounds the rest. "
             f"Series space: {series_space}. Exact plotted values: {tsv_path.name}. "
             "No criterion is applied."
         ),
@@ -2896,21 +3060,32 @@ def build_design_section(
             if index < len(manifest.included_runs)
             else f"run-{index + 1:02d}"
         )
+        # Every run is still read -- the summary table, the variance-inflation panel
+        # and the correlation matrix are all computed across all of them. Only the
+        # heatmap is drawn per run, and six near-identical 41-column heatmaps are
+        # compared through those three panels rather than by eye.
+        draw_matrix = cfg.design_matrix_runs == "all" or (
+            cfg.design_matrix_runs == "first" and index == 0
+        )
         with _panel(f"design matrix for {run_label}"):
             frame = pd.read_csv(path, sep="\t")
             frame = frame.drop(columns=[c for c in ("frame",) if c in frame.columns])
             contrast, dropped = _contrast_for_run(manifest, list(frame.columns))
 
-            saved = _save(
-                design_figures.design_matrix_figure(
-                    frame,
-                    contrast=contrast,
-                    tr_seconds=manifest.t_r,
-                    run_label=f"{manifest.contrast_name} · {run_label}",
-                ),
-                out_dir=plots_dir,
-                stem=f"design_{run_label}",
-                formats=cfg.formats,
+            saved = (
+                _save(
+                    design_figures.design_matrix_figure(
+                        frame,
+                        contrast=contrast,
+                        tr_seconds=manifest.t_r,
+                        run_label=f"{manifest.contrast_name} · {run_label}",
+                    ),
+                    out_dir=plots_dir,
+                    stem=f"design_{run_label}",
+                    formats=cfg.formats,
+                )
+                if draw_matrix
+                else None
             )
             if saved:
                 caption = (
@@ -2941,10 +3116,13 @@ def build_design_section(
             summaries.append(design_figures.summarize_design(frame, contrast=contrast))
             summary_labels.append(run_label)
             event_counts.append(design_figures.count_events(frame, weighted))
+            drawn_conditions = design_figures.raster_conditions(
+                list(frame.columns), weighted=weighted, mode=cfg.raster_conditions
+            )
             onsets_per_run.append(
                 {
                     name: design_figures.onset_rows(frame[name].to_numpy(dtype=float))
-                    for name in weighted
+                    for name in drawn_conditions
                     if name in frame.columns
                 }
             )
@@ -2983,29 +3161,30 @@ def build_design_section(
                     )
                 )
 
-        with _panel(f"regressor correlation for {manifest.contrast_name}"):
-            saved = _save(
-                design_figures.regressor_correlation_across_runs_figure(
-                    frames, run_labels=summary_labels
-                ),
-                out_dir=plots_dir,
-                stem="design_correlation",
-                formats=cfg.formats,
-            )
-            if saved:
-                blocks.append(
-                    html.Figure(
-                        title="Regressor correlation",
-                        path=saved,
-                        dense=True,
-                        caption=(
-                            "The strongest correlation each pair reaches in any run. "
-                            "A pair collinear in a single run costs the contrast its "
-                            "precision in that run, and averaging across runs would "
-                            "dilute exactly that away."
-                        ),
-                    )
+        if cfg.include_regressor_correlation:
+            with _panel(f"regressor correlation for {manifest.contrast_name}"):
+                saved = _save(
+                    design_figures.regressor_correlation_across_runs_figure(
+                        frames, run_labels=summary_labels
+                    ),
+                    out_dir=plots_dir,
+                    stem="design_correlation",
+                    formats=cfg.formats,
                 )
+                if saved:
+                    blocks.append(
+                        html.Figure(
+                            title="Regressor correlation",
+                            path=saved,
+                            dense=True,
+                            caption=(
+                                "The strongest correlation each pair reaches in any run. "
+                                "A pair collinear in a single run costs the contrast its "
+                                "precision in that run, and averaging across runs would "
+                                "dilute exactly that away."
+                            ),
+                        )
+                    )
 
     if summaries:
         # Columns on the table that already reports this design per run, rather than a
@@ -3031,12 +3210,20 @@ def build_design_section(
         # where they fell -- and timing is what decides whether two conditions are
         # separable at all, which no count and no condition number reveals.
         if any(onsets_per_run):
+            # Every condition any run drew, in first-seen order, so a run that lost a
+            # condition still shares the panel's lanes with the runs that kept it.
+            raster_names: List[str] = []
+            for per_run in onsets_per_run:
+                for name in per_run:
+                    if name not in raster_names:
+                        raster_names.append(name)
             with _panel(f"event raster for {manifest.contrast_name}"):
                 raster_path = _save(
                     design_figures.event_raster_figure(
                         onsets_per_run,
                         run_labels=summary_labels,
-                        condition_names=weighted,
+                        condition_names=raster_names,
+                        weighted=weighted,
                         tr_seconds=manifest.t_r,
                         title=f"{manifest.contrast_name}: event timing",
                     ),

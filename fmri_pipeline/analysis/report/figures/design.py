@@ -121,7 +121,25 @@ class RegressorGroup:
         return self.stop - self.start
 
 
-def _role(column: str) -> str:
+#: Prefixes marking a modelled *condition* that is not of experimental interest.
+#:
+#: A fixation block or a ramp is convolved and fitted exactly like a task condition, so
+#: it is not a confound in the motion-regressor sense -- but labelling it "Task" made
+#: the design matrix's block count disagree with the very prefix the pipeline uses to
+#: mark it. Overridable, because this is a naming convention rather than a fact about
+#: any paradigm.
+NUISANCE_CONDITION_PREFIXES = ("nuis_", "nuisance_")
+
+#: Role name for those columns.
+NUISANCE_ROLE = "Modelled nuisance"
+
+#: Roles whose columns carry event onsets, and so belong on the event raster.
+CONDITION_ROLES = ("Task", NUISANCE_ROLE)
+
+
+def _role(
+    column: str, *, nuisance_prefixes: Sequence[str] = NUISANCE_CONDITION_PREFIXES
+) -> str:
     lowered = str(column).strip().lower()
     if lowered in _CONSTANT_NAMES:
         return "Constant"
@@ -129,20 +147,31 @@ def _role(column: str) -> str:
         return "Drift"
     if lowered.startswith(_CONFOUND_PREFIXES):
         return "Confound"
+    if nuisance_prefixes and lowered.startswith(tuple(nuisance_prefixes)):
+        return NUISANCE_ROLE
     return "Task"
 
 
-def classify_regressors(columns: Sequence[str]) -> Tuple[List[str], List[RegressorGroup]]:
+def classify_regressors(
+    columns: Sequence[str],
+    *,
+    nuisance_prefixes: Sequence[str] = NUISANCE_CONDITION_PREFIXES,
+) -> Tuple[List[str], List[RegressorGroup]]:
     """Order design columns by role and report each role's column span.
 
     Task, confound, drift and constant regressors are answering different questions, and
     interleaving them makes the matrix unreadable. The returned order groups them; the
     spans let the figure separate and label the blocks.
+
+    Modelled nuisance conditions get a block of their own, next to the task block: they
+    are convolved and fitted the same way, so they belong beside the conditions rather
+    than among the motion regressors, but counting them as task columns made the
+    matrix claim more experimental conditions than the design has.
     """
-    order_of_roles = ["Task", "Confound", "Drift", "Constant"]
+    order_of_roles = ["Task", NUISANCE_ROLE, "Confound", "Drift", "Constant"]
     by_role: Dict[str, List[str]] = {role: [] for role in order_of_roles}
     for column in columns:
-        by_role[_role(column)].append(str(column))
+        by_role[_role(column, nuisance_prefixes=nuisance_prefixes)].append(str(column))
 
     ordered: List[str] = []
     groups: List[RegressorGroup] = []
@@ -392,11 +421,95 @@ def summarize_design(
     )
 
 
+#: How many conditions the raster may draw before its lanes stop being separable.
+#:
+#: Past this the per-condition offsets within a run's lane are thinner than the event
+#: marks themselves, so the panel stops answering the question it is drawn for.
+MAX_RASTER_CONDITIONS = 8
+
+#: What ``raster_conditions`` accepts.
+RASTER_MODES = ("weighted", "task", "all")
+
+
+def raster_conditions(
+    columns: Sequence[str], *, weighted: Sequence[str], mode: str = "task"
+) -> List[str]:
+    """Which design columns the event raster should draw.
+
+    ``weighted`` draws only the columns this contrast weights, which is what the
+    report used to do unconditionally. It collapses to a single lane for any
+    single-regressor contrast -- a parametric modulator, a main effect against
+    implicit baseline -- and the panel's whole subject is comparative: conditions that
+    alternate are separable, conditions that block against one another share their
+    variance with drift. One lane shows none of that.
+
+    ``task`` draws every modelled task condition, which is the default because it is
+    the set the reader has to compare the weighted ones against. ``all`` adds the
+    nuisance and drift columns, which have no onsets and so draw nothing; it exists
+    for a design whose conditions this module's role classifier does not recognise.
+
+    Order follows ``columns`` so the raster's lanes match the design matrix's.
+    """
+    if mode not in RASTER_MODES:
+        raise ValueError(
+            f"raster_conditions mode must be one of {list(RASTER_MODES)}, got {mode!r}."
+        )
+    names = [str(column) for column in columns]
+    if mode == "weighted":
+        chosen = [name for name in names if name in set(map(str, weighted))]
+    elif mode == "task":
+        chosen = [name for name in names if _role(name) in CONDITION_ROLES]
+    else:
+        chosen = names
+
+    # A weighted regressor the classifier did not call a task column still belongs on
+    # the panel: the contrast rests on it, whatever it is named.
+    for name in map(str, weighted):
+        if name in names and name not in chosen:
+            chosen.append(name)
+    return chosen[:MAX_RASTER_CONDITIONS]
+
+
+#: Warm hues for the regressors a contrast weights, cool ones for the rest.
+#:
+#: Two ordered pools rather than one cycling palette: the split has to survive any
+#: mix of weighted and unweighted conditions, and drawing both from one sequence put
+#: a weighted condition and a context one in neighbouring hues. Between them they use
+#: each Okabe-Ito entry exactly once, so at the raster's cap of
+#: :data:`MAX_RASTER_CONDITIONS` no colour is ever reused -- two conditions in one
+#: colour cannot be told apart, which defeats the comparison the panel exists for.
+_WEIGHTED_HUES = ("vermillion", "orange", "reddish_purple", "yellow")
+_CONTEXT_HUES = ("blue", "bluish_green", "sky_blue", "black")
+
+
+def _condition_colours(
+    conditions: Sequence[str], weighted: "set[str]"
+) -> Dict[str, str]:
+    """Assign each condition a colour, warm if the contrast weights it."""
+    pools = {True: list(_WEIGHTED_HUES), False: list(_CONTEXT_HUES)}
+    taken = {True: 0, False: 0}
+    out: Dict[str, str] = {}
+    for name in conditions:
+        # With no contrast to mark, every condition is drawn as a subject in its own
+        # right rather than as context for one.
+        is_weighted = not weighted or name in weighted
+        pool = pools[is_weighted]
+        # Spilling into the other pool beats repeating a hue: a design at the cap with
+        # no weighted regressors would otherwise draw its fifth condition in the same
+        # colour as its first.
+        if taken[is_weighted] >= len(pool):
+            pool, is_weighted = pools[not is_weighted], not is_weighted
+        out[name] = style.OKABE_ITO[pool[taken[is_weighted] % len(pool)]]
+        taken[is_weighted] += 1
+    return out
+
+
 def event_raster_figure(
     onsets_per_run: Sequence[Dict[str, "np.ndarray"]],
     *,
     run_labels: Sequence[str],
     condition_names: Sequence[str],
+    weighted: Sequence[str] = (),
     tr_seconds: Optional[float] = None,
     title: str = "",
 ) -> Figure:
@@ -423,6 +536,12 @@ def event_raster_figure(
     scale = float(tr_seconds) if tr_seconds else 1.0
     unit = "Time (s)" if tr_seconds else "Design row"
 
+    weighted_set = {str(name) for name in weighted}
+    colours = _condition_colours(conditions, weighted_set)
+
+    def _colour(index: int) -> str:
+        return colours[conditions[index]]
+
     with style.plot_context():
         figure, ax = plt.subplots(
             figsize=(9.0, 0.42 * len(onsets_per_run) + 1.6), constrained_layout=True
@@ -441,11 +560,7 @@ def event_raster_figure(
                     lineoffsets=run_index + offsets[condition_index],
                     linelengths=0.36 / max(len(conditions), 1) * 1.7,
                     linewidths=1.6,
-                    colors=style.OKABE_ITO[
-                        ("vermillion", "blue", "bluish_green", "orange")[
-                            condition_index % 4
-                        ]
-                    ],
+                    colors=_colour(condition_index),
                 )
 
         labels = [
@@ -456,28 +571,28 @@ def event_raster_figure(
         ax.set_yticklabels(labels, fontsize=8)
         ax.set_ylim(len(onsets_per_run) - 0.5, -0.5)
         ax.set_xlabel(unit)
+        legend_columns = min(len(conditions), 4)
+        legend_rows = int(np.ceil(len(conditions) / legend_columns))
         if title:
             # Padded clear of the legend, which sits above the axes: placed inside, it
-            # landed on the first run's own events.
-            ax.set_title(title, pad=26)
+            # landed on the first run's own events. The pad tracks how many rows the
+            # legend wrapped to, or the title lands on the legend instead.
+            ax.set_title(title, pad=14 + 12 * legend_rows)
 
         handles = [
-            plt.Line2D(
-                [],
-                [],
-                color=style.OKABE_ITO[
-                    ("vermillion", "blue", "bluish_green", "orange")[index % 4]
-                ],
-                linewidth=2.0,
-            )
+            plt.Line2D([], [], color=_colour(index), linewidth=2.0)
             for index in range(len(conditions))
+        ]
+        entries = [
+            f"{name} (weighted)" if weighted_set and name in weighted_set else name
+            for name in conditions
         ]
         ax.legend(
             handles,
-            conditions,
+            entries,
             fontsize=7,
             frameon=False,
-            ncol=len(conditions),
+            ncol=legend_columns,
             loc="lower center",
             bbox_to_anchor=(0.5, 1.005),
         )
@@ -1062,7 +1177,7 @@ def variance_inflation_across_runs_figure(
                 title or "Variance inflation per regressor", pad=20
             )
             ax_contrast.annotate(
-                "Regressors the contrast weights",
+                "Regressors that the contrast weights",
                 xy=(0.0, 1.0),
                 xycoords="axes fraction",
                 xytext=(0, 3),

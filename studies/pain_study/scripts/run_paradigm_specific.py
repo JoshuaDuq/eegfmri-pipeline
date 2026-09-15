@@ -29,7 +29,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     eeg.add_argument(
         "--source-layout",
-        default="brainvision_processed_1khz",
+        default="analyzer_brainvision_processed_1khz",
         help=(
             "Directory under sub-*/eeg/ holding the BrainVision generation to convert. "
             "Default is the Analyzer-corrected 1 kHz export; use original_untrimmed_5khz "
@@ -53,6 +53,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     eeg.add_argument("--event-prefix", action="append", default=None)
     eeg.add_argument("--keep-all-annotations", action="store_true")
+    eeg.add_argument(
+        "--canonicalize-thermode-markers",
+        action="store_true",
+        help=(
+            "Require 11 thermode events; when canonical Trig_therm markers are absent, "
+            "rewrite exactly 11 Stim_on markers to the canonical description."
+        ),
+    )
 
     fmri = sub.add_parser("fmri-raw-to-bids", help="Convert fMRI DICOM raw data to BIDS")
     fmri.add_argument("--source-root", required=True)
@@ -112,6 +120,7 @@ def main() -> int:
             source_format=args.source_format,
             source_layout=args.source_layout,
             trim_to_first_event_prefix=args.trim_to_first_event,
+            canonicalize_thermode_markers=bool(args.canonicalize_thermode_markers),
         )
         print(f"Converted EEG files: {n}")
         return 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trim BrainVision recordings to their first and last ``Volume,V  1`` markers.
+"""Trim BrainVision recordings to the first contiguous volume block.
 
 This file is standalone and uses only the Python standard library. Copy it to any
 computer with Python 3.11 or newer, edit the configuration block below, and run:
@@ -8,9 +8,13 @@ computer with Python 3.11 or newer, edit the configuration block below, and run:
 
 The source files are never modified. For each selected ``.vhdr``, the script writes a
 new ``.vhdr``/``.vmrk``/``.eeg`` triplet beneath OUTPUT_ROOT. The input directory tree
-is preserved. The first configured volume marker becomes sample 1 (time 0.000 s), and
-the last configured volume marker becomes the final sample. No signal outside those
-inclusive boundaries is retained.
+is preserved.
+
+The first ``Volume,V  1`` of the first contiguous 0.9 s volume train becomes sample 1
+(time 0.000 s). That is the first saved BOLD volume. The last sample is one repetition
+time after that block's last volume marker, clipped to the end of the recording, so a
+partial last TR is kept when EEG stopped mid-volume. Pre-first-marker samples and a
+later scanner restart are dropped.
 
 The script deliberately fails on ambiguous, incomplete, unsupported, or inconsistent
 BrainVision data instead of guessing.
@@ -18,6 +22,7 @@ BrainVision data instead of guessing.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import re
@@ -41,15 +46,19 @@ SOURCE_ROOT = Path("/path/to/source_data")
 OUTPUT_ROOT = Path("/path/to/trimmed_data")
 
 # Recursive glob evaluated beneath SOURCE_ROOT. Examples:
-#   "**/original_untrimmed_5khz/ThermalPainEEGFMRI*.vhdr"
+#   "**/original_untrimmed_5khz/*.vhdr"
 #   "**/*.vhdr"
-HEADER_GLOB = "**/original_untrimmed_5khz/ThermalPainEEGFMRI*.vhdr"
+HEADER_GLOB = "**/original_untrimmed_5khz/*.vhdr"
 
 # Explicit SOURCE_ROOT-relative glob exclusions. Remove or edit these for another dataset.
-# This study's listed file is a documented aborted acquisition with no volume marker.
+# Documented aborted acquisitions with no volume marker.
 EXCLUDED_HEADER_GLOBS = (
     "**/ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h10.39.899.vhdr",
+    "**/ThermalPainEEGFMRI_run1_sub0017_2026-08-05_11h02.06.404.vhdr",
 )
+
+# A gap this many times the median volume interval starts a new acquisition block.
+VOLUME_BLOCK_GAP_FACTOR = 1.5
 
 # Added to every output triplet stem.
 OUTPUT_SUFFIX = "_first_to_last_volume"
@@ -128,6 +137,8 @@ class TrimPlan:
     input_samples: int
     first_volume_sample: int
     last_volume_sample: int
+    last_inclusive_sample: int
+    tr_samples: int
     output_samples: int
     output_markers: tuple[Marker, ...]
 
@@ -142,6 +153,24 @@ class TrimPlan:
 
 def fail(message: str) -> None:
     raise ValueError(message)
+
+
+def volume_blocks(positions: tuple[int, ...] | list[int], gap_factor: float) -> list[list[int]]:
+    """Split 1-indexed volume samples into contiguous acquisition blocks."""
+    ordered = sorted(positions)
+    if not ordered:
+        return []
+    if len(ordered) == 1:
+        return [ordered]
+    intervals = [current - previous for previous, current in zip(ordered, ordered[1:])]
+    median_interval = sorted(intervals)[len(intervals) // 2]
+    blocks: list[list[int]] = [[ordered[0]]]
+    for current, interval in zip(ordered[1:], intervals):
+        if interval > gap_factor * median_interval:
+            blocks.append([current])
+        else:
+            blocks[-1].append(current)
+    return blocks
 
 
 def read_utf8_brainvision(path: Path) -> TextFile:
@@ -284,6 +313,7 @@ def build_output_markers(
     marker_path: Path,
     markers: tuple[Marker, ...],
     first_volume_sample: int,
+    last_inclusive_sample: int,
     last_volume_sample: int,
     sampling_interval_us: Decimal,
 ) -> tuple[Marker, ...]:
@@ -301,17 +331,17 @@ def build_output_markers(
     new_segment = adjusted_new_segment(initial_segments[0], int(offset_us_decimal))
 
     retained = []
-    output_samples = last_volume_sample - first_volume_sample + 1
+    output_samples = last_inclusive_sample - first_volume_sample + 1
     for marker in markers:
         marker_end = marker.position + marker.size - 1
         if marker.position < first_volume_sample <= marker_end:
             fail(f"{marker_path}: a marker spans the trimming boundary: {marker}")
-        if marker.position <= last_volume_sample < marker_end:
+        if marker.position <= last_inclusive_sample < marker_end:
             fail(f"{marker_path}: a marker spans the final trimming boundary: {marker}")
         if (
             marker is initial_segments[0]
             or marker.position < first_volume_sample
-            or marker.position > last_volume_sample
+            or marker.position > last_inclusive_sample
         ):
             continue
         shifted = marker.shifted(first_volume_sample)
@@ -330,17 +360,18 @@ def build_output_markers(
     if len(matching_boundaries) != 1:
         fail(f"{marker_path}: expected exactly one first volume marker at output sample 1")
 
-    matching_final_boundaries = [
+    last_volume_output = last_volume_sample - first_volume_sample + 1
+    matching_last_volumes = [
         marker
         for marker in output
         if marker.marker_type == VOLUME_MARKER_TYPE
         and marker.description == VOLUME_MARKER_DESCRIPTION
-        and marker.position == output_samples
+        and marker.position == last_volume_output
     ]
-    if len(matching_final_boundaries) != 1:
+    if len(matching_last_volumes) != 1:
         fail(
-            f"{marker_path}: expected exactly one last volume marker at "
-            f"output sample {output_samples}"
+            f"{marker_path}: expected the last volume marker at output sample "
+            f"{last_volume_output}"
         )
     return output
 
@@ -468,8 +499,15 @@ def create_trim_plan(header: Path, source_root: Path, output_root: Path) -> Trim
             f"{input_marker}: no {VOLUME_MARKER_TYPE!r},"
             f"{VOLUME_MARKER_DESCRIPTION!r} marker"
         )
-    first_volume_sample = min(marker.position for marker in volume_markers)
-    last_volume_sample = max(marker.position for marker in volume_markers)
+    blocks = volume_blocks(
+        [marker.position for marker in volume_markers],
+        VOLUME_BLOCK_GAP_FACTOR,
+    )
+    first_block = blocks[0]
+    if len(first_block) < 2:
+        fail(f"{input_marker}: first volume block has fewer than two markers")
+    first_volume_sample = first_block[0]
+    last_volume_sample = first_block[-1]
     if sum(marker.position == first_volume_sample for marker in volume_markers) != 1:
         fail(f"{input_marker}: first volume boundary is duplicated at sample {first_volume_sample}")
     if sum(marker.position == last_volume_sample for marker in volume_markers) != 1:
@@ -479,16 +517,33 @@ def create_trim_plan(header: Path, source_root: Path, output_root: Path) -> Trim
     if last_volume_sample > input_samples:
         fail(f"{input_marker}: last volume marker is beyond the end of the data")
 
+    block_intervals = [
+        current - previous for previous, current in zip(first_block, first_block[1:])
+    ]
+    tr_samples = sorted(block_intervals)[len(block_intervals) // 2]
+    if tr_samples < 1:
+        fail(f"{input_marker}: first volume block has a non-positive repetition time")
+    jitter = max(abs(interval - tr_samples) for interval in block_intervals)
+    if jitter > 1:
+        fail(
+            f"{input_marker}: first volume block is not a regular train "
+            f"(median {tr_samples} samples, max deviation {jitter})"
+        )
+    last_inclusive_sample = min(last_volume_sample + tr_samples - 1, input_samples)
+    if last_inclusive_sample < last_volume_sample:
+        fail(f"{input_marker}: last volume marker is beyond the end of the data")
+
     output_directory = output_root / header.parent.relative_to(source_root)
     output_stem = f"{header.stem}{OUTPUT_SUFFIX}"
     output_header = output_directory / f"{output_stem}.vhdr"
     output_marker = output_directory / f"{output_stem}.vmrk"
     output_data = output_directory / f"{output_stem}.eeg"
-    output_samples = last_volume_sample - first_volume_sample + 1
+    output_samples = last_inclusive_sample - first_volume_sample + 1
     output_markers = build_output_markers(
         input_marker,
         markers,
         first_volume_sample,
+        last_inclusive_sample,
         last_volume_sample,
         sampling_interval_us,
     )
@@ -508,29 +563,52 @@ def create_trim_plan(header: Path, source_root: Path, output_root: Path) -> Trim
         input_samples=input_samples,
         first_volume_sample=first_volume_sample,
         last_volume_sample=last_volume_sample,
+        last_inclusive_sample=last_inclusive_sample,
+        tr_samples=tr_samples,
         output_samples=output_samples,
         output_markers=output_markers,
     )
 
 
-def validate_configuration() -> tuple[Path, Path]:
-    source_root = SOURCE_ROOT.expanduser().resolve()
-    output_root = OUTPUT_ROOT.expanduser().resolve()
-    if not source_root.is_dir():
-        fail(f"SOURCE_ROOT is not a directory: {source_root}")
-    if source_root == output_root or source_root in output_root.parents:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Trim BrainVision recordings to the first contiguous volume block."
+    )
+    parser.add_argument("--source-root", type=Path, default=None)
+    parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument("--header-glob", default=None)
+    return parser.parse_args(argv)
+
+
+def validate_configuration(
+    source_root: Path | None = None,
+    output_root: Path | None = None,
+    header_glob: str | None = None,
+) -> tuple[Path, Path, str]:
+    resolved_source = (source_root or SOURCE_ROOT).expanduser().resolve()
+    resolved_output = (output_root or OUTPUT_ROOT).expanduser().resolve()
+    resolved_glob = HEADER_GLOB if header_glob is None else header_glob
+    if not resolved_source.is_dir():
+        fail(f"SOURCE_ROOT is not a directory: {resolved_source}")
+    if resolved_source == resolved_output or resolved_source in resolved_output.parents:
         fail("OUTPUT_ROOT must be separate from and not inside SOURCE_ROOT")
-    if not HEADER_GLOB.strip():
+    if not resolved_glob.strip():
         fail("HEADER_GLOB cannot be empty")
     if not OUTPUT_SUFFIX or any(separator in OUTPUT_SUFFIX for separator in ("/", "\\")):
         fail("OUTPUT_SUFFIX must be a non-empty filename suffix")
-    return source_root, output_root
+    return resolved_source, resolved_output, resolved_glob
 
 
-def build_plans(source_root: Path, output_root: Path) -> tuple[TrimPlan, ...]:
-    headers = sorted(path for path in source_root.glob(HEADER_GLOB) if path.is_file())
+def build_plans(
+    source_root: Path, output_root: Path, header_glob: str = HEADER_GLOB
+) -> tuple[TrimPlan, ...]:
+    headers = sorted(
+        path
+        for path in source_root.glob(header_glob)
+        if path.is_file() and not path.name.startswith("._")
+    )
     if not headers:
-        fail(f"No .vhdr files matched {HEADER_GLOB!r} beneath {source_root}")
+        fail(f"No .vhdr files matched {header_glob!r} beneath {source_root}")
 
     excluded = [
         path
@@ -655,23 +733,36 @@ def format_seconds(samples: int, sampling_interval_us: Decimal) -> str:
     return f"{seconds:.6f}"
 
 
-def main() -> int:
-    source_root, output_root = validate_configuration()
-    plans = build_plans(source_root, output_root)
-    print(f"Validated {len(plans)} recording(s). Trimming to first volume marker...\n")
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    source_root, output_root, header_glob = validate_configuration(
+        source_root=args.source_root,
+        output_root=args.output_root,
+        header_glob=args.header_glob,
+    )
+    plans = build_plans(source_root, output_root, header_glob)
+    print(
+        f"Validated {len(plans)} recording(s). "
+        "Trimming to first volume marker through last marker + 1 TR...\n"
+    )
 
     for index, plan in enumerate(plans, start=1):
         removed_samples = plan.first_volume_sample - 1
         removed_seconds = format_seconds(removed_samples, plan.sampling_interval_us)
-        trailing_samples = plan.input_samples - plan.last_volume_sample
+        trailing_samples = plan.input_samples - plan.last_inclusive_sample
         trailing_seconds = format_seconds(trailing_samples, plan.sampling_interval_us)
+        kept_after_last = plan.last_inclusive_sample - plan.last_volume_sample + 1
+        kept_after_last_seconds = format_seconds(kept_after_last, plan.sampling_interval_us)
         trim_recording(plan)
         print(
             f"[{index:>{len(str(len(plans)))}}/{len(plans)}] "
             f"{plan.input_header.name}\n"
             f"    removed before: {removed_samples:,} samples ({removed_seconds} s)\n"
             f"    removed after:  {trailing_samples:,} samples ({trailing_seconds} s)\n"
-            f"    first V  1 is sample 1; last V  1 is the final sample\n"
+            f"    last TR kept:   {kept_after_last:,} of {plan.tr_samples:,} samples "
+            f"({kept_after_last_seconds} s)\n"
+            f"    first V  1 is sample 1; last V  1 is not the final sample unless "
+            f"EEG stopped on that marker\n"
             f"    wrote   {plan.output_header}"
         )
 

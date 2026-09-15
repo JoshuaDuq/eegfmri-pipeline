@@ -15,7 +15,8 @@ def _passing_study1_metrics() -> dict[str, object]:
         "target_split_half_reliability": 0.51,
         "target_reliability_n_trials": 31,
         "within_subject_centered_delta_r2": 0.004,
-        "temporal_negative_controls_passed": True,
+        # Study 1 no longer derives a temporal-control verdict; the default gate ignores it.
+        "temporal_negative_controls_passed": None,
         "artifact_censoring_robustness_passed": True,
     }
 
@@ -56,10 +57,19 @@ def test_study2_confirmatory_gates_require_configured_level2_metric() -> None:
 def test_study2_confirmatory_gates_require_configured_boolean_control_flags() -> None:
     config = load_study2_config()
     metrics = _passing_study1_metrics()
-    metrics["temporal_negative_controls_passed"] = 1
+    metrics["artifact_censoring_robustness_passed"] = 1
 
-    with pytest.raises(TypeError, match="temporal_negative_controls_passed"):
+    with pytest.raises(TypeError, match="artifact_censoring_robustness_passed"):
         evaluate_study1_confirmatory_criteria(metrics, config)
+
+
+def test_study2_confirmatory_gates_ignore_the_absent_temporal_control_verdict() -> None:
+    config = load_study2_config()
+
+    qc = evaluate_study1_confirmatory_criteria(_passing_study1_metrics(), config)
+
+    assert qc.confirmatory_criteria_met is True
+    assert "temporal_negative_controls" not in qc.unmet_criteria
 
 
 def test_study2_confirmatory_gates_require_configured_lower_ci_metric() -> None:
@@ -71,8 +81,20 @@ def test_study2_confirmatory_gates_require_configured_lower_ci_metric() -> None:
         evaluate_study1_confirmatory_criteria(metrics, config)
 
 
-def test_study2_confirmatory_gates_report_target_reliability_failure() -> None:
+def test_study2_confirmatory_gates_do_not_gate_on_condition_level_reliability() -> None:
     config = load_study2_config()
+    metrics = _passing_study1_metrics()
+    metrics["target_split_half_reliability"] = 0.39
+
+    qc = evaluate_study1_confirmatory_criteria(metrics, config)
+
+    assert qc.confirmatory_criteria_met is True
+    assert qc.unmet_criteria == ()
+
+
+def test_study2_confirmatory_gates_still_apply_a_configured_reliability_threshold() -> None:
+    config = load_study2_config()
+    config["study2"]["confirmatory"]["study1_gates"]["min_target_split_half_reliability"] = 0.4
     metrics = _passing_study1_metrics()
     metrics["target_split_half_reliability"] = 0.39
 

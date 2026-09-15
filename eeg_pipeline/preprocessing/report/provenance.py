@@ -20,7 +20,7 @@ from eeg_pipeline.preprocessing.report.tables import Align, Column, grid_table
 #: the handful of settings that actually alter the numbers.
 PROVENANCE_KEYS = (
     ("project.random_state", "Random seed"),
-    ("paths.decomb_manifest", "Gradient/BCG correction manifest"),
+    ("paths.decomb_manifest", "Decomb correction manifest"),
     ("preprocessing.task_is_rest", "Resting-state mode"),
     ("eeg.reference", "EEG reference"),
     ("preprocessing.line_freq", "Power-line frequency (Hz)"),

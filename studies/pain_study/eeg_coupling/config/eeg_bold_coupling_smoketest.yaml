@@ -1,6 +1,6 @@
 paths:
   bids_fmri_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri"
-  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg"
+  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/bids_analyzer_archive/eeg"
   deriv_root: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives"
   freesurfer_dir: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/preprocessed/fmri/sourcedata/freesurfer"
   signature_maps:

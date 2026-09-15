@@ -48,8 +48,10 @@ def test_rorqual_profile_exports_generic_values() -> None:
     assert values["ALLIANCE_ACCOUNT"] == "def-mpcoll"
     assert values["ALLIANCE_PROJECT_ROOT"] == "/project/def-mpcoll/joshduq"
     assert values["ALLIANCE_SCRATCH_ROOT"] == "/scratch/joshduq"
-    assert values["FMRIPREP_SLURM_MEMORY"] == "700G"
-    assert values["FMRIPREP_MEM_MB"] == "680000"
+    # Sized from measured peak RSS (18.5-24.2 GB/subject, job 21081408), not guessed.
+    # 700G routed every task to cpularge (9 nodes); 64G fits cpubase (314 nodes).
+    assert values["FMRIPREP_SLURM_MEMORY"] == "64G"
+    assert values["FMRIPREP_MEM_MB"] == "60000"
     assert values["STUDY1_PREPARE_SLURM_MEMORY"] == "64G"
 
 

@@ -153,6 +153,66 @@ def run_effect_correlation_matrix(
     return np.corrcoef(fitted_effects, rowvar=False)
 
 
+#: Mapped lightness below which a cell's annotation switches to white.
+#:
+#: Read off the colormap rather than off ``r`` so the rule follows the colormap, not
+#: an assumption about it.
+_DARK_CELL_LUMINANCE = 0.45
+
+
+def _annotate_cells(axis: plt.Axes, matrix: np.ndarray) -> None:
+    """Write each correlation into its own cell of the lower triangle.
+
+    The fixed -1..+1 scale is what makes this panel comparable between subjects and
+    between contrasts, and a per-map scale would destroy exactly that. The cost is
+    that a real spread of 0.4 renders as several shades of near-white: measured on
+    this study, every off-diagonal cell fell within 0.3 of zero and the panel could
+    not be read at all, which the caption conceded by directing the reader to the TSV.
+
+    Annotating keeps the scale and returns the values, so the panel no longer needs
+    the file beside it.
+    """
+    from matplotlib.colors import Normalize
+
+    n = matrix.shape[0]
+    norm = Normalize(vmin=-1.0, vmax=1.0)
+    cmap = plt.get_cmap(SIGNED_CMAP)
+    size = 7.5 if n <= 6 else 6.0
+    for row in range(n):
+        # Lower triangle without the diagonal, matching what plot_matrix draws:
+        # writing 1.00 down the diagonal would label cells the panel does not show.
+        for column in range(row):
+            value = float(matrix[row, column])
+            red, green, blue, _alpha = cmap(norm(value))
+            luminance = 0.299 * red + 0.587 * green + 0.114 * blue
+            axis.text(
+                column,
+                row,
+                f"{value:.2f}",
+                ha="center",
+                va="center",
+                fontsize=size,
+                color="white" if luminance < _DARK_CELL_LUMINANCE else "#111111",
+            )
+
+
+def _blank_empty_tracks(axis: plt.Axes) -> None:
+    """Unlabel the row and column the lower triangle leaves empty.
+
+    Drawn without its diagonal, the lower triangle gives the first run no cells in its
+    row and the last run none in its column. Naming them marks two tracks a reader can
+    scan for a value that is not there.
+    """
+    rows = list(axis.get_yticklabels())
+    columns = list(axis.get_xticklabels())
+    if rows:
+        rows[0].set_text("")
+        axis.set_yticklabels(rows)
+    if columns:
+        columns[-1].set_text("")
+        axis.set_xticklabels(columns)
+
+
 def run_effect_correlation_figure(
     correlation: np.ndarray,
     *,
@@ -185,6 +245,8 @@ def run_effect_correlation_figure(
             vmin=-1.0,
             vmax=1.0,
         )
+        _annotate_cells(axis, matrix)
+        _blank_empty_tracks(axis)
         if title:
             axis.set_title(title)
         annotate_provenance(

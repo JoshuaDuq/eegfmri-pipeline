@@ -174,13 +174,11 @@ class SignFlipNull:
     ``2**(n-1)`` distinct sign patterns for a two-sided maximum statistic, because a
     pattern and its global negation give identical ``|z|`` maps.
 
-    Why this exists beside Bonferroni and FDR: both of those assume every voxel is
-    drawn from N(0, 1). A single-subject map combined across runs is routinely
-    over-dispersed relative to that -- on this study's own data the fitted null is
-    N(-0.61, 1.51^2) -- so both corrections are computed against a distribution the
-    map demonstrably does not follow. Sign-flipping runs makes no distributional
-    assumption at all; it asks how large a maximum this same data produces when the
-    only thing changed is which runs are labelled positive.
+    Validity requires independent runs whose null contrast errors are symmetric
+    about zero (jointly invariant to the run sign flips). This does not require
+    Gaussian errors or equal run variances. The maximum statistic controls the
+    voxelwise familywise error under these assumptions; it does not provide
+    cluster-extent inference or population inference across participants.
     """
 
     null_max: Tuple[float, ...]
@@ -192,6 +190,26 @@ class SignFlipNull:
     n_runs: int
     n_patterns: int
     alpha: float
+
+
+def _fitted_mask_values(img: Any, masker: Any) -> np.ndarray:
+    """Read an image's in-mask voxels without putting it through the masker.
+
+    ``masker.transform`` is the obvious call and the wrong one. A
+    ``FirstLevelModel`` built with ``smoothing_fwhm`` hands that smoothing to its own
+    masker, so transforming a map the model already produced smooths it a second time.
+    Measured on this study: the identity sign pattern reported a maximum |z| of 6.90
+    against the stored map's 9.78, and the familywise height and survivor count that
+    travelled with it were quantities of a doubly-smoothed map -- printed in the report
+    beside heights computed on the model's own.
+
+    The null itself stayed internally consistent, since every pattern was smoothed the
+    same way, so the p-value was never wrong. What was wrong is that its height and its
+    survivor count did not describe the map anyone was looking at.
+    """
+    mask = np.asanyarray(masker.mask_img_.dataobj).astype(bool)
+    values = np.asanyarray(img.dataobj, dtype=float)[mask]
+    return values[np.isfinite(values)]
 
 
 def _sign_patterns(n_runs: int) -> np.ndarray:
@@ -219,12 +237,17 @@ def compute_sign_flip_null(
     Each pattern is evaluated by passing the per-run vectors ``s_i * c_i`` through the
     same ``compute_contrast`` call the pipeline already uses, so the pooling rule is
     nilearn's own and the identity pattern reproduces the stored map exactly rather
-    than approximating it.
+    than approximating it. Voxels are read through :func:`_fitted_mask_values` rather
+    than the masker, which would smooth them a second time and break exactly that
+    correspondence.
 
     ``None`` when the model holds a single run, or when the contrast cannot be
     expanded. Best-effort throughout: this is a diagnostic, and the contrast it
     describes is already on disk by the time it runs.
     """
+    if not np.isfinite(alpha) or not 0.0 < alpha < 1.0:
+        raise ValueError("Sign-flip alpha must be finite and lie in (0, 1).")
+
     designs = list(getattr(flm, "design_matrices_", []) or [])
     masker = getattr(flm, "masker_", None)
     if masker is None or len(designs) < 2:
@@ -247,8 +270,7 @@ def compute_sign_flip_null(
         except Exception as exc:
             logger.warning("Sign-flip pattern %d failed (%s)", index, exc)
             return None
-        z = np.asarray(masker.transform(z_img), dtype=float).ravel()
-        z = z[np.isfinite(z)]
+        z = _fitted_mask_values(z_img, masker)
         if z.size == 0:
             return None
         maxima.append(float(np.abs(z).max()))
@@ -260,18 +282,21 @@ def compute_sign_flip_null(
 
     null_max = np.asarray(maxima, dtype=float)
     observed_max = float(null_max[0])
-    height = float(np.quantile(null_max, 1.0 - alpha))
-    # The identity is a member of the null set and always ties the observed maximum,
-    # so the +1 in the numerator is not a continuity correction -- it is that tie. It
-    # is also why p can never fall below ``p_floor``; see that field.
-    global_p = float((np.sum(null_max >= observed_max) + 1) / (null_max.size + 1))
+    # Exhaustive enumeration already includes the identity. The +1 correction
+    # belongs to a sampled null, not this exact distribution (SciPy permutation_test).
+    global_p = float(np.mean(null_max >= observed_max))
+    # Reject strictly above this order statistic, with at most floor(alpha * N)
+    # null maxima in the rejection region. Interpolated quantiles can exceed alpha
+    # at small N; ties at the boundary must remain outside the rejection region.
+    allowed_exceedances = int(np.floor(alpha * null_max.size))
+    height = float(np.sort(null_max)[null_max.size - allowed_exceedances - 1])
     return SignFlipNull(
         null_max=tuple(float(value) for value in null_max),
         observed_max=observed_max,
         fwe_height=height,
-        fwe_survivors=int(np.sum(np.abs(observed) >= height)),
+        fwe_survivors=int(np.sum(np.abs(observed) > height)),
         global_p=global_p,
-        p_floor=float(2 / (null_max.size + 1)),
+        p_floor=float(1 / null_max.size),
         n_runs=len(vectors),
         n_patterns=int(null_max.size),
         alpha=float(alpha),
@@ -356,8 +381,7 @@ def compute_run_influence(
         except Exception as exc:
             logger.warning("Could not recombine the contrast (%s)", exc)
             return None
-        values = np.asarray(masker.transform(img), dtype=float).ravel()
-        return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+        return _fitted_mask_values(img, masker)
 
     combined = _z(vectors)
     if combined is None:

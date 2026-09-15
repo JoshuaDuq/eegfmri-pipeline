@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -61,6 +62,132 @@ def _signature_target_defaults(config: Any, *, config_path: str) -> dict[str, An
         .lower(),
         "round_decimals": int(require_config_value(config, f"{config_path}.round_decimals")),
     }
+
+
+@dataclass(frozen=True)
+class _TrialTimingContract:
+    """What a paired EEG and fMRI trial must agree on, in seconds."""
+
+    onset_offset_s: float
+    onset_tolerance_s: float
+    plateau_duration_s: Optional[float]
+    duration_tolerance_s: float
+
+
+def _timing_contract(config: Any, *, config_path: str) -> _TrialTimingContract:
+    audit_path = f"{config_path}.timing_audit"
+    onset_offset = float(require_config_value(config, f"{audit_path}.onset_offset_s"))
+    onset_tolerance = float(require_config_value(config, f"{audit_path}.onset_tolerance_s"))
+    duration_tolerance = float(require_config_value(config, f"{audit_path}.duration_tolerance_s"))
+    raw_duration = _optional_config_value(config, f"{audit_path}.plateau_duration_s")
+    plateau_duration = None if raw_duration is None else float(raw_duration)
+
+    for name, value in (
+        ("onset_tolerance_s", onset_tolerance),
+        ("duration_tolerance_s", duration_tolerance),
+    ):
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(f"{audit_path}.{name} must be a finite non-negative number.")
+    if not np.isfinite(onset_offset):
+        raise ValueError(f"{audit_path}.onset_offset_s must be finite.")
+    if plateau_duration is not None and (
+        not np.isfinite(plateau_duration) or plateau_duration <= 0
+    ):
+        raise ValueError(f"{audit_path}.plateau_duration_s must be positive when set.")
+
+    return _TrialTimingContract(
+        onset_offset_s=onset_offset,
+        onset_tolerance_s=onset_tolerance,
+        plateau_duration_s=plateau_duration,
+        duration_tolerance_s=duration_tolerance,
+    )
+
+
+def _format_timing_violations(
+    *,
+    rows: np.ndarray,
+    observed: np.ndarray,
+    expected: np.ndarray,
+    limit: int = 5,
+) -> str:
+    parts = [
+        f"row {int(row)}: observed={float(obs):.6f}s expected={float(exp):.6f}s "
+        f"error={abs(float(obs) - float(exp)) * 1000.0:.3f}ms"
+        for row, obs, exp in zip(rows[:limit], observed[:limit], expected[:limit])
+    ]
+    if rows.size > limit:
+        parts.append(f"... and {int(rows.size) - limit} more")
+    return "; ".join(parts)
+
+
+def _audit_paired_trial_timing(
+    *,
+    eeg_onset: np.ndarray,
+    eeg_duration: np.ndarray,
+    paired_onset: np.ndarray,
+    paired_duration: np.ndarray,
+    contract: _TrialTimingContract,
+    label: str,
+) -> None:
+    """Fail when trials joined by identifier do not describe the same moment.
+
+    Equal trial identifiers are an assertion, not evidence: the two tables index trials
+    independently, so a dropped row on either side renumbers everything after it while
+    every key still matches. The protocol fixes the interval between an EEG trigger and
+    the fMRI plateau it opens, which makes the onset difference the one quantity that
+    can distinguish a genuine pairing from a coincidental one.
+
+    Rows with no partner are left to the caller's match accounting; only paired rows
+    can be audited here.
+    """
+    onsets = np.asarray(eeg_onset, dtype=float)
+    durations = np.asarray(eeg_duration, dtype=float)
+    partner_onsets = np.asarray(paired_onset, dtype=float)
+    partner_durations = np.asarray(paired_duration, dtype=float)
+
+    paired = np.isfinite(onsets) & np.isfinite(partner_onsets)
+    if not np.any(paired):
+        raise ValueError(
+            f"{label}: no trial carries both an EEG onset and an fMRI onset, so the "
+            "protocol offset between them cannot be verified."
+        )
+
+    expected_onsets = onsets + contract.onset_offset_s
+    onset_error = np.abs(partner_onsets - expected_onsets)
+    offending = np.flatnonzero(paired & (onset_error > contract.onset_tolerance_s))
+    if offending.size:
+        raise ValueError(
+            f"{label}: {offending.size} of {int(np.count_nonzero(paired))} paired trials "
+            f"miss the protocol offset of {contract.onset_offset_s:.3f}s by more than "
+            f"{contract.onset_tolerance_s * 1000.0:.1f}ms. "
+            + _format_timing_violations(
+                rows=offending,
+                observed=partner_onsets[offending],
+                expected=expected_onsets[offending],
+            )
+        )
+
+    if contract.plateau_duration_s is None:
+        expected_durations = durations
+        described = "the paired EEG event duration"
+    else:
+        expected_durations = np.full(partner_durations.shape, contract.plateau_duration_s)
+        described = f"the modeled plateau duration of {contract.plateau_duration_s:.3f}s"
+
+    measurable = paired & np.isfinite(partner_durations) & np.isfinite(expected_durations)
+    duration_error = np.abs(partner_durations - expected_durations)
+    offending = np.flatnonzero(measurable & (duration_error > contract.duration_tolerance_s))
+    if offending.size:
+        raise ValueError(
+            f"{label}: {offending.size} of {int(np.count_nonzero(measurable))} paired trials "
+            f"depart from {described} by more than "
+            f"{contract.duration_tolerance_s * 1000.0:.1f}ms. "
+            + _format_timing_violations(
+                rows=offending,
+                observed=partner_durations[offending],
+                expected=expected_durations[offending],
+            )
+        )
 
 
 def _optional_config_value(config: Any, key: str, default: Any = None) -> Any:
@@ -206,9 +333,9 @@ def _load_target_table_values_for_subject(
     target_column: str,
     events_df: pd.DataFrame,
     run_int: np.ndarray,
-    eeg_time_keys: List[Optional[str]],
     eeg_trial_keys: List[Optional[str]],
     round_decimals: int,
+    contract: _TrialTimingContract,
 ) -> tuple[pd.Series, pd.DataFrame]:
     target_column = str(target_column).strip()
     if not target_column:
@@ -240,32 +367,20 @@ def _load_target_table_values_for_subject(
     target_duration = pd.to_numeric(subject_rows["duration"], errors="coerce").to_numpy(dtype=float)
     target_values = pd.to_numeric(subject_rows[target_column], errors="coerce")
 
-    def _mk_key(run_num: float, on: float, dur: float) -> Optional[str]:
-        if not (np.isfinite(run_num) and np.isfinite(on) and np.isfinite(dur)):
-            return None
-        return (
-            f"{int(run_num)}|"
-            f"{round(float(on), round_decimals):.{round_decimals}f}|"
-            f"{round(float(dur), round_decimals):.{round_decimals}f}"
-        )
-
     def _mk_trial_key(run_num: float, trial_num: float) -> Optional[str]:
         if not (np.isfinite(run_num) and np.isfinite(trial_num)):
             return None
         return f"{int(run_num)}|{int(round(float(trial_num)))}"
 
-    target_time_keys = [
-        _mk_key(run_num, onset, duration)
-        for run_num, onset, duration in zip(target_runs, target_onset, target_duration)
-    ]
     target_trial_keys = [
         _mk_trial_key(run_num, trial_num) for run_num, trial_num in zip(target_runs, target_trials)
     ]
 
     target_frame = pd.DataFrame(
         {
-            "__key__": target_time_keys,
             "__trial_key__": target_trial_keys,
+            "onset": target_onset,
+            "duration": target_duration,
             target_column: target_values,
         }
     )
@@ -276,35 +391,9 @@ def _load_target_table_values_for_subject(
         target_column,
         "(run,trial)",
     )
-    time_values = _unique_values_by_key(
-        target_frame,
-        "__key__",
-        target_column,
-        "(run,onset,duration)",
-    )
 
     trial_y = _values_for_keys(eeg_trial_keys, trial_values)
-    time_y = _values_for_keys(eeg_time_keys, time_values)
     trial_matches = int(np.isfinite(trial_y.to_numpy(dtype=float)).sum())
-    time_matches = int(np.isfinite(time_y.to_numpy(dtype=float)).sum())
-    if time_matches > 0:
-        time_matched = np.isfinite(time_y.to_numpy(dtype=float))
-        trial_matched = np.isfinite(trial_y.to_numpy(dtype=float))
-        if not np.array_equal(time_matched, time_matched & trial_matched):
-            raise ValueError(
-                "Configured fMRI signature target table alignment temporal audit is ambiguous: "
-                "onset/duration keys match rows that are not matched by trial identifiers."
-            )
-        both_matched = time_matched & trial_matched
-        if np.any(both_matched) and not np.allclose(
-            time_y.to_numpy(dtype=float)[both_matched],
-            trial_y.to_numpy(dtype=float)[both_matched],
-            equal_nan=True,
-        ):
-            raise ValueError(
-                "Configured fMRI signature target table alignment temporal audit is ambiguous: "
-                "trial-number and onset/duration keys match different target values."
-            )
 
     active_keys = eeg_trial_keys
     active_key_column = "__trial_key__"
@@ -316,6 +405,32 @@ def _load_target_table_values_for_subject(
             f"clean EEG event by unique trial identifiers for {subject_bids}, "
             f"task-{task}, target={target_column}; matched {trial_matches}/{len(events_df)}."
         )
+
+    # The table records the clean EEG event's own onset and duration, so a row paired by
+    # trial identifier must land on the same instant rather than merely the same index.
+    _audit_paired_trial_timing(
+        eeg_onset=np.asarray(
+            pd.to_numeric(events_df["onset"], errors="coerce"),
+            dtype=float,
+        ),
+        eeg_duration=np.asarray(
+            pd.to_numeric(events_df["duration"], errors="coerce"),
+            dtype=float,
+        ),
+        paired_onset=_values_for_keys(
+            eeg_trial_keys,
+            _unique_values_by_key(target_frame, "__trial_key__", "onset", "(run,trial)"),
+        ).to_numpy(dtype=float),
+        paired_duration=_values_for_keys(
+            eeg_trial_keys,
+            _unique_values_by_key(target_frame, "__trial_key__", "duration", "(run,trial)"),
+        ).to_numpy(dtype=float),
+        contract=contract,
+        label=(
+            f"Configured fMRI signature target table temporal audit ({table_path.name}, "
+            f"{subject_bids}, task-{task})"
+        ),
+    )
 
     extra = _aligned_numeric_target_table_columns(
         subject_rows=subject_rows,
@@ -427,21 +542,11 @@ def load_fmri_signature_target_for_subject(
     duration = pd.to_numeric(events_df["duration"], errors="coerce").to_numpy(dtype=float)
     run_int = pd.to_numeric(run_series, errors="coerce").to_numpy(dtype=float)
 
-    def _mk_key(run_num: float, on: float, dur: float) -> Optional[str]:
-        if not (np.isfinite(run_num) and np.isfinite(on) and np.isfinite(dur)):
-            return None
-        return (
-            f"{int(run_num)}|"
-            f"{round(float(on), round_decimals):.{round_decimals}f}|"
-            f"{round(float(dur), round_decimals):.{round_decimals}f}"
-        )
-
     def _mk_trial_key(run_num: float, trial_num: float) -> Optional[str]:
         if not (np.isfinite(run_num) and np.isfinite(trial_num)):
             return None
         return f"{int(run_num)}|{int(round(float(trial_num)))}"
 
-    eeg_keys = [_mk_key(r, o, d) for r, o, d in zip(run_int, onset, duration)]
     events_trial = _first_finite_numeric(events_df, ["trial_number", "trial_index", "epoch"])
     eeg_trial_keys: List[Optional[str]] = [None] * len(events_df)
     if events_trial is not None:
@@ -471,9 +576,13 @@ def load_fmri_signature_target_for_subject(
             target_column=target_column,
             events_df=events_df,
             run_int=run_int,
-            eeg_time_keys=eeg_keys,
             eeg_trial_keys=eeg_trial_keys,
             round_decimals=round_decimals,
+            contract=replace(
+                _timing_contract(config, config_path=config_path),
+                onset_offset_s=0.0,
+                plateau_duration_s=None,
+            ),
         )
         y_label = f"fmri_signature.primary_targets.{target_column}"
         logger.info(
@@ -597,17 +706,6 @@ def load_fmri_signature_target_for_subject(
             f"Available signatures: {available_signatures_with_metric or available_signatures}"
         )
 
-    sig_df["__key__"] = None
-    if {"onset", "duration"}.issubset(sig_df.columns):
-        sig_df["__key__"] = [
-            _mk_key(r, o, d)
-            for r, o, d in zip(
-                sig_df["run_num"].to_numpy(dtype=float),
-                sig_df["onset"].to_numpy(dtype=float),
-                sig_df["duration"].to_numpy(dtype=float),
-            )
-        ]
-
     sig_trial = _first_finite_numeric(
         sig_df, ["events_trial_number", "trial_number", "trial_index"]
     )
@@ -622,29 +720,8 @@ def load_fmri_signature_target_for_subject(
         ]
 
     trial_values = _unique_values_by_key(sig_df, "__trial_key__", metric, "(run,trial)")
-    onset_values = _unique_values_by_key(sig_df, "__key__", metric, "(run,onset,duration)")
     trial_y = _values_for_keys(eeg_trial_keys, trial_values)
-    onset_y = _values_for_keys(eeg_keys, onset_values)
     trial_matches = int(np.isfinite(trial_y.to_numpy(dtype=float)).sum())
-    onset_matches = int(np.isfinite(onset_y.to_numpy(dtype=float)).sum())
-    if onset_matches > 0:
-        onset_matched = np.isfinite(onset_y.to_numpy(dtype=float))
-        trial_matched = np.isfinite(trial_y.to_numpy(dtype=float))
-        if not np.array_equal(onset_matched, onset_matched & trial_matched):
-            raise ValueError(
-                "ambiguous fMRI signature alignment temporal audit: onset/duration keys match rows "
-                "that are not matched by trial identifiers."
-            )
-        both_matched = onset_matched & trial_matched
-        if np.any(both_matched) and not np.allclose(
-            onset_y.to_numpy(dtype=float)[both_matched],
-            trial_y.to_numpy(dtype=float)[both_matched],
-            equal_nan=True,
-        ):
-            raise ValueError(
-                "ambiguous fMRI signature alignment temporal audit: trial-number and onset/duration "
-                "keys match different target values."
-            )
 
     active_keys = eeg_trial_keys
     active_agg = trial_values
@@ -656,6 +733,31 @@ def load_fmri_signature_target_for_subject(
             "fMRI signature alignment must match finite values to at least one clean EEG "
             f"event by unique trial identifiers; matched {trial_matches}/{len(events_df)}."
         )
+
+    _audit_paired_trial_timing(
+        eeg_onset=onset,
+        eeg_duration=duration,
+        paired_onset=_values_for_keys(
+            active_keys,
+            _unique_values_by_key(
+                sig_df[["__trial_key__", "onset"]].rename(columns={"__trial_key__": "key"}),
+                "key",
+                "onset",
+                "(run,trial)",
+            ),
+        ).to_numpy(dtype=float),
+        paired_duration=_values_for_keys(
+            active_keys,
+            _unique_values_by_key(
+                sig_df[["__trial_key__", "duration"]].rename(columns={"__trial_key__": "key"}),
+                "key",
+                "duration",
+                "(run,trial)",
+            ),
+        ).to_numpy(dtype=float),
+        contract=_timing_contract(config, config_path=config_path),
+        label=f"fMRI signature alignment temporal audit ({sig_path.name})",
+    )
 
     norm = str(cfg["normalization"]).strip().lower()
     if norm != "none":
@@ -700,14 +802,13 @@ def load_fmri_signature_target_for_subject(
 
     y_label = f"fmri_signature.{method}.{contrast}.{sig_name}.{metric}"
     logger.info(
-        "Loaded fMRI signature target for %s: %s (norm=%s, mode=%s, matches=%d/%d, onset_matches=%d, trial_matches=%d)",
+        "Loaded fMRI signature target for %s: %s (norm=%s, mode=%s, matches=%d/%d, trial_matches=%d)",
         subject_bids,
         y_label,
         norm,
         "trial",
         int(np.isfinite(y.to_numpy(dtype=float)).sum()),
         len(y),
-        int(onset_matches),
         int(trial_matches),
     )
     return y, y_label, extra_meta

@@ -23,6 +23,7 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
     discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
+    slice_time_ref_from_bold as _slice_time_ref_from_bold,
     prepare_confounds_for_first_level_model as _prepare_confounds_for_first_level_model,
     select_confounds_for_glm_from_path as _select_confounds_for_glm,
     select_consistent_run_source,
@@ -1333,6 +1334,7 @@ def run_trial_signature_extraction_for_subject(
         )
 
         tr = _get_tr_from_bold(bold_path)
+        slice_time_ref = _slice_time_ref_from_bold(bold_path, tr=tr)
 
         # Determine trial list and build run-level modeled events.
         trials, modeled_events = _extract_trials_for_run(
@@ -1366,7 +1368,13 @@ def run_trial_signature_extraction_for_subject(
             confounds = _prepare_confounds_for_first_level_model(confounds, sample_mask)
 
         if cfg.method == "beta-series":
-            flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
+            flm = _build_first_level_model(
+                tr=tr,
+                cfg=cfg,
+                mask_img=mask_img,
+                slice_time_ref=slice_time_ref,
+                logger=logger,
+            )
             flm.fit(
                 bold_path,
                 events=modeled_events,
@@ -1439,11 +1447,17 @@ def run_trial_signature_extraction_for_subject(
                     nib.save(var_img, str(p))
 
                 if signature_root is not None and signature_specs:
+                    # The run's own fitted mask, not the fixed scoring extent: voxels this
+                    # run never covered come back as zero-valued beta background, which
+                    # attenuates the target while the fixed-mask support statistics stay
+                    # untouched. Coverage is a per-trial property, so the condition-level
+                    # union of contributing run masks cannot stand in for it here.
                     sigs = compute_signature_expression(
                         stat_or_effect_img=beta_img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
                         mask_img=signature_mask_img if signature_mask_img is not None else mask_img,
+                        coverage_mask_img=mask_img,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
@@ -1513,7 +1527,13 @@ def run_trial_signature_extraction_for_subject(
                 lss_events = _build_lss_events(
                     trial=t, all_trials=trials, original_events_df=events_df, cfg=cfg
                 )
-                flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
+                flm = _build_first_level_model(
+                    tr=tr,
+                    cfg=cfg,
+                    mask_img=mask_img,
+                    slice_time_ref=slice_time_ref,
+                    logger=logger,
+                )
                 flm.fit(
                     bold_path,
                     events=lss_events,
@@ -1568,11 +1588,17 @@ def run_trial_signature_extraction_for_subject(
                     nib.save(var_img, str(p))
 
                 if signature_root is not None and signature_specs:
+                    # The run's own fitted mask, not the fixed scoring extent: voxels this
+                    # run never covered come back as zero-valued beta background, which
+                    # attenuates the target while the fixed-mask support statistics stay
+                    # untouched. Coverage is a per-trial property, so the condition-level
+                    # union of contributing run masks cannot stand in for it here.
                     sigs = compute_signature_expression(
                         stat_or_effect_img=beta_img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
                         mask_img=signature_mask_img if signature_mask_img is not None else mask_img,
+                        coverage_mask_img=mask_img,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,

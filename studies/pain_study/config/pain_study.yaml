@@ -21,7 +21,7 @@ paths:
   # on sub-0001 run-1 the 47 Hz line is untouched there and 19 dB down in the staged tree,
   # and the delivered derivatives carry the 34 dB stopband that only the staged tree
   # explains. The config named one input while the science was built on another.
-  bids_root: "../../../data/bids_output/eeg_decombed_auto_staged"  # BIDS-formatted EEG data
+  bids_root: "../../../data/bids_output/bids_analyzer_archive/eeg_decombed_auto_staged"  # BIDS-formatted EEG data
   # Null preserves ordinary datasets. A configured Decomb manifest activates spectral
   # exclusions and requires preprocessing.notch_freq: null.
   #
@@ -29,7 +29,7 @@ paths:
   # that reads power at a frequency needs to know where. Without it the report treats a
   # 30 dB stopband as data: it draws the trough unmarked, and the aperiodic fit was
   # measuring slopes across holes it had no way to recognise.
-  decomb_manifest: "../../../data/bids_output/eeg_decombed_auto_staged/line_notch_manifest.tsv"
+  decomb_manifest: "../../../data/bids_output/bids_analyzer_archive/eeg_decombed_auto_staged/line_notch_manifest.tsv"
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
 

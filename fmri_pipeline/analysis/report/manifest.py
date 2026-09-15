@@ -45,6 +45,41 @@ _PATH_TUPLE_FIELDS = (
 )
 
 
+#: Nilearn ``output_type`` values that yield a z-scaled statistic.
+#:
+#: Only ``z_score``. ``stat`` is a t or F, which shares neither scale nor tail with a
+#: z, and the rest are effects, variances or probabilities.
+Z_SCALED_OUTPUT_TYPES = frozenset({"z_score", "z-score", "zscore"})
+
+
+def stat_map_is_z_scaled(
+    *,
+    stat_map_output_type: Optional[str],
+    stat_map: Optional[Path],
+    effect_map: Optional[Path],
+) -> bool:
+    """Whether ``stat_map`` may be thresholded at a z height.
+
+    Nilearn's :func:`~nilearn.glm.threshold_stats_img` takes an image "presumably in z
+    scale", and its notes add that otherwise the computed threshold is "not rigorous
+    and likely meaningless". Every corrected height this report quotes -- FDR,
+    Bonferroni, random-field -- translates an alpha to a z, so all of them inherit that
+    requirement.
+
+    Schema 3 answers from ``stat_map_output_type``. A schema-2 manifest recorded no
+    output type, so the fallback is the one signature the broken case leaves behind: a
+    study whose requested output is the effect size writes one file and records it as
+    both maps, so ``stat_map`` and ``effect_map`` are the same path. Manifests whose
+    two maps differ came from the ``z-score`` default and stay thresholdable -- refusing
+    them would strip working panels from every report already on disk.
+    """
+    if stat_map_output_type is not None:
+        return str(stat_map_output_type).strip().lower() in Z_SCALED_OUTPUT_TYPES
+    if stat_map is None or effect_map is None:
+        return True
+    return Path(stat_map) != Path(effect_map)
+
+
 @dataclass(frozen=True)
 class ContrastManifest:
     """Everything the report needs about one fitted contrast."""
@@ -119,6 +154,20 @@ class ContrastManifest:
     #: units line can name the right one rather than assuming the common case.
     signal_scaling_mode: Optional[str] = None
 
+    #: Which Nilearn ``output_type`` produced ``stat_map``.
+    #:
+    #: Load-bearing, not provenance. Every height in this report -- the applied
+    #: threshold, FDR, Bonferroni, random-field -- is a z-scale quantity, and Nilearn
+    #: states outright that on a non-z input the computed threshold is "not rigorous
+    #: and likely meaningless". Before this field existed the report had no way to ask,
+    #: so a study configured with ``output_type: cope`` had its effect map thresholded
+    #: at |z| > 2.30: a map whose maximum is 0.67 percent signal change, against a
+    #: height nothing in those units can ever reach.
+    #:
+    #: ``None`` on a schema-2 manifest, where :func:`stat_map_is_z_scaled` falls back
+    #: to the one check those manifests still support.
+    stat_map_output_type: Optional[str] = None
+
     #: Per-run estimates of this contrast, as 4D volumes with run on the fourth axis.
     #:
     #: A first-level contrast over several runs is a fixed-effects combination,
@@ -142,9 +191,8 @@ class ContrastManifest:
     #: ``sign_flip_p_floor`` is stored rather than recomputed because it is the number
     #: that makes ``sign_flip_global_p`` readable: the unflipped pattern is always a
     #: member of the null and always ties the observed maximum, so the p can never fall
-    #: below ``2 / (2**(n_runs-1) + 1)``. Six runs floor at 0.061, and a p of 0.061
-    #: printed without its floor reads as a near-miss when it is the smallest value the
-    #: test can return.
+    #: below ``1 / 2**(n_runs-1)``. Six runs have 32 distinct two-sided patterns,
+    #: including the identity once, and an attainable floor of 0.03125.
     sign_flip_fwe_height: Optional[float] = None
     sign_flip_fwe_survivors: Optional[int] = None
     sign_flip_global_p: Optional[float] = None
@@ -767,6 +815,7 @@ def write_report_manifest(
     radiological: bool = False,
     smoothing_fwhm: Optional[float] = None,
     signal_scaling_mode: Optional[str] = None,
+    stat_map_output_type: Optional[str] = None,
     mask_is_analysis_mask: bool = False,
     contrast_cfg: Any = None,
 ) -> Path:
@@ -850,6 +899,7 @@ def write_report_manifest(
         # disagree about whether scaling happened.
         signal_scaling=signal_scaling_mode is not None,
         signal_scaling_mode=signal_scaling_mode,
+        stat_map_output_type=stat_map_output_type,
         confound_strategy=str(meta.get("confounds_strategy", "unspecified")),
         # Only true when the caller passed the mask the model was fitted inside.
         # A mask discovered from the preprocessing derivatives is a single run's,

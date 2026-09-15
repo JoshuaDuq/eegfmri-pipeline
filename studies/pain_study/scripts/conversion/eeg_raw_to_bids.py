@@ -29,12 +29,42 @@ from eeg_pipeline.utils.data.preprocessing import (
 logger = logging.getLogger(__name__)
 
 SourceFormat = Literal["brainvision", "native-fif"]
+CANONICAL_THERMODE_MARKER = "Trig_therm/T  1"
+LEGACY_STIMULATION_MARKER = "Stim_on/S  1"
+THERMODE_EVENT_COUNT = 11
 
+
+
+#: A gap this many times the median volume interval starts a new acquisition block.
+_VOLUME_BLOCK_GAP_FACTOR = 1.5
+
+
+def _first_contiguous_volume_onsets(onsets: list[float]) -> list[float]:
+    """Keep the first 0.9 s-scale volume train; drop a later scanner restart."""
+    ordered = sorted(float(onset) for onset in onsets)
+    if len(ordered) < 2:
+        return ordered
+    intervals = np.diff(ordered)
+    median_interval = float(np.median(intervals))
+    block = [ordered[0]]
+    for current, interval in zip(ordered[1:], intervals, strict=True):
+        if interval > _VOLUME_BLOCK_GAP_FACTOR * median_interval:
+            break
+        block.append(current)
+    return block
 
 
 # Moved from eeg_pipeline/utils/data/preprocessing.py: it trims to a scanner's volume
 # markers, which only a study with a scanner has.
 def trim_to_volume_bounds(raw: mne.io.BaseRaw) -> bool:
+    """Crop to the first contiguous volume block, ending one TR after its last marker.
+
+    A volume marker is the start of a volume. The last retained sample is
+    ``last_marker + TR``, clipped to the end of the recording, so a partial
+    last TR is kept when EEG stopped mid-volume. Pre-first-marker samples
+    (quiet EEG and unsaved dummy volumes) are dropped. A later scanner
+    restart is not kept.
+    """
     if len(raw.annotations) == 0:
         return False
 
@@ -50,18 +80,28 @@ def trim_to_volume_bounds(raw: mne.io.BaseRaw) -> bool:
         return False
 
     onsets = [raw.annotations.onset[idx] for idx in volume_indices]
-    first_onset = min(onsets)
-    last_onset = max(onsets)
+    block = _first_contiguous_volume_onsets(onsets)
+    if len(block) < 2:
+        return False
 
+    first_onset = block[0]
+    last_onset = block[-1]
     if not isinstance(first_onset, (int, float)) or first_onset <= 0:
         return False
 
+    repetition_time = float(np.median(np.diff(block)))
+    recording_end = float(raw.first_time + raw.times[-1])
+    last_inclusive = min(last_onset + repetition_time, recording_end)
+
     logger.info(
-        "Trimming raw to volume bounds: %.3fs to %.3fs relative to recording start.",
+        "Trimming raw to volume bounds: %.3fs to %.3fs relative to recording start "
+        "(last marker %.3fs + TR %.3fs, clipped to recording end).",
         first_onset,
+        last_inclusive,
         last_onset,
+        repetition_time,
     )
-    raw.crop(tmin=float(first_onset), tmax=float(last_onset))
+    raw.crop(tmin=float(first_onset), tmax=float(last_inclusive))
     return True
 
 
@@ -81,6 +121,37 @@ def trim_to_first_event(raw: mne.io.BaseRaw, prefix: str) -> float:
     # Annotation onsets are absolute against orig_time; crop takes a time in raw.times.
     raw.crop(tmin=first_onset - raw.first_time)
     return first_onset
+
+
+def _canonicalize_thermode_annotations(
+    raw: mne.io.BaseRaw,
+    log: logging.Logger,
+) -> bool:
+    """Rewrite a complete legacy stimulation train to canonical thermode semantics."""
+    descriptions = list(raw.annotations.description)
+    canonical_count = descriptions.count(CANONICAL_THERMODE_MARKER)
+    if canonical_count == THERMODE_EVENT_COUNT:
+        return False
+    if canonical_count:
+        raise ValueError(
+            f"Expected {THERMODE_EVENT_COUNT} {CANONICAL_THERMODE_MARKER} markers, "
+            f"found {canonical_count}."
+        )
+
+    legacy_count = descriptions.count(LEGACY_STIMULATION_MARKER)
+    if legacy_count != THERMODE_EVENT_COUNT:
+        raise ValueError(
+            f"Thermode canonicalization expected {THERMODE_EVENT_COUNT} "
+            f"{LEGACY_STIMULATION_MARKER} markers, found {legacy_count}."
+        )
+    raw.annotations.rename({LEGACY_STIMULATION_MARKER: CANONICAL_THERMODE_MARKER})
+    log.info(
+        "Rewrote %d %s annotations as %s.",
+        legacy_count,
+        LEGACY_STIMULATION_MARKER,
+        CANONICAL_THERMODE_MARKER,
+    )
+    return True
 
 
 def _find_native_corrected_fifs(source_root: Path, task: str) -> list[Path]:
@@ -195,8 +266,9 @@ def run_raw_to_bids(
     keep_all_annotations: bool = False,
     *,
     source_format: SourceFormat = "brainvision",
-    source_layout: str = "brainvision_processed_1khz",
+    source_layout: str = "analyzer_brainvision_processed_1khz",
     trim_to_first_event_prefix: Optional[str] = None,
+    canonicalize_thermode_markers: bool = False,
     _logger: Optional[logging.Logger] = None,
 ) -> int:
     """Convert one explicitly selected EEG source format to BIDS."""
@@ -226,6 +298,9 @@ def run_raw_to_bids(
 
         raw = _read_raw(source_file, source_format)
         set_channel_types(raw)
+
+        if canonicalize_thermode_markers:
+            _canonicalize_thermode_annotations(raw, log)
 
         if montage:
             set_montage(raw, montage)

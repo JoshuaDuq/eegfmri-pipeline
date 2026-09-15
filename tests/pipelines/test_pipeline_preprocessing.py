@@ -1257,6 +1257,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
                 PreprocessingPipeline,
                 "_harmonize_filtered_raw_bads_for_mne_concat",
             ) as mock_harmonize,
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
         ):
             p._run_ica_fitting(["0001"], "t", n_jobs=1)
         self.assertEqual(mock_run.call_count, 2)
@@ -1281,6 +1282,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
             patch.object(PreprocessingPipeline, "_run_band_specific_ica_report") as report,
         ):
             p._run_ica_fitting(["0001"], "pain", n_jobs=1)
@@ -1297,6 +1299,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
             patch.object(PreprocessingPipeline, "_run_band_specific_ica_report") as report,
         ):
             p._run_ica_fitting(["0001"], "pain", n_jobs=1)
@@ -1324,6 +1327,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
             patch.object(PreprocessingPipeline, "_run_ica_cardiac_review", create=True) as review,
             patch.object(PreprocessingPipeline, "_run_ica_ocular_review", create=True),
         ):
@@ -1343,6 +1347,7 @@ assert "eeg_pipeline.spectral_availability.decomb" not in sys.modules
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
             patch.object(
                 PreprocessingPipeline,
                 "_run_ica_cardiac_review",
@@ -2626,6 +2631,7 @@ class TestPreprocessingParallelism(_PreprocessingImportMixin, unittest.TestCase)
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne,
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
         ):
             p._run_ica_fitting(["0001"], "pain", n_jobs=6)
 
@@ -2641,6 +2647,7 @@ class TestPreprocessingParallelism(_PreprocessingImportMixin, unittest.TestCase)
         with (
             patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne,
             patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_write_preclean_artifact_proxy"),
             patch.object(PreprocessingPipeline, "_append_epoch_rejection_review"),
         ):
             p._run_epoch_creation(["0001"], "pain", task_is_rest=False, n_jobs=6)

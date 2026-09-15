@@ -50,6 +50,7 @@ Configuration Options
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -245,17 +246,33 @@ def _compute_frequency_weighted_power(
 ) -> np.ndarray:
     """Compute frequency-weighted mean power for a band and time window.
 
+    ``time_mask`` selects which coefficients contribute. A 1-D mask applies the same
+    time points to every frequency. A 2-D ``(n_freqs, n_times)`` mask selects them per
+    frequency, which is what a support-restricted window needs: the Morlet kernel is
+    wider at low frequencies, so the coefficients that can be attributed to a window
+    differ by frequency. A frequency with no contributing coefficient drops out of the
+    weighted average rather than contributing a value drawn from outside the window.
+
     Args:
         tfr_data: TFR data array (n_epochs, n_channels, n_freqs, n_times).
         frequency_mask: Boolean mask for frequencies in the band.
-        time_mask: Boolean mask for time points in the segment.
+        time_mask: Boolean mask over times, or over (freqs, times).
         frequencies: Full frequency array.
 
     Returns:
         Array of shape (n_epochs, n_channels) with weighted mean power.
     """
-    band_data = tfr_data[:, :, frequency_mask, :][:, :, :, time_mask]
-    power_freq_time = np.nanmean(band_data, axis=3)
+    band_data = tfr_data[:, :, frequency_mask, :]
+    mask = np.asarray(time_mask, dtype=bool)
+    if mask.ndim == 2:
+        band_data = np.where(mask[frequency_mask, :][None, None, :, :], band_data, np.nan)
+    else:
+        band_data = band_data[:, :, :, mask]
+
+    with warnings.catch_warnings():
+        # A frequency whose support never fits the window is an all-NaN slice by design.
+        warnings.filterwarnings("ignore", "Mean of empty slice", RuntimeWarning)
+        power_freq_time = np.nanmean(band_data, axis=3)
 
     band_frequencies = np.asarray(frequencies[frequency_mask], dtype=float)
     frequency_weights = compute_frequency_weights(band_frequencies)
@@ -266,8 +283,108 @@ def _compute_frequency_weighted_power(
     numerator = np.nansum(np.where(finite_mask, power_freq_time * weights_3d, 0.0), axis=2)
     denominator = np.nansum(np.where(finite_mask, weights_3d, 0.0), axis=2)
 
-    weighted_power = np.where(denominator > 0, numerator / denominator, np.nan)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # A band with no measurable frequency has a zero denominator by design; the
+        # where() already discards the quotient, this only keeps it quiet.
+        weighted_power = np.where(denominator > 0, numerator / denominator, np.nan)
     return weighted_power
+
+
+def _window_support_attrs(
+    window_support: Optional[Any],
+    freqs: np.ndarray,
+) -> Dict[str, Any]:
+    """Record what the window could actually be measured from, for the metadata sidecar."""
+    if window_support is None:
+        return {"support_restricted_window": False}
+    unmeasurable = np.asarray(window_support.unmeasurable_frequencies, dtype=bool)
+    return {
+        "support_restricted_window": True,
+        "window_half_support_s": [float(value) for value in window_support.half_support_s],
+        "window_unmeasurable_frequencies_hz": [
+            float(value) for value in np.asarray(freqs, dtype=float)[unmeasurable]
+        ],
+    }
+
+
+def _restrict_time_mask_to_window_support(
+    *,
+    ctx: Any,
+    tfr_obj: Any,
+    times: np.ndarray,
+    freqs: np.ndarray,
+    segment_name: Optional[str],
+    time_mask: np.ndarray,
+    power_cfg: Dict[str, Any],
+) -> Tuple[np.ndarray, Optional[Any]]:
+    """Narrow a window's coefficients to those the window itself can account for.
+
+    Returns the mask unchanged when the restriction is switched off or when the window's
+    bounds or the TFR's geometry are unavailable, since neither the half-support nor the
+    edges can be computed without them.
+    """
+    from eeg_pipeline.utils.analysis.tfr import support_restricted_time_mask, tfr_geometry
+    from eeg_pipeline.utils.analysis.windowing import window_range_for
+
+    if not bool(power_cfg.get("support_restricted_windows", True)):
+        return time_mask, None
+
+    window = window_range_for(ctx.windows, segment_name)
+    if window is None:
+        ctx.logger.warning(
+            "Window '%s' has no recorded bounds; power is measured from every coefficient "
+            "the time mask selects, including those reading across its edges.",
+            segment_name or "unnamed",
+        )
+        return time_mask, None
+
+    try:
+        recorded_freqs, n_cycles = tfr_geometry(tfr_obj, config=ctx.config)
+    except ValueError as exc:
+        ctx.logger.warning(
+            "Cannot recover the Morlet geometry for window '%s' (%s); power is measured "
+            "from every coefficient the time mask selects.",
+            segment_name or "unnamed",
+            exc,
+        )
+        return time_mask, None
+
+    if recorded_freqs.shape != np.asarray(freqs, dtype=float).shape:
+        ctx.logger.warning(
+            "Recorded TFR frequencies (%d) do not match this TFR's frequency axis (%d); "
+            "power for window '%s' is measured without support restriction.",
+            recorded_freqs.size,
+            np.asarray(freqs).size,
+            segment_name or "unnamed",
+        )
+        return time_mask, None
+
+    support = support_restricted_time_mask(
+        times=times,
+        window=window,
+        freqs=recorded_freqs,
+        n_cycles=n_cycles,
+        additional_half_support_s=float(power_cfg.get("additional_half_support_s", 0.0)),
+    )
+
+    unmeasurable = np.flatnonzero(support.unmeasurable_frequencies)
+    if unmeasurable.size:
+        widest = float(np.max(support.half_support_s[unmeasurable]))
+        ctx.logger.error(
+            "Window '%s' spans %.3f s, which is narrower than the %.3f s of data each "
+            "coefficient reads at %d of %d frequencies (up to %.3f Hz). Those frequencies "
+            "are left unmeasured rather than filled from outside the window; widen the "
+            "window past %.3f s or lower time_frequency_analysis.tfr.n_cycles_factor.",
+            segment_name or "unnamed",
+            float(window[1]) - float(window[0]),
+            2.0 * widest,
+            unmeasurable.size,
+            support.half_support_s.size,
+            float(np.max(recorded_freqs[unmeasurable])),
+            2.0 * widest,
+        )
+
+    return support.time_mask, support
 
 
 def _normalize_power(
@@ -592,6 +709,16 @@ def extract_power_features(
         )
         return pd.DataFrame(), []
 
+    time_mask, window_support = _restrict_time_mask_to_window_support(
+        ctx=ctx,
+        tfr_obj=tfr_obj,
+        times=times,
+        freqs=freqs,
+        segment_name=segment_name,
+        time_mask=time_mask,
+        power_cfg=power_cfg,
+    )
+
     epsilon_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))
     emit_db = bool(power_cfg.get("emit_db", True))
     output_features = {}
@@ -633,6 +760,7 @@ def extract_power_features(
 
         features_df = pd.DataFrame(output_features)
         features_df.attrs["baseline_mode"] = "raw_mean"
+        features_df.attrs.update(_window_support_attrs(window_support, freqs))
         features_df.attrs["evoked_subtracted"] = bool(
             getattr(ctx, "power_evoked_subtracted", False)
         )
@@ -768,6 +896,7 @@ def extract_power_features(
         return pd.DataFrame(), []
 
     features_df = pd.DataFrame(output_features)
+    features_df.attrs.update(_window_support_attrs(window_support, freqs))
     features_df.attrs["evoked_subtracted"] = bool(getattr(ctx, "power_evoked_subtracted", False))
     features_df.attrs["evoked_subtracted_conditionwise"] = bool(
         getattr(ctx, "power_evoked_subtracted_conditionwise", False)

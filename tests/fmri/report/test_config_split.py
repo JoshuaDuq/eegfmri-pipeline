@@ -70,3 +70,39 @@ def test_an_unknown_format_is_rejected() -> None:
 def test_an_unknown_report_key_is_rejected_instead_of_ignored() -> None:
     with pytest.raises(ValueError, match="Unknown fmri_report key"):
         report_config_from_mapping({"enabled": True, "typo": True})
+
+
+def test_new_figure_settings_reject_an_unknown_value() -> None:
+    for key, bad in (
+        ("raster_conditions", "sideways"),
+        ("design_matrix_runs", "every-other"),
+    ):
+        config = FmriReportConfig(**{key: bad})
+        with pytest.raises(ValueError, match=key):
+            config.validate()
+
+
+def test_new_figure_settings_keep_their_documented_defaults() -> None:
+    config = FmriReportConfig()
+    config.validate()
+    assert config.raster_conditions == "task"
+    assert config.design_matrix_runs == "first"
+    assert config.include_glass_brain is True
+
+
+def test_the_pruned_panels_default_off() -> None:
+    config = FmriReportConfig()
+    config.validate()
+    # Both duplicate a panel that is still drawn: the residual SD map reproduces the
+    # standard-error map (r = 0.944), and the regressor matrix's readable structure is
+    # the confound expansion the VIF panel already summarises per regressor.
+    assert config.include_residual_sd_map is False
+    assert config.include_regressor_correlation is False
+
+
+def test_the_pruned_panels_can_be_switched_back_on() -> None:
+    config = FmriReportConfig(
+        include_residual_sd_map=True, include_regressor_correlation=True
+    )
+    config.validate()
+    assert config.include_residual_sd_map and config.include_regressor_correlation

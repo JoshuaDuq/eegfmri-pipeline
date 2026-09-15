@@ -49,6 +49,12 @@ def _config(root: Path) -> DotConfig:
                     "metric": "dot",
                     "normalization": "none",
                     "round_decimals": 3,
+                    "timing_audit": {
+                        "onset_offset_s": 3.0,
+                        "onset_tolerance_s": 0.010,
+                        "plateau_duration_s": 7.5,
+                        "duration_tolerance_s": 0.010,
+                    },
                 },
                 "feature_benchmark": {
                     "n_perm": 10,
@@ -698,7 +704,10 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
 
     def _capture_cv(**kwargs):
         refit_targets.append(list(kwargs["y"]))
-        return _model_prediction_result(kwargs["y"], [{"r2": 1.0}])
+        return _model_prediction_result(
+            kwargs["y"],
+            [{"r2": 1.0} for _ in kwargs["outer_folds"]],
+        )
 
     with (
         patch(
@@ -756,9 +765,10 @@ def test_model_comparison_permutation_resamples_until_requested_valid_draws() ->
     null_scores = [0.0, 2.0]
 
     def _capture_cv(**kwargs):
+        fold_score = null_scores.pop(0)
         return _model_prediction_result(
             kwargs["y"],
-            [{"r2": null_scores.pop(0)}],
+            [{"r2": fold_score} for _ in kwargs["outer_folds"]],
         )
 
     with (
@@ -1230,14 +1240,14 @@ def test_circular_shift_within_run_requires_trial_indices() -> None:
         )
 
 
-def test_admissible_circular_shifts_follow_original_trial_distance_rule() -> None:
-    from eeg_pipeline.analysis.machine_learning.orchestration import _admissible_circular_shifts
+def test_circular_shift_group_is_the_whole_cycle_for_long_enough_runs() -> None:
+    """Restricting to the most-displacing shifts would break the group the test needs."""
+    from eeg_pipeline.analysis.machine_learning.orchestration import _circular_shift_group
 
-    complete_run = np.arange(1, 12, dtype=int)
-    assert _admissible_circular_shifts(complete_run) == (5, 6)
-    assert _admissible_circular_shifts(np.arange(1, 10, dtype=int)) == (4, 5)
-    assert _admissible_circular_shifts(np.arange(1, 9, dtype=int)) == (4,)
-    assert _admissible_circular_shifts(np.arange(1, 8, dtype=int)) == tuple()
+    assert _circular_shift_group(np.arange(1, 12, dtype=int)) == tuple(range(11))
+    assert _circular_shift_group(np.arange(1, 10, dtype=int)) == tuple(range(9))
+    assert _circular_shift_group(np.arange(1, 9, dtype=int)) == tuple(range(8))
+    assert _circular_shift_group(np.arange(1, 8, dtype=int)) == tuple()
 
 
 def test_circular_shift_within_run_preserves_subject_run_label_sets() -> None:

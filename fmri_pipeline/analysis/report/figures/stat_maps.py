@@ -13,9 +13,11 @@ from fmri_pipeline.analysis.report.figures._mosaic import (
     ColorbarSpec,
     draw_colorbar,
     mosaic_figure,
+    stamp_empty,
     suppressed_band,
 )
 from fmri_pipeline.analysis.report.style import (
+    GUIDE_COLOR,
     MAGNITUDE_CMAP,
     OKABE_ITO,
     SIGNED_CMAP,
@@ -153,6 +155,26 @@ def _provenance(
     return lines
 
 
+def suprathreshold_count(
+    values: np.ndarray, *, threshold: Optional[float], two_sided: bool
+) -> Optional[int]:
+    """How many masked voxels a panel drawn at ``threshold`` would show.
+
+    ``None`` when no threshold was applied, where every voxel is drawn and the
+    question does not arise.
+    """
+    if not threshold:
+        return None
+    compared = np.abs(values) if two_sided else values
+    return int(np.count_nonzero(compared > float(threshold)))
+
+
+def empty_panel_message(threshold: float, *, two_sided: bool) -> str:
+    """What an empty thresholded panel says across its own tiles."""
+    comparison = "|z|" if two_sided else "z"
+    return f"no voxel reaches {comparison} > {float(threshold):.2f}"
+
+
 def stat_map_mosaic(
     stat_img: Any,
     *,
@@ -202,7 +224,7 @@ def stat_map_mosaic(
         )
 
     with plot_context():
-        return mosaic_figure(
+        figure = mosaic_figure(
             draw,
             reference_img=stat_img,
             mask_img=mask_img,
@@ -225,6 +247,9 @@ def stat_map_mosaic(
                 limit_source=limit_source,
             ),
         )
+        if suprathreshold_count(values, threshold=threshold, two_sided=two_sided) == 0:
+            stamp_empty(figure, empty_panel_message(threshold, two_sided=two_sided))
+        return figure
 
 
 def magnitude_mosaic(
@@ -481,6 +506,20 @@ def evidence_ortho(
         return figure
 
 
+def _opacity_reach(stat_img: Any, mask_img: Any, *, threshold: float) -> str:
+    """How much of the map the dual-coded opacity ramp actually reaches."""
+    stat_values, _source = _masked_values(stat_img, mask_img)
+    magnitude = np.abs(stat_values)
+    if magnitude.size == 0:
+        return "opacity ramp: no masked voxels"
+    solid = float(np.mean(magnitude >= threshold))
+    visible = float(np.mean(magnitude >= 0.5 * threshold))
+    return (
+        f"map reaches |z| {magnitude.max():.2f}; {visible:.1%} of voxels are drawn at "
+        f"any opacity and {solid:.1%} at full"
+    )
+
+
 def dual_coded_mosaic(
     effect_img: Any,
     *,
@@ -569,6 +608,13 @@ def dual_coded_mosaic(
                 f"n = {values.size:,} voxels",
                 f"hue: effect · opacity: |z| ramped "
                 f"{0.5 * float(threshold):.2f}–{float(threshold):.2f}",
+                # What the ramp is worth on this map. A ramp whose foot sits above the
+                # bulk of the map's own evidence renders the panel almost entirely
+                # transparent, and the result is a mosaic of bare underlay that looks
+                # like a rendering failure. The ramp is not rescaled to fix that --
+                # doing so would make two contrasts' panels incomparable -- so the
+                # mismatch is stated instead.
+                _opacity_reach(stat_img, mask_img, threshold=float(threshold)),
                 f"colour limit ±{resolved_vmax:.3g} "
                 f"({clipped_fraction(values, limit=resolved_vmax):.1%} clipped)"
                 + (f", from {limit_source}" if limit_source else ""),
@@ -734,16 +780,36 @@ def glass_brain(
                 "maximum-intensity projection: a voxel anywhere along a ray fills it"
             ],
         )
+        if suprathreshold_count(values, threshold=threshold, two_sided=two_sided) == 0:
+            # Centred on the projections, which occupy the left 86% of this figure --
+            # the mosaic's own tile band does not apply here.
+            figure.text(
+                0.44,
+                0.5,
+                empty_panel_message(threshold, two_sided=two_sided),
+                ha="center",
+                va="center",
+                fontsize=10,
+                color=GUIDE_COLOR,
+                bbox={
+                    "facecolor": "white",
+                    "edgecolor": "#d0d0d0",
+                    "boxstyle": "round,pad=0.5",
+                },
+                zorder=10,
+            )
         return figure
 
 
 __all__ = [
     "apply_sidedness",
     "dual_coded_mosaic",
+    "empty_panel_message",
     "evidence_ortho",
     "glass_brain",
     "magnitude_mosaic",
     "stat_map_mosaic",
+    "suprathreshold_count",
 ]
 
 

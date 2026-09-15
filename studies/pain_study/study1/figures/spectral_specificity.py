@@ -38,9 +38,9 @@ FOLD_COLUMNS = (
 FEATURE_LABELS = {
     "alpha": "Alpha (8–12.9 Hz)",
     "beta": "Beta (13–30 Hz)",
-    "gamma": "Scanner-clean gamma\n(30.1–38; 43–56; 67–77 Hz)",
+    "gamma": "Gamma (30.1–77 Hz)",
     "alpha_beta": "Alpha + beta",
-    "alpha_beta_gamma": "Alpha + beta + scanner-clean gamma",
+    "alpha_beta_gamma": "Alpha + beta + gamma",
 }
 
 

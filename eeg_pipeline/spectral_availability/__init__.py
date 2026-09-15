@@ -1,5 +1,6 @@
 from eeg_pipeline.spectral_availability.estimators import (
     morlet_half_support,
+    morlet_temporal_half_support,
     multitaper_half_support,
     multitaper_tfr_half_support,
     welch_half_support,
@@ -59,6 +60,7 @@ __all__ = [
     "align_decomb_to_epochs",
     "load_decomb_manifest",
     "morlet_half_support",
+    "morlet_temporal_half_support",
     "merge_frequency_intervals",
     "multitaper_half_support",
     "multitaper_tfr_half_support",

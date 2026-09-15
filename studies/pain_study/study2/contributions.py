@@ -43,9 +43,10 @@ def compute_band_contribution_scores(
 ) -> pd.DataFrame:
     """Compute the combined NPS-predictive score and its band-specific decomposition.
 
-    The combined score is the full frozen linear predictor (the primary Study 2
-    score). The band columns decompose that predictor and support the secondary
-    mutually-adjusted contribution analysis.
+    Everything here is in the transformed linear-predictor space the frozen model fits
+    in: the combined column is X @ coefficients and the band columns are the terms of
+    that same sum. Scores on the raw target scale are a different quantity and are not
+    additive over bands; see ``compute_held_out_contribution_scores``.
     """
     X_arr = np.asarray(X, dtype=float)
     coefficient_arr = np.asarray(coefficients, dtype=float)
@@ -92,7 +93,16 @@ def compute_held_out_contribution_scores(
     bands: tuple[str, ...],
     band_members: Mapping[str, tuple[str, ...]],
 ) -> pd.DataFrame:
-    """Compute frozen-fold combined and band-specific scores in canonical row order."""
+    """Compute frozen-fold combined and band-specific scores in canonical row order.
+
+    Two scales meet here. ``eta_combined`` is the held-out prediction on the raw
+    residual-target scale, which is what Study 1 delivers and what the source stage
+    correlates against. The band columns, and ``eta_bands_linear_predictor``, stay in
+    the transformed linear-predictor space, where the decomposition is exact -- as do
+    the Haufe patterns derived from the same model. The Yeo-Johnson inverse is
+    monotone but not linear, so the band columns do not sum to ``eta_combined`` and
+    should never be described as shares of it.
+    """
     fold_scores: list[pd.DataFrame] = []
     assigned_rows = np.zeros(len(context.groups), dtype=bool)
     for fold, (_train_indices, test_indices) in enumerate(context.outer_folds):
@@ -112,6 +122,7 @@ def compute_held_out_contribution_scores(
             subject_ids=np.asarray(context.groups, dtype=object)[test_rows],
             trial_ids=test_rows,
         )
+        scores["eta_bands_linear_predictor"] = scores["eta_combined"]
         scores["eta_combined"] = residual_prediction
         fold_scores.append(scores)
         assigned_rows[test_rows] = True

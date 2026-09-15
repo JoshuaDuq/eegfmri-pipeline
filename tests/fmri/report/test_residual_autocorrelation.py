@@ -80,16 +80,17 @@ def test_residual_acf_figure_draws_run_panels_with_median_and_iqr() -> None:
         title="Residual autocorrelation",
     )
 
-    assert len(figure.axes) == 2
-    assert [axis.get_title() for axis in figure.axes] == ["run-01", "run-02"]
-    median_line = next(line for line in figure.axes[0].lines if line.get_label() == "Median")
+    # One axis carrying one median line per run, and the widest run's IQR as a band.
+    assert len(figure.axes) == 1
+    axis = figure.axes[0]
+    median_line = next(line for line in axis.lines if line.get_label() == "run-01")
     np.testing.assert_allclose(median_line.get_xdata(), [2.0, 4.0])
     np.testing.assert_allclose(median_line.get_ydata(), [0.1, 0.0])
-    assert figure.axes[0].collections
-    assert "retained pairs/voxel" in " ".join(
-        text.get_text() for axis in figure.axes for text in axis.texts
-    )
-    assert "no criterion" in " ".join(text.get_text() for text in figure.texts).lower()
+    assert axis.collections, "the interquartile band is missing"
+    strip = " ".join(text.get_text() for text in figure.texts)
+    # The per-panel pair counts moved into the strip when the panels merged.
+    assert "retained pairs per voxel" in strip
+    assert "no criterion" in strip.lower()
     plt.close(figure)
 
 
@@ -107,3 +108,43 @@ def test_residual_acf_tsv_contains_every_plotted_quantile(tmp_path: Path) -> Non
         "run-01\t1\t2.000000\t9\t-0.100000\t0.100000\t0.300000",
         "run-01\t2\t4.000000\t8\t-0.200000\t0.000000\t0.200000",
     ]
+
+
+def test_every_run_is_drawn_on_one_shared_axis() -> None:
+    # Six subplots showed that six runs behave the same and left the spread between
+    # them -- the one thing a per-run panel is read for -- to be reconstructed by eye.
+    # The variance-inflation panel already makes this argument against itself.
+    runs = tuple(
+        _run(f"run-{i + 1:02d}", ((-0.1 + 0.01 * i, 0.1, 0.3), (-0.2, 0.0, 0.2)))
+        for i in range(6)
+    )
+    figure = residual_autocorrelation.residual_autocorrelation_figure(runs, tr=0.9)
+    try:
+        drawable = [
+            axis
+            for axis in figure.axes
+            if axis.lines or axis.collections
+        ]
+        median_lines = [
+            line for axis in drawable for line in axis.lines if line.get_label() != "_nolegend_"
+        ]
+    finally:
+        plt.close(figure)
+
+    assert len(drawable) == 1, f"{len(drawable)} axes carry data; expected one"
+    assert len(median_lines) == 6, "one median line per run"
+
+
+def test_each_run_line_is_separately_identifiable() -> None:
+    runs = tuple(
+        _run(f"run-{i + 1:02d}", ((-0.1, 0.1, 0.3), (-0.2, 0.0, 0.2))) for i in range(4)
+    )
+    figure = residual_autocorrelation.residual_autocorrelation_figure(runs, tr=0.9)
+    try:
+        legend = figure.axes[0].get_legend()
+        labels = [entry.get_text() for entry in legend.get_texts()]
+    finally:
+        plt.close(figure)
+
+    for run in runs:
+        assert any(run.label in label for label in labels), f"{run.label} is not in the legend"

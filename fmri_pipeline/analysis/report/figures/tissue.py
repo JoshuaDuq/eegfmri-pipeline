@@ -120,6 +120,27 @@ def enrichment(
     return out
 
 
+def _mark_offscale_threshold(axis: plt.Axes, position: float, stat_label: str) -> None:
+    """Name a threshold that falls outside the drawn range, at the edge it left by.
+
+    Clipping the axis to the data must not silently drop the threshold: a reader has
+    to be able to tell that the rejection region lies beyond the view rather than that
+    no threshold was applied.
+    """
+    at_right = position > 0
+    axis.annotate(
+        f"|{stat_label}| > {abs(position):.2f} \u2192" if at_right else f"\u2190 {abs(position):.2f}",
+        xy=(1.0 if at_right else 0.0, 1.0),
+        xycoords="axes fraction",
+        xytext=(-4 if at_right else 4, -4),
+        textcoords="offset points",
+        ha="right" if at_right else "left",
+        va="top",
+        fontsize=6.5,
+        color=GUIDE_COLOR,
+    )
+
+
 def tissue_distribution_figure(
     slices: Sequence[TissueSlice],
     *,
@@ -161,14 +182,24 @@ def tissue_distribution_figure(
                 color=colour,
                 label=f"{item.name} ({item.n_voxels:,} voxels)",
             )
+        # The bins already span the data's robust range; the axis is pinned to them so
+        # that a threshold far outside it cannot stretch the view. Drawn with axvline
+        # the marker autoscaled the axis instead: measured on this study, bins over
+        # +-0.25 against an axis reaching +-2.4, so all three densities were one
+        # vertical stroke occupying 8% of the panel.
+        left.set_xlim(-limit, limit)
         if threshold:
             for sign in ((-1.0, 1.0) if two_sided else (1.0,)):
-                left.axvline(
-                    sign * float(threshold),
-                    color=GUIDE_COLOR,
-                    linestyle=(0, (4, 2)),
-                    linewidth=1.0,
-                )
+                position = sign * float(threshold)
+                if abs(position) <= limit:
+                    left.axvline(
+                        position,
+                        color=GUIDE_COLOR,
+                        linestyle=(0, (4, 2)),
+                        linewidth=1.0,
+                    )
+                else:
+                    _mark_offscale_threshold(left, position, stat_label)
         left.axvline(0.0, color=GUIDE_COLOR, linewidth=0.8)
         left.set_xlabel(stat_label)
         left.set_ylabel("density")
@@ -196,6 +227,12 @@ def tissue_distribution_figure(
             right.set_xticks(positions)
             right.set_xticklabels([name for name, *_rest in rates], fontsize=8)
             right.set_ylabel("% of class above threshold")
+            # From zero, always. With nothing above the threshold every bar is zero
+            # and the autoscaler produced a +-0.04 axis around three of them, which
+            # reads as measured precision. Three flat bars against a real axis is the
+            # honest picture of a contrast where nothing survived.
+            tallest = max((100.0 * share for _n, share, *_r in rates), default=0.0)
+            right.set_ylim(0.0, max(tallest * 1.25, 1.0))
         else:
             right.set_axis_off()
             right.text(

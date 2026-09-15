@@ -39,6 +39,24 @@ Run the workflow in this order:
 1. Install the private `studies` package so `eeg-pipeline` exposes `signature-prediction`.
 2. Upload or verify external signature assets: `NPS`, `SIIPS1`, `signature_manifest.yaml`, and the
    fixed MNI scoring mask.
+
+   `signature_manifest.yaml` is now generated from a declared provenance file rather than from a
+   default space label. Copy
+   `studies/pain_study/study1/config/signature_provenance.example.yaml`, fill in each signature's
+   `space`, `source_space`, `spatial_reference` and — whenever the delivered space differs from the
+   source space — a `transform` record, then regenerate:
+
+   ```bash
+   python -m studies.pain_study.study1.signature_manifest \
+     "$SIGNATURE_DIR" "$SIGNATURE_DIR/signature_manifest.yaml" \
+     --provenance studies/pain_study/study1/config/signature_provenance.yaml
+   ```
+
+   Manifests written before this change carry only `space` and are rejected by
+   `prepare-targets`. The published SIIPS1 weights were trained in SPM MNI152 space, so declaring
+   the unmodified file as MNI152NLin2009cAsym is rejected outright: resampling onto the fMRIPrep
+   grid changes sampling, not anatomical correspondence. Until a validated transform exists,
+   `prepare-targets` will not run against those assets, which is intended.
 3. Run fMRIPrep for the Study 1 fMRI subjects if preprocessed BOLD files are missing.
 4. Run the Study 1 stages: `prepare-targets`, `prepare-features`, `feature-benchmark`, then
    `report`. The two standalone sensor-topography families can be generated immediately after
@@ -848,8 +866,8 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
      --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity.svg"
    ```
 
-   This command includes only ElasticNet alpha, beta, scanner-clean gamma, alpha+beta, and
-   alpha+beta+scanner-clean-gamma cells. It verifies every participant effect and cohort mean
+   This command includes only ElasticNet alpha, beta, gamma, alpha+beta, and
+   alpha+beta+gamma cells. It verifies every participant effect and cohort mean
    against the fold tables and writes subject-level and cohort-level TSV/parquet audits. Ridge and
    exploratory low-frequency/all-band models remain tabular.
 
@@ -865,7 +883,7 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
      --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/power_construct_validity.svg"
    ```
 
-   This command requires alpha, beta, and all three scanner-clean gamma features. It writes the
+   This command requires alpha, beta, and all three gamma features. It writes the
    editable SVG and seven TSV/parquet audit pairs covering trial power, participant and cohort
    temperature estimates, participant and cohort rating estimates, and the complementary Fp1/Fp2
    sensitivity. The primary figure includes Fp1/Fp2 when
@@ -887,7 +905,7 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
      --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution.svg"
    ```
 
-   The five vertically aligned panels show alpha, beta, and the three scanner-clean gamma intervals
+   The five vertically aligned panels show alpha, beta, and the three gamma sub-bands
    from −5 to 14.5 s. The final 0.5 s is omitted to limit right-edge Morlet convolution effects. Each
    thin line is one participant's retained-trial mean; the colored curve is the equally weighted
    cohort mean with a pointwise 95% percentile interval obtained by resampling participants as

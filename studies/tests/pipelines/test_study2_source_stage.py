@@ -30,6 +30,7 @@ def _source_stage_frame(
                     "subject_id": "sub-0001",
                     "run": block,
                     "trial_id": trial_offset + 1,
+                    "source_row": trial_offset + 1,
                     "trial_index": trial_index,
                     "trial_index_within_run": trial_index,
                     "onset": float(rng.normal()),

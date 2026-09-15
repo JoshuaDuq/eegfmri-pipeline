@@ -1,0 +1,92 @@
+# The MRI-simulator arm of the thermal-pain study.
+#
+# Recordings made in the mock scanner: the paradigm, the cap and the 5 kHz amplifier of
+# the EEG-fMRI cohort, but no magnet, so no gradient artifact, no volume markers and no
+# ballistocardiogram. Formerly `Données_Lorie_Ève/`, now
+# /Volumes/KINGSTON/EEG_fMRI_data/mri_simulator/.
+#
+# This file reproduces, key for key, the effective config recorded for the run that
+# preprocessed subjects 0008/0010/0011/0015 on 2026-08-24
+# (derivatives_sim/logs/run_metadata/preprocessing/run_20260824T233104Z_92674e63.json).
+# Its own config file was lost when that directory was reorganised; this reconstruction
+# was diffed leaf by leaf against that JSON. Re-verify the same way before adding any
+# subject to the arm, and before any contrast against the in-scanner arm
+# (studies/pain_study/config/inscanner_lorie_matched.yaml).
+#
+# It extends the PACKAGED default and not studies/pain_study/config/pain_study.yaml,
+# which points at the decombed BIDS copy, activates a Decomb manifest and widens the
+# condition prefixes -- none of which these recordings have or want.
+#
+# Run as:
+#
+#     eeg-pipeline --config studies/pain_study/config/simulator_arm.yaml \
+#         preprocessing bad-channels --subject 0019 ... --n-jobs 2
+#     ... preprocessing ica    ... --n-jobs 3
+#     ... preprocessing epochs ... --n-jobs 3
+
+extends: "../../../eeg_pipeline/utils/config/eeg_config.yaml"
+
+project:
+  task: "thermalactive"
+  paradigm: "task"
+
+paths:
+  # Absolute, because the loader only treats a value as a path when it contains a
+  # separator, and because this config must not depend on the directory it is run from.
+  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/mri_simulator/bids_sim"
+  deriv_root: "/Volumes/KINGSTON/EEG_fMRI_data/mri_simulator/derivatives_sim"
+  # The recordings as acquired. Conversion reads a staged symlink tree beside this one
+  # (source_staged_sim), because the converter globs sub-*/eeg/<layout>/ and this tree is
+  # flat; the staging tree is scaffolding, this is the source of record.
+  source_data: "/Volumes/KINGSTON/EEG_fMRI_data/mri_simulator/source_data_sim"
+  # No fMRI was acquired in the simulator, so the epoching stage has nothing to align to.
+  bids_fmri_root: null
+
+preprocessing:
+  # The thermode trigger, spelled "Trig_therm/T  1". Given as a prefix because the loader
+  # turns any configured string containing a separator into a filesystem path.
+  condition_preferred_prefixes: ["Trig_therm"]
+  # Each run is one continuous block of 11 trials with no scheduled pause, so the 15 s
+  # inter-event gap that marks a break never occurs.
+  find_breaks: false
+  # Nothing upstream removed mains from these recordings: they went to BIDS straight from
+  # the recorder, with no Analyzer stage and no line-comb removal.
+  notch_freq: 60
+
+ica:
+  # No human reviewed these components. The exclusions are ICLabel's and MNE's ECG/EOG
+  # detectors'. Saying so is the honest record; asserting manual_review_complete would be
+  # signing an attestation for a review that did not happen.
+  require_manual_review: false
+
+  # MNE's documented CTPS default. The packaged null resolves to 0.1, which the core
+  # config prescribes for recordings that carry a ballistocardiogram. There is no magnet
+  # in the simulator and therefore no BCG, so the looser out-of-scanner threshold is the
+  # one that fits these recordings -- and it is what the other four subjects on this arm
+  # were run with.
+  ecg_threshold: 0.25
+
+  band_specific_report:
+    # The packaged comparison splits on stimulus_temp. It is an exploratory report panel
+    # that controls no derivative, and it was empty for the four subjects already on this
+    # arm, whose events carry no behavioural columns. Leaving it empty keeps the arm's
+    # reports comparable.
+    comparisons: []
+
+report:
+  # Report-only: this changes which markers the event rug under the data-quality trace
+  # counts, never a derivative. Without it the rug counts all 55 paradigm marks instead of
+  # the 11 thermode triggers. No trailing slashes -- the loader resolves any string
+  # containing a separator into a filesystem path, and the comparison is startswith() on
+  # the upper-cased description, so the slash was never needed.
+  acquisition:
+    non_event_prefixes:
+      - "BAD"
+      - "EDGE"
+      - "NEW SEGMENT"
+      - "REC_START"
+      - "SIMFX_START"
+      - "ITI_START"
+      - "STIM_ON"
+      - "PAINQ_ON"
+      - "VAS_ON"

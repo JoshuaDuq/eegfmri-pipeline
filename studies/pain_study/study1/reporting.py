@@ -32,15 +32,15 @@ from studies.pain_study.study1.figures.behavioral_validity import (
     build_behavioral_validity_summary,
 )
 from studies.pain_study.study1.figures.validity_data import (
+    WITHIN_SCALE_INTENSITY_COLUMN,
     ValidityTrialData,
     load_validity_trial_data,
 )
 from studies.pain_study.study1.targets import (
     PRIMARY_SIGNATURES,
-    residualization_columns_for_target_table,
+    resolve_target_residualization_columns,
 )
 from studies.pain_study.study1.temporal_controls import (
-    TEMPORAL_NEGATIVE_CONTROL_KINDS,
     TEMPORAL_CONTROL_PARTITION,
     temporal_control_window_for_feature_spec,
 )
@@ -71,6 +71,9 @@ INTERPRETATION_DIAGNOSTIC_FIELDS = (
     "precision_flag_passed",
     "level2_mean_delta_r2",
     "within_subject_centered_delta_r2",
+    "within_condition_centered_delta_r2",
+    "within_condition_centered_n_subjects",
+    "within_condition_centered_n_trials",
     "temporal_negative_controls_passed",
     "artifact_censoring_robustness_passed",
     "hrf_timing_robustness_passed",
@@ -237,68 +240,15 @@ def _optional_float(record: pd.Series, field: str) -> float | None:
     return float(numeric)
 
 
-def _temporal_controls_criterion_met(control_rows: pd.DataFrame) -> bool | None:
-    """Return whether negative-control windows predict the post-stimulus target.
-
-    A pre-stimulus or pre-plateau wrong-lag window that shows significant
-    positive incremental prediction returns False. Plateau sensitivity windows
-    are response-period analyses, not negative controls. Returns None when
-    controls are absent or any negative-control cell lacks the statistics needed
-    to evaluate it.
-    """
-    if control_rows.empty:
-        return None
-    for _, row in control_rows.iterrows():
-        delta_r2 = _optional_float(row, "mean_delta_r2")
-        p_holm = _optional_float(row, "p_value_delta_r2_holm")
-        if delta_r2 is None or p_holm is None:
-            return None
-        if delta_r2 > 0.0 and p_holm <= PRIMARY_P_VALUE_ALPHA:
-            return False
-    return True
-
-
-def _derive_temporal_negative_controls(frame: pd.DataFrame) -> pd.Series:
-    """Derive the temporal-control pass for each primary feature-benchmark cell.
-
-    Temporal specificity is a property of the (target, model) pair, so the
-    criterion value from the matching pre-stimulus and wrong-lag control cells
-    is applied to every primary feature cell sharing that target and model.
-    """
-    lane = frame["lane"].astype(str)
-    partition = frame["analysis_partition"].astype(str)
-    target = frame["target"].astype(str)
-    model = frame["model"].astype(str)
-    is_control = (lane == "feature_benchmark") & (partition == TEMPORAL_CONTROL_PARTITION)
-    is_primary = (lane == "feature_benchmark") & (partition == "primary")
-
-    negative_control = (
-        frame["temporal_control_kind"].astype(str).isin(TEMPORAL_NEGATIVE_CONTROL_KINDS)
-    )
-    controls = frame.loc[is_control & negative_control]
-    criterion_values = pd.Series(pd.NA, index=frame.index, dtype="object")
-    for idx in frame.index[is_primary]:
-        matching = controls.loc[
-            (controls["target"].astype(str) == target.at[idx])
-            & (controls["model"].astype(str) == model.at[idx])
-        ]
-        criterion_met = _temporal_controls_criterion_met(matching)
-        if criterion_met is not None:
-            criterion_values.at[idx] = criterion_met
-    return criterion_values
-
-
 def _append_derived_qc_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     for field in INTERPRETATION_DIAGNOSTIC_FIELDS:
         if field not in out.columns:
             out[field] = pd.NA
 
-    derived_temporal = _derive_temporal_negative_controls(out)
-    existing_temporal = out["temporal_negative_controls_passed"].astype(object)
-    out["temporal_negative_controls_passed"] = existing_temporal.where(
-        derived_temporal.isna(), derived_temporal
-    )
+    # Window-wise significance cannot establish equivalence or temporal superiority.
+    # Stored booleans carry no evidence of either test and must not propagate as a pass.
+    out["temporal_negative_controls_passed"] = pd.NA
     return out
 
 
@@ -704,6 +654,7 @@ def _write_full_picture_tables(
         "target_qc_metrics": _write_article_table(
             _target_qc_metrics(
                 diagnostics=target_diagnostics,
+                behavioral_cohort_estimates=cohort_validity,
             ),
             full_picture_root / "target_qc_metrics",
         ),
@@ -1094,14 +1045,13 @@ def _article_target_diagnostics(
     enriched_targets: pd.DataFrame,
     config: Any,
 ) -> pd.DataFrame:
-    nuisance_columns = residualization_columns_for_target_table(
-        config,
-        primary_targets_parquet_path(config),
-    )
     stimulus_surface_columns = _stimulus_surface_design_columns(target_table)
 
     rows = []
     for target_name in PRIMARY_SIGNATURES:
+        nuisance_columns = resolve_target_residualization_columns(
+            frame=target_table, config=config, target_name=target_name
+        )
         nuisance_in_sample_r2 = _in_sample_r2(target_table, target_name, nuisance_columns)
         rows.append(
             {
@@ -1120,16 +1070,6 @@ def _article_target_diagnostics(
                     enriched_targets,
                     "pain_binary_coded",
                     target_name,
-                ),
-                "siips1_intensity_beyond_temperature_nps_r": (
-                    _partial_correlation(
-                        enriched_targets,
-                        x_column="SIIPS1",
-                        y_column="within_scale_intensity",
-                        covariate_columns=("stimulus_temp", "NPS"),
-                    )
-                    if target_name == "SIIPS1"
-                    else float("nan")
                 ),
                 "framewise_displacement_r": _correlation(
                     target_table,
@@ -1169,6 +1109,7 @@ def _article_target_diagnostics(
 def _target_qc_metrics(
     *,
     diagnostics: pd.DataFrame,
+    behavioral_cohort_estimates: pd.DataFrame,
 ) -> pd.DataFrame:
     required_columns = (
         "target",
@@ -1177,7 +1118,6 @@ def _target_qc_metrics(
         "stimulus_temp_r",
         "within_scale_intensity_r",
         "pain_binary_r",
-        "siips1_intensity_beyond_temperature_nps_r",
         "split_half_subject_temperature_r",
         "split_half_subject_temperature_n_cells",
     )
@@ -1186,6 +1126,7 @@ def _target_qc_metrics(
         required_columns,
         table_name="Study 1 target diagnostics",
     )
+    intensity_betas = _within_participant_intensity_betas(behavioral_cohort_estimates)
     rows: list[dict[str, Any]] = []
     for _, diagnostic in diagnostics.sort_values("target", kind="stable").iterrows():
         target_name = str(diagnostic["target"])
@@ -1197,9 +1138,7 @@ def _target_qc_metrics(
                 "stimulus_temp_r": diagnostic["stimulus_temp_r"],
                 "within_scale_intensity_r": diagnostic["within_scale_intensity_r"],
                 "pain_binary_r": diagnostic["pain_binary_r"],
-                "siips1_intensity_beyond_temperature_nps_r": diagnostic[
-                    "siips1_intensity_beyond_temperature_nps_r"
-                ],
+                "within_participant_intensity_standardized_beta": intensity_betas[target_name],
                 "split_half_subject_temperature_r": diagnostic["split_half_subject_temperature_r"],
                 "split_half_subject_temperature_n_cells": int(
                     diagnostic["split_half_subject_temperature_n_cells"]
@@ -1211,6 +1150,33 @@ def _target_qc_metrics(
             }
         )
     return pd.DataFrame(rows)
+
+
+def _within_participant_intensity_betas(cohort_estimates: pd.DataFrame) -> dict[str, float]:
+    """Equally weighted participant slope for intensity, per target.
+
+    Taken from the behavioral-validity models rather than recomputed here: those adjust
+    temperature categorically within each participant, and SIIPS1 additionally for NPS.
+    A pooled linear temperature adjustment over all trials answers a different question.
+    """
+    _require_columns(
+        cohort_estimates,
+        ("target", "term", "mean"),
+        table_name="Study 1 behavioral validity cohort estimates",
+    )
+    intensity = cohort_estimates.loc[
+        cohort_estimates["term"].astype(str) == WITHIN_SCALE_INTENSITY_COLUMN
+    ]
+    betas: dict[str, float] = {}
+    for target_name in PRIMARY_SIGNATURES:
+        matching = intensity.loc[intensity["target"].astype(str) == target_name, "mean"]
+        if len(matching) != 1:
+            raise ValueError(
+                f"Study 1 behavioral validity estimates must define one "
+                f"{WITHIN_SCALE_INTENSITY_COLUMN} row for {target_name}; got {len(matching)}."
+            )
+        betas[target_name] = float(matching.iloc[0])
+    return betas
 
 
 def _stimulus_surface_design_columns(target_table: pd.DataFrame) -> pd.DataFrame:
@@ -1228,9 +1194,8 @@ def _stimulus_surface_design_columns(target_table: pd.DataFrame) -> pd.DataFrame
 def _residual_variance_fraction(in_sample_r2: float) -> float:
     """Fraction of target variance remaining after Level-2 nuisance residualization.
 
-    This is the share of variance the EEG residual model can still explain. Values near
-    zero mean the nuisance design already accounts for the target, so the staged-residual
-    prediction gain is bounded a priori and a null EEG result is uninformative.
+    This descriptive, in-sample fraction is neither residual-trial reliability nor
+    an upper bound on out-of-sample incremental prediction.
     """
     if not np.isfinite(in_sample_r2):
         return float("nan")
@@ -1358,42 +1323,6 @@ def _in_sample_design_r2(
 def _correlation(frame: pd.DataFrame, x_column: str, y_column: str) -> float:
     _require_columns(frame, (x_column, y_column), table_name="article input")
     return _series_correlation(_numeric_series(frame, x_column), _numeric_series(frame, y_column))
-
-
-def _partial_correlation(
-    frame: pd.DataFrame,
-    *,
-    x_column: str,
-    y_column: str,
-    covariate_columns: tuple[str, ...],
-) -> float:
-    _require_columns(
-        frame,
-        (x_column, y_column, *covariate_columns),
-        table_name="article input",
-    )
-    if not covariate_columns:
-        raise ValueError("Study 1 partial correlation requires at least one covariate.")
-
-    x = _numeric_series(frame, x_column).to_numpy(dtype=float)
-    y = _numeric_series(frame, y_column).to_numpy(dtype=float)
-    covariates = [
-        _numeric_series(frame, column).to_numpy(dtype=float) for column in covariate_columns
-    ]
-    design = np.column_stack([np.ones(len(frame), dtype=float), *covariates])
-    if np.linalg.matrix_rank(design) < design.shape[1]:
-        raise ValueError(
-            "Study 1 partial correlation design is rank deficient for "
-            f"{x_column}, {y_column}, covariates={covariate_columns}."
-        )
-    x_residual = _least_squares_residual(x, design)
-    y_residual = _least_squares_residual(y, design)
-    return _series_correlation(pd.Series(x_residual), pd.Series(y_residual))
-
-
-def _least_squares_residual(values: np.ndarray, design: np.ndarray) -> np.ndarray:
-    coefficients, *_ = np.linalg.lstsq(design, values, rcond=None)
-    return values - design @ coefficients
 
 
 def _series_correlation(x: pd.Series, y: pd.Series) -> float:

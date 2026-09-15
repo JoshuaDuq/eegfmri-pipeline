@@ -26,12 +26,13 @@ What it does
 
 Alignment assumption (not done here)
 ------------------------------------
-Acquisition: EEG and BOLD are stopped together after each run and started together
-for the next; within a run they are simultaneous. The script converts fMRI onsets
-(PsychoPy) to EEG/scan time via an estimated offset. trial_complete_in_eeg compares
-trial_end to eeg_recording_duration. trial_complete_in_bold compares trial_end to
-BOLD end in EEG time: when fmri_nvols > eeg_volume_markers (dummies), BOLD end in
-EEG time = fmri_duration - (fmri_nvols - eeg_volume_markers)*TR.
+EEG t = 0 is the first saved BOLD volume (the first ``Volume`` marker). Dummy
+volumes the scanner plays before that marker are not in the NIfTI and not in
+the EEG volume train. When EEG has fewer volume markers than BOLD volumes, EEG
+stopped before the scan ended; the missing volumes are at the end of the BOLD
+series, not dummy volumes at the start. trial_complete_in_eeg compares trial_end
+to eeg_recording_duration. trial_complete_in_bold compares trial_end to the end
+of the saved BOLD series (nvols * TR) on that same clock.
 
 Uses only the Python standard library (no pandas) so it can run in minimal environments.
 """
@@ -332,9 +333,9 @@ def _annotate_fmri_events_for_qc(
     Add QC columns (onset/trial_end in EEG/scan time from prior conversion):
       - eeg_recording_duration, trial_end_time, trial_complete_in_eeg, trial_complete_in_bold
 
-    trial_complete_in_bold: compares trial_end to BOLD end. When BOLD has dummy volumes,
-    EEG 0 = BOLD time (fmri_nvols - eeg_volume_markers)*TR; BOLD end in EEG time is
-    fmri_duration - that offset.
+    trial_complete_in_bold: compares trial_end to the end of the saved BOLD series
+    (nvols * TR). EEG t = 0 is the first saved BOLD volume; extra BOLD volumes sit
+    after EEG stops, not before it starts.
 
     Returns (n_trials, n_trials_incomplete_in_eeg, n_trials_incomplete_in_bold, max_trial_end_time).
     """
@@ -369,8 +370,7 @@ def _annotate_fmri_events_for_qc(
     eeg_tol_s = 0.10
     bold_tol_s = 1e-3
 
-    eeg_to_bold_s = max(0.0, (fmri_nvols - eeg_volume_markers) * fmri_tr)
-    bold_end_in_eeg_time = fmri_duration - eeg_to_bold_s
+    bold_end_in_eeg_time = fmri_nvols * fmri_tr
 
     incomplete_eeg = 0
     incomplete_bold = 0
@@ -569,7 +569,7 @@ def main() -> int:
     parser.add_argument(
         "--eeg-root",
         type=Path,
-        default=Path("data/bids_output/eeg"),
+        default=Path("data/bids_output/bids_analyzer_archive/eeg"),
         help="Path to EEG BIDS root (default: data/bids_output/eeg)",
     )
     parser.add_argument(
@@ -766,8 +766,7 @@ def main() -> int:
         )
 
     def _bold_end_in_eeg(r: RunQC) -> float:
-        o = max(0.0, (r.fmri_nvols - r.eeg_volume_markers) * r.fmri_tr)
-        return r.fmri_duration - o
+        return r.fmri_nvols * r.fmri_tr
 
     past_bold = [r for r in run_qc_rows if r.max_trial_end_time > _bold_end_in_eeg(r) + 1e-6]
     if past_bold:

@@ -1,0 +1,232 @@
+# The in-scanner arm of the scanner / no-scanner comparison.
+#
+# Subjects 0008, 0010, 0011 and 0015 were recorded twice with the same thermal-pain
+# paradigm: once inside the MR bore (this dataset) and once outside it (the Lorie-Ève
+# dataset, /Volumes/KINGSTON/Données_Lorie_Ève). Comparing the two arms only means
+# something if the preprocessing is the same, so this file reproduces
+# Données_Lorie_Ève/eeg_config.yaml key for key.
+#
+# It therefore extends the packaged default, exactly as the Lorie-Ève config does, and
+# NOT studies/pain_study/config/pain_study.yaml: that file points at the decombed BIDS
+# copy, activates a Decomb manifest, and widens the condition prefixes, none of which the
+# other arm had.
+#
+# Run as:
+#
+#     eeg-pipeline --config studies/pain_study/config/inscanner_lorie_matched.yaml \
+#         preprocessing bad-channels --subject 0008 --subject 0010 --subject 0011 --subject 0015 --n-jobs 2
+#     ... preprocessing ica    ... --n-jobs 3
+#     ... preprocessing epochs ... --n-jobs 3
+#
+# (the same three stages, in the same order, at the same worker counts as the run
+# recorded in Données_Lorie_Ève/derivatives/logs/run_metadata/preprocessing/).
+
+extends: "../../../eeg_pipeline/utils/config/eeg_config.yaml"
+
+project:
+  task: "thermalactive"
+  paradigm: "task"
+
+paths:
+  # Absolute, because the loader only treats a value as a path when it contains a
+  # separator, and because this config must not depend on the directory it is run from.
+  #
+  # bids_output/bids_analyzer_archive/eeg is the ORIGINAL BIDS conversion: Analyzer removed
+  # the gradient and the marked pulse artifact, and nothing has removed mains or the room's
+  # line comb. That is the state the Lorie-Ève recordings are in too, which is why notch_freq
+  # below can be the same 60 Hz on both arms. The decombed copies this study normally runs on
+  # (bids_analyzer_archive/eeg_decombed_auto_staged) have had per-recording lines subtracted
+  # and would need notch_freq: null plus a manifest, i.e. a different filter chain from the
+  # other arm.
+  #
+  # It moved into bids_analyzer_archive/ on 2026-09-08, when FASTR + BCGNet became the live
+  # preprocessing. This arm was NOT repointed at the FASTR lineage: it depends on the Analyzer
+  # state above, not on recency, and switching roots would change what the contrast measures.
+  #
+  # A staged copy of that archived root, holding only these four participants: everything
+  # small copied, the .eeg binaries symlinked. The bad-channel stage writes its verdict back
+  # into channels.tsv IN THE BIDS ROOT (pyprep.overwrite_chans_tsv, true on both arms, and how
+  # the later stages learn which channels are bad), and that archived root is the source every
+  # other analysis in this study reads. Staging keeps this run from marking it up. Rebuild
+  # with the loop in studies/pain_study/scripts/run_inscanner_lorie_matched.sh.
+  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg_loriematched_staged"
+  deriv_root: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives_lorie_matched"
+  source_data: "/Volumes/KINGSTON/EEG_fMRI_data/source_data"
+  # No line-removal stage ran over the recordings above, so there is no manifest of
+  # removed frequencies. Matches the other arm.
+  decomb_manifest: null
+  # fMRI was acquired alongside these recordings, but the other arm had none and the
+  # epoching stage's fMRI alignment and trimming would then apply to one arm only.
+  bids_fmri_root: null
+
+preprocessing:
+  # The thermode trigger, spelled "Trig_therm/T  1". Given as a prefix because the
+  # loader turns any configured string containing a separator into a filesystem path.
+  # The study's own config also lists a bare "Trig_" fallback; the other arm does not,
+  # so neither does this.
+  condition_preferred_prefixes: ["Trig_therm"]
+  # Off on both arms. On this arm it would find nothing anyway -- a volume marker every
+  # 0.9 s means no inter-event gap approaches the 15 s break threshold -- but leaving it
+  # on here and off there would be a difference between the arms for no reason.
+  find_breaks: false
+  # 60 Hz, because nothing upstream removed mains from either arm's recordings.
+  notch_freq: 60
+
+ica:
+  # No human reviewed these components, on either arm. The exclusions are ICLabel's and
+  # MNE's ECG/EOG detectors'. Saying so is the honest record; asserting
+  # manual_review_complete would be signing attestations for a review that did not happen.
+  require_manual_review: false
+
+  # MNE's documented CTPS default, matched to the other arm.
+  #
+  # NOTE, and this is the one setting where matching the other arm argues against the
+  # packaged guidance: the inherited null resolves to MNE-BIDS-Pipeline's 0.1, which is
+  # what every previous in-scanner run of this cohort used, and the core config says the
+  # threshold should follow the acquisition protocol -- 0.1 where a ballistocardiogram is
+  # present, 0.25 outside the scanner. These recordings do have a ballistocardiogram.
+  # 0.25 is set anyway because a two-arm comparison cannot separate a scanner effect from
+  # a threshold effect, and a comparison is what this run is for. True cardiac components
+  # here score far above either value; what the looser threshold gives up is the marginal
+  # ones. Change this to null to get the study's usual in-scanner treatment, and then do
+  # not compare component counts across the arms.
+  ecg_threshold: 0.25
+
+  cardiac_review:
+    # A property of these recordings, not a preprocessing choice -- the same kind of
+    # entry as notch_freq above, and the reason it differs from the other arm's null.
+    #
+    # cardiac_review runs on both arms with promote_exclusions on, so both need a
+    # correct beat train. Outside the scanner, beat_source "auto" finds no marker and
+    # detects R peaks from the ECG lead, which works. Inside the bore the same fallback
+    # locks onto the magnetohydrodynamic deflection and reports single-digit bpm where
+    # the markers report 60. Analyzer's R-marker train is present in all 24 runs here
+    # (399-566 beats per run, except sub-0008 run-4 at 110), so naming it gives this arm
+    # the same correct input the other arm gets for free.
+    marker_description: "Pulse Artifact/R"
+
+  band_specific_report:
+    # Empty on the other arm, whose batch came without behavioural files, so the
+    # stimulus_temp split it needs was a hard error rather than an empty panel. These
+    # recordings do carry stimulus_temp and the comparison would run, but it is an
+    # exploratory report panel that controls no derivative, and an extra panel on one
+    # arm only is not worth the divergence.
+    comparisons: []
+
+report:
+  # Report-only from here down: these keys change which warnings and which curves a
+  # reviewer sees, never a derivative.
+  acquisition:
+    # This site's own bookkeeping, so the event rug under the data-quality trace counts
+    # the 11 thermode triggers in a run rather than its ~550 volume and ~480 beat marks.
+    # The other arm's list names its markers; this one names these.
+    non_event_prefixes:
+      - "BAD"
+      - "EDGE"
+      - "NEW SEGMENT"
+      # No trailing slashes, even though the annotations are spelled "Volume/V  1" and
+      # "Response/...". The config loader resolves any string containing a separator into
+      # a filesystem path, so "VOLUME/" arrives at the report as an absolute path and
+      # matches nothing. Comparison is startswith() on the upper-cased description, so
+      # the slash was never needed. studies/pain_study/config/pain_study.yaml still
+      # carries the slashed spellings and has this bug.
+      - "VOLUME"
+      - "PULSE ARTIFACT"
+      - "R  "
+      - "RESPONSE"
+  analysis:
+    # The residual gradient comb, withheld from the report's aperiodic fit. Copied
+    # verbatim from studies/pain_study/config/pain_study.yaml, where its derivation is
+    # documented: each entry is a k/TR harmonic widened by 1.5 bins either side on the
+    # 0.25 Hz Welch grid. The other arm's list is empty because those recordings have no
+    # comb; withholding this arm's comb is the same treatment, not a different one.
+    aperiodic_exclude_hz:
+      - [0.7361, 1.4861]
+      - [1.8472, 2.5972]
+      - [2.9584, 3.7084]
+      - [4.0695, 4.8195]
+      - [5.1806, 5.9306]
+      - [6.2917, 7.0417]
+      - [7.4028, 8.1528]
+      - [8.5139, 9.2639]
+      - [9.6251, 10.3751]
+      - [10.7362, 11.4862]
+      - [11.8473, 12.5973]
+      - [12.9584, 13.7084]
+      - [14.0695, 14.8195]
+      - [15.1807, 15.9307]
+      - [16.2918, 17.0418]
+      - [17.4029, 18.1529]
+      - [18.5140, 19.2640]
+      - [19.6251, 20.3751]
+      - [20.7363, 21.4863]
+      - [21.8474, 22.5974]
+      - [22.9585, 23.7085]
+      - [24.0696, 24.8196]
+      - [25.1807, 25.9307]
+      - [26.2918, 27.0418]
+      - [27.4030, 28.1530]
+      - [28.5141, 29.2641]
+      - [29.6252, 30.3752]
+      - [30.7363, 31.4863]
+      - [31.8474, 32.5974]
+      - [32.9586, 33.7086]
+      - [34.0697, 34.8197]
+      - [35.1808, 35.9308]
+      - [36.2919, 37.0419]
+      - [37.4030, 38.1530]
+      - [38.5141, 39.2641]
+      - [39.6253, 40.3753]
+      - [40.7364, 41.4864]
+      - [41.8475, 42.5975]
+      - [42.9586, 43.7086]
+      - [44.0697, 44.8197]
+      - [45.1809, 45.9309]
+      - [46.2920, 47.0420]
+      - [47.4031, 48.1531]
+      - [48.5142, 49.2642]
+      - [49.6253, 50.3753]
+      - [50.7365, 51.4865]
+      - [51.8476, 52.5976]
+      - [52.9587, 53.7087]
+      - [54.0698, 54.8198]
+      - [55.1809, 55.9309]
+      - [56.2920, 57.0420]
+      - [57.4032, 58.1532]
+      - [58.5143, 59.2643]
+      - [59.6254, 60.3754]
+      - [60.7365, 61.4865]
+      - [61.8476, 62.5976]
+      - [62.9588, 63.7088]
+      - [64.0699, 64.8199]
+      - [65.1810, 65.9310]
+      - [66.2921, 67.0421]
+      - [67.4032, 68.1532]
+      - [68.5143, 69.2643]
+      - [69.6255, 70.3755]
+      - [70.7366, 71.4866]
+      - [71.8477, 72.5977]
+      - [72.9588, 73.7088]
+      - [74.0699, 74.8199]
+      - [75.1811, 75.9311]
+      - [76.2922, 77.0422]
+      - [77.4033, 78.1533]
+      - [78.5144, 79.2644]
+      - [79.6255, 80.3755]
+      - [80.7367, 81.4867]
+      - [81.8478, 82.5978]
+      - [82.9589, 83.7089]
+      - [84.0700, 84.8200]
+      - [85.1811, 85.9311]
+      - [86.2922, 87.0422]
+      - [87.4034, 88.1534]
+      - [88.5145, 89.2645]
+      - [89.6256, 90.3756]
+      - [90.7367, 91.4867]
+      - [91.8478, 92.5978]
+      - [92.9590, 93.7090]
+      - [94.0701, 94.8201]
+      - [95.1812, 95.9312]
+      - [96.2923, 97.0423]
+      - [97.4034, 98.1534]
+      - [98.5145, 99.2645]

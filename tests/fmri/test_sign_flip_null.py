@@ -77,9 +77,9 @@ def test_observed_maximum_matches_the_stored_contrast(three_run_model):
 
 
 def test_p_floor_accounts_for_the_identity_tie(three_run_model):
-    """The identity is always in the null set and always ties, so p >= 2/(n+1)."""
+    """Exhaustive enumeration counts the identity once: p >= 1/n_patterns."""
     null = run_level.compute_sign_flip_null(three_run_model, "task")
-    assert null.p_floor == pytest.approx(2 / (2 ** (3 - 1) + 1))
+    assert null.p_floor == pytest.approx(1 / 2 ** (3 - 1))
     assert null.global_p >= null.p_floor
 
 
@@ -94,7 +94,39 @@ def test_survivors_are_counted_at_the_fwe_height(three_run_model):
     stored = three_run_model.masker_.transform(
         three_run_model.compute_contrast("task", output_type="z_score")
     ).ravel()
-    assert null.fwe_survivors == int(np.sum(np.abs(stored) >= null.fwe_height))
+    assert null.fwe_survivors == int(np.sum(np.abs(stored) > null.fwe_height))
+
+
+@pytest.mark.parametrize("n_runs, alpha", [(3, 0.05), (3, 0.25), (6, 0.05), (6, 0.25)])
+def test_exact_familywise_decisions_match_enumerated_p_values(n_runs, alpha):
+    from types import SimpleNamespace
+
+    class LinearModel:
+        design_matrices_ = [pd.DataFrame({"task": [1.0]})] * n_runs
+        masker_ = SimpleNamespace(
+            mask_img_=nib.Nifti1Image(np.ones((3, 1, 1), dtype=np.uint8), np.eye(4))
+        )
+
+        def compute_contrast(self, vectors, output_type):
+            effects = np.arange(1.0, n_runs + 1)
+            maximum = float(np.asarray(vectors).ravel() @ effects)
+            return nib.Nifti1Image(
+                np.array([maximum, maximum / 2, 0.0]).reshape(3, 1, 1), np.eye(4)
+            )
+
+    null = run_level.compute_sign_flip_null(LinearModel(), "task", alpha=alpha)
+    maxima = np.asarray(null.null_max)
+    observed = np.array([null.observed_max, null.observed_max / 2, 0.0])
+    corrected_p = np.mean(maxima[:, None] >= observed, axis=0)
+    assert null.global_p == pytest.approx(corrected_p[0])
+    assert null.fwe_survivors == np.count_nonzero(corrected_p <= alpha)
+    np.testing.assert_array_equal(observed > null.fwe_height, corrected_p <= alpha)
+
+
+def test_no_familywise_survivors_when_exact_resolution_exceeds_alpha(three_run_model):
+    null = run_level.compute_sign_flip_null(three_run_model, "task")
+    assert null.p_floor > null.alpha
+    assert null.fwe_survivors == 0
 
 
 def test_single_run_model_yields_none():

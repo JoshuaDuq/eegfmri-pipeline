@@ -150,7 +150,7 @@ def test_compute_cohort_source_association_maps_stacks_source_stage_subject_maps
     assert result.partial_r_maps[:, 1].max() < -0.95
 
 
-def test_compute_cohort_source_association_maps_aligns_source_power_by_trial_id() -> None:
+def test_compute_cohort_source_association_maps_aligns_source_power_by_source_row() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_maps import (
         compute_cohort_source_association_maps,
@@ -158,15 +158,15 @@ def test_compute_cohort_source_association_maps_aligns_source_power_by_trial_id(
 
     full_frame = _source_stage_frame().assign(
         subject_id="sub-0001",
-        trial_id=np.arange(1, 67),
+        source_row=np.arange(1, 67),
     )
     retained_frame = (
-        full_frame.loc[~full_frame["trial_id"].isin([4, 8, 12])]
+        full_frame.loc[~full_frame["source_row"].isin([4, 8, 12])]
         .copy()
         .reset_index(drop=True)
     )
     source_power = np.zeros((len(full_frame), 3), dtype=float)
-    retained_rows = retained_frame["trial_id"].to_numpy(dtype=int) - 1
+    retained_rows = retained_frame["source_row"].to_numpy(dtype=int) - 1
     source_power[retained_rows, :] = _source_power_from_column(
         retained_frame["eta_combined_z"].to_numpy(dtype=float)
     )
@@ -184,7 +184,7 @@ def test_compute_cohort_source_association_maps_aligns_source_power_by_trial_id(
     assert result.partial_r_maps[0, 1] < -0.95
 
 
-def test_compute_cohort_source_association_maps_requires_trial_id() -> None:
+def test_compute_cohort_source_association_maps_requires_source_row() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_maps import (
         compute_cohort_source_association_maps,
@@ -193,9 +193,9 @@ def test_compute_cohort_source_association_maps_requires_trial_id() -> None:
     frame = _cohort_source_stage_frame(include_subject_with_unmet_criteria=False)
     source_power_by_subject = _source_power_by_subject(frame, column="eta_combined_z")
 
-    with pytest.raises(ValueError, match="missing required trial column"):
+    with pytest.raises(ValueError, match="missing required source row column"):
         compute_cohort_source_association_maps(
-            frame.drop(columns=["trial_id"]),
+            frame.drop(columns=["source_row"]),
             source_power_by_subject,
             band="alpha",
             config=load_study2_config(),

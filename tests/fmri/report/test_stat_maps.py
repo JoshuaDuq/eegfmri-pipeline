@@ -555,3 +555,89 @@ def test_residual_panel_states_the_bound_its_own_tails_cannot_cross() -> None:
         assert "bounded" in provenance
     finally:
         plt.close(figure)
+
+
+def _noise_map(scale: float = 0.1, shape=(20, 20, 20)) -> nib.Nifti1Image:
+    rng = np.random.default_rng(0)
+    return nib.Nifti1Image(rng.normal(0.0, scale, shape), np.eye(4))
+
+
+def _stamped(figure) -> str:
+    return " ".join(text.get_text() for text in figure.texts)
+
+
+def test_a_thresholded_mosaic_says_so_when_nothing_survives() -> None:
+    # Three panels of bare underlay, and the only statement that nothing survived was
+    # 6.5-point grey at the bottom of the strip. An empty mosaic has to read as a
+    # result rather than as a rendering failure.
+    figure = stat_maps.stat_map_mosaic(_noise_map(), threshold=2.3, two_sided=True)
+    try:
+        text = _stamped(figure)
+    finally:
+        plt.close(figure)
+
+    assert "no voxel" in text.lower()
+    assert "2.30" in text
+
+
+def test_a_mosaic_with_survivors_is_not_stamped() -> None:
+    rng = np.random.default_rng(0)
+    data = rng.normal(0.0, 0.1, (20, 20, 20))
+    data[8:12, 8:12, 8:12] = 6.0
+    figure = stat_maps.stat_map_mosaic(
+        nib.Nifti1Image(data, np.eye(4)), threshold=2.3, two_sided=True
+    )
+    try:
+        text = _stamped(figure)
+    finally:
+        plt.close(figure)
+
+    assert "no voxel" not in text.lower()
+
+
+def test_an_unthresholded_mosaic_is_never_stamped() -> None:
+    # Nothing is suppressed, so there is nothing to explain.
+    figure = stat_maps.stat_map_mosaic(_noise_map(), threshold=None)
+    try:
+        text = _stamped(figure)
+    finally:
+        plt.close(figure)
+
+    assert "no voxel" not in text.lower()
+
+
+def test_an_empty_glass_brain_says_so_too() -> None:
+    # A projection of nothing is a blank outline, and no more self-explanatory than
+    # an empty mosaic.
+    figure = stat_maps.glass_brain(_noise_map(), threshold=2.3, two_sided=True)
+    try:
+        text = _stamped(figure)
+    finally:
+        plt.close(figure)
+
+    assert "no voxel" in text.lower()
+
+
+def test_suprathreshold_count_is_none_without_a_threshold() -> None:
+    values = np.array([0.0, 5.0, -5.0])
+    assert stat_maps.suprathreshold_count(values, threshold=None, two_sided=True) is None
+    assert stat_maps.suprathreshold_count(values, threshold=2.3, two_sided=True) == 2
+    assert stat_maps.suprathreshold_count(values, threshold=2.3, two_sided=False) == 1
+
+
+def test_the_dual_coded_panel_states_what_its_opacity_ramp_reaches() -> None:
+    # The ramp runs from half the threshold to the threshold. On a map whose evidence
+    # sits well below that, every voxel is transparent and the panel renders as bare
+    # underlay -- indistinguishable from a rendering failure unless it is stated.
+    rng = np.random.default_rng(0)
+    stat = nib.Nifti1Image(rng.normal(0.0, 0.1, (20, 20, 20)), np.eye(4))
+    effect = nib.Nifti1Image(np.asarray(stat.dataobj) * 0.04, np.eye(4))
+
+    figure = stat_maps.dual_coded_mosaic(effect, stat_img=stat, threshold=2.3)
+    try:
+        text = _stamped(figure)
+    finally:
+        plt.close(figure)
+
+    assert "0.0%" in text and "full" in text
+    assert "reaches |z|" in text

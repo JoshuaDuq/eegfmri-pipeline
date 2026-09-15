@@ -241,3 +241,85 @@ def test_too_many_peaks_are_capped_and_the_cap_is_stated(maps) -> None:
 def test_no_peaks_is_refused_rather_than_drawn_empty() -> None:
     with pytest.raises(ValueError, match="at least one peak"):
         run_consistency.peak_forest_figure([], run_labels=_labels())
+
+
+def _correlation(values: list[list[float]]) -> np.ndarray:
+    matrix = np.array(values, dtype=float)
+    np.fill_diagonal(matrix, 1.0)
+    return matrix
+
+
+def test_every_drawn_cell_carries_its_own_value() -> None:
+    # The fixed -1..+1 scale is what makes the panel comparable across subjects, and
+    # it is also why a real spread of 0.4 renders as six shades of near-white. The
+    # caption used to send the reader to the TSV; the values belong on the figure.
+    matrix = _correlation(
+        [
+            [1.0, 0.21, -0.08],
+            [0.21, 1.0, 0.30],
+            [-0.08, 0.30, 1.0],
+        ]
+    )
+    figure = run_consistency.run_effect_correlation_figure(
+        matrix, run_labels=["run-01", "run-02", "run-03"]
+    )
+    try:
+        drawn = {text.get_text() for axis in figure.axes for text in axis.texts}
+    finally:
+        plt.close(figure)
+
+    for expected in ("0.21", "-0.08", "0.30"):
+        assert expected in drawn, f"{expected} is not written on the panel"
+
+
+def test_the_diagonal_is_not_annotated() -> None:
+    # The lower triangle is drawn without its diagonal; writing 1.00 there would
+    # label cells the panel does not show.
+    matrix = _correlation([[1.0, 0.5], [0.5, 1.0]])
+    figure = run_consistency.run_effect_correlation_figure(
+        matrix, run_labels=["run-01", "run-02"]
+    )
+    try:
+        drawn = [text.get_text() for axis in figure.axes for text in axis.texts]
+    finally:
+        plt.close(figure)
+
+    assert "1.00" not in drawn
+    assert drawn.count("0.50") == 1
+
+
+def test_the_fixed_scale_is_kept() -> None:
+    # Comparability across subjects depends on it; annotation is what makes it
+    # readable, not a rescale.
+    matrix = _correlation([[1.0, 0.1], [0.1, 1.0]])
+    figure = run_consistency.run_effect_correlation_figure(
+        matrix, run_labels=["run-01", "run-02"]
+    )
+    try:
+        image = figure.axes[0].images[0]
+        limits = (image.norm.vmin, image.norm.vmax)
+    finally:
+        plt.close(figure)
+
+    assert limits == (-1.0, 1.0)
+
+
+def test_the_empty_row_and_column_are_not_labelled() -> None:
+    # The lower triangle without its diagonal leaves the first row and the last column
+    # with no cells at all. Labelling them marks two tracks that contain nothing.
+    matrix = _correlation([[1.0, 0.2, 0.3], [0.2, 1.0, 0.4], [0.3, 0.4, 1.0]])
+    figure = run_consistency.run_effect_correlation_figure(
+        matrix, run_labels=["run-01", "run-02", "run-03"]
+    )
+    try:
+        axis = figure.axes[0]
+        rows = [label.get_text() for label in axis.get_yticklabels()]
+        columns = [label.get_text() for label in axis.get_xticklabels()]
+    finally:
+        plt.close(figure)
+
+    assert rows[0] == "", f"the empty first row is still labelled {rows[0]!r}"
+    assert columns[-1] == "", f"the empty last column is still labelled {columns[-1]!r}"
+    # Every other track keeps its name.
+    assert rows[1:] == ["run-02", "run-03"]
+    assert columns[:-1] == ["run-01", "run-02"]

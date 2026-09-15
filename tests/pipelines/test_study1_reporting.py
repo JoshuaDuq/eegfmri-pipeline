@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from eeg_pipeline.utils.config.loader import ConfigDict
 from studies.pain_study.study1.feature_benchmark import PRIMARY_BAND_PRESETS
@@ -101,6 +103,14 @@ def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
         "residual_target_variance_fraction",
         "split_half_subject_temperature_r",
     }.issubset(diagnostics_table.columns)
+    target_table = pd.read_parquet(study_root / "targets" / "primary_targets.parquet")
+    design = np.column_stack([np.ones(len(target_table)), target_table["NPS"]])
+    y = target_table["SIIPS1"].to_numpy()
+    residual = y - design @ np.linalg.lstsq(design, y, rcond=None)[0]
+    expected_r2 = 1.0 - np.sum(residual ** 2) / np.sum((y - y.mean()) ** 2)
+    siips1 = diagnostics_table.loc[diagnostics_table["target"] == "SIIPS1"].iloc[0]
+    assert siips1["official_nuisance_in_sample_r2"] == pytest.approx(expected_r2)
+    assert siips1["residual_target_variance_fraction"] == pytest.approx(1.0 - expected_r2)
     assert "vas_rating_r" not in diagnostics_table.columns
     residual_variance = diagnostics_table["residual_target_variance_fraction"]
     assert ((residual_variance >= 0.0) & (residual_variance <= 1.0)).all()

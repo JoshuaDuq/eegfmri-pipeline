@@ -229,8 +229,15 @@ fmri_contrast:
   auto_compcor_n: 5             # Number of CompCor components included when confounds_strategy includes CompCor
   write_design_matrix: false    # Write design matrix TSV/PNG under qc/
   
-  # Output format
-  output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta" (beta currently aliases cope/effect_size; plots/reports require z-score)
+  # Output format: which map is written as the contrast's headline output.
+  #   "z-score" | "t-stat" | "cope" | "beta"  (beta aliases cope/effect_size)
+  # This no longer decides what the report thresholds. A z map is always written
+  # beside the requested output and is what inference runs on, because every height
+  # the report quotes -- the applied threshold, FDR, Bonferroni, random-field -- is a
+  # z-scale quantity, and Nilearn's threshold_stats_img states that on a non-z input
+  # the computed threshold is "not rigorous and likely meaningless". Group analysis
+  # takes the effect_size maps, so "cope" remains a reasonable choice.
+  output_type: "z-score"
   resample_to_freesurfer: true # Auto-resample to FreeSurfer subject space
 
 ###################################################################

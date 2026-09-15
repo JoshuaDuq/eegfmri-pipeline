@@ -17,7 +17,7 @@ from eeg_pipeline.analysis.machine_learning.target_residualization import (
 from studies.pain_study.study1.deep_regression.model import build_band_regressor
 from studies.pain_study.study1.targets import (
     nuisance_regression_enabled,
-    resolve_residualization_columns,
+    resolve_target_residualization_columns,
 )
 
 
@@ -122,7 +122,8 @@ def _fit_regressor(
     *,
     X_train: np.ndarray,
     y_train: np.ndarray,
-    groups_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
     X_test: np.ndarray,
     config: Any,
     seed: int,
@@ -133,17 +134,13 @@ def _fit_regressor(
         torch.cuda.manual_seed_all(int(seed))
     np.random.seed(int(seed))
 
-    X_train_n, X_test_n = _standardize_train_test(X_train, X_test)
-    train_idx, val_idx = _validation_indices(
-        groups_train,
-        seed=seed,
-        fraction=float(config.get("study1.deep_regression.validation_fraction", 0.2)),
+    n_validation = len(X_val)
+    X_fit, X_evaluation = _standardize_train_test(
+        X_train, np.concatenate([X_val, X_test], axis=0)
     )
-    X_fit = X_train_n[train_idx]
-    y_fit = y_train[train_idx]
-    X_val = X_train_n[val_idx]
-    y_val = y_train[val_idx]
-    y_fit_n, y_mean, y_std = _standardize_train_targets(y_fit)
+    X_val = X_evaluation[:n_validation]
+    X_test_n = X_evaluation[n_validation:]
+    y_fit_n, y_mean, y_std = _standardize_train_targets(y_train)
     y_val_n = _apply_target_standardization(y_val, mean=y_mean, std=y_std)
 
     model = build_band_regressor(
@@ -178,7 +175,7 @@ def _fit_regressor(
     best_state = None
     best_val = np.inf
     no_improve = 0
-    has_validation = len(val_idx) > 0
+    has_validation = n_validation > 0
     X_val_tensor = (
         torch.tensor(X_val, dtype=torch.float32, device=device) if has_validation else None
     )
@@ -250,7 +247,9 @@ def run_loso_deep_regression(
     y_eval = np.full(len(y), np.nan, dtype=float)
     fold_records: list[dict[str, Any]] = []
     residual_columns = (
-        resolve_residualization_columns(frame=meta, config=config)
+        resolve_target_residualization_columns(
+            frame=meta, config=config, target_name=target_name
+        )
         if nuisance_regression_enabled(config)
         else tuple()
     )
@@ -259,28 +258,36 @@ def run_loso_deep_regression(
         "columns": list(residual_columns),
     }
     for fold_id, (train_idx, test_idx) in enumerate(logo.split(X, y, groups)):
-        train_groups = groups[train_idx]
-        y_train = y[train_idx]
-        y_test = y[test_idx]
+        seed = int(config.get("project.random_state", 42)) + fold_id
+        fit_local, validation_local = _validation_indices(
+            groups[train_idx],
+            seed=seed,
+            fraction=float(config.get("study1.deep_regression.validation_fraction", 0.2)),
+        )
+        fit_idx = train_idx[fit_local]
+        validation_idx = train_idx[validation_local]
+        evaluation_idx = np.concatenate([validation_idx, test_idx])
+        y_train = y[fit_idx]
+        y_evaluation = y[evaluation_idx]
         if residual_columns:
-            y_train, y_test, residualization_summary = residualize_targets_for_fold(
+            y_train, y_evaluation, residualization_details = residualize_targets_for_fold(
                 y=y,
                 meta=meta,
-                train_idx=train_idx,
-                test_idx=test_idx,
+                train_idx=fit_idx,
+                test_idx=evaluation_idx,
                 columns=residual_columns,
             )
-            residualization_summary = {
-                "enabled": True,
-                **residualization_summary,
-            }
+            residualization_summary = {"enabled": True, **residualization_details}
+        y_val = y_evaluation[:len(validation_idx)]
+        y_test = y_evaluation[len(validation_idx):]
         fold_pred = _fit_regressor(
-            X_train=X[train_idx],
+            X_train=X[fit_idx],
             y_train=y_train,
-            groups_train=train_groups,
+            X_val=X[validation_idx],
+            y_val=y_val,
             X_test=X[test_idx],
             config=config,
-            seed=int(config.get("project.random_state", 42)) + fold_id,
+            seed=seed,
         )
         predictions[test_idx] = fold_pred
         y_eval[test_idx] = y_test
@@ -293,6 +300,10 @@ def run_loso_deep_regression(
                 "mae": float(mean_absolute_error(y_true_fold, fold_pred)),
                 "r2": _safe_r2(y_true_fold, fold_pred, y_train_mean=float(np.mean(y_train))),
                 "n_trials": int(len(test_idx)),
+                "n_fit_subjects": int(len(np.unique(groups[fit_idx]))),
+                "n_validation_subjects": int(len(np.unique(groups[validation_idx]))),
+                "n_fit_trials": int(len(fit_idx)),
+                "n_validation_trials": int(len(validation_idx)),
             }
         )
 
@@ -308,6 +319,9 @@ def run_loso_deep_regression(
     fold_df = pd.DataFrame(fold_records)
     summary = {
         "model_name": "band_temporal_regressor",
+        "evaluation_scale": "residual_target" if residual_columns else "raw_target",
+        "preprocessing_fit_partition": "inner_fitting_subjects",
+        "validation_use": "early_stopping_only_no_outer_training_refit",
         "target": target_name,
         "preset": preset_name,
         "bands": list(bands),

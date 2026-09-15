@@ -8,7 +8,7 @@ from eeg_pipeline.utils.data.preprocessing import find_brainvision_vhdrs
 def _two_layouts(tmp_path: Path) -> tuple[Path, Path]:
     eeg_directory = tmp_path / "sub-0001" / "eeg"
     original = eeg_directory / "original_untrimmed_5khz" / "run.vhdr"
-    processed = eeg_directory / "brainvision_processed_1khz" / "run.vhdr"
+    processed = eeg_directory / "analyzer_brainvision_processed_1khz" / "run.vhdr"
     original.parent.mkdir(parents=True)
     processed.parent.mkdir(parents=True)
     original.touch()
@@ -19,7 +19,7 @@ def _two_layouts(tmp_path: Path) -> tuple[Path, Path]:
 def test_find_brainvision_vhdrs_reads_the_named_layout(tmp_path: Path) -> None:
     _, processed = _two_layouts(tmp_path)
 
-    assert find_brainvision_vhdrs(tmp_path, "brainvision_processed_1khz") == [processed]
+    assert find_brainvision_vhdrs(tmp_path, "analyzer_brainvision_processed_1khz") == [processed]
 
 
 def test_find_brainvision_vhdrs_reads_the_original_5khz_layout(tmp_path: Path) -> None:

@@ -23,6 +23,7 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.spectral_availability import (
     EpochSpectralAvailability,
     morlet_half_support,
+    morlet_temporal_half_support,
 )
 from eeg_pipeline.utils.analysis.windowing import time_mask
 from eeg_pipeline.utils.analysis.stats import (
@@ -327,6 +328,59 @@ def apply_tfr_availability(
         valid_frequency_mask=valid,
         half_support_hz=half_support,
         eligible_epoch_counts=valid.sum(axis=0),
+    )
+
+
+@dataclass(frozen=True)
+class WindowSupport:
+    """Which TFR coefficients a window can be measured from, per frequency."""
+
+    time_mask: np.ndarray  # (n_freqs, n_times)
+    half_support_s: np.ndarray  # (n_freqs,)
+    unmeasurable_frequencies: np.ndarray  # (n_freqs,) True where the window is too narrow
+
+
+def support_restricted_time_mask(
+    *,
+    times: np.ndarray,
+    window: Tuple[float, float],
+    freqs: np.ndarray,
+    n_cycles: np.ndarray,
+    additional_half_support_s: float = 0.0,
+) -> WindowSupport:
+    """Keep only the coefficients whose own support lies inside the window.
+
+    A Morlet coefficient is a weighted sum of the signal over an interval centred on its
+    time point, so a coefficient near a window edge reports activity from the other side
+    of it. Selecting coefficients by time after the transform does not restrict what they
+    were computed from; restricting them by their support does.
+
+    ``additional_half_support_s`` carries any non-causal smearing applied before the
+    transform -- an FIR filter's half-length, say -- which widens the same interval.
+
+    A frequency whose support is wider than the window survives as an all-False row
+    rather than a narrowed one. That frequency is not measurable in that window, and a
+    partial answer would be indistinguishable from a whole one downstream.
+    """
+    time_points = np.asarray(times, dtype=float)
+    start, end = (float(window[0]), float(window[1]))
+    if not (np.isfinite(start) and np.isfinite(end)) or end <= start:
+        raise ValueError(f"Support-restricted window must satisfy start < end, got {window!r}.")
+    extra = float(additional_half_support_s)
+    if not np.isfinite(extra) or extra < 0:
+        raise ValueError(
+            f"additional_half_support_s must be finite and non-negative, got {additional_half_support_s!r}."
+        )
+
+    half_support = morlet_temporal_half_support(freqs, n_cycles) + extra
+    lower = start + half_support[:, None]
+    upper = end - half_support[:, None]
+    mask = (time_points[None, :] >= lower) & (time_points[None, :] < upper)
+
+    return WindowSupport(
+        time_mask=mask,
+        half_support_s=half_support,
+        unmeasurable_frequencies=~mask.any(axis=1),
     )
 
 
@@ -881,11 +935,20 @@ def compute_adaptive_n_cycles(
     return n_cycles
 
 
-def _get_config_float(config: Optional[Any], key: str, default: float) -> float:
-    """Get float value from config with fallback to default."""
+def _get_config_float(
+    config: Optional[Any],
+    key: str,
+    default: Optional[float],
+) -> Optional[float]:
+    """Get a float from config, keeping ``None`` as a value rather than coercing it.
+
+    ``max_cycles`` uses ``None`` to mean "no cap", and an explicit ``null`` in the config
+    means the same thing, so neither can be passed through ``float()``.
+    """
     if config is None:
         return default
-    return float(config.get(key, default))
+    value = config.get(key, default)
+    return default if value is None else float(value)
 
 
 def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:

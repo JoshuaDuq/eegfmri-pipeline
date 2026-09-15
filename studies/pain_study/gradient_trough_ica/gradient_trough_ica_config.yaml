@@ -37,9 +37,9 @@ tfr:
 
 paths:
   corrected_data_roots:
-    sub-0014: data/source_data/sub-0014/eeg/brainvision_processed_1khz
-    sub-0015: data/source_data/sub-0015/eeg/brainvision_processed_1khz
+    sub-0014: data/source_data/sub-0014/eeg/analyzer_brainvision_processed_1khz
+    sub-0015: data/source_data/sub-0015/eeg/analyzer_brainvision_processed_1khz
   events_roots:
     sub-0014: data/bids_output/eeg_brainvision_analyzer_sub-0014/sub-0014/eeg
-    sub-0015: data/bids_output/eeg/sub-0015/eeg
+    sub-0015: data/bids_output/bids_analyzer_archive/eeg/sub-0015/eeg
   output_root: outputs/gradient_trough_ica

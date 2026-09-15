@@ -191,3 +191,68 @@ def test_no_lines_leaves_the_figure_untouched() -> None:
     style.annotate_provenance(figure, [])
     assert not figure.texts
     plt.close(figure)
+
+
+def _saved_size(figure: plt.Figure, tmp_path: Path) -> tuple[int, int]:
+    from PIL import Image
+
+    path = tmp_path / "figure.png"
+    figure.savefig(path, **style.savefig_kwargs(path))
+    plt.close(figure)
+    with Image.open(path) as image:
+        return image.size
+
+
+def test_provenance_strip_does_not_widen_the_saved_figure(tmp_path: Path) -> None:
+    # A tight bounding box grows to contain every artist, so an unwrapped strip set
+    # the saved width from the length of its own prose. Measured before this was
+    # fixed: a 6.0 x 4.4 figure saved at 2253 x 959 -- against 1223 x 903 for the
+    # same axes without the strip, so 46% of the panel was blank canvas.
+    lines = [
+        "3,414 paired frames across 6 run(s)",
+        "within-run r = +0.38 (each run centred first)",
+        "per run +0.33 (run-05) to +0.46 (run-04)",
+        "frames without a defined framewise displacement are excluded from both axes",
+        "reference levels are published conventions, not criteria applied here",
+    ]
+
+    def _draw(with_strip: bool) -> tuple[int, int]:
+        with style.plot_context():
+            figure, axis = plt.subplots(figsize=(6.0, 4.4), constrained_layout=True)
+            axis.plot([0, 1], [0, 1])
+            if with_strip:
+                style.annotate_provenance(figure, lines)
+            return _saved_size(figure, tmp_path)
+
+    bare_width, bare_height = _draw(False)
+    width, height = _draw(True)
+
+    # The strip may claim a band of height; it may not set the width.
+    assert width == pytest.approx(bare_width, rel=0.02)
+    assert height > bare_height
+    assert height < bare_height * 1.25
+
+
+def test_provenance_strip_wraps_to_fit_the_figure_it_is_drawn_on() -> None:
+    # The same segments must occupy fewer lines on a wider figure -- that is what
+    # keeps the band shallow on a mosaic and the width honest on a small panel.
+    lines = [f"segment number {index} of the strip" for index in range(8)]
+    narrow = style.wrap_provenance(lines, width_points=4.0 * 72.0)
+    wide = style.wrap_provenance(lines, width_points=12.0 * 72.0)
+    assert len(narrow) > len(wide) >= 1
+
+
+def test_provenance_strip_keeps_every_segment_it_was_given(tmp_path: Path) -> None:
+    # Wrapping must not drop content: the strip is what makes a figure readable once
+    # it has travelled out of the report.
+    lines = ["first segment", "second segment", "third segment"]
+    with style.plot_context():
+        figure, _ = plt.subplots(figsize=(4.0, 3.0), constrained_layout=True)
+        style.annotate_provenance(figure, lines)
+        drawn = " ".join(
+            text.get_text() for text in figure.texts if text.get_fontsize() < 8
+        )
+        plt.close(figure)
+
+    for line in lines:
+        assert line in drawn

@@ -51,7 +51,7 @@ paths:
   # on sub-0001 run-1 the 47 Hz line is untouched there and 19 dB down in the staged tree,
   # and the delivered derivatives carry the 34 dB stopband that only the staged tree
   # explains. The config named one input while the science was built on another.
-  bids_root: "../../../data/bids_output/eeg_decombed_auto_staged"  # BIDS-formatted EEG data
+  bids_root: "../../../data/bids_output/bids_analyzer_archive/eeg_decombed_auto_staged"  # BIDS-formatted EEG data
   # Null preserves ordinary datasets. A configured Decomb manifest activates spectral
   # exclusions and requires preprocessing.notch_freq: null.
   #
@@ -955,6 +955,20 @@ feature_engineering:
     # Emit dB-scaled versions of log10-ratio power:
     #   db = 10 * log10(active / baseline)
     emit_db: true
+
+    # Restrict each window's power to coefficients whose Morlet kernel fits inside it.
+    # The transform runs once on the full epoch, so selecting coefficients by time
+    # afterwards does not restrict what they were computed from: a coefficient within
+    # one half-support of a window edge carries signal from the other side of it. With
+    # n_cycles = f/2 that half-support is 0.398 s at every frequency, which is how a
+    # "prestimulus" feature comes to contain post-onset activity.
+    #
+    # Turning this off restores the older behaviour and the leak with it. Do that only
+    # for windows whose interpretation does not depend on their boundaries.
+    support_restricted_windows: true
+    # Non-causal smearing applied before the transform -- an FIR filter's half-length --
+    # widens the same interval. 0.0 leaves the wavelet's own support as the only term.
+    additional_half_support_s: 0.0
   
   constants:
     epsilon_std: *epsilon_std
@@ -1373,12 +1387,20 @@ machine_learning:
     ci_method: "bootstrap"               # "fixed_effects" | "bootstrap"
     bootstrap_iterations: 1000
     subject_weighting: "equal"           # "equal" (recommended inferential unit = subject) | "trial_count"
+    # Trial column defining a "same condition" repetition for the within-person,
+    # within-condition held-out evaluation. Absent from meta, that endpoint is not reported.
+    within_condition_column: "stimulus_temp"
 
   constants:
     variance_threshold: 0.0
 
   preprocessing:
     imputer_strategy: "median"
+    # A feature missing in more than this fraction of a training split is dropped; one
+    # missing in fewer is imputed from that split's median. Applied before the staged
+    # nuisance regression, so one absent value costs a cell rather than the column.
+    max_feature_missingness: 0.05
+    max_subject_missingness: 0.10
     variance_threshold_grid: [0.0, 0.01, 0.1]
     power_transformer_method: "yeo-johnson"
     power_transformer_standardize: true
@@ -1411,6 +1433,19 @@ machine_learning:
     metric: "dot"
     normalization: "none"
     round_decimals: 3
+
+    # Equal trial identifiers do not establish that two tables describe the same trial.
+    # Both sides number trials by position within a run, so one row dropped on either
+    # side renumbers every trial after it while every key still matches. The protocol
+    # fixes the interval from the EEG trigger to the fMRI regressor it opens, which makes
+    # the onset difference the only quantity that can tell a real pairing from a
+    # coincidental one. These describe this repository's thermal-pain paradigm; a study
+    # with a different protocol must override them.
+    timing_audit:
+      onset_offset_s: 3.0            # EEG trigger -> modeled plateau start [s]
+      onset_tolerance_s: 0.010       # Residual mismatch allowed after the offset [s]
+      plateau_duration_s: 7.5        # Modeled fMRI duration; null compares the EEG duration
+      duration_tolerance_s: 0.010
 
   plotting:
     enabled: true

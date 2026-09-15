@@ -55,6 +55,10 @@ def subject_source_power_metadata_path(config: Any, *, subject_id: str, band: st
     return study2_output_root(config) / subject_id / "eeg" / "source" / f"source_power_{band}.json"
 
 
+def source_trial_index_path(config: Any) -> Path:
+    return source_model_dir(config) / "source_trials.tsv"
+
+
 def source_vertex_manifest_path(config: Any) -> Path:
     return source_model_dir(config) / "common_source_vertices.npz"
 
@@ -356,6 +360,7 @@ __all__ = [
     "source_stage_dir",
     "source_stage_fisher_z_path",
     "source_stage_frame_path",
+    "source_trial_index_path",
     "source_stage_partial_r_path",
     "source_stage_qc_path",
     "source_vertex_manifest_path",

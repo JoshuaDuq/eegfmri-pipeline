@@ -43,6 +43,10 @@ def _parse_optional_positive_float_attr(
 
 
 def _read_repetition_time(sidecar: Path) -> Optional[float]:
+    return _coerce_float(_read_sidecar(sidecar).get("RepetitionTime"))
+
+
+def _read_sidecar(sidecar: Path) -> dict:
     try:
         meta = json.loads(sidecar.read_text())
     except json.JSONDecodeError as exc:
@@ -51,7 +55,69 @@ def _read_repetition_time(sidecar: Path) -> Optional[float]:
         raise ValueError(f"Failed to read BOLD sidecar JSON at {sidecar}: {exc}") from exc
     if not isinstance(meta, dict):
         raise ValueError(f"BOLD sidecar {sidecar} must contain a JSON object.")
-    return _coerce_float(meta.get("RepetitionTime"))
+    return meta
+
+
+def slice_time_ref_from_bold(bold_path: Path, *, tr: float) -> float:
+    """Return the fraction of the TR that this run's volumes are timed to.
+
+    Slice-time correction resamples every slice onto one reference instant inside the
+    volume, and the design has to be sampled there too. BIDS records that instant as
+    ``StartTime`` in seconds, which nilearn's own ``first_level_from_bids`` divides by
+    the TR to get ``slice_time_ref``. Leaving nilearn's ``0.0`` default in place on
+    corrected data samples every regressor a fixed fraction of a TR early.
+
+    Uncorrected data has no single reference instant, so ``0.0`` is the honest answer
+    rather than a fallback: the volume's nominal acquisition start is what it is timed to.
+    A run with no sidecar is treated the same way, matching how ``get_tr_from_bold``
+    falls back to the NIfTI header, but it is logged because a lost sidecar and genuinely
+    uncorrected data are indistinguishable from here.
+    """
+    tr_value = float(tr)
+    if not math.isfinite(tr_value) or tr_value <= 0:
+        raise ValueError(f"Slice-timing reference requires a positive finite TR, got {tr!r}.")
+
+    sidecar = bold_path.with_suffix("").with_suffix(".json")
+    if not sidecar.exists():
+        logging.getLogger(__name__).warning(
+            "No BOLD sidecar for %s; sampling the design at the start of each TR. "
+            "Slice-time-corrected data needs a sidecar carrying StartTime.",
+            bold_path.name,
+        )
+        return 0.0
+
+    meta = _read_sidecar(sidecar)
+    if not bool(meta.get("SliceTimingCorrected", False)):
+        return 0.0
+
+    start_time = _coerce_float(meta.get("StartTime"))
+    if start_time is None:
+        raise ValueError(
+            f"BOLD sidecar {sidecar} reports SliceTimingCorrected but carries no numeric "
+            "StartTime; the slice-timing reference cannot be derived."
+        )
+    if not 0.0 <= start_time < tr_value:
+        raise ValueError(
+            f"BOLD sidecar {sidecar} reports StartTime={start_time} outside [0, TR={tr_value}); "
+            "the slice-timing reference must lie within one repetition time."
+        )
+    return start_time / tr_value
+
+
+def bold_frame_times(bold_path: Path, *, tr: float, n_scans: int) -> np.ndarray:
+    """Return the instants a run's volumes represent, in seconds.
+
+    Matches what nilearn's ``FirstLevelModel`` samples its design at, so a regressor
+    built here and one built inside the GLM describe the same timeline. Nuisance
+    regressors convolved on a grid that ignores the slice-timing reference are sampled
+    a fixed fraction of a TR away from the data they are meant to explain.
+    """
+    scans = int(n_scans)
+    if scans <= 0:
+        raise ValueError(f"Frame times require a positive scan count, got {n_scans!r}.")
+    tr_value = float(tr)
+    slice_time_ref = slice_time_ref_from_bold(bold_path, tr=tr_value)
+    return (np.arange(scans, dtype=float) + slice_time_ref) * tr_value
 
 
 def _read_header_tr(bold_path: Path) -> Optional[float]:
@@ -300,6 +366,7 @@ def build_first_level_model(
     tr: float,
     cfg: Any,
     mask_img: Optional[Any] = None,
+    slice_time_ref: float = 0.0,
     logger: Optional[logging.Logger] = None,
 ) -> Any:
     """Create a nilearn FirstLevelModel with compatibility guards."""
@@ -307,9 +374,13 @@ def build_first_level_model(
 
     low_pass = _parse_optional_positive_float_attr(cfg, "low_pass_hz")
     high_pass = _parse_optional_positive_float_attr(cfg, "high_pass_hz", 0.0)
+    slice_time_ref = float(slice_time_ref)
+    if not 0.0 <= slice_time_ref <= 1.0:
+        raise ValueError(f"slice_time_ref must lie in [0, 1], got {slice_time_ref}.")
 
     kwargs: dict[str, Any] = dict(
         t_r=float(tr),
+        slice_time_ref=slice_time_ref,
         hrf_model=getattr(cfg, "hrf_model", "spm"),
         drift_model=getattr(cfg, "drift_model", None),
         high_pass=high_pass,

@@ -1,0 +1,204 @@
+# The in-scanner arm for subjects 0019/0020/0021, corrected with the Python FASTR +
+# BCGNet chain.
+#
+# Same three participants and the same paradigm as the MRI-simulator arm
+# (studies/pain_study/config/simulator_arm.yaml), recorded in the bore about a week
+# earlier: 0019 on 2026-08-17, 0020 on 2026-08-19, 0021 on 2026-08-20. Input is
+# source_data/fastr_python_v2_bcgnet/, where FASTR removed the gradient artifact,
+# downsampled to 1 kHz and cropped each run to its volume bounds, and BCGNet removed the
+# ballistocardiogram. Outputs are kept beside the simulator arm's so the two can be
+# compared.
+#
+# This file matches simulator_arm.yaml on every leaf the recordings allow. It diverges
+# only where they force it -- the marker names, and the report keys that name them --
+# because a simulator/scanner contrast can only separate a scanner effect from a
+# preprocessing effect if the preprocessing is the same. Diff the two files before
+# trusting any cross-arm result.
+#
+# Run as:
+#
+#     bash studies/pain_study/scripts/run_simulator_arm.sh \
+#         --config studies/pain_study/config/fastr_bcgnet_arm.yaml 0019 0020 0021
+
+extends: "../../../eeg_pipeline/utils/config/eeg_config.yaml"
+
+project:
+  task: "thermalactive"
+  paradigm: "task"
+
+paths:
+  # Absolute, because the loader only treats a value as a path when it contains a
+  # separator, and because this config must not depend on the directory it is run from.
+  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/mri_simulator/fastr_bcgnet/bids"
+  deriv_root: "/Volumes/KINGSTON/EEG_fMRI_data/mri_simulator/fastr_bcgnet/derivatives"
+  source_data: "/Volumes/KINGSTON/EEG_fMRI_data/source_data/fastr_python_v2_bcgnet"
+  # fMRI was acquired alongside these recordings, and the volume markers survive in the
+  # events. It stays null anyway: setting it turns on the epoching stage's fMRI alignment
+  # and trimming, which the simulator arm cannot have, and that would be a difference in
+  # the epochs rather than in the recordings. Set it, and re-run both arms, if the
+  # comparison ever needs fMRI-aligned epochs.
+  bids_fmri_root: null
+
+preprocessing:
+  # Identical to the simulator arm.
+  condition_preferred_prefixes: ["Trig_therm"]
+  # A volume marker every 0.9 s means no inter-event gap approaches the 15 s break
+  # threshold, so this would find nothing here even if it were on.
+  find_breaks: false
+  # FASTR removed the gradient artifact and BCGNet the ballistocardiogram. Neither touches
+  # mains, and no line-comb stage has run over this generation.
+  notch_freq: 60
+
+ica:
+  # No human reviewed these components, on either arm. The exclusions are ICLabel's and
+  # MNE's ECG/EOG detectors'.
+  require_manual_review: false
+
+  # Matched to the simulator arm. The packaged null resolves to 0.1, which the core config
+  # prescribes where a ballistocardiogram is present -- and one was present here, before
+  # BCGNet. 0.25 is set because a two-arm contrast cannot separate a scanner effect from a
+  # threshold effect. Change it to null for this arm's usual in-scanner treatment, and then
+  # do not compare component counts across the arms.
+  ecg_threshold: 0.25
+
+  cardiac_review:
+    # Left at the inherited null, which is not the usual in-scanner setting. These
+    # recordings carry no Analyzer "Pulse Artifact/R" train -- the BCGNet chain does not
+    # write one -- so there is no marker to name, and beat_source "auto" falls through to
+    # detection on the ECG lead.
+    #
+    # That fallback is what locks onto the magnetohydrodynamic deflection on the
+    # Analyzer-era runs, so it was measured here before being accepted, on run 1 of each
+    # subject: sub-0020 48.3 bpm and sub-0021 57.1 bpm, both with a tight RR spread, and
+    # sub-0019 110.2 bpm with a bimodal RR (IQR 0.514-0.983 s), which is double-marking
+    # rather than an MHD lock. Usable, but sub-0019's beat count is inflated -- read its
+    # cardiac panel with that in mind, and note that promote_exclusions is on.
+    marker_description: null
+
+  band_specific_report:
+    # Empty on both arms. These events do carry stimulus_temp, so the packaged comparison
+    # would run, but it is an exploratory report panel that controls no derivative and the
+    # simulator arm's is empty.
+    comparisons: []
+
+report:
+  acquisition:
+    # Report-only: which markers the event rug under the data-quality trace counts as
+    # trials. This arm's spellings differ from the simulator arm's -- "Rating_on" where
+    # that one has "Vas_on", plus the volume train and the two marks the FASTR chain writes
+    # about its own output, and neither "Rec_start" nor "Simfx_start". No trailing slashes:
+    # the config loader resolves any string containing a separator into a filesystem path,
+    # and the comparison is startswith() on the upper-cased description.
+    #
+    # "COMMENT" catches "Comment/QC_ResidualHigh", the chain's per-run gradient-residual
+    # flag. It is carried through conversion deliberately: neither results/sub-*.json nor
+    # cohort_summary.csv records it, so the annotation is the only surviving per-run record
+    # of which runs the chain was unhappy with.
+    non_event_prefixes:
+      - "BAD"
+      - "COMMENT"
+      - "EDGE"
+      - "NEW SEGMENT"
+      - "VOLUME"
+      - "ITI_START"
+      - "STIM_ON"
+      - "PAINQ_ON"
+      - "RATING_ON"
+  analysis:
+    # The gradient comb withheld from the report's aperiodic fit, copied verbatim from
+    # studies/pain_study/config/inscanner_lorie_matched.yaml: each entry is a k/TR harmonic
+    # widened by 1.5 bins either side on the 0.25 Hz Welch grid. It applies unchanged here
+    # -- the volume markers in these runs are 0.900 s apart, the same TR the list was
+    # derived for, and FASTR attenuates the harmonics without moving them. The simulator
+    # arm's list is empty because those recordings have no comb; withholding this arm's
+    # comb is the same treatment, not a different one.
+    aperiodic_exclude_hz:
+      - [0.7361, 1.4861]
+      - [1.8472, 2.5972]
+      - [2.9584, 3.7084]
+      - [4.0695, 4.8195]
+      - [5.1806, 5.9306]
+      - [6.2917, 7.0417]
+      - [7.4028, 8.1528]
+      - [8.5139, 9.2639]
+      - [9.6251, 10.3751]
+      - [10.7362, 11.4862]
+      - [11.8473, 12.5973]
+      - [12.9584, 13.7084]
+      - [14.0695, 14.8195]
+      - [15.1807, 15.9307]
+      - [16.2918, 17.0418]
+      - [17.4029, 18.1529]
+      - [18.5140, 19.2640]
+      - [19.6251, 20.3751]
+      - [20.7363, 21.4863]
+      - [21.8474, 22.5974]
+      - [22.9585, 23.7085]
+      - [24.0696, 24.8196]
+      - [25.1807, 25.9307]
+      - [26.2918, 27.0418]
+      - [27.4030, 28.1530]
+      - [28.5141, 29.2641]
+      - [29.6252, 30.3752]
+      - [30.7363, 31.4863]
+      - [31.8474, 32.5974]
+      - [32.9586, 33.7086]
+      - [34.0697, 34.8197]
+      - [35.1808, 35.9308]
+      - [36.2919, 37.0419]
+      - [37.4030, 38.1530]
+      - [38.5141, 39.2641]
+      - [39.6253, 40.3753]
+      - [40.7364, 41.4864]
+      - [41.8475, 42.5975]
+      - [42.9586, 43.7086]
+      - [44.0697, 44.8197]
+      - [45.1809, 45.9309]
+      - [46.2920, 47.0420]
+      - [47.4031, 48.1531]
+      - [48.5142, 49.2642]
+      - [49.6253, 50.3753]
+      - [50.7365, 51.4865]
+      - [51.8476, 52.5976]
+      - [52.9587, 53.7087]
+      - [54.0698, 54.8198]
+      - [55.1809, 55.9309]
+      - [56.2920, 57.0420]
+      - [57.4032, 58.1532]
+      - [58.5143, 59.2643]
+      - [59.6254, 60.3754]
+      - [60.7365, 61.4865]
+      - [61.8476, 62.5976]
+      - [62.9588, 63.7088]
+      - [64.0699, 64.8199]
+      - [65.1810, 65.9310]
+      - [66.2921, 67.0421]
+      - [67.4032, 68.1532]
+      - [68.5143, 69.2643]
+      - [69.6255, 70.3755]
+      - [70.7366, 71.4866]
+      - [71.8477, 72.5977]
+      - [72.9588, 73.7088]
+      - [74.0699, 74.8199]
+      - [75.1811, 75.9311]
+      - [76.2922, 77.0422]
+      - [77.4033, 78.1533]
+      - [78.5144, 79.2644]
+      - [79.6255, 80.3755]
+      - [80.7367, 81.4867]
+      - [81.8478, 82.5978]
+      - [82.9589, 83.7089]
+      - [84.0700, 84.8200]
+      - [85.1811, 85.9311]
+      - [86.2922, 87.0422]
+      - [87.4034, 88.1534]
+      - [88.5145, 89.2645]
+      - [89.6256, 90.3756]
+      - [90.7367, 91.4867]
+      - [91.8478, 92.5978]
+      - [92.9590, 93.7090]
+      - [94.0701, 94.8201]
+      - [95.1812, 95.9312]
+      - [96.2923, 97.0423]
+      - [97.4034, 98.1534]
+      - [98.5145, 99.2645]

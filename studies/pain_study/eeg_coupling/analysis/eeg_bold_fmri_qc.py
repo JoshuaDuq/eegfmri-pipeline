@@ -18,7 +18,11 @@ from fmri_pipeline.analysis.trial_signatures import (
     _discover_runs,
     _extract_trials_for_run,
 )
-from fmri_pipeline.utils.bold_discovery import get_tr_from_bold, select_confounds
+from fmri_pipeline.utils.bold_discovery import (
+    bold_frame_times,
+    get_tr_from_bold,
+    select_confounds,
+)
 
 
 def _require_mapping(value: Any, *, path: str) -> Mapping[str, Any]:
@@ -180,7 +184,7 @@ def _design_qc_table(
             import nibabel as nib
 
             n_scans = int(nib.load(str(bold_path)).shape[3])
-        frame_times = np.arange(n_scans, dtype=float) * tr
+        frame_times = bold_frame_times(bold_path, tr=tr, n_scans=n_scans)
 
         for trial in trials:
             lss_events = _build_lss_events(

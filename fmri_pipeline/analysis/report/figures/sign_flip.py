@@ -31,19 +31,12 @@ def sign_flip_figure(
     if values.size == 0:
         raise ValueError("The sign-flip panel requires at least one enumerated maximum.")
 
-    # The empirical CDF of the permutation distribution. Both quantities a reader
-    # needs are then read off an axis rather than inferred: the familywise height is
-    # where the curve crosses 1 - alpha, and the exceedance probability of the
-    # observed value is one minus its height on the curve.
-    #
-    # An earlier version put rank on the vertical axis. Rank is an index, not a
-    # measurement -- nothing follows from a pattern being 17th rather than 18th -- so
-    # that panel spent its whole vertical dimension on a non-quantity, and was this
-    # same curve unnormalised and mislabelled.
+    # Exact p uses P(max >= observed), including ties: 1 - F(observed-).
+    # The critical height is a discrete order statistic, not an interpolated quantile.
     ordered = np.sort(values)
     cumulative = np.arange(1, ordered.size + 1) / ordered.size
     #: The level the familywise height is the quantile of. Fixed at 0.95 because
-    #: ``SignFlipSummary.height`` is defined as the 95th percentile of this null.
+    #: The report's sign-flip analysis uses a 5% familywise level.
     alpha = 0.95
 
     with style.plot_context():
@@ -71,13 +64,17 @@ def sign_flip_figure(
 
         axis.axhline(alpha, color=style.OKABE_ITO["blue"], linewidth=1.0, linestyle=":")
         axis.axvline(summary.height, color=style.OKABE_ITO["blue"], linewidth=1.3)
+        # Above the alpha line, not below it. The curve rises toward this crossing from
+        # the left, so the down-left corner the label used to sit in is exactly where
+        # the steps are -- and it was drawn straight through them. Nothing occupies the
+        # band above 0.95 until the curve reaches the height.
         axis.annotate(
             f"familywise 5%: |z| > {summary.height:.2f}",
             xy=(summary.height, alpha),
-            xytext=(-11, -10),
+            xytext=(-6, 5),
             textcoords="offset points",
             ha="right",
-            va="top",
+            va="bottom",
             fontsize=7,
             color=style.OKABE_ITO["blue"],
         )
@@ -114,13 +111,8 @@ def sign_flip_figure(
         notes = [
             f"{summary.n_patterns} sign patterns over {summary.n_runs} runs",
             f"{summary.survivors:,} voxel(s) at the familywise height",
-            f"p = {summary.global_p:.3f}"
-            + (
-                f" (its floor for {summary.n_runs} runs)"
-                if summary.floor_limited
-                else f" (floor {summary.p_floor:.3f})"
-            ),
-            "no criterion applied",
+            f"p = {summary.global_p:.3f} (floor {summary.p_floor:.3f})",
+            "exact two-sided max statistic",
         ]
         style.annotate_provenance(figure, notes)
         return figure

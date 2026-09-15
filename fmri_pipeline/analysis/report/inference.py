@@ -1,32 +1,11 @@
-"""What a height threshold on a statistic map is actually worth.
+"""Threshold summaries and exploratory distribution diagnostics for saved z maps.
 
-A first-level z map is thresholded at a number chosen in a config file, and the
-report drew it without ever saying what that number buys. Two facts decide that, and
-neither is visible in a thresholded picture:
-
-*How many voxels were tested.* At |z| > 2.3 over 50,000 in-mask voxels, roughly a
-thousand voxels are expected to survive with no signal present at all. The
-Benjamini-Hochberg and Bonferroni thresholds for the same map are the natural
-comparisons, so they are computed here and stated beside the applied one.
-
-*Whether the map's null is the one the threshold assumes.* A z map is nominally
-N(0, 1) under the null, but a single-subject GLM with unmodelled autocorrelation and
-physiological noise is routinely over-dispersed. Measured on this study's own data,
-the empirical null is centred at -0.61 with a width of 1.51: |z| > 2.3 reads as
-p < 0.021 and is worth p = 0.027 upward and p = 0.13 downward. Efron (2004) is the
-reference; the robust quantile form used here is what survives a map with a real
-signal tail.
-
-The correction is *applied*, not only noted. Every theoretical-null quantity has an
-empirical-null counterpart -- expected survivors, tail probabilities, an FDR rejection
-region -- because on real data they disagree by nearly an order of magnitude in both
-directions, and the theoretical figures alone let a reader conclude the opposite of
-what the map shows. Stating a fitted null beside a threshold while continuing to
-report only what the threshold is worth under N(0, 1) leaves the reader to integrate
-a normal tail by eye off a log axis.
-
-Everything is computed from a saved map. Nothing here fits a model, which is what
-lets it live in the report package.
+Theoretical-normal FDR and Bonferroni calculations require calibrated null p-values.
+A median/MAD Gaussian fit to the observed spatial mixture provides a sensitivity
+analysis, not an independently identified null or guaranteed FDR control. The
+volume-only random-field approximation also requires assumptions that these
+saved maps alone cannot establish. Run sign-flip results are computed during fitting
+and read here as a separate test with explicit symmetry assumptions.
 """
 
 from __future__ import annotations
@@ -97,17 +76,14 @@ class SignFlipSummary:
     The report-side view of the null enumerated during analysis. Only the scalars a
     panel needs, so the report never imports the fitting package to draw this.
 
-    Why it belongs beside Bonferroni and FDR rather than replacing them: those two ask
-    what a threshold is worth if every voxel is N(0, 1), and this map's fitted null is
-    measurably not that. This one assumes nothing about the distribution -- it asks how
-    large a maximum the same data produces when the only thing changed is which runs
-    were labelled positive.
+    The sign-flip test requires independent runs with null contrast errors symmetric
+    about zero. It does not require Gaussian errors. The maximum statistic accounts
+    for the voxelwise search; it does not test cluster extent.
 
     ``p_floor`` travels with ``global_p`` because the two are not independent. The
     unflipped pattern is always a member of the null and always ties the observed
-    maximum, so ``global_p`` can never fall below ``p_floor``. Printed alone, a p of
-    0.061 from six runs reads as a near-miss when it is the smallest value the test can
-    return.
+    maximum, so ``global_p`` can never fall below ``p_floor``. With six runs the
+    exact two-sided minimum is 1/32 = 0.03125.
     """
 
     height: float
@@ -127,13 +103,12 @@ class SignFlipSummary:
 def sign_flip_p_floor(n_runs: int) -> float:
     """Smallest attainable global p for a run sign-flip test over ``n_runs`` runs.
 
-    ``2 / (2**(n_runs-1) + 1)``: the numerator is 2 rather than 1 because the
-    unflipped pattern is itself a member of the null and ties the observed maximum,
-    so it is counted on both sides of the ratio.
+    There are ``2**(n_runs-1)`` distinct two-sided sign patterns, including the
+    identity. Exhaustive enumeration counts that identity once.
     """
     if n_runs < 2:
         raise ValueError(f"A sign-flip null needs at least two runs, got {n_runs!r}.")
-    return 2.0 / (2 ** (n_runs - 1) + 1)
+    return 1.0 / 2 ** (n_runs - 1)
 
 
 @dataclass(frozen=True)
@@ -262,19 +237,22 @@ def fdr_p_cutoff(p: np.ndarray, *, q: float) -> Optional[float]:
 def fdr_threshold(
     values: np.ndarray, *, q: float, two_sided: bool
 ) -> Optional[float]:
-    """The z height at which Benjamini-Hochberg controls the FDR at ``q``.
+    """A strict z cutoff retaining every Benjamini-Hochberg rejection at ``q``.
 
     Returns ``None`` when nothing is rejected. Callers state that rather than
     substituting a threshold, since "no voxel survives correction" is the finding.
     """
     finite = _finite(values)
-    cutoff = fdr_p_cutoff(p_values(finite, two_sided=two_sided), q=q)
+    p = p_values(finite, two_sided=two_sided)
+    cutoff = fdr_p_cutoff(p, q=q)
     if cutoff is None:
         return None
 
-    from scipy import stats
-
-    return float(stats.norm.isf(cutoff / 2.0 if two_sided else cutoff))
+    compared = np.abs(finite) if two_sided else finite
+    boundary = float(np.min(compared[p <= cutoff]))
+    # Use the observed boundary: inverse-normal roundoff (or p underflow) can
+    # otherwise discard the least-extreme rejected voxels when plots use z > height.
+    return float(np.nextafter(boundary, -np.inf))
 
 
 def bonferroni_threshold(*, n: int, alpha: float, two_sided: bool) -> float:
@@ -316,33 +294,16 @@ def _ec_density_3d(z: float) -> float:
 
 
 def rft_voxel_threshold(*, n_resels: float, alpha: float, two_sided: bool) -> float:
-    """The height at which a Gaussian field of ``n_resels`` yields a max above it
-    with probability ``alpha``.
+    """Return a volume-only Gaussian random-field critical-height approximation.
 
-    The familywise correction this pipeline had the inputs for and did not perform.
-    Bonferroni divides alpha across voxels, and after 6 mm of smoothing on a 3 mm grid
-    neighbouring voxels are not separate tests: on this study's own contrast that is
-    50,626 tests charged for a family of about 5,000, and the resulting height
-    (|z| > 4.89) is stricter than the data warrant.
+    Solve ``R3 * rho3(z) = alpha`` in the upper tail of the expected Euler
+    characteristic. The full expansion also includes mask boundary terms; their
+    size depends on geometry and cannot be inferred from volume alone. This
+    calculation does not establish dataset-specific FWE control.
 
-    Random field theory charges for the resels instead. The expected Euler
-    characteristic of the excursion set above ``z`` is ``R * rho_3(z)``, and at the
-    heights that matter it approximates the probability that the field's maximum
-    exceeds ``z`` -- so setting it equal to alpha and solving gives the corrected
-    height. Worsley et al. (1996) is the reference.
-
-    Only the 3D term is carried. The full expansion adds the lower-dimensional resel
-    counts, whose contribution is negligible for a search volume of thousands of
-    resels and which would require the mask's intrinsic volumes rather than one
-    number. This is the same approximation SPM's single-resel-count form makes.
-
-    Two-sided inference splits alpha between the tails, which are asymptotically
-    independent for a smooth field.
-
-    Raises when the search volume is too small for the approximation to admit a
-    solution, which is a statement about applicability rather than a failure: below
-    roughly one resel per unit of alpha the excursion set's expected Euler
-    characteristic never reaches alpha at all, and no RFT height exists to return.
+    Applicability requires a sufficiently smooth, approximately stationary Gaussian
+    null field and a valid smoothness estimate. Two-sided inference allocates
+    alpha/2 to each tail. Raise if the upper-tail approximation has no solution.
     """
     if not np.isfinite(n_resels) or n_resels <= 0:
         raise ValueError(f"A search volume needs at least one resel, got {n_resels!r}.")
@@ -441,11 +402,10 @@ def empirical_calibration(
 ) -> EmpiricalCalibration:
     """Re-read the applied height and an FDR correction against ``null``.
 
-    This is Efron's (2004) empirical-null correction, applied where it changes the
-    answer rather than only mentioned. Standardising each voxel by the fitted null and
-    running Benjamini-Hochberg on the resulting p values is the whole of it, and the
-    consequence is large: on this study's contrast the theoretical-null FDR rejects
-    4,469 voxels at q = 0.05 and the empirical-null FDR rejects 82.
+    This is an exploratory plug-in calculation, not a validated implementation of
+    Efron's empirical-null inference. The median/MAD fit to the observed spatial
+    mixture can absorb signal; estimation uncertainty and spatial dependence are
+    not accounted for by the resulting Benjamini-Hochberg calculation.
 
     The rejection region is returned as raw-z bounds rather than one height, because a
     shifted null makes it asymmetric -- here, raw z above 5.35 or below -6.57. Reporting
@@ -456,21 +416,18 @@ def empirical_calibration(
 
     finite = _finite(values)
     standardised = (finite - null.centre) / null.scale
-    cutoff = fdr_p_cutoff(
-        p_values(standardised, two_sided=two_sided), q=fdr_q
-    )
+    p = p_values(standardised, two_sided=two_sided)
+    cutoff = fdr_p_cutoff(p, q=fdr_q)
 
     fdr_upper: Optional[float] = None
     fdr_lower: Optional[float] = None
     survivors = 0
     if cutoff is not None:
-        height = float(stats.norm.isf(cutoff / 2.0 if two_sided else cutoff))
+        height = fdr_threshold(standardised, q=fdr_q, two_sided=two_sided)
         fdr_upper = null.centre + height * null.scale
-        rejected = finite > fdr_upper
         if two_sided:
             fdr_lower = null.centre - height * null.scale
-            rejected = rejected | (finite < fdr_lower)
-        survivors = int(np.count_nonzero(rejected))
+        survivors = int(np.count_nonzero(p <= cutoff))
 
     expected: Optional[float] = None
     upper_tail: Optional[float] = None

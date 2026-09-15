@@ -25,7 +25,7 @@ ONSETS = np.arange(6, 90, 14).astype(float)
 EFFECT = 4.0
 
 
-def _model(active_runs, n_runs=3, seed=0):
+def _model(active_runs, n_runs=3, seed=0, smoothing_fwhm=None):
     from nilearn.glm.first_level import FirstLevelModel
 
     rng = np.random.default_rng(seed)
@@ -52,6 +52,7 @@ def _model(active_runs, n_runs=3, seed=0):
         minimize_memory=False,
         standardize=False,
         signal_scaling=False,
+        smoothing_fwhm=smoothing_fwhm,
     )
     model.fit(bolds, events=events)
     return model
@@ -139,6 +140,24 @@ def test_single_run_model_yields_none():
         )
         is None
     )
+
+
+def test_smoothed_run_influence_matches_the_original_contrast_maps():
+    model = _model(active_runs={0}, n_runs=2, smoothing_fwhm=5.0)
+    vectors = run_level._contrast_vectors(model, "task")
+    mask = np.asarray(model.masker_.mask_img_.dataobj, dtype=bool)
+    combined = np.asarray(model.compute_contrast(vectors, output_type="z_score").dataobj)[mask]
+    rows = run_level.compute_run_influence(model, "task", threshold=2.3)
+    for index, row in enumerate(rows):
+        reduced_vectors = [
+            np.zeros_like(vector) if i == index else vector for i, vector in enumerate(vectors)
+        ]
+        reduced = np.asarray(
+            model.compute_contrast(reduced_vectors, output_type="z_score").dataobj
+        )[mask]
+        assert row.max_abs_z == pytest.approx(np.abs(reduced).max())
+        assert row.survivors == np.count_nonzero(np.abs(reduced) > 2.3)
+        assert row.survivors - row.delta == np.count_nonzero(np.abs(combined) > 2.3)
 
 
 def test_writer_columns(one_active_run, tmp_path):

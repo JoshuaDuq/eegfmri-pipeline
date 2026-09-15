@@ -183,7 +183,7 @@ def test_target_permutations_required_inputs_use_study2_study1_root_name(
 
     assert (
         tmp_path / "group" / "multimodal" / "study1_custom" / "feature_benchmark"
-        in required[1].parents
+        in required[2].parents
     )
 
 
@@ -235,13 +235,20 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
         filtered_ranges.append((low, high))
         return object()
 
-    fake_epochs = SimpleNamespace(
+    class _FakeEpochs(SimpleNamespace):
+        def __len__(self) -> int:
+            return len(stcs)
+
+    fake_epochs = _FakeEpochs(
         info={},
         times=times,
         copy=lambda: SimpleNamespace(filter=fake_filter),
     )
+    fake_events = pd.DataFrame({"run": [1, 1, 2, 2], "trial_id": [1, 2, 1, 2]})
 
-    monkeypatch.setattr(stages, "_load_subject_epochs", lambda *a, **k: fake_epochs)
+    monkeypatch.setattr(
+        stages, "_load_subject_epochs", lambda *a, **k: (fake_epochs, fake_events)
+    )
     monkeypatch.setattr(stages, "build_surface_forward_model", lambda *a, **k: object())
     monkeypatch.setattr(stages, "compute_baseline_noise_covariance", lambda *a, **k: object())
     monkeypatch.setattr(stages, "make_sloreta_inverse_operator", lambda **k: object())
@@ -298,6 +305,11 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
     vertex_metadata = json.loads(paths.source_vertex_metadata_path(config).read_text())
     assert vertex_metadata["common_subject"] == "fsaverage"
     assert vertex_metadata["spacing"] == "oct6"
+    trial_index = pd.read_csv(paths.source_trial_index_path(config), sep="\t")
+    assert trial_index["subject_id"].tolist() == ["sub-0000"] * 4
+    assert trial_index["run"].tolist() == [1, 1, 2, 2]
+    assert trial_index["trial_id"].tolist() == [1, 2, 1, 2]
+    assert trial_index["source_row"].tolist() == [1, 2, 3, 4]
     assert vertex_metadata["n_vertices"] == 3
     assert filtered_ranges == [
         (8.0, 12.9),
@@ -308,6 +320,19 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
     ]
 
 
+def _write_source_model_qc(config: dict, subjects: tuple[str, ...], *, failing: tuple[str, ...] = ()) -> None:
+    qc_path = paths.source_model_qc_path(config)
+    qc_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "subject_id": list(subjects),
+            "source_model_criteria_met": [
+                subject_id not in failing for subject_id in subjects
+            ],
+        }
+    ).to_csv(qc_path, sep="\t", index=False)
+
+
 def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
     config = _config(tmp_path)
     frame = _cohort_source_stage_frame()
@@ -315,6 +340,7 @@ def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
     frame.to_csv(paths.source_stage_frame_path(config), sep="\t", index=False)
 
     subjects = ("sub-0001", "sub-0002", "sub-0003")
+    _write_source_model_qc(config, subjects)
     source_power = _source_power_by_subject(frame, column="eta_combined_z")
     for band in ("alpha", "beta", "gamma"):
         for subject_id in subjects:
@@ -332,6 +358,38 @@ def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
         assert fisher.shape == (2, 3)
         assert partial.shape == (2, 3)
         assert qc["source_stage_criteria_met"].tolist() == [True, True, False]
+
+
+def test_run_source_stage_excludes_subjects_failing_source_model_qc(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    frame = _cohort_source_stage_frame()
+    paths.source_stage_dir(config).mkdir(parents=True, exist_ok=True)
+    frame.to_csv(paths.source_stage_frame_path(config), sep="\t", index=False)
+
+    subjects = ("sub-0001", "sub-0002", "sub-0003")
+    _write_source_model_qc(config, subjects, failing=("sub-0001",))
+    source_power = _source_power_by_subject(frame, column="eta_combined_z")
+    for band in ("alpha", "beta", "gamma"):
+        for subject_id in subjects:
+            power_path = paths.subject_source_power_path(config, subject_id=subject_id, band=band)
+            power_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(power_path, source_power[subject_id])
+
+    run_source_stage(_context(config, subjects=subjects))
+
+    qc = pd.read_csv(paths.source_stage_dir(config) / "qc_alpha.tsv", sep="\t")
+    assert "sub-0001" not in qc["subject_id"].astype(str).tolist()
+    assert np.load(paths.source_stage_dir(config) / "fisher_z_alpha.npy").shape == (1, 3)
+
+
+def test_source_model_eligible_subjects_requires_a_verdict_for_every_subject(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    _write_source_model_qc(config, ("sub-0001",))
+
+    with pytest.raises(ValueError, match="no verdict"):
+        stages.source_model_eligible_subjects(config, ("sub-0001", "sub-0002"))
 
 
 def test_target_permutations_required_inputs_lists_frame_power_and_model(tmp_path: Path) -> None:
@@ -359,6 +417,7 @@ def test_run_target_permutations_writes_null_maps_per_band(tmp_path: Path, monke
     frame.to_csv(paths.source_stage_frame_path(config), sep="\t", index=False)
 
     subjects = ("sub-0001", "sub-0002", "sub-0003")
+    _write_source_model_qc(config, subjects)
     source_power = _source_power_by_subject(frame, column="eta_combined_z")
     for band in ("alpha", "beta", "gamma"):
         for subject_id in subjects:
@@ -855,6 +914,7 @@ def test_run_band_unique_stage_and_inference_write_outputs(tmp_path: Path) -> No
     frame.to_csv(paths.source_stage_frame_path(config), sep="\t", index=False)
 
     subjects = ("sub-0001", "sub-0002", "sub-0003")
+    _write_source_model_qc(config, subjects)
     rng = np.random.default_rng(123)
     source_power = {
         str(subject_id): rng.normal(size=(len(subject_frame), 3))

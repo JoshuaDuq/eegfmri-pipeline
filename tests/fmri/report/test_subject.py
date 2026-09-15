@@ -266,19 +266,42 @@ def test_diagnostics_include_the_exact_model_response_residual_carpet(
     assert "unwhitened model-response" in carpet.caption
 
 
-def test_diagnostics_include_the_pooled_residual_standard_deviation_map(
+def _block_titled(section, title: str):
+    """Find a diagnostics block by title rather than by position.
+
+    Positional indexing broke the moment a panel was switched off; a title is what the
+    test is actually about.
+    """
+    return next((block for block in section.blocks if getattr(block, "title", None) == title), None)
+
+
+def test_the_pooled_residual_standard_deviation_map_is_off_by_default(
     tmp_path: Path,
 ) -> None:
+    # It is the standard-error map again: r = 0.944 across in-mask voxels on this
+    # study, with the ratio between them varying by 12%.
     section = subject.build_diagnostics_section(
         manifest=_manifest(tmp_path),
         deriv_root=tmp_path,
         out_dir=tmp_path,
         cfg=_cfg(include_unthresholded=False),
     )
+    assert _block_titled(section, "Pooled residual standard deviation") is None
 
-    residual_sd = section.blocks[3]
+
+def test_the_pooled_residual_standard_deviation_map_can_be_switched_on(
+    tmp_path: Path,
+) -> None:
+    section = subject.build_diagnostics_section(
+        manifest=_manifest(tmp_path),
+        deriv_root=tmp_path,
+        out_dir=tmp_path,
+        cfg=_cfg(include_unthresholded=False, include_residual_sd_map=True),
+    )
+
+    residual_sd = _block_titled(section, "Pooled residual standard deviation")
     artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
-    assert residual_sd.title == "Pooled residual standard deviation"
+    assert residual_sd is not None
     assert residual_sd.path == artifact_dir / "residual_standard_deviation.png"
     assert residual_sd.path.is_file()
     assert (artifact_dir / "residual_standard_deviation.nii.gz").is_file()
@@ -297,9 +320,9 @@ def test_diagnostics_include_residual_autocorrelation_at_acquired_lags(
         cfg=_cfg(include_unthresholded=False),
     )
 
-    residual_acf = section.blocks[4]
+    residual_acf = _block_titled(section, "Residual autocorrelation by run")
     artifact_dir = tmp_path / "plots" / "contrast-heat-warm"
-    assert residual_acf.title == "Residual autocorrelation by run"
+    assert residual_acf is not None
     assert residual_acf.path == artifact_dir / "residual_autocorrelation.svg"
     assert residual_acf.path.is_file()
     assert (artifact_dir / "residual_autocorrelation.tsv").is_file()
@@ -1273,11 +1296,11 @@ def test_threshold_caption_names_the_p_floor_when_it_binds():
 
     summary = inference.SignFlipSummary(
         height=7.02,
-        survivors=38,
-        global_p=0.0606,
-        p_floor=0.0606,
-        n_runs=6,
-        n_patterns=32,
+        survivors=0,
+        global_p=0.125,
+        p_floor=0.0625,
+        n_runs=5,
+        n_patterns=16,
         observed_max=8.87,
     )
     caption = _threshold_table_caption(
@@ -1290,9 +1313,13 @@ def test_threshold_caption_names_the_p_floor_when_it_binds():
             sign_flip=summary,
         )
     )
-    assert "0.061" in caption
-    assert "smallest value this test can return" in caption
+    assert "0.125" in caption
+    assert "smallest value this test can return" not in caption
     assert "no map-level p below" in caption
+    assert "symmetric" in caption
+    assert "independent" in caption
+    assert "diagnostic" in caption
+    assert "unaffected" not in caption
 
 
 def test_threshold_caption_drops_the_stale_no_correction_claim():
@@ -1345,7 +1372,7 @@ def test_sign_flip_summary_recomputes_a_missing_floor():
         sign_flip_n_runs = 6
         sign_flip_observed_max = 8.87
 
-    assert _sign_flip_summary(_M()).p_floor == pytest.approx(2 / 33)
+    assert _sign_flip_summary(_M()).p_floor == pytest.approx(1 / 32)
 
 
 def _cluster_frame(rows):

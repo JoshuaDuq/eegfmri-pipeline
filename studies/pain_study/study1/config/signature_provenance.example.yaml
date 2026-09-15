@@ -1,0 +1,49 @@
+# Input to studies/pain_study/study1/signature_manifest.py.
+#
+#   python -m studies.pain_study.study1.signature_manifest \
+#     /Volumes/KINGSTON/EEG_fMRI_data/external \
+#     /Volumes/KINGSTON/EEG_fMRI_data/external/signature_manifest.yaml \
+#     --provenance studies/pain_study/study1/config/signature_provenance.yaml
+#
+# Copy this file, fill in the real values, and keep it beside the signature assets.
+# The generator records checksums, shapes, affines and support summaries; it does not
+# transform images and cannot infer a space. Every field below is an assertion the
+# operator is making about where the weights actually live.
+#
+#   space               the template the delivered file is in. Must equal
+#                       study1.targets.fmriprep_space for target construction to run.
+#   source_space        the template the published weights were trained in. For the
+#                       CANlab NPS and SIIPS1 distributions this is SPM MNI152, not
+#                       MNI152NLin2009cAsym.
+#   spatial_reference   the document or record establishing source_space.
+#   transform           required whenever space differs from source_space. Grid
+#                       resampling is not registration, so a nilearn resample_to_img
+#                       call is not an acceptable method here.
+#
+# The unmodified published SIIPS1 file (sha256 da9992...98c) declared as
+# mni152nlin2009casym is rejected: that assertion has never been established.
+signatures:
+  - name: NPS
+    path: NPS/weights_NSF_grouppred_cvpcr.nii.gz
+    space: TODO
+    source_space: TODO
+    spatial_reference: TODO
+    source_publication: Wager et al. 2013, Neurologic Pain Signature
+    source_repository_or_access_record: TODO
+    # transform:
+    #   source_sha256: TODO
+    #   method: TODO
+    #   reference: TODO
+    #   validation: TODO
+  - name: SIIPS1
+    path: SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz
+    space: TODO
+    source_space: TODO
+    spatial_reference: TODO
+    source_publication: Woo et al. 2017, SIIPS1
+    source_repository_or_access_record: TODO
+    # transform:
+    #   source_sha256: TODO
+    #   method: TODO
+    #   reference: TODO
+    #   validation: TODO

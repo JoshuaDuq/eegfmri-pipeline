@@ -136,6 +136,8 @@ def test_compute_held_out_contribution_scores_uses_frozen_fold_space(monkeypatch
     np.testing.assert_allclose(scores["eta_combined"], [10.0, 20.0])
     np.testing.assert_allclose(scores["eta_alpha"], [2.0, 6.0])
     np.testing.assert_allclose(scores["eta_gamma"], [6.0, 12.0])
+    # The band columns decompose the linear predictor, not the raw-scale score.
+    np.testing.assert_allclose(scores["eta_bands_linear_predictor"], [8.0, 18.0])
 
 
 def test_compute_band_contribution_scores_rejects_invalid_feature_names() -> None:

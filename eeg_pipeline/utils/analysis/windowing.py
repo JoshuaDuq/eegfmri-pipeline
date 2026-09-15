@@ -594,6 +594,11 @@ def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.nd
     return np.zeros_like(times, dtype=bool)
 
 
+def window_range_for(spec: Any, window_name: str) -> Optional[Tuple[float, float]]:
+    """Return the [start, end) bounds ``make_mask_for_times`` would use, or None."""
+    return _get_window_range_from_spec(spec, window_name)
+
+
 def _get_window_range_from_spec(spec: Any, window_name: str) -> Optional[Tuple[float, float]]:
     """Extract window range from spec, strictly by name."""
     key = str(window_name).strip().lower()

@@ -245,7 +245,7 @@ def _event_row(
     rating: float,
 ) -> dict[str, object]:
     return {
-        "run": run,
+        "run_id": run,
         "trial_number": trial_number,
         "stimulus_temp": stimulus_temp,
         "selected_surface": 1,
@@ -495,7 +495,7 @@ def test_report_keeps_diagnostic_metrics_without_auto_interpretation(tmp_path) -
     assert primary_gate["target_split_half_reliability"] == 0.31
     assert primary_gate["target_reliability_n_trials"] == 28
     assert bool(primary_gate["precision_flag_passed"]) is False
-    assert bool(primary_gate["temporal_negative_controls_passed"]) is False
+    assert pd.isna(primary_gate["temporal_negative_controls_passed"])
     assert bool(primary_gate["artifact_censoring_robustness_passed"]) is False
     assert not {
         "analysis_validity_classification",
@@ -527,6 +527,7 @@ def test_report_requires_reliability_trial_count_for_source_entry(tmp_path) -> N
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
     assert primary_gate["target_reliability_n_trials"] == 29
+    assert pd.isna(primary_gate["temporal_negative_controls_passed"])
     assert "study2_source_entry_interpretation" not in report.columns
     assert "interpretation_limitations" not in report.columns
 
@@ -655,7 +656,7 @@ def test_report_includes_temporal_control_metadata_and_holm_values(tmp_path) -> 
     assert pd.to_numeric(temporal["p_value_delta_r2_holm"], errors="coerce").notna().all()
 
 
-def test_report_derives_temporal_negative_controls_pass(tmp_path) -> None:
+def test_report_does_not_infer_equivalence_from_nonsignificant_controls(tmp_path) -> None:
     from studies.pain_study.study1.reporting import write_study1_report
 
     cfg = _config(tmp_path)
@@ -675,11 +676,11 @@ def test_report_derives_temporal_negative_controls_pass(tmp_path) -> None:
     report = pd.read_csv(report_path, sep="\t")
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
-    assert primary_gate["temporal_negative_controls_passed"]
+    assert pd.isna(primary_gate["temporal_negative_controls_passed"])
     assert "missing_interpretation_diagnostics" not in report.columns
 
 
-def test_report_derives_temporal_negative_controls_failure(tmp_path) -> None:
+def test_report_does_not_treat_anticipatory_prediction_as_null_control_failure(tmp_path) -> None:
     from studies.pain_study.study1.reporting import write_study1_report
 
     cfg = _config(tmp_path)
@@ -699,11 +700,12 @@ def test_report_derives_temporal_negative_controls_failure(tmp_path) -> None:
     report = pd.read_csv(report_path, sep="\t")
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
-    assert not primary_gate["temporal_negative_controls_passed"]
+    assert pd.isna(primary_gate["temporal_negative_controls_passed"])
     assert "interpretation_limitations" not in report.columns
+    assert report.loc[report["target"] == "SIIPS1", "temporal_negative_controls_passed"].isna().all()
 
 
-def test_report_ignores_plateau_sensitivity_for_temporal_negative_control_pass(tmp_path) -> None:
+def test_report_keeps_temporal_criterion_unassessed_with_plateau_sensitivity(tmp_path) -> None:
     from studies.pain_study.study1.reporting import write_study1_report
 
     cfg = _config(tmp_path)
@@ -730,5 +732,5 @@ def test_report_ignores_plateau_sensitivity_for_temporal_negative_control_pass(t
     report = pd.read_csv(report_path, sep="\t")
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
-    assert primary_gate["temporal_negative_controls_passed"]
+    assert pd.isna(primary_gate["temporal_negative_controls_passed"])
     assert "interpretation_limitations" not in report.columns

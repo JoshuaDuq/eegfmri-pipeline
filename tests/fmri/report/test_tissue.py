@@ -157,3 +157,66 @@ def test_without_a_threshold_the_survival_panel_says_so() -> None:
 def test_an_empty_split_is_refused() -> None:
     with pytest.raises(ValueError, match="at least one populated class"):
         tissue.tissue_distribution_figure([], threshold=2.3)
+
+
+def _slices(spread: float = 0.09, n: int = 4_000) -> list[tissue.TissueSlice]:
+    rng = np.random.default_rng(0)
+    return [
+        tissue.TissueSlice(name=name, values=rng.normal(0.0, spread, n))
+        for name in ("GM", "WM", "CSF")
+    ]
+
+
+def test_the_density_axis_is_not_stretched_by_an_out_of_range_threshold() -> None:
+    # The bins span the data's robust range; drawing the threshold with axvline let a
+    # line carrying no data set the axis. Measured: bins over +-0.25 against an axis
+    # reaching +-2.4, so all three densities occupied 8% of the panel width.
+    figure = tissue.tissue_distribution_figure(_slices(), threshold=2.3, two_sided=True)
+    try:
+        low, high = figure.axes[0].get_xlim()
+    finally:
+        plt.close(figure)
+
+    assert high < 1.0, f"axis reaches {high:.2f} for data inside +-0.4"
+    assert low > -1.0
+
+
+def test_an_out_of_range_threshold_is_still_named_on_the_panel() -> None:
+    # Clipping the axis must not silently drop the threshold: a reader has to know the
+    # rejection region lies beyond the drawn range.
+    figure = tissue.tissue_distribution_figure(_slices(), threshold=2.3, two_sided=True)
+    try:
+        drawn = " ".join(
+            text.get_text() for text in figure.axes[0].texts
+        ) + " ".join(text.get_text() for text in figure.texts)
+    finally:
+        plt.close(figure)
+
+    assert "2.30" in drawn
+
+
+def test_an_in_range_threshold_is_drawn_as_a_line() -> None:
+    figure = tissue.tissue_distribution_figure(_slices(spread=2.0), threshold=2.3)
+    try:
+        positions = [
+            float(line.get_xdata()[0])
+            for line in figure.axes[0].lines
+            if len(set(np.asarray(line.get_xdata(), dtype=float))) == 1
+        ]
+    finally:
+        plt.close(figure)
+
+    assert any(abs(p - 2.3) < 1e-6 for p in positions)
+
+
+def test_an_all_zero_survival_panel_keeps_a_real_axis() -> None:
+    # With nothing above threshold every bar is zero and the autoscaler invented a
+    # +-0.04 axis around three zeros, which reads as measured precision.
+    figure = tissue.tissue_distribution_figure(_slices(), threshold=2.3)
+    try:
+        bottom, top = figure.axes[1].get_ylim()
+    finally:
+        plt.close(figure)
+
+    assert bottom == 0.0
+    assert top >= 1.0

@@ -32,7 +32,9 @@ ran last silently restyles the other. A context manager cannot do that.
 
 from __future__ import annotations
 
+import logging
 from contextlib import AbstractContextManager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -40,6 +42,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from eeg_pipeline.preprocessing.report.style import OKABE_ITO
+
+logger = logging.getLogger(__name__)
 
 #: Diverging colormap for signed maps. Light neutral at zero on a white background.
 SIGNED_CMAP = "RdBu_r"
@@ -142,15 +146,97 @@ def savefig_kwargs(path: Path) -> dict[str, Any]:
     return {"bbox_inches": "tight"}
 
 
-#: Where the provenance strip sits, in figure coordinates.
+#: Where the provenance strip's first line sits, in figure coordinates.
 #:
 #: Below the canvas, not on it. ``savefig`` runs with a tight bounding box, which
 #: expands the saved image to include every artist, so the strip gets a band of its
 #: own and the figure above it is untouched.
 PROVENANCE_Y = -0.045
 
+#: Type size of the provenance strip, in points.
+PROVENANCE_FONTSIZE = 6.5
 
-def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
+#: What separates one provenance segment from the next, and where the strip may wrap.
+PROVENANCE_SEPARATOR = "  ·  "
+
+#: Fraction of the figure width the strip is allowed to occupy before it wraps.
+#:
+#: Short of 1.0 because the strip starts at x = 0.005 and a tight bounding box
+#: measures the glyphs, not the nominal extent.
+PROVENANCE_WIDTH_FRACTION = 0.97
+
+
+@lru_cache(maxsize=512)
+def _text_width_points(text: str, fontsize: float) -> float:
+    """Width of ``text`` at ``fontsize``, in points.
+
+    Cached: glyph-path construction costs about 30 ms per segment, and the same
+    segments recur across panels -- the orientation label and the mask description
+    appear on every volume figure in the report.
+
+    Measured through :class:`~matplotlib.textpath.TextPath`, which reads the font
+    metrics directly and so needs neither a renderer nor a draw. Both of those are
+    unavailable at the point a figure is being composed, and forcing a draw to
+    measure a caption would cost every figure in the report a full render.
+
+    Falls back to an average-advance estimate if the font cannot be loaded, because a
+    strip that wraps at a slightly wrong column is a far smaller defect than a figure
+    that fails to build.
+    """
+    from matplotlib.font_manager import FontProperties
+    from matplotlib.textpath import TextPath
+
+    if not text:
+        return 0.0
+    try:
+        prop = FontProperties(family=FMRI_RC["font.family"])
+        return float(TextPath((0, 0), text, size=fontsize, prop=prop).get_extents().width)
+    except Exception:  # pragma: no cover - font resolution is environment-specific
+        logger.debug("Could not measure provenance text; estimating its width.")
+        return 0.5 * fontsize * len(text)
+
+
+def wrap_provenance(
+    segments: Sequence[str], *, width_points: float, fontsize: float = PROVENANCE_FONTSIZE
+) -> list[str]:
+    """Pack provenance segments into lines no wider than ``width_points``.
+
+    Wrapping happens on segment boundaries rather than between words: each segment is
+    one self-contained fact, and a fact broken across two lines reads as two.
+
+    A single segment wider than the whole line is emitted alone and allowed to
+    overrun. Splitting it mid-phrase would corrupt the one thing the strip exists to
+    carry, and the alternative -- dropping it -- silently removes provenance.
+    """
+    kept = [str(segment) for segment in segments if segment]
+    if not kept:
+        return []
+
+    separator_width = _text_width_points(PROVENANCE_SEPARATOR, fontsize)
+    lines: list[str] = []
+    current: list[str] = []
+    current_width = 0.0
+    for segment in kept:
+        segment_width = _text_width_points(segment, fontsize)
+        addition = segment_width + (separator_width if current else 0.0)
+        if current and current_width + addition > width_points:
+            lines.append(PROVENANCE_SEPARATOR.join(current))
+            current, current_width = [segment], segment_width
+        else:
+            current.append(segment)
+            current_width += addition
+    if current:
+        lines.append(PROVENANCE_SEPARATOR.join(current))
+    return lines
+
+
+def annotate_provenance(
+    figure: plt.Figure,
+    lines: Sequence[str],
+    *,
+    y: float = PROVENANCE_Y,
+    x: float = 0.005,
+) -> None:
     """Print the numbers a reader needs to trust the figure, inside the figure.
 
     A figure travels: it gets pulled out of the report into a slide, a manuscript,
@@ -170,18 +256,33 @@ def annotate_provenance(figure: plt.Figure, lines: Sequence[str]) -> None:
     Placing it below and letting the tight bounding box grow to include it is what
     survives nilearn's layout. Reserving space by moving the axes does not: the
     slicers reposition themselves at draw time and take the reserved band back.
+
+    The strip is wrapped to the figure's own width first. A tight bounding box grows
+    to contain every artist, so an unwrapped strip sets the saved image's width from
+    the length of its own prose: measured on this study, a 6.0 x 4.4 inch panel saved
+    at 2253 x 959 px -- aspect 2.35 against the figure's 1.36, with the surplus
+    entirely blank canvas, carried through base64 into the report.
     """
     if not lines:
         return
-    figure.text(
-        0.005,
-        PROVENANCE_Y,
-        "  ·  ".join(lines),
-        fontsize=6.5,
-        color=GUIDE_COLOR,
-        va="center",
-        ha="left",
-    )
+    width_points = figure.get_figwidth() * 72.0 * PROVENANCE_WIDTH_FRACTION
+    wrapped = wrap_provenance(lines, width_points=width_points)
+    if not wrapped:
+        return
+    # Downward, in figure fractions: the first line keeps ``y`` so a single-line strip
+    # sits exactly where it always did, and only a strip that needed wrapping grows
+    # the band it is drawn in.
+    step = (PROVENANCE_FONTSIZE * 1.45) / (figure.get_figheight() * 72.0)
+    for index, text in enumerate(wrapped):
+        figure.text(
+            x,
+            y - index * step,
+            text,
+            fontsize=PROVENANCE_FONTSIZE,
+            color=GUIDE_COLOR,
+            va="center",
+            ha="left",
+        )
 
 
 def colour_limit_note(limit: float, clipped: float) -> str:
@@ -326,6 +427,9 @@ __all__ = [
     "OKABE_ITO",
     "ORIENTATION_LABEL",
     "PRINT_FIGURE_DPI",
+    "PROVENANCE_FONTSIZE",
+    "PROVENANCE_SEPARATOR",
+    "PROVENANCE_Y",
     "RADIOLOGICAL",
     "SEQUENTIAL_DECISION_CMAP",
     "SIGNED_CMAP",
@@ -341,4 +445,5 @@ __all__ = [
     "save_report_figure",
     "savefig_kwargs",
     "suprathreshold_limit",
+    "wrap_provenance",
 ]

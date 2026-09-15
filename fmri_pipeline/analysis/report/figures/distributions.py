@@ -269,7 +269,7 @@ def threshold_table(context: ThresholdContext) -> Tuple[str, List[str]]:
         )
         rows.append(
             [
-                f"FDR q = {context.fdr_q:g} vs fitted null",
+                f"Exploratory FDR q = {context.fdr_q:g} vs fitted null",
                 _region(bounds, comparison=comparison),
                 f"{calibration.fdr_survivors:,}" if bounds else "0",
                 "n/a",
@@ -290,16 +290,12 @@ def threshold_table(context: ThresholdContext) -> Tuple[str, List[str]]:
         ]
     )
 
-    # Beside Bonferroni, never instead of it. Both control the familywise rate and
-    # neither dominates: Bonferroni charges for every voxel and is loose when smoothing
-    # has made neighbours the same measurement, while the Euler-characteristic form
-    # charges for the resels and overshoots once the search volume is small in resel
-    # terms -- which is this study's own regime, where it lands above Bonferroni. The
-    # resel count rides in the label because the height is unreadable without it.
+    # The volume-only EC approximation omits mask boundary terms and cannot by
+    # itself establish FWE control. Keep that limitation visible in the row label.
     if context.rft is not None:
         rows.append(
             [
-                f"Random field FWE {context.alpha:g}"
+                f"Random field approximation, nominal FWE {context.alpha:g}"
                 + (
                     f" ({context.n_resels:,.0f} resels)"
                     if context.n_resels is not None
@@ -325,8 +321,8 @@ def threshold_table(context: ThresholdContext) -> Tuple[str, List[str]]:
             [
                 f"Run sign-flip, FWE {context.alpha:g}",
                 _region(
-                    _symmetric(sign_flip.height, two_sided=context.two_sided),
-                    comparison=comparison,
+                    _symmetric(sign_flip.height, two_sided=True),
+                    comparison="|z|",
                 ),
                 f"{sign_flip.survivors:,}",
                 "n/a",
@@ -380,6 +376,20 @@ def _normal_sf(threshold: float) -> float:
     return float(stats.norm.sf(float(threshold)))
 
 
+#: Smallest count a null curve is drawn at on the log axis.
+#:
+#: A Gaussian evaluated far into its own tail underflows to zero, which a log axis
+#: cannot draw and a log autoscaler reads as a reason to expand the view by twenty
+#: decades. Clamping the curve at half a voxel keeps it visible right down to the
+#: axis floor and keeps that expansion from happening.
+_LOG_FLOOR = 0.5
+
+
+def _visible_on_log(curve: np.ndarray) -> np.ndarray:
+    """Clamp a count curve to the smallest value a log axis can show."""
+    return np.clip(curve, _LOG_FLOOR, None)
+
+
 def null_calibration_figure(
     values: np.ndarray,
     *,
@@ -419,23 +429,33 @@ def null_calibration_figure(
         reach = max([float(np.max(np.abs(finite)))] + drawn) * 1.08
         span = np.linspace(-reach, reach, 512)
 
+        # Kept so the axis limits can be set from what was actually drawn rather than
+        # from an autoscaler reading the curves' underflowed tails.
+        drawn_curves: list[np.ndarray] = []
+
+        theoretical = _normal_counts(
+            span, n=finite.size, bin_width=bin_width, centre=0.0, scale=1.0
+        )
+        drawn_curves.append(theoretical)
         axis.plot(
             span,
-            _normal_counts(span, n=finite.size, bin_width=bin_width, centre=0.0, scale=1.0),
+            _visible_on_log(theoretical),
             color=GUIDE_COLOR,
             linewidth=1.6,
             label="theoretical N(0, 1)",
         )
         if context.null is not None:
+            fitted = _normal_counts(
+                span,
+                n=finite.size,
+                bin_width=bin_width,
+                centre=context.null.centre,
+                scale=context.null.scale,
+            )
+            drawn_curves.append(fitted)
             axis.plot(
                 span,
-                _normal_counts(
-                    span,
-                    n=finite.size,
-                    bin_width=bin_width,
-                    centre=context.null.centre,
-                    scale=context.null.scale,
-                ),
+                _visible_on_log(fitted),
                 color=OKABE_ITO["orange"],
                 linewidth=1.6,
                 label=(
@@ -461,7 +481,10 @@ def null_calibration_figure(
                         _THRESHOLD_SHORT.get(key, key),
                         xy=(position, 1.0),
                         xycoords=("data", "axes fraction"),
-                        xytext=(-3, -3),
+                        # Left of the line, not on it. Drawn at the line's own x the
+                        # rotated label ran straight through it, and the FDR pair --
+                        # a tenth of a z apart -- was unreadable in every report.
+                        xytext=(-5, -3),
                         textcoords="offset points",
                         rotation=90,
                         ha="right",
@@ -477,8 +500,15 @@ def null_calibration_figure(
         axis.set_xlim(-edge, edge)
         axis.set_yscale("log")
         positive = counts[counts > 0]
-        if positive.size:
-            axis.set_ylim(bottom=max(0.5, float(np.min(positive)) * 0.5))
+        # Both ends, explicitly. A fitted null this narrow underflows to exactly zero
+        # a short way into its tails, and Matplotlib's log autoscaler then reads a
+        # denormal positive minimum off the curve and expands the view to match:
+        # measured on this study, a top of 3.70e19 against a tallest bin of 1,796, so
+        # every drawn artist sat in the bottom fifth of the panel that exists to
+        # compare them. Setting only the bottom leaves that top in place.
+        ceiling = max([float(np.max(counts))] + [float(np.max(curve)) for curve in drawn_curves])
+        floor = max(0.5, float(np.min(positive)) * 0.5) if positive.size else 0.5
+        axis.set_ylim(bottom=floor, top=max(ceiling * 1.6, floor * 10.0))
         axis.set_xlabel("z")
         axis.set_ylabel("voxels")
         if title:
@@ -498,13 +528,56 @@ def null_calibration_figure(
         return figure
 
 
-#: Voxels drawn on the effect-versus-evidence panel.
+#: Voxels drawn from the dense core of the effect-versus-evidence panel.
 #:
 #: A 50,000-voxel mask plotted point by point is a solid block of ink that hides its
-#: own density, and the file it produces dominates the report's size. A random sample
-#: of this many, drawn from a fixed seed so the panel is reproducible, shows the same
-#: shape.
-_SCATTER_SAMPLE = 12_000
+#: own density, and the file it produces dominates the report's size. A sample of this
+#: many, drawn from a fixed seed so the panel is reproducible, shows the same shape.
+#:
+#: The budget applies to the core alone -- see :func:`_stratified_sample` for why the
+#: tail is never sampled.
+DEFAULT_SCATTER_SAMPLE = 12_000
+
+#: Where the tail begins, as a fraction of the applied threshold.
+#:
+#: Below the threshold, so the voxels immediately short of it are drawn too: whether
+#: an effect nearly cleared the height is exactly what the panel is consulted for.
+DEFAULT_TAIL_FRACTION = 0.8
+
+#: Where the tail begins when no threshold was applied, in units of z.
+_TAIL_FLOOR = 2.0
+
+
+def _stratified_sample(
+    stat_values: np.ndarray,
+    *,
+    budget: int,
+    tail_start: float,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, int, int]:
+    """Indices to draw: every tail voxel, plus a sample of the core.
+
+    A uniform sample keeps the tail in proportion to its size, which is to say it
+    throws almost all of it away -- and the tail is the whole subject of this panel.
+    Measured on this study before the change: 12,000 of 75,788 voxels drawn, and the
+    panel's x axis reached +-0.55 while the map reached +-3.45, so both threshold
+    lines were drawn over canvas no point could have occupied.
+
+    Returns the indices together with the tail and core counts, both of which the
+    panel states: a reader has to be able to tell "no voxel came close" from "the
+    ones that did were not drawn".
+    """
+    tail = np.abs(stat_values) >= tail_start
+    tail_indices = np.flatnonzero(tail)
+    core_indices = np.flatnonzero(~tail)
+
+    if core_indices.size > budget:
+        core_indices = np.sort(rng.choice(core_indices, size=budget, replace=False))
+    return (
+        np.concatenate([core_indices, tail_indices]),
+        int(tail_indices.size),
+        int(core_indices.size),
+    )
 
 
 def effect_versus_evidence_figure(
@@ -517,6 +590,8 @@ def effect_versus_evidence_figure(
     effect_units: str = "effect",
     title: str = "",
     seed: int = 0,
+    max_core_points: int = DEFAULT_SCATTER_SAMPLE,
+    tail_fraction: float = DEFAULT_TAIL_FRACTION,
 ) -> plt.Figure:
     """Effect magnitude against statistical evidence, voxel by voxel.
 
@@ -564,11 +639,18 @@ def effect_versus_evidence_figure(
     if effect.size == 0:
         raise ValueError("The effect-versus-evidence panel requires at least one voxel.")
 
+    # Stratified, not uniform. The threshold sets where the tail starts so that the
+    # voxels the panel is read for -- the ones near and beyond the height the maps
+    # beside it were drawn at -- are all present, whatever the mask's size.
+    tail_start = (
+        float(threshold) * float(tail_fraction)
+        if threshold and threshold > 0
+        else _TAIL_FLOOR
+    )
     rng = np.random.default_rng(seed)
-    if effect.size > _SCATTER_SAMPLE:
-        picked = rng.choice(effect.size, size=_SCATTER_SAMPLE, replace=False)
-    else:
-        picked = np.arange(effect.size)
+    picked, n_tail, n_core = _stratified_sample(
+        stat_values, budget=int(max_core_points), tail_start=tail_start, rng=rng
+    )
 
     # Signed, not folded. ``z = effect / SE`` with SE > 0, so a voxel's statistic
     # always carries its effect's sign: plotting |z| against a signed effect encodes
@@ -653,10 +735,16 @@ def effect_versus_evidence_figure(
         if title:
             ax.set_title(title)
 
+        n_core_total = int(effect.size) - n_tail
+        core_note = (
+            f"{n_core:,} of {n_core_total:,} core voxels sampled"
+            if n_core < n_core_total
+            else f"all {n_core_total:,} core voxels drawn"
+        )
         lines = [
             f"{effect.size:,} voxels in the mask",
-            f"{picked.size:,} drawn"
-            + (" (random sample)" if picked.size < effect.size else ""),
+            core_note,
+            f"all {n_tail:,} voxels at |z| \u2265 {tail_start:.2f} drawn",
         ]
         if colour_note:
             lines.append(colour_note)

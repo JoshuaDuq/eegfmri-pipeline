@@ -13,9 +13,10 @@ unsmoothed data and almost none at 8 mm.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
+import nibabel as nib
 import numpy as np
 
 from fmri_pipeline.analysis.report.figures._mosaic import (
@@ -177,6 +178,98 @@ def mask_volume_mm3(mask_img: Any) -> Tuple[int, float]:
     return voxels, float(voxels * float(np.prod(voxel_sizes)))
 
 
+def run_contribution_map(bold_imgs: Sequence[Any]) -> Any:
+    """How many runs reach each voxel, as an integer volume.
+
+    The analysis mask is an intersection, so the voxels some runs hold and others do
+    not are discarded before the coverage panel is drawn -- and those are precisely
+    the voxels the panel is consulted for. A binary mask over anatomy can only say
+    that the mask covers the brain; this says where coverage was lost and to how many
+    runs.
+
+    Each run's own extent comes from :func:`nilearn.masking.compute_epi_mask`, applied
+    to the run's first volume rather than the whole series: coverage is a property of
+    the field of view and of dropout, not of any one timepoint, and reading one volume
+    per run keeps the panel cheap on a study with hundreds of frames.
+
+    Runs are resampled onto the first run's grid when they do not already share it, so
+    a study whose runs differ in resolution still yields a countable map.
+    """
+    from nilearn.image import index_img, resample_to_img
+    from nilearn.masking import compute_epi_mask
+
+    runs = list(bold_imgs)
+    if len(runs) < 2:
+        raise ValueError(
+            "A run-contribution map needs more than one run; with one run every "
+            "modelled voxel is reached by every run and the map is uniform."
+        )
+
+    reference = None
+    counts = None
+    for img in runs:
+        volume = index_img(img, 0) if len(getattr(img, "shape", ())) == 4 else img
+        mask = compute_epi_mask(volume)
+        if reference is None:
+            reference = mask
+        elif not np.allclose(mask.affine, reference.affine) or mask.shape != reference.shape:
+            # Nearest-neighbour: a mask resampled with interpolation is no longer a
+            # mask, and a half-covered voxel counted as half a run is not a reading
+            # this panel offers.
+            mask = resample_to_img(
+                mask, reference, interpolation="nearest", force_resample=True, copy_header=True
+            )
+        data = np.asanyarray(mask.dataobj).astype(bool)
+        counts = data.astype(np.int16) if counts is None else counts + data
+    return nib.Nifti1Image(counts, reference.affine)
+
+
+def _contribution_colormap(n_runs: int):
+    """One step per run count, so a voxel's count is readable off the key.
+
+    A continuous ramp would invite reading a count of four as "somewhat covered". The
+    counts are integers and the colours are too, so the map has exactly ``n_runs + 1``
+    entries and is driven by ``vmin``/``vmax`` rather than by a ``BoundaryNorm``:
+    Nilearn passes ``vmin``/``vmax`` down to Matplotlib itself, and supplying a norm as
+    well raises "Passing a Normalize instance simultaneously with vmin/vmax is not
+    supported" -- which ``mosaic_figure`` catches per row, so the panel rendered as
+    three empty bands rather than failing outright.
+    """
+    from matplotlib.colors import ListedColormap
+
+    ramp = plt.get_cmap("YlGnBu")
+    # Zero is transparent -- outside every run is outside the picture, not a value.
+    colours = [(0.0, 0.0, 0.0, 0.0)]
+    colours += [ramp(0.25 + 0.72 * (index / max(n_runs - 1, 1))) for index in range(n_runs)]
+    return ListedColormap(colours)
+
+
+def _draw_count_legend(figure: plt.Figure, *, n_runs: int, cmap) -> None:
+    """A discrete key for the run counts, in the band the colourbar would occupy.
+
+    A continuous colourbar cannot label an integer count without inviting the reading
+    that a voxel is fractionally covered, so the key is one swatch per count.
+    """
+    from matplotlib.patches import Patch
+
+    handles = [
+        Patch(facecolor=cmap(index + 1), edgecolor="none", label=f"{index + 1}")
+        for index in range(n_runs)
+    ]
+    figure.legend(
+        handles=handles,
+        title="runs",
+        loc="center right",
+        bbox_to_anchor=(0.995, 0.5),
+        frameon=False,
+        fontsize=7,
+        title_fontsize=7,
+        handlelength=1.1,
+        handleheight=1.1,
+        labelspacing=0.32,
+    )
+
+
 def coverage_figure(
     mask_img: Any,
     *,
@@ -186,6 +279,8 @@ def coverage_figure(
     title: str = "",
     radiological: bool = False,
     n_cuts: int = DEFAULT_CUTS_PER_ROW,
+    contribution_img: Any = None,
+    n_runs: int = 0,
 ) -> plt.Figure:
     """Draw the analysis mask over the background, with its extent stated.
 
@@ -210,6 +305,33 @@ def coverage_figure(
     if voxels == 0:
         raise ValueError(
             "Coverage figure requires a mask with at least one voxel; got no voxels."
+        )
+
+    contributions = (
+        np.asanyarray(contribution_img.dataobj) if contribution_img is not None else None
+    )
+    show_counts = contributions is not None and n_runs > 1
+    count_cmap = _contribution_colormap(int(n_runs)) if show_counts else None
+
+    def draw_counts(figure, rect, direction, cuts):
+        # ``plot_roi`` rather than ``plot_stat_map``: this is a label image, its values
+        # are integers, and plot_roi is the plotter Nilearn documents for one. It also
+        # keeps zero on the colormap's transparent entry instead of thresholding it.
+        plotting.plot_roi(
+            contribution_img,
+            bg_img=bg_img,
+            display_mode=direction,
+            cut_coords=list(cuts),
+            cmap=count_cmap,
+            vmin=0,
+            vmax=int(n_runs),
+            dim=0,
+            black_bg=False,
+            annotate=False,
+            radiological=radiological,
+            colorbar=False,
+            figure=figure,
+            axes=rect,
         )
 
     def draw(figure, rect, direction, cuts):
@@ -250,11 +372,21 @@ def coverage_figure(
         lines.append(extent_note)
     if smoothness_note:
         lines.append(smoothness_note)
+    if show_counts:
+        reached = contributions[contributions > 0]
+        partial = int(np.count_nonzero((contributions > 0) & (contributions < n_runs)))
+        lines.append(
+            f"colour: how many of the {int(n_runs)} runs reach each voxel; "
+            f"{partial:,} voxel(s) reached by some runs and not others"
+        )
+        lines.append(
+            f"{int(np.count_nonzero(reached == n_runs)):,} voxel(s) reached by every run"
+        )
     lines.append("voxels outside this mask were not tested")
 
     with plot_context():
-        return mosaic_figure(
-            draw,
+        figure = mosaic_figure(
+            draw_counts if show_counts else draw,
             reference_img=mask_img,
             mask_img=mask_img,
             n_cuts=n_cuts,
@@ -263,6 +395,9 @@ def coverage_figure(
             colorbar=None,
             provenance=lines,
         )
+        if show_counts:
+            _draw_count_legend(figure, n_runs=int(n_runs), cmap=count_cmap)
+        return figure
 
 
 def smoothness_note(fwhm: Tuple[float, float, float], *, source: str) -> str:

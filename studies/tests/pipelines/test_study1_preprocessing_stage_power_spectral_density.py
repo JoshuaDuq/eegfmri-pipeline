@@ -43,7 +43,7 @@ def test_preprocessing_stage_psd_specification_uses_equal_time_windows(
     assert specification.spectrum.n_overlap == n_overlap
     assert specification.segment_duration_s == 16.384
     assert specification.overlap_fraction == 0.5
-    expected_corrections = 1 if stage in {"raw", "processed"} else 0
+    expected_corrections = 1 if stage == "raw" else 0
     assert len(specification.source_corrections) == expected_corrections
     expected_exclusions = 1 if stage == "raw" else 0
     assert len(specification.source_exclusions) == expected_exclusions

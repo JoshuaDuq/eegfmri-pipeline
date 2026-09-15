@@ -42,6 +42,12 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "variance_threshold": constant_config.get("variance_threshold", 0.0),
         # Preprocessing
         "imputer_strategy": preprocessing_config.get("imputer_strategy", "median"),
+        "max_feature_missingness": float(
+            preprocessing_config.get("max_feature_missingness", 0.05)
+        ),
+        "max_subject_missingness": float(
+            preprocessing_config.get("max_subject_missingness", 0.10)
+        ),
         "power_transformer_method": preprocessing_config.get(
             "power_transformer_method", "yeo-johnson"
         ),

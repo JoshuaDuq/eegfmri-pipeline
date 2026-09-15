@@ -41,6 +41,8 @@ def _base_config(root: Path) -> DotConfig:
             manifest_entries["NPS" if rel_path.startswith("NPS/") else "SIIPS1"] = {
                 "path": rel_path,
                 "space": "MNI152NLin2009cAsym",
+                "source_space": "MNI152NLin2009cAsym",
+                "spatial_reference": "Synthetic fixture created in this template",
                 "source_publication": "test fixture",
                 "source_repository_or_access_record": "test fixture",
                 "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
@@ -84,6 +86,12 @@ def _base_config(root: Path) -> DotConfig:
                     "metric": "dot",
                     "normalization": "none",
                     "round_decimals": 3,
+                    "timing_audit": {
+                        "onset_offset_s": 3.0,
+                        "onset_tolerance_s": 0.010,
+                        "plateau_duration_s": 7.5,
+                        "duration_tolerance_s": 0.010,
+                    },
                     "trials_per_run": 11,
                     "contrast_name": "pain_vs_nonpain",
                     "signature_manifest_path": "signature_manifest.yaml",
@@ -135,6 +143,9 @@ def _events_frame() -> pd.DataFrame:
     )
 
 
+PLATEAU_OFFSET_S = 3.0
+
+
 def _write_signature_outputs(
     root: Path,
     *,
@@ -142,7 +153,15 @@ def _write_signature_outputs(
     include_siips1: bool = True,
     siips1_second_dot=2.2,
     trial_count: int = 2,
+    event_onsets: list[float] | None = None,
 ) -> None:
+    # The loader audits the protocol offset between the EEG trigger and the modeled
+    # plateau, so these rows have to sit where the paired EEG events put them.
+    onsets = (
+        [float(value) + PLATEAU_OFFSET_S for value in event_onsets]
+        if event_onsets is not None
+        else [20.0 + index + PLATEAU_OFFSET_S for index in range(1, trial_count + 1)]
+    )
     sig_dir = (
         root
         / "derivatives"
@@ -163,7 +182,7 @@ def _write_signature_outputs(
             "dot": 1.0 + trial_index / 10.0,
             "n_voxels": 1000,
             "scoring_mask_sha256": NPS_MASK_HASH,
-            "onset": 20.0 + trial_index,
+            "onset": onsets[trial_index - 1],
             "duration": 7.5,
         }
         for trial_index in range(1, trial_count + 1)
@@ -179,7 +198,7 @@ def _write_signature_outputs(
                     "dot": siips1_second_dot if trial_index == 2 else 2.0 + trial_index / 10.0,
                     "n_voxels": 800,
                     "scoring_mask_sha256": SIIPS1_MASK_HASH,
-                    "onset": 20.0 + trial_index,
+                    "onset": onsets[trial_index - 1],
                     "duration": 7.5,
                 }
                 for trial_index in range(1, trial_count + 1)
@@ -218,7 +237,7 @@ def test_prepare_primary_targets_requires_both_primary_signatures() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root, include_siips1=False)
+        _write_signature_outputs(root, include_siips1=False, event_onsets=[22.150, 65.084])
 
         with (
             patch(
@@ -245,7 +264,7 @@ def test_prepare_primary_targets_requires_original_trial_indices() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root)
+        _write_signature_outputs(root, event_onsets=[22.150, 65.084])
         events = _events_frame().drop(columns=["trial_number"])
 
         with (
@@ -339,7 +358,7 @@ def test_prepare_primary_targets_rejects_non_finite_primary_values() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root, include_siips1=True, siips1_second_dot=float("nan"))
+        _write_signature_outputs(root, include_siips1=True, siips1_second_dot=float("nan"), event_onsets=[22.150, 65.084])
 
         with (
             patch(
@@ -366,7 +385,7 @@ def test_prepare_primary_targets_requires_explicit_run_id_column() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root)
+        _write_signature_outputs(root, event_onsets=[10.0, 20.0, 30.0, 40.0])
         events = _events_frame().drop(columns=["run_id"])
 
         with (
@@ -395,7 +414,7 @@ def test_prepare_primary_targets_maps_run_id_to_run_column() -> None:
         root = Path(td)
         cfg = _base_config(root)
         cfg["study1"]["targets"]["trials_per_run"] = 11
-        _write_signature_outputs(root, trial_count=4)
+        _write_signature_outputs(root, trial_count=4, event_onsets=[10.0, 20.0, 30.0, 40.0])
         events = pd.DataFrame(
             {
                 "run_id": [1, 1, 2, 2],
@@ -459,7 +478,7 @@ def test_prepare_primary_targets_passes_common_signature_scoring_mask() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root)
+        _write_signature_outputs(root, event_onsets=[22.150, 65.084])
         scoring_mask = object()
         extraction_calls = []
 
@@ -505,7 +524,7 @@ def test_prepare_primary_targets_writes_wide_primary_table() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root)
+        _write_signature_outputs(root, event_onsets=[22.150, 65.084])
 
         with (
             patch(
@@ -543,7 +562,7 @@ def test_prepare_primary_targets_excludes_events_outside_configured_contrast() -
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root, trial_count=3)
+        _write_signature_outputs(root, trial_count=3, event_onsets=[22.150, 40.0, 65.084])
         events = pd.DataFrame(
             {
                 "run_id": [1, 1, 1],
@@ -583,7 +602,7 @@ def test_prepare_primary_targets_aligns_signatures_by_run() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
-        _write_signature_outputs(root, trial_count=4)
+        _write_signature_outputs(root, trial_count=4, event_onsets=[10.0, 20.0, 30.0, 40.0])
         events = pd.DataFrame(
             {
                 "run_id": [1, 1, 1, 1],
@@ -626,7 +645,7 @@ def test_prepare_primary_targets_records_within_run_trial_number() -> None:
         root = Path(td)
         cfg = _base_config(root)
         cfg["study1"]["targets"]["trials_per_run"] = 11
-        _write_signature_outputs(root, trial_count=4)
+        _write_signature_outputs(root, trial_count=4, event_onsets=[10.0, 20.0, 30.0, 40.0])
         events = pd.DataFrame(
             {
                 "run_id": [1, 1, 2, 2],

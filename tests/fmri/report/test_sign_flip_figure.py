@@ -22,8 +22,8 @@ def _summary(**overrides) -> SignFlipSummary:
     params = dict(
         height=7.02,
         survivors=38,
-        global_p=0.0606,
-        p_floor=0.0606,
+        global_p=0.03125,
+        p_floor=0.03125,
         n_runs=6,
         n_patterns=32,
         observed_max=8.87,
@@ -110,10 +110,13 @@ def test_the_floor_is_named_when_it_binds():
     Provenance lines are joined into a single 6.5pt strip, so a sentence here becomes
     an unreadable ribbon across the figure.
     """
-    figure = sign_flip.sign_flip_figure([8.87, 5.7], summary=_summary())
+    figure = sign_flip.sign_flip_figure(
+        [8.87, 5.7], summary=_summary(global_p=0.125, p_floor=0.0625, n_runs=5)
+    )
     text = _texts(figure).lower()
-    assert "0.061" in text
-    assert "its floor for 6 runs" in text
+    assert "0.125" in text
+    assert "floor 0.062" in text
+    assert "its floor" not in text
     plt.close(figure)
 
 
@@ -160,3 +163,23 @@ def test_nothing_is_scored_against_a_criterion():
 def test_an_empty_null_is_refused():
     with pytest.raises(ValueError, match="at least one enumerated maximum"):
         sign_flip.sign_flip_figure([], summary=_summary())
+
+
+def test_the_familywise_label_sits_clear_of_the_step_curve() -> None:
+    # Anchored below-left of the crossing, the label was drawn straight through the
+    # curve: the ECDF rises toward that corner, so down-left of it is exactly where
+    # the steps are. Above the alpha line is empty until the curve reaches it.
+    summary = _summary(height=5.18, observed_max=6.03)
+    figure = sign_flip.sign_flip_figure(
+        [2.8, 3.2, 3.6, 4.1, 4.7, 5.0, 5.4, 6.03], summary=summary
+    )
+    try:
+        axis = figure.axes[0]
+        label = next(child for child in axis.texts if "familywise" in child.get_text())
+        _x, y = label.get_position()
+        alignment = label.get_va()
+    finally:
+        plt.close(figure)
+
+    assert y >= 0.95, "the label is anchored below the alpha line, over the curve"
+    assert alignment == "bottom"

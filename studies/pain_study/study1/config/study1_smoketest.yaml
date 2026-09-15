@@ -20,6 +20,13 @@ study1:
     method: "lss"
     normalization: "none"
     round_decimals: 3
+    # See machine_learning.fmri_signature.timing_audit: matching trial identifiers alone
+    # cannot show that an EEG trigger row and an fMRI plateau row are the same trial.
+    timing_audit:
+      onset_offset_s: 3.0
+      onset_tolerance_s: 0.010
+      plateau_duration_s: 7.5
+      duration_tolerance_s: 0.010
     trials_per_run: 11
     names: ["NPS", "SIIPS1"]
     signature_manifest_path: "signature_manifest.yaml"

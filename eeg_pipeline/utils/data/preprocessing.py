@@ -623,11 +623,298 @@ def _peripheral_low_gamma_metric(
     )
 
 
+PRECLEAN_ARTIFACT_PROXY_SUFFIX = "desc-preclean_artifactproxy.tsv"
+
+
+def preclean_artifact_proxy_path(
+    *,
+    deriv_root: Path,
+    subject: str,
+    task: str,
+) -> Path:
+    subject_label = subject if str(subject).startswith("sub-") else f"sub-{subject}"
+    return (
+        Path(deriv_root)
+        / "preprocessed"
+        / "eeg"
+        / subject_label
+        / "eeg"
+        / f"{subject_label}_task-{task}_{PRECLEAN_ARTIFACT_PROXY_SUFFIX}"
+    )
+
+
+def _filtered_run_raw_paths(
+    *,
+    deriv_root: Path,
+    subject_label: str,
+    task: str,
+) -> List[Tuple[int, Path]]:
+    eeg_dir = Path(deriv_root) / "preprocessed" / "eeg" / subject_label / "eeg"
+    pattern = f"{subject_label}_task-{task}_run-*_proc-filt_raw.fif"
+    found: List[Tuple[int, Path]] = []
+    for path in sorted(eeg_dir.glob(pattern)):
+        if path.name.startswith("._"):
+            continue
+        match = re.search(r"_run-(\d+)_", path.name)
+        if match is None:
+            continue
+        found.append((int(match.group(1)), path))
+    return sorted(found)
+
+
+def _epoch_filtered_raw_at_events(
+    *,
+    raw: mne.io.BaseRaw,
+    onsets: np.ndarray,
+    tmin: float,
+    tmax: float,
+    run_label: str,
+) -> mne.BaseEpochs:
+    """Epoch a continuous recording at the event onsets themselves.
+
+    Building the events array from the onsets rather than matching annotations keeps the
+    correspondence to the events table exact, so each epoch carries that row's own trial
+    identifiers instead of a position in a list that a dropped marker would shift.
+    """
+    sfreq = float(raw.info["sfreq"])
+    samples = np.rint(np.asarray(onsets, dtype=float) * sfreq).astype(int)
+    first, last = 0, raw.n_times - 1
+    out_of_range = np.flatnonzero(
+        (samples + int(np.floor(tmin * sfreq)) < first) | (samples + int(np.ceil(tmax * sfreq)) > last)
+    )
+    if out_of_range.size:
+        raise ValueError(
+            f"{run_label}: {out_of_range.size} event(s) sit too close to the recording "
+            "edges for the configured epoch bounds; the artifact proxy cannot be measured "
+            "for them."
+        )
+
+    events = np.column_stack(
+        [samples, np.zeros(samples.size, dtype=int), np.ones(samples.size, dtype=int)]
+    )
+    return mne.Epochs(
+        raw,
+        events=events,
+        event_id={"trial": 1},
+        tmin=float(tmin),
+        tmax=float(tmax),
+        baseline=None,
+        preload=True,
+        reject=None,
+        flat=None,
+        reject_by_annotation=False,
+        proj=False,
+        verbose=False,
+    )
+
+
+def _deriv_root_for_epochs(epochs_path: Path, deriv_root: Optional[Path]) -> Path:
+    """Recover the derivatives root the epochs were written under.
+
+    ``preprocessed/eeg/<subject>/eeg`` is the layout every writer here uses, so the root
+    is four levels above the file. An explicit root always wins, because a caller that
+    knows it should not depend on this shape.
+    """
+    if deriv_root is not None:
+        return Path(deriv_root)
+    parents = Path(epochs_path).resolve().parents
+    if len(parents) < 5:
+        raise ValueError(
+            f"Cannot locate the derivatives root from {epochs_path}; pass deriv_root explicitly."
+        )
+    return parents[4]
+
+
+def write_preclean_artifact_proxy(
+    *,
+    subject: str,
+    task: str,
+    bids_root: Path,
+    deriv_root: Path,
+    config: Any,
+    conditions: Optional[List[str]] = None,
+    _logger: Optional[logging.Logger] = None,
+) -> Optional[Path]:
+    """Measure the peripheral artifact proxy on the filtered, uncleaned continuous signal.
+
+    The proxy exists to adjust for muscle and movement artifact independently of EEG
+    cleaning, which means it has to be measured before that cleaning happens. Read off
+    the final epochs it is a different quantity: an interpolated frontal channel carries
+    reconstructed signal rather than the artifact, and ICA and AutoReject have already
+    removed some of what the covariate is meant to quantify.
+
+    The residual cardiac metric stays on the cleaned epochs, where its estimand -- what
+    contamination survived -- actually lives.
+    """
+    log = _logger or logger
+    qc_cfg = CleanEventsQCConfig.from_config(config)
+    if not qc_cfg.enabled or not qc_cfg.peripheral_low_gamma.enabled:
+        return None
+
+    subject_label = subject if str(subject).startswith("sub-") else f"sub-{subject}"
+    run_paths = _filtered_run_raw_paths(
+        deriv_root=Path(deriv_root),
+        subject_label=subject_label,
+        task=task,
+    )
+    if not run_paths:
+        raise FileNotFoundError(
+            "The pre-cleaning artifact proxy requires the filtered continuous recordings "
+            f"(*_proc-filt_raw.fif) for {subject_label}, task-{task}. Run the filter step first."
+        )
+
+    bids_sub_eeg_dir = Path(bids_root) / subject_label / "eeg"
+    if not bids_sub_eeg_dir.exists():
+        raise FileNotFoundError(f"Missing BIDS EEG directory: {bids_sub_eeg_dir}")
+    events = _load_subject_events_for_epochs(bids_sub_eeg_dir, subject_label, task)
+    resolved_conditions = list(conditions) if conditions else None
+    if resolved_conditions:
+        mask, _column = _build_epoch_event_mask(events, resolved_conditions)
+        events = events.loc[mask].copy()
+    events = events.reset_index(drop=True)
+    if events.empty:
+        raise ValueError(
+            f"No events matched conditions={resolved_conditions} for {subject_label}, task-{task}; "
+            "the pre-cleaning artifact proxy has nothing to measure."
+        )
+
+    run_column = "run_id" if "run_id" in events.columns else "run"
+    if run_column not in events.columns or "trial_number" not in events.columns:
+        raise ValueError(
+            "The pre-cleaning artifact proxy needs run and trial_number identifiers in the "
+            f"BIDS events for {subject_label}, task-{task} to survive epoch rejection."
+        )
+
+    tmin = float(get_config_value(config, "epochs.tmin", -7.0))
+    tmax = float(get_config_value(config, "epochs.tmax", 15.0))
+    column = qc_cfg.peripheral_low_gamma.output_column
+
+    frames: List[pd.DataFrame] = []
+    for run_num, raw_path in run_paths:
+        run_events = events.loc[
+            pd.to_numeric(events[run_column], errors="coerce") == float(run_num)
+        ]
+        if run_events.empty:
+            continue
+        raw = mne.io.read_raw_fif(raw_path, preload=True, verbose=False)
+        epochs = _epoch_filtered_raw_at_events(
+            raw=raw,
+            onsets=pd.to_numeric(run_events["onset"], errors="coerce").to_numpy(dtype=float),
+            tmin=tmin,
+            tmax=tmax,
+            run_label=f"{subject_label}, task-{task}, run-{run_num}",
+        )
+        mask = window_mask(
+            np.asarray(epochs.times, dtype=float),
+            qc_cfg.peripheral_low_gamma.window,
+            path="preprocessing.clean_events_qc.peripheral_low_gamma.window",
+        )
+        frames.append(
+            pd.DataFrame(
+                {
+                    "run_id": pd.to_numeric(run_events[run_column], errors="coerce").to_numpy(),
+                    "trial_number": pd.to_numeric(
+                        run_events["trial_number"], errors="coerce"
+                    ).to_numpy(),
+                    "onset": pd.to_numeric(run_events["onset"], errors="coerce").to_numpy(),
+                    column: _peripheral_low_gamma_metric(
+                        epochs=epochs,
+                        channels=qc_cfg.peripheral_low_gamma.channels,
+                        band=qc_cfg.peripheral_low_gamma.band,
+                        mask=mask,
+                    ),
+                }
+            )
+        )
+
+    if not frames:
+        raise ValueError(
+            f"No filtered run matched the events for {subject_label}, task-{task}; the "
+            "pre-cleaning artifact proxy has nothing to measure."
+        )
+
+    table = pd.concat(frames, axis=0, ignore_index=True)
+    out_path = preclean_artifact_proxy_path(
+        deriv_root=Path(deriv_root),
+        subject=subject_label,
+        task=task,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out_path, sep="\t", index=False)
+    log.info("Wrote pre-cleaning artifact proxy (n=%d): %s", len(table), out_path)
+    return out_path
+
+
+def _preclean_artifact_proxy_for_events(
+    *,
+    kept: pd.DataFrame,
+    column: str,
+    proxy_path: Path,
+    context: str,
+) -> np.ndarray:
+    """Align the stored pre-cleaning proxy to the retained events by trial identifier."""
+    if not proxy_path.exists():
+        raise FileNotFoundError(
+            f"{context}: missing the pre-cleaning artifact proxy at {proxy_path}. It is "
+            "measured on the filtered continuous recording, before interpolation, ICA and "
+            "rejection, and cannot be recovered from the clean epochs."
+        )
+    stored = pd.read_csv(proxy_path, sep="\t")
+    missing = sorted({"run_id", "trial_number", column} - set(stored.columns))
+    if missing:
+        raise ValueError(f"{context}: {proxy_path} is missing required columns: {missing}.")
+
+    run_column = "run_id" if "run_id" in kept.columns else "run"
+    if run_column not in kept.columns or "trial_number" not in kept.columns:
+        raise ValueError(
+            f"{context}: retained events carry no run/trial_number identifiers to align the "
+            "pre-cleaning artifact proxy to."
+        )
+
+    keys = pd.MultiIndex.from_arrays(
+        [
+            pd.to_numeric(stored["run_id"], errors="coerce"),
+            pd.to_numeric(stored["trial_number"], errors="coerce"),
+        ]
+    )
+    if keys.has_duplicates:
+        raise ValueError(f"{context}: {proxy_path} carries duplicate (run, trial) identifiers.")
+    lookup = pd.Series(
+        pd.to_numeric(stored[column], errors="coerce").to_numpy(),
+        index=keys,
+    )
+
+    wanted = pd.MultiIndex.from_arrays(
+        [
+            pd.to_numeric(kept[run_column], errors="coerce"),
+            pd.to_numeric(kept["trial_number"], errors="coerce"),
+        ]
+    )
+    unmatched = [key for key in wanted if key not in lookup.index]
+    if unmatched:
+        raise ValueError(
+            f"{context}: {len(unmatched)} retained event(s) have no pre-cleaning artifact "
+            f"proxy row, first {unmatched[:5]}. Missing artifact metrics are not imputed."
+        )
+    return lookup.reindex(wanted).to_numpy(dtype=float)
+
+
 def _compute_clean_events_qc_table(
     *,
     epochs: mne.BaseEpochs,
     qc_cfg: CleanEventsQCConfig,
+    kept: pd.DataFrame,
+    proxy_path: Path,
+    context: str,
 ) -> pd.DataFrame:
+    """Assemble the per-trial QC columns at the stage each metric's estimand lives at.
+
+    Residual cardiac coupling asks what contamination survived cleaning, so it is
+    measured here, on the cleaned epochs. The peripheral artifact proxy asks how much
+    artifact was present independently of cleaning, so it is read back from the
+    pre-cleaning measurement rather than recomputed from epochs that ICA, AutoReject and
+    channel interpolation have already altered.
+    """
     if not qc_cfg.enabled:
         return pd.DataFrame(index=np.arange(len(epochs), dtype=int))
     if not epochs.preload:
@@ -649,16 +936,11 @@ def _compute_clean_events_qc_table(
         )
 
     if qc_cfg.peripheral_low_gamma.enabled:
-        peripheral_mask = window_mask(
-            times,
-            qc_cfg.peripheral_low_gamma.window,
-            path="preprocessing.clean_events_qc.peripheral_low_gamma.window",
-        )
-        out[qc_cfg.peripheral_low_gamma.output_column] = _peripheral_low_gamma_metric(
-            epochs=epochs,
-            channels=qc_cfg.peripheral_low_gamma.channels,
-            band=qc_cfg.peripheral_low_gamma.band,
-            mask=peripheral_mask,
+        out[qc_cfg.peripheral_low_gamma.output_column] = _preclean_artifact_proxy_for_events(
+            kept=kept,
+            column=qc_cfg.peripheral_low_gamma.output_column,
+            proxy_path=proxy_path,
+            context=context,
         )
 
     if out.shape[0] != len(epochs):
@@ -896,6 +1178,7 @@ def write_clean_events_tsv_for_epochs(
     bids_root: Path,
     epochs_path: Path,
     config: Any,
+    deriv_root: Optional[Path] = None,
     conditions: Optional[List[str]] = None,
     overwrite: bool = True,
     after_rejection: bool = True,
@@ -970,7 +1253,17 @@ def write_clean_events_tsv_for_epochs(
 
     kept.insert(0, "trial_id", range(1, len(kept) + 1))
     kept.insert(0, "epoch_index", range(len(kept)))
-    qc_table = _compute_clean_events_qc_table(epochs=epochs, qc_cfg=qc_cfg)
+    qc_table = _compute_clean_events_qc_table(
+        epochs=epochs,
+        qc_cfg=qc_cfg,
+        kept=kept,
+        proxy_path=preclean_artifact_proxy_path(
+            deriv_root=_deriv_root_for_epochs(epochs_path, deriv_root),
+            subject=subject_label,
+            task=task,
+        ),
+        context=f"Clean events QC for {subject_label}, task-{task}",
+    )
     if len(qc_table) != len(kept):
         raise ValueError(
             f"QC table length mismatch for {subject_label}, task-{task}: {len(qc_table)} vs {len(kept)}."

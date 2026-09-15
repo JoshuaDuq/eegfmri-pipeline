@@ -240,3 +240,85 @@ def test_a_binary_mask_gets_no_colour_scale() -> None:
         except Exception:
             pass
     assert mock_plot.call_args.kwargs["colorbar"] is False
+
+
+def _run_img(shape=(12, 12, 12), *, filled: slice, seed: int = 0) -> nib.Nifti1Image:
+    """A single-volume EPI whose signal occupies ``filled`` along x."""
+    rng = np.random.default_rng(seed)
+    data = np.zeros(shape + (4,), dtype=float)
+    data[filled] = 800.0 + rng.normal(0, 5.0, data[filled].shape)
+    return nib.Nifti1Image(data, np.eye(4))
+
+
+def test_run_contribution_counts_how_many_runs_reach_each_voxel() -> None:
+    # The analysis mask is an intersection, so the voxels some runs hold and others do
+    # not are thrown away before the panel is drawn -- and those are exactly the
+    # voxels a coverage panel is consulted for.
+    runs = [
+        _run_img(filled=slice(2, 10), seed=0),
+        _run_img(filled=slice(2, 10), seed=1),
+        _run_img(filled=slice(4, 10), seed=2),
+    ]
+    counts = coverage.run_contribution_map(runs)
+    data = np.asanyarray(counts.dataobj)
+
+    assert data.max() == 3
+    # The band only two runs reach must be distinguishable from the band all three do.
+    assert 0 < data[3, 6, 6] < 3
+    assert data[6, 6, 6] == 3
+
+
+def test_run_contribution_needs_more_than_one_run() -> None:
+    with pytest.raises(ValueError, match="more than one run"):
+        coverage.run_contribution_map([_run_img(filled=slice(2, 10))])
+
+
+def test_the_coverage_panel_draws_the_contribution_map_when_it_is_given_one(
+    caplog,
+) -> None:
+    # Asserting on the strip alone passed over a panel whose every row had failed:
+    # mosaic_figure catches a row that will not render so the other two survive, so a
+    # broken overlay produces an empty picture and a warning, not an exception. The
+    # overlay itself has to be checked.
+    import logging
+
+    runs = [
+        _run_img(filled=slice(2, 10), seed=0),
+        _run_img(filled=slice(4, 10), seed=1),
+    ]
+    counts = coverage.run_contribution_map(runs)
+    binary = nib.Nifti1Image(
+        (np.asanyarray(counts.dataobj) == 2).astype(np.uint8), np.eye(4)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        figure = coverage.coverage_figure(
+            binary,
+            bg_img=binary,
+            contribution_img=counts,
+            n_runs=2,
+            title="Analysis mask",
+        )
+    try:
+        text = " ".join(artist.get_text() for artist in figure.texts)
+        # One image per tile for the underlay, a second for the count overlay.
+        overlays = [axis for axis in figure.axes if len(axis.images) >= 2]
+    finally:
+        plt.close(figure)
+
+    assert "Could not draw" not in caplog.text, caplog.text
+    assert overlays, "the contribution overlay was never drawn"
+    assert "run" in text.lower()
+
+
+def test_a_single_run_falls_back_to_the_plain_mask() -> None:
+    # With one run every modelled voxel is reached by every run, so the count map is
+    # uniform and says nothing the mask does not.
+    mask = nib.Nifti1Image(np.ones((10, 10, 10), dtype=np.uint8), np.eye(4))
+    figure = coverage.coverage_figure(mask, bg_img=mask, contribution_img=None, n_runs=1)
+    try:
+        text = " ".join(artist.get_text() for artist in figure.texts)
+    finally:
+        plt.close(figure)
+
+    assert "how many of the" not in text

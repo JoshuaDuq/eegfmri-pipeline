@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from studies.tests.test_support import DotConfig, validity_figure_test_config
 
@@ -140,7 +141,7 @@ def _event_row(
     rating: float,
 ) -> dict[str, object]:
     return {
-        "run": run,
+        "run_id": run,
         "trial_number": trial_number,
         "stimulus_temp": stimulus_temp,
         "selected_surface": 1,
@@ -320,7 +321,12 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     assert "vas_rating_r" not in target_qc.columns
     assert "siips1_rating_beyond_temperature_nps_r" not in target_qc.columns
     siips1 = target_qc.loc[target_qc["target"] == "SIIPS1"].iloc[0]
-    assert siips1["siips1_intensity_beyond_temperature_nps_r"] > 0.0
+    assert "siips1_intensity_beyond_temperature_nps_r" not in target_qc.columns
+    expected = cohort_validity.loc[
+        (cohort_validity["target"] == "SIIPS1")
+        & (cohort_validity["term"] == "within_scale_intensity"), "mean"
+    ].iloc[0]
+    assert siips1["within_participant_intensity_standardized_beta"] == pytest.approx(expected)
 
 
 def test_report_compares_configured_sensitivity_roots(tmp_path, monkeypatch) -> None:

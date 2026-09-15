@@ -178,7 +178,7 @@ def discover_processed_brainvision_runs(
     candidates = (
         (path, _participant_subject_id(participant_directory))
         for participant_directory in _participant_directories(source_root)
-        for path in (participant_directory / "eeg" / "brainvision_processed_1khz").rglob(
+        for path in (participant_directory / "eeg" / "analyzer_brainvision_processed_1khz").rglob(
             "ThermalPainEEGFMRI*.vhdr"
         )
     )

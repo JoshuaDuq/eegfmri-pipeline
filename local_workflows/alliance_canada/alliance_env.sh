@@ -3,7 +3,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/load_cluster_profile.sh"
 
-export ALLIANCE_TIME="06:00:00"
+export ALLIANCE_TIME="12:00:00"
 export ALLIANCE_CPUS="16"
 
 # Repository and Python environment on the cluster.

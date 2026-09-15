@@ -34,6 +34,7 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
     discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
+    slice_time_ref_from_bold as _slice_time_ref_from_bold,
     prepare_confounds_for_first_level_model as _prepare_confounds_for_first_level_model,
     select_confounds_for_glm as _select_confounds_for_glm,
     select_consistent_run_source,
@@ -1349,7 +1350,12 @@ def fit_first_level_glm(
     # First-level inference requires an explicit fMRIPrep analysis mask.
     mask_img = _load_matching_brain_mask_for_bold(bold_path)
 
-    flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
+    flm = _build_first_level_model(
+        tr=tr,
+        cfg=cfg,
+        mask_img=mask_img,
+        slice_time_ref=_slice_time_ref_from_bold(bold_path, tr=tr),
+    )
 
     flm.fit(bold_path, events=events_df, confounds=confounds, sample_masks=sample_mask)
     _validate_design_matrices(
@@ -1406,6 +1412,32 @@ def _validate_consistent_trs(bold_paths: List[Path]) -> float:
             f"Reference TR={reference_tr:.6f}s; mismatched runs: {formatted}."
         )
     return reference_tr
+
+
+def _validate_consistent_slice_time_refs(bold_paths: List[Path], *, tr: float) -> float:
+    """Return the one slice-timing reference a multi-run model can be given.
+
+    nilearn carries a single ``slice_time_ref`` for every run in a model, so runs whose
+    volumes are timed to different instants cannot share one design; that has to fail
+    rather than silently adopt the first run's reference for all of them.
+    """
+    if not bold_paths:
+        raise ValueError("Cannot validate slice-timing references without any BOLD runs.")
+
+    refs = [_slice_time_ref_from_bold(path, tr=tr) for path in bold_paths]
+    reference = float(refs[0])
+    mismatches = [
+        f"{path.name}={ref:.6f}"
+        for path, ref in zip(bold_paths, refs)
+        if not np.isclose(float(ref), reference, rtol=0.0, atol=1e-6)
+    ]
+    if mismatches:
+        formatted = ", ".join(mismatches)
+        raise ValueError(
+            "All runs included in one multi-run first-level GLM must share the same "
+            f"slice-timing reference. Reference={reference:.6f}; mismatched runs: {formatted}."
+        )
+    return reference
 
 
 def _retained_frame_indices(
@@ -1573,12 +1605,18 @@ def fit_first_level_glm_multi_run(
         valid_confounds_paths.append(confounds_path)
 
     tr = _validate_consistent_trs(valid_bold_paths)
+    slice_time_ref = _validate_consistent_slice_time_refs(valid_bold_paths, tr=tr)
     logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(valid_bold_paths), tr)
 
     # Multi-run first-level inference requires an explicit intersection mask across runs.
     mask_img = _build_intersection_brain_mask(valid_bold_paths)
 
-    flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
+    flm = _build_first_level_model(
+        tr=tr,
+        cfg=cfg,
+        mask_img=mask_img,
+        slice_time_ref=slice_time_ref,
+    )
 
     strategy = (
         str(

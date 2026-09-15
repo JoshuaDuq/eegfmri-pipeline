@@ -307,6 +307,9 @@ def test_run_loso_deep_regression_uses_foldwise_nuisance_residual_targets(tmp_pa
             "categorical_columns": [],
         },
     }
+    # No early-stopping split, so the fold's whole training set fits the nuisance model
+    # and the expected residuals stay readable.
+    cfg["study1"]["deep_regression"]["validation_fraction"] = 0.0
     X = np.ones((6, 1, 3, 10), dtype=float)
     y = np.asarray([100.0, 110.0, 0.0, 10.0, 0.0, 10.0], dtype=float)
     groups = np.asarray(
@@ -496,3 +499,64 @@ def test_run_deep_regression_writes_one_output_per_target_and_preset(tmp_path) -
 
     assert len(outputs) == 4
     assert outputs[0].parts[-3:] == ("NPS", "alpha", "summary.json")
+
+
+def test_deep_preprocessing_excludes_validation_subjects_and_adjusts_siips1(tmp_path) -> None:
+    from studies.pain_study.study1.deep_regression import training
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["targets"]["nuisance_regression"] = {
+        "enabled": True,
+        "continuous_columns": ["pain_binary_coded"],
+        "categorical_columns": [],
+    }
+    cfg["study1"]["deep_regression"]["validation_fraction"] = 0.25
+    rng = np.random.default_rng(310)
+    groups = np.repeat(np.arange(5).astype(str), 12)
+    nps = rng.normal(size=len(groups))
+    pain = np.tile([0.0, 1.0], len(groups) // 2)
+    y = 2.0 * nps + pain + rng.normal(size=len(groups))
+    X = rng.normal(size=(len(groups), 1, 2, 4))
+    meta = pd.DataFrame({"subject_id": groups, "NPS": nps, "pain_binary_coded": pain})
+    captured = []
+
+    def capture_fit(**kwargs):
+        captured.append(kwargs)
+        return np.zeros(len(kwargs["X_test"]))
+
+    def run(values, features):
+        with patch.object(training, "_fit_regressor", side_effect=capture_fit):
+            return training.run_loso_deep_regression(
+                X=features, y=values, groups=groups, meta=meta,
+                target_name="SIIPS1", preset_name="alpha", bands=["alpha"], config=cfg,
+            )
+
+    result = run(y, X)
+    first_fit = captured[0]
+    outer_train = np.flatnonzero(groups != "0")
+    fit_local, validation_local = training._validation_indices(
+        groups[outer_train], seed=11, fraction=0.25,
+    )
+    fit_indices = outer_train[fit_local]
+    validation_indices = outer_train[validation_local]
+    design = np.column_stack([np.ones(len(y)), pain, nps])
+    coefficients = np.linalg.lstsq(design[fit_indices], y[fit_indices], rcond=None)[0]
+    residual = y - design @ coefficients
+    assert result.summary["target_residualization"]["columns"] == ["pain_binary_coded", "NPS"]
+    np.testing.assert_allclose(first_fit["y_train"], residual[fit_indices])
+    np.testing.assert_allclose(first_fit["y_val"], residual[validation_indices])
+    np.testing.assert_allclose(first_fit["X_train"], X[fit_indices])
+    np.testing.assert_allclose(result.predictions.loc[groups == "0", "y_true"], residual[groups == "0"])
+
+    changed_y = y.copy()
+    changed_y[validation_indices] += 100.0
+    changed_X = X.copy()
+    changed_X[validation_indices] += 1000.0
+    captured.clear()
+    changed = run(changed_y, changed_X)
+    np.testing.assert_allclose(captured[0]["y_train"], first_fit["y_train"])
+    np.testing.assert_allclose(captured[0]["X_train"], first_fit["X_train"])
+    np.testing.assert_allclose(
+        changed.predictions.loc[groups == "0", "y_true"],
+        result.predictions.loc[groups == "0", "y_true"],
+    )

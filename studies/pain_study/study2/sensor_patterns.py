@@ -11,18 +11,13 @@ from scipy.stats import pearsonr
 from sklearn.base import clone
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import PowerTransformer
 
-from eeg_pipeline.analysis.machine_learning.config import get_ml_config
 from eeg_pipeline.analysis.machine_learning.orchestration import (
     _apply_fold_feature_harmonization_foldwise,
+    _fit_staged_residual_preprocessor,
 )
 from eeg_pipeline.analysis.machine_learning.preprocessing import (
     transform_feature_names_through_steps,
-)
-from eeg_pipeline.analysis.machine_learning.target_residualization import (
-    _design_matrix,
-    fit_nuisance_model_for_fold,
 )
 from studies.pain_study.study2.haufe import compute_haufe_pattern
 from studies.pain_study.study2.target_retrained_null import Study1ModelContext
@@ -295,38 +290,22 @@ def fit_frozen_study1_fold(
 ) -> FrozenStudy1FoldFit:
     """Refit one frozen Study 1 outer fold and expose its transformed feature space."""
     train_indices, test_indices = context.outer_folds[fold]
-    nuisance = fit_nuisance_model_for_fold(
+    staged = _fit_staged_residual_preprocessor(
+        X=context.X,
         y=context.y,
         meta=context.meta,
-        train_idx=train_indices,
-        test_idx=test_indices,
+        groups=context.groups,
+        rows=train_indices,
         columns=context.target_residualization_columns,
+        config=context.config,
     )
-    ml_config = get_ml_config(context.config)
-    target_transformer = PowerTransformer(
-        method=ml_config.get("power_transformer_method", "yeo-johnson"),
-        standardize=ml_config.get("power_transformer_standardize", True),
+    transformed_target = staged.transform_target(context.y, context.meta, train_indices)
+    nuisance_prediction = staged.nuisance_prediction(context.meta, test_indices)
+    training_matrix = staged.transform_features(
+        context.X, context.meta, train_indices, context.groups
     )
-    transformed_target = target_transformer.fit_transform(
-        nuisance.train_residual.reshape(-1, 1)
-    ).ravel()
-    design_train = _design_matrix(
-        context.meta.iloc[train_indices],
-        context.target_residualization_columns,
-        check_rank=True,
-    )
-    design_test = _design_matrix(
-        context.meta.iloc[test_indices],
-        context.target_residualization_columns,
-        check_rank=False,
-    )
-    feature_coefficients, *_ = np.linalg.lstsq(
-        design_train,
-        context.X[train_indices],
-        rcond=None,
-    )
-    training_matrix = context.X[train_indices] - design_train @ feature_coefficients
-    test_matrix = context.X[test_indices] - design_test @ feature_coefficients
+    test_matrix = staged.transform_features(context.X, context.meta, test_indices, context.groups)
+    supported_names = np.asarray(context.feature_names)[staged.feature_support]
     training_matrix, test_matrix, keep = _apply_fold_feature_harmonization_foldwise(
         training_matrix,
         test_matrix,
@@ -334,7 +313,7 @@ def fit_frozen_study1_fold(
         context.harmonization_mode,
     )
     retained_names = [
-        name for name, retained in zip(context.feature_names, keep, strict=True) if retained
+        name for name, retained in zip(supported_names, keep, strict=True) if retained
     ]
 
     if not isinstance(context.pipe, TransformedTargetRegressor) or not isinstance(
@@ -347,9 +326,7 @@ def fit_frozen_study1_fold(
     estimator.fit(training_matrix, transformed_target)
 
     transformed_prediction = estimator.predict(test_matrix)
-    residual_prediction = target_transformer.inverse_transform(
-        transformed_prediction.reshape(-1, 1)
-    ).ravel()
+    residual_prediction = staged.inverse_transform_target(transformed_prediction)
     transformed_training = estimator[:-1].transform(training_matrix)
     transformed_test = estimator[:-1].transform(test_matrix)
     transformed_names = transform_feature_names_through_steps(estimator.steps[:-1], retained_names)
@@ -365,9 +342,9 @@ def fit_frozen_study1_fold(
         transformed_test=np.asarray(transformed_test, dtype=float),
         transformed_feature_names=tuple(transformed_names),
         coefficients=weights,
-        nuisance_prediction=np.asarray(nuisance.test_prediction, dtype=float),
+        nuisance_prediction=np.asarray(nuisance_prediction, dtype=float),
         residual_prediction=np.asarray(residual_prediction, dtype=float),
-        full_prediction=np.asarray(nuisance.test_prediction + residual_prediction, dtype=float),
+        full_prediction=np.asarray(nuisance_prediction + residual_prediction, dtype=float),
         evaluation_target=np.asarray(context.y[test_indices], dtype=float),
         train_target_mean=float(np.mean(context.y[train_indices])),
         parameters=parameters,

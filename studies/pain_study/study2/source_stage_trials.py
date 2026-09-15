@@ -5,7 +5,56 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.analysis.machine_learning.circular_shift import admissible_circular_shifts
+from eeg_pipeline.analysis.machine_learning.circular_shift import is_permutation_valid_run
+
+
+SOURCE_TRIAL_KEY_COLUMNS = ("subject_id", "run", "trial_id")
+SOURCE_TRIAL_INDEX_COLUMNS = (*SOURCE_TRIAL_KEY_COLUMNS, "source_row")
+
+
+def build_source_trial_index(
+    *,
+    subject_id: str,
+    events: pd.DataFrame,
+    n_source_rows: int,
+) -> pd.DataFrame:
+    """Record which source-power row each retained epoch produced.
+
+    The source estimate for row i comes from epoch i of the same cleaned epochs the
+    events frame describes, so the mapping is positional here and nowhere else. Writing
+    it down means later stages join on the recording's own run and trial identity
+    instead of assuming the two orderings still agree after censoring.
+    """
+    missing = [column for column in ("run", "trial_id") if column not in events.columns]
+    if missing:
+        raise ValueError(
+            f"Study 2 source-trial index for {subject_id} requires event columns: {missing}."
+        )
+    if len(events) != n_source_rows:
+        raise ValueError(
+            f"Study 2 source-trial index for {subject_id} expects one event per source row: "
+            f"events={len(events)}, source_rows={n_source_rows}."
+        )
+    runs = pd.to_numeric(events["run"], errors="coerce")
+    trial_ids = pd.to_numeric(events["trial_id"], errors="coerce")
+    if runs.isna().any() or trial_ids.isna().any():
+        raise ValueError(
+            f"Study 2 source-trial index for {subject_id} requires finite run and trial_id."
+        )
+    index = pd.DataFrame(
+        {
+            "subject_id": str(subject_id),
+            "run": runs.to_numpy(dtype=int),
+            "trial_id": trial_ids.to_numpy(dtype=int),
+            # One-based, matching the source-power row addressing used downstream.
+            "source_row": np.arange(1, n_source_rows + 1, dtype=int),
+        }
+    )
+    if index.duplicated(list(SOURCE_TRIAL_KEY_COLUMNS)).any():
+        raise ValueError(
+            f"Study 2 source-trial index for {subject_id} has duplicate run/trial identities."
+        )
+    return index
 
 
 def permutation_valid_source_runs_with_rows(
@@ -34,10 +83,7 @@ def permutation_valid_source_runs(frame: pd.DataFrame) -> pd.DataFrame:
     working["trial_index"] = trial_indices.to_numpy(dtype=int)
     for _run, run_frame in working.groupby("run", sort=True):
         ordered = run_frame.sort_values("trial_index")
-        admissible = admissible_circular_shifts(
-            ordered["trial_index"].to_numpy(dtype=int),
-        )
-        if admissible:
+        if is_permutation_valid_run(ordered["trial_index"].to_numpy(dtype=int)):
             valid_indices.extend(ordered.index.tolist())
 
     if not valid_indices:
@@ -46,6 +92,9 @@ def permutation_valid_source_runs(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 __all__ = [
+    "SOURCE_TRIAL_INDEX_COLUMNS",
+    "SOURCE_TRIAL_KEY_COLUMNS",
+    "build_source_trial_index",
     "permutation_valid_source_runs",
     "permutation_valid_source_runs_with_rows",
 ]
