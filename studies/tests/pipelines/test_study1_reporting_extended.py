@@ -75,8 +75,13 @@ def _write_feature_summary(
 ) -> None:
     _write_article_inputs(root)
     feature_summary = (
-        root / "feature_benchmark" / partition / target / feature_spec
-        / "model_comparison" / "metrics"
+        root
+        / "feature_benchmark"
+        / partition
+        / target
+        / feature_spec
+        / "model_comparison"
+        / "metrics"
     )
     feature_summary.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -344,8 +349,7 @@ def test_report_holm_corrected_p_values_are_present(tmp_path) -> None:
     assert "p_value_delta_r2_holm" in report.columns
 
     primary_feature = report.loc[
-        (report["lane"] == "feature_benchmark")
-        & (report["analysis_partition"] == "primary")
+        (report["lane"] == "feature_benchmark") & (report["analysis_partition"] == "primary")
     ]
     assert primary_feature["p_value_r2_holm"].notna().any()
     assert primary_feature["p_value_delta_r2_holm"].notna().any()
@@ -561,8 +565,7 @@ def test_report_holm_correction_inflates_p_values(tmp_path) -> None:
     report = pd.read_csv(report_path, sep="\t")
 
     primary = report.loc[
-        (report["lane"] == "feature_benchmark")
-        & (report["analysis_partition"] == "primary")
+        (report["lane"] == "feature_benchmark") & (report["analysis_partition"] == "primary")
     ]
     raw = pd.to_numeric(primary["p_value_r2"], errors="coerce").dropna()
     adjusted = pd.to_numeric(primary["p_value_r2_holm"], errors="coerce").dropna()
@@ -574,6 +577,85 @@ def test_report_holm_correction_inflates_p_values(tmp_path) -> None:
 ###################################################################
 # _validate_complete_primary_outputs
 ###################################################################
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("mean_delta_r2", float("inf")),
+        ("ci_low_delta_r2", -float("inf")),
+        ("p_value_delta_r2", -0.01),
+        ("p_value_delta_r2", 1.01),
+        ("n_perm_completed", 5000.9),
+        ("n_perm_attempted", 5100.9),
+        ("n_invalid_permutations", 100.9),
+        ("n_folds", 4.5),
+        ("n_subjects_included", -1),
+        ("subject_excluded_fraction", 1.1),
+    ],
+)
+def test_primary_report_rejects_invalid_numeric_values(tmp_path, field, value):
+    from studies.pain_study.study1.reporting import (
+        _feature_records,
+        _validate_complete_primary_outputs,
+    )
+
+    cfg = _config(tmp_path)
+    _write_complete_outputs(_study1_root(cfg), cfg)
+    records = _feature_records(cfg)
+    records[0][field] = value
+    with pytest.raises(ValueError, match=field):
+        _validate_complete_primary_outputs(records=records, config=cfg)
+
+
+@pytest.mark.parametrize("invalid_p", [-0.01, 1.01, float("inf"), "invalid", None])
+def test_holm_rejects_invalid_or_partial_p_value_families(invalid_p):
+    from studies.pain_study.study1.reporting import _append_feature_multiplicity
+
+    frame = pd.DataFrame(
+        {
+            "lane": ["feature_benchmark"] * 2,
+            "analysis_partition": ["exploratory"] * 2,
+            "claim_tier": ["exploratory"] * 2,
+            "p_value_delta_r2": [0.01, invalid_p],
+        }
+    )
+    with pytest.raises(ValueError, match="p_value_delta_r2"):
+        _append_feature_multiplicity(frame)
+
+
+def test_holm_preserves_absent_optional_family_and_probability_boundaries():
+    from studies.pain_study.study1.reporting import _append_feature_multiplicity
+
+    frame = pd.DataFrame(
+        {
+            "lane": ["feature_benchmark"] * 2,
+            "analysis_partition": ["exploratory"] * 2,
+            "claim_tier": ["exploratory"] * 2,
+            "p_value_r2": [None, None],
+            "p_value_delta_r2": [0.0, 1.0],
+        }
+    )
+    result = _append_feature_multiplicity(frame)
+    assert result["p_value_r2_holm"].isna().all()
+    assert result["p_value_delta_r2_holm"].tolist() == [0.0, 1.0]
+
+
+@pytest.mark.parametrize(
+    "target,feature,model",
+    [("ROI", "alpha", "ridge"), ("NPS", "broadband", "ridge"), ("NPS", "alpha", "rf")],
+)
+def test_primary_claim_tier_rejects_unprespecified_cells(target, feature, model):
+    from studies.pain_study.study1.reporting import _claim_tier
+
+    with pytest.raises(ValueError, match="prespecified"):
+        _claim_tier(
+            lane="feature_benchmark",
+            partition="primary",
+            target_name=target,
+            feature_spec=feature,
+            model_name=model,
+        )
 
 
 def test_report_does_not_require_deep_regression_outputs(tmp_path) -> None:
@@ -605,9 +687,7 @@ def test_report_includes_exploratory_records(tmp_path) -> None:
     root = _study1_root(cfg)
     _write_complete_outputs(root, cfg)
 
-    _write_feature_summary(
-        root, "NPS", "spectral", partition="exploratory"
-    )
+    _write_feature_summary(root, "NPS", "spectral", partition="exploratory")
 
     report_path = write_study1_report(task="pain", config=cfg)
     report = pd.read_csv(report_path, sep="\t")
@@ -615,6 +695,8 @@ def test_report_includes_exploratory_records(tmp_path) -> None:
     exploratory = report.loc[report["analysis_partition"] == "exploratory"]
     assert len(exploratory) >= 2
     assert set(exploratory["feature_spec"]) == {"spectral"}
+    assert exploratory["p_value_delta_r2_holm"].tolist() == pytest.approx([0.02, 0.02])
+    assert exploratory["p_value_r2_holm"].tolist() == pytest.approx([0.10, 0.10])
 
 
 def test_report_includes_temporal_control_metadata_and_holm_values(tmp_path) -> None:
@@ -702,7 +784,9 @@ def test_report_does_not_treat_anticipatory_prediction_as_null_control_failure(t
 
     assert pd.isna(primary_gate["temporal_negative_controls_passed"])
     assert "interpretation_limitations" not in report.columns
-    assert report.loc[report["target"] == "SIIPS1", "temporal_negative_controls_passed"].isna().all()
+    assert (
+        report.loc[report["target"] == "SIIPS1", "temporal_negative_controls_passed"].isna().all()
+    )
 
 
 def test_report_keeps_temporal_criterion_unassessed_with_plateau_sensitivity(tmp_path) -> None:

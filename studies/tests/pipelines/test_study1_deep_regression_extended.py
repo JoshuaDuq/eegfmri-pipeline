@@ -9,6 +9,67 @@ import pytest
 from studies.tests.test_support import DotConfig
 
 
+def test_feature_standardization_is_invariant_to_eeg_voltage_units() -> None:
+    from studies.pain_study.study1.deep_regression.training import _standardize_train_test
+
+    train = np.arange(24.0).reshape(3, 1, 2, 4)
+    test = train[:1] + 2.0
+    normalized = _standardize_train_test(train, test)
+    normalized_volts = _standardize_train_test(train * 1e-9, test * 1e-9)
+    for expected, actual in zip(normalized, normalized_volts, strict=True):
+        np.testing.assert_allclose(actual, expected, atol=1e-12)
+
+
+def test_early_stopping_restores_best_cpu_weights(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    from studies.pain_study.study1.deep_regression import training
+
+    class ConstantRegressor(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, values):
+            return self.weight.expand(len(values))
+
+    class SteppingOptimizer:
+        def __init__(self, parameters, **kwargs):
+            self.parameter = next(iter(parameters))
+
+        def zero_grad(self, **kwargs):
+            self.parameter.grad = None
+
+        def step(self):
+            with torch.no_grad():
+                self.parameter.add_(1.0)
+
+    monkeypatch.setattr(training, "build_band_regressor", lambda **kwargs: ConstantRegressor())
+    monkeypatch.setattr(torch.optim, "AdamW", SteppingOptimizer)
+    config = DotConfig(
+        {
+            "study1": {
+                "deep_regression": {
+                    "n_epochs": 3,
+                    "patience": 2,
+                    "batch_size": 2,
+                    "use_cuda": False,
+                }
+            }
+        }
+    )
+    prediction = training._fit_regressor(
+        X_train=np.zeros((2, 1, 1, 2)),
+        y_train=np.array([-1.0, 1.0]),
+        X_val=np.zeros((1, 1, 1, 2)),
+        y_val=np.array([1.0]),
+        X_test=np.zeros((1, 1, 1, 2)),
+        config=config,
+        seed=1,
+    )
+    # Epoch one predicts the validation target exactly; later epochs deteriorate.
+    np.testing.assert_allclose(prediction, [1.0])
+
+
 ###################################################################
 # build_band_regressor architecture
 ###################################################################
@@ -221,6 +282,23 @@ def test_deep_regression_time_window_rejects_non_overlapping_range() -> None:
 
     with pytest.raises(ValueError, match="does not overlap"):
         _deep_regression_time_window(epochs, cfg)
+
+
+@pytest.mark.parametrize("window", [[-0.1, 0.5], [0.5, 1.5]])
+def test_deep_regression_rejects_partially_recorded_window(window) -> None:
+    import mne
+    from studies.pain_study.study1.deep_regression.bands import build_band_tensor
+
+    info = mne.create_info(["Cz"], sfreq=100.0, ch_types="eeg")
+    epochs = mne.EpochsArray(np.ones((2, 1, 100)), info, tmin=0.0, verbose=False)
+    config = DotConfig(
+        {
+            "study1": {"deep_regression": {"time_window": window}},
+            "time_frequency_analysis": {"bands": {"alpha": [8.0, 12.9]}},
+        }
+    )
+    with pytest.raises(ValueError, match="fully contained"):
+        build_band_tensor(epochs=epochs, config=config, bands=["alpha"], channels=["Cz"])
 
 
 ###################################################################

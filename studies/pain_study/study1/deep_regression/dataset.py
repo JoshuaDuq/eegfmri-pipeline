@@ -30,7 +30,16 @@ def _subject_eeg_channels(epochs: mne.Epochs) -> list[str]:
 def _trial_key(run_num: float, trial_index: float) -> str | None:
     if not np.isfinite(run_num) or not np.isfinite(trial_index):
         return None
-    return f"{int(run_num)}|{int(round(trial_index))}"
+    if run_num != int(run_num) or trial_index != int(trial_index):
+        raise ValueError("Deep regression run and trial identifiers must be integer-valued.")
+    return f"{int(run_num)}|{int(trial_index)}"
+
+
+def _event_trial_indices(events: pd.DataFrame) -> pd.Series:
+    for column in ("trial_number", "trial_index", "epoch"):
+        if column in events.columns:
+            return pd.to_numeric(events[column], errors="coerce")
+    raise ValueError("Deep regression alignment requires trial identifiers in clean EEG events.")
 
 
 def _time_key(run_num: float, onset: float, duration: float) -> str | None:
@@ -94,22 +103,11 @@ def _alignment_key_data(
         raise ValueError("Clean EEG events must contain a usable 'run' column for deep regression.")
     event_runs = pd.to_numeric(event_runs, errors="coerce")
 
-    event_trial = None
-    if "trial_number" in aligned_events.columns:
-        event_trial = pd.to_numeric(aligned_events["trial_number"], errors="coerce")
-    elif "trial_index" in aligned_events.columns:
-        event_trial = pd.to_numeric(aligned_events["trial_index"], errors="coerce")
-    elif "epoch" in aligned_events.columns:
-        event_trial = pd.to_numeric(aligned_events["epoch"], errors="coerce")
+    event_trial = _event_trial_indices(aligned_events)
 
     target_runs = pd.to_numeric(target_rows["run"], errors="coerce")
     target_trials = pd.to_numeric(target_rows["trial_index"], errors="coerce")
     target_values = pd.to_numeric(target_rows[value_column], errors="coerce")
-
-    if event_trial is None:
-        raise ValueError(
-            "Deep regression alignment requires trial identifiers in clean EEG events."
-        )
 
     target_trial_keys = [
         _trial_key(run_num, trial_index)
@@ -118,6 +116,7 @@ def _alignment_key_data(
             target_trials.to_numpy(dtype=float),
         )
     ]
+    _raise_on_missing_or_duplicate_trial_keys(target_trial_keys, label="target")
     trial_frame = pd.DataFrame({"key": target_trial_keys, "value": target_values})
     trial_lookup = _unique_values_by_key(
         trial_frame,
@@ -153,51 +152,19 @@ def _alignment_key_data(
             pd.to_numeric(target_rows["duration"], errors="coerce").to_numpy(dtype=float),
         )
     ]
-    time_frame = pd.DataFrame({"key": target_time_keys, "value": target_values})
-    time_lookup = _unique_values_by_key(
-        time_frame,
-        key_column="key",
-        value_column="value",
-        label="target time",
-    )
-    time_matches = sum(1 for key in event_time_keys if key is not None and key in time_lookup.index)
-
     if trial_matches == 0:
         raise ValueError(
             f"Deep regression alignment failed for target '{value_column}': no trial-id matches."
         )
 
-    if time_matches > 0:
-        time_y = np.asarray(
-            [
-                float(time_lookup[key]) if key is not None and key in time_lookup.index else np.nan
-                for key in event_time_keys
-            ],
-            dtype=float,
-        )
-        trial_y = np.asarray(
-            [
-                (
-                    float(trial_lookup[key])
-                    if key is not None and key in trial_lookup.index
-                    else np.nan
-                )
-                for key in event_trial_keys
-            ],
-            dtype=float,
-        )
-        time_matched = np.isfinite(time_y)
-        trial_matched = np.isfinite(trial_y)
-        if not np.array_equal(time_matched, time_matched & trial_matched):
+    target_times_by_trial = dict(zip(target_trial_keys, target_time_keys, strict=True))
+    for trial_key, event_time in zip(event_trial_keys, event_time_keys, strict=True):
+        if trial_key not in target_times_by_trial:
+            continue
+        if event_time is None or event_time != target_times_by_trial[trial_key]:
             raise ValueError(
-                "Deep regression temporal audit is ambiguous: onset/duration keys match rows "
-                "that are not matched by trial identifiers."
-            )
-        both_matched = time_matched & trial_matched
-        if np.any(both_matched) and not np.allclose(time_y[both_matched], trial_y[both_matched]):
-            raise ValueError(
-                "Deep regression temporal audit is ambiguous: trial and onset/duration keys "
-                "match different target values."
+                "Deep regression temporal audit failed: onset/duration must match "
+                f"the prepared target row for trial {trial_key}."
             )
 
     return event_trial_keys, trial_lookup
@@ -238,7 +205,6 @@ def _append_target_table_metadata(
         "trial_index",
         "onset",
         "duration",
-        "NPS",
         "SIIPS1",
         target_name,
     }
@@ -310,19 +276,29 @@ def load_band_tensor_matrix(
     target_runs: list[np.ndarray] = []
     groups: list[str] = []
     meta_runs: list[pd.DataFrame] = []
+    reference_times: np.ndarray | None = None
     for subject_id, epochs, aligned_events, target_rows in payloads:
         y = _align_subject_targets(
             aligned_events=aligned_events,
             target_rows=target_rows,
             target_name=resolved_target,
         )
-        tensors = build_band_tensor(
+        tensors, times = build_band_tensor(
             epochs=epochs,
             config=config,
             bands=bands,
             channels=common_channels,
             logger=logger,
         )
+        if reference_times is None:
+            reference_times = times
+        elif times.shape != reference_times.shape or not np.allclose(
+            times, reference_times, rtol=0.0, atol=1e-9
+        ):
+            raise ValueError(
+                "Study 1 deep regression requires a common sampled time axis across "
+                f"participants; {subject_id} differs from {payloads[0][0]}."
+            )
         if not np.all(np.isfinite(y)):
             n_invalid = int((~np.isfinite(y)).sum())
             raise ValueError(
@@ -341,12 +317,7 @@ def load_band_tensor_matrix(
             raise ValueError(
                 "Clean EEG events must contain a usable 'run' column for deep regression."
             )
-        if "trial_number" in aligned_events.columns:
-            trial_index = pd.to_numeric(aligned_events["trial_number"], errors="coerce")
-        elif "trial_index" in aligned_events.columns:
-            trial_index = pd.to_numeric(aligned_events["trial_index"], errors="coerce")
-        else:
-            trial_index = pd.Series(np.arange(1, len(y) + 1), dtype=float)
+        trial_index = _event_trial_indices(aligned_events)
 
         meta = pd.DataFrame(
             {

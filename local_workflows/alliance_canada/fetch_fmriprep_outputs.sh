@@ -79,7 +79,10 @@ ssh \
 
 mkdir -p "${local_derivatives_root}" "${LOCAL_FMRIPREP_OUTPUT_ROOT}"
 
-rsync -avh --progress \
+# --partial keeps the incomplete file when the transfer dies, so a retry resumes
+# instead of restarting. The archive is ~100 GB over a link that drops; without
+# this, an interruption at 84% discards all of it.
+rsync -avh --partial --progress \
     -e "ssh -o ControlPath=${ALLIANCE_SSH_CONTROL_PATH} -o BatchMode=yes" \
     "${ALLIANCE_HOST}:${remote_archive}" \
     "${local_archive}"

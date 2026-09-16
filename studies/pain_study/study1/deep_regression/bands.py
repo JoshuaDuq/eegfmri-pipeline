@@ -49,6 +49,12 @@ def _deep_regression_time_window(epochs: mne.Epochs, config: Any) -> tuple[float
             "study1.deep_regression.time_window does not overlap the clean epoch time axis: "
             f"window=[{start}, {end}], epoch_span=[{epochs.times[0]}, {epochs.times[-1]}]."
         )
+    tolerance = 0.5 / float(epochs.info["sfreq"])
+    if start < epochs.times[0] - tolerance or end > epochs.times[-1] + tolerance:
+        raise ValueError(
+            "study1.deep_regression.time_window must be fully contained in the clean epoch: "
+            f"window=[{start}, {end}], epoch_span=[{epochs.times[0]}, {epochs.times[-1]}]."
+        )
     return start, end
 
 
@@ -59,7 +65,8 @@ def build_band_tensor(
     bands: list[str],
     channels: list[str],
     logger: logging.Logger | None = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return band envelopes and their actual cropped sample times in seconds."""
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -91,7 +98,7 @@ def build_band_tensor(
             band_data.shape[2],
         )
 
-    return np.stack(tensors, axis=1)
+    return np.stack(tensors, axis=1), filtered.times.copy()
 
 
 __all__ = ["build_band_tensor"]

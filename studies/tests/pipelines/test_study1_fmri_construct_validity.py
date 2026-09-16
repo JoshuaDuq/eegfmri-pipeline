@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import warnings
@@ -10,6 +11,20 @@ import pandas as pd
 import pytest
 
 TEMPERATURES = (41.3, 42.3, 43.3, 44.3, 45.3, 46.3)
+
+
+def test_subject_model_rejects_inconsistent_slice_references(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures.fmri_construct_models import _common_slice_time_ref
+
+    runs = []
+    for run_number, start_time in enumerate((0.0, 0.5), start=1):
+        bold_path = tmp_path / f"run-{run_number}_bold.nii.gz"
+        bold_path.with_suffix("").with_suffix(".json").write_text(
+            json.dumps({"SliceTimingCorrected": True, "StartTime": start_time})
+        )
+        runs.append(SimpleNamespace(bold_path=bold_path))
+    with pytest.raises(ValueError, match="one slice-timing reference"):
+        _common_slice_time_ref(runs, tr=1.0)
 
 
 def test_temperature_events_encode_centered_effect_and_nuisance_structure() -> None:
@@ -147,8 +162,11 @@ def test_first_level_settings_use_prespecified_study1_glm() -> None:
     assert settings.max_condition_number == 3000.0
 
 
+@pytest.mark.parametrize("slice_time_ref", [0.0, 0.5])
 def test_fit_subject_effects_recovers_known_temperature_and_rating_signals(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slice_time_ref: float,
 ) -> None:
     import nibabel as nib
     from nilearn.glm.first_level import make_first_level_design_matrix
@@ -179,7 +197,7 @@ def test_fit_subject_effects_recovers_known_temperature_and_rating_signals(
         retained_trials=retained,
     )
     designs = build_subject_designs((run_input,))
-    frame_times = np.arange(160, dtype=float)
+    frame_times = np.arange(160, dtype=float) + slice_time_ref
     regressors: dict[str, np.ndarray] = {}
     for design in designs:
         matrix = make_first_level_design_matrix(
@@ -197,6 +215,21 @@ def test_fit_subject_effects_recovers_known_temperature_and_rating_signals(
     image = nib.Nifti1Image(data.astype(np.float32), affine)
     image.header.set_zooms((1.0, 1.0, 1.0, 1.0))
     nib.save(image, bold_path)
+    bold_path.with_suffix("").with_suffix(".json").write_text(
+        json.dumps(
+            {"RepetitionTime": 1.0, "SliceTimingCorrected": True, "StartTime": slice_time_ref}
+        )
+    )
+    import studies.pain_study.study1.figures.fmri_construct_models as model_module
+
+    original_validate = model_module.validate_design_matrices
+
+    def validate_timed_design(model, **kwargs):
+        for matrix in model.design_matrices_:
+            np.testing.assert_allclose(matrix.index.to_numpy(), frame_times)
+        original_validate(model, **kwargs)
+
+    monkeypatch.setattr(model_module, "validate_design_matrices", validate_timed_design)
 
     settings = replace(
         first_level_settings(load_study1_config()),
@@ -220,6 +253,7 @@ def test_fit_subject_effects_recovers_known_temperature_and_rating_signals(
         "temperature_linear",
         "rating_within_temperature",
     }
+    assert result.design_audit["slice_time_ref"].eq(slice_time_ref).all()
 
 
 def test_group_inference_is_deterministic_and_uses_participants() -> None:

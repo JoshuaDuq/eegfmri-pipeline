@@ -19,6 +19,7 @@ from fmri_pipeline.utils.bold_discovery import (
     build_first_level_model,
     get_tr_from_bold,
     select_confounds_for_glm_from_path,
+    slice_time_ref_from_bold,
     validate_design_matrices,
 )
 from studies.pain_study.study1.figures.fmri_construct_data import (
@@ -116,6 +117,7 @@ def fit_subject_effects(
     subject_id = runs[0].subject_id
     design_by_estimand = _designs_by_estimand(designs, runs=runs, subject_id=subject_id)
     mask_image, repetition_time = _common_mask_and_tr(runs)
+    slice_time_ref = _common_slice_time_ref(runs, tr=repetition_time)
     run_images = [str(run.bold_path) for run in runs]
     confounds, sample_masks = _load_confounds(runs, settings=settings)
 
@@ -131,6 +133,7 @@ def fit_subject_effects(
             tr=repetition_time,
             cfg=settings,
             mask_img=mask_image,
+            slice_time_ref=slice_time_ref,
         )
         with warnings.catch_warnings():
             # SciPy 1.17 on macOS emits spurious matmul warnings while returning a
@@ -291,6 +294,13 @@ def _designs_by_estimand(
     return output
 
 
+def _common_slice_time_ref(runs: Sequence[FmriRunInput], *, tr: float) -> float:
+    references = [slice_time_ref_from_bold(run.bold_path, tr=tr) for run in runs]
+    if not np.allclose(references, references[0], rtol=0.0, atol=1e-6):
+        raise ValueError("Participant fMRI runs must have one slice-timing reference.")
+    return float(references[0])
+
+
 def _common_mask_and_tr(
     runs: Sequence[FmriRunInput],
 ) -> tuple[nib.Nifti1Image, float]:
@@ -412,6 +422,7 @@ def _design_audit(
                 "condition_number": condition_number,
                 "target_efficiency": efficiency,
                 "repetition_time_s": repetition_time,
+                "slice_time_ref": slice_time_ref_from_bold(run.bold_path, tr=repetition_time),
                 "bold_path": str(run.bold_path),
                 "mask_path": str(run.mask_path),
                 "confounds_path": str(run.confounds_path),

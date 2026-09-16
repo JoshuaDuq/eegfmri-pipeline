@@ -2,10 +2,46 @@
 
 from __future__ import annotations
 
+import logging
+
+import nibabel as nib
+import numpy as np
 import pandas as pd
 import pytest
 
 from studies.tests.test_support import DotConfig
+
+
+@pytest.mark.parametrize("onset", [100.0, float("nan")])
+def test_convolved_nuisance_rejects_trial_without_hrf_support(
+    tmp_path, monkeypatch, onset
+) -> None:
+    from fmri_pipeline.analysis import contrast_builder
+    from fmri_pipeline.utils import bold_discovery
+    from studies.pain_study.study1.targets import _compute_convolved_nuisance_columns
+
+    bold_path = tmp_path / "bold.nii.gz"
+    nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 30)), np.eye(4)), bold_path)
+    confounds_path = tmp_path / "confounds.tsv"
+    pd.DataFrame({"framewise_displacement": np.ones(30)}).to_csv(
+        confounds_path, sep="\t", index=False
+    )
+    monkeypatch.setattr(bold_discovery, "discover_fmriprep_preproc_bold", lambda **kw: bold_path)
+    monkeypatch.setattr(bold_discovery, "get_tr_from_bold", lambda path: 1.0)
+    monkeypatch.setattr(bold_discovery, "bold_frame_times", lambda *a, **kw: np.arange(30.0))
+    monkeypatch.setattr(contrast_builder, "discover_confounds", lambda **kw: confounds_path)
+    config = _nuisance_config(continuous=["hrf_weighted_framewise_displacement"])
+    config["study1"]["targets"]["fmriprep_space"] = "MNI152NLin2009cAsym"
+
+    with pytest.raises(ValueError, match="timing|HRF support"):
+        _compute_convolved_nuisance_columns(
+            subject="0001",
+            task="pain",
+            deriv_root=tmp_path,
+            events_df=pd.DataFrame({"run_id": [1], "onset": [onset], "duration": [7.5]}),
+            config=config,
+            logger=logging.getLogger(__name__),
+        )
 
 
 def _nuisance_config(
@@ -28,6 +64,56 @@ def _nuisance_config(
             }
         }
     )
+
+
+def test_frontal_proxy_raster_uses_actual_bold_frame_times(tmp_path, monkeypatch) -> None:
+    from fmri_pipeline.analysis import contrast_builder
+    from fmri_pipeline.utils import bold_discovery
+    from nilearn.glm.first_level.hemodynamic_models import compute_regressor
+    from studies.pain_study.study1.targets import _compute_convolved_nuisance_columns
+
+    bold_path = tmp_path / "bold.nii.gz"
+    nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 40)), np.eye(4)), bold_path)
+    confounds_path = tmp_path / "confounds.tsv"
+    pd.DataFrame({"framewise_displacement": np.zeros(40)}).to_csv(
+        confounds_path, sep="\t", index=False
+    )
+    frame_times = np.arange(40.0) + 0.5
+    monkeypatch.setattr(bold_discovery, "discover_fmriprep_preproc_bold", lambda **kw: bold_path)
+    monkeypatch.setattr(bold_discovery, "get_tr_from_bold", lambda path: 1.0)
+    monkeypatch.setattr(bold_discovery, "bold_frame_times", lambda *a, **kw: frame_times)
+    monkeypatch.setattr(contrast_builder, "discover_confounds", lambda **kw: confounds_path)
+    column = "hrf_weighted_fp1_fp2_high_frequency_power"
+    config = _nuisance_config(continuous=[column])
+    config["study1"]["targets"]["fmriprep_space"] = "MNI152NLin2009cAsym"
+    onset, duration, power = 2.6, 7.5, 4.0
+    events = pd.DataFrame(
+        {
+            "run_id": [1],
+            "onset": [onset],
+            "duration": [duration],
+            "fp1_fp2_high_frequency_power": [power],
+        }
+    )
+    weights, _ = compute_regressor(
+        np.array([[onset], [duration], [1.0]]),
+        "spm",
+        frame_times,
+        con_id="trial",
+        oversampling=50,
+    )
+    active_frames = (frame_times >= onset) & (frame_times < onset + duration)
+    expected = np.sum(weights[:, 0] * active_frames * power) / weights[:, 0].sum()
+
+    result = _compute_convolved_nuisance_columns(
+        subject="0001",
+        task="pain",
+        deriv_root=tmp_path,
+        events_df=events,
+        config=config,
+        logger=logging.getLogger(__name__),
+    )
+    assert result.loc[0, column] == pytest.approx(expected)
 
 
 ###################################################################

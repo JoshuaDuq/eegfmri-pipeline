@@ -49,12 +49,7 @@ FEATURE_MODELS = ("elasticnet", "ridge")
 PRIMARY_GATE_TARGET = "NPS"
 PRIMARY_GATE_FEATURE_SPEC = "alpha_beta_gamma"
 PRIMARY_GATE_MODEL = "elasticnet"
-PRIMARY_REQUIRED_NUMERIC_FIELDS = (
-    "mean_delta_r2",
-    "ci_low_delta_r2",
-    "ci_high_delta_r2",
-    "overall_r2",
-    "p_value_delta_r2",
+PRIMARY_COUNT_FIELDS = (
     "n_perm",
     "n_perm_completed",
     "n_perm_attempted",
@@ -63,6 +58,15 @@ PRIMARY_REQUIRED_NUMERIC_FIELDS = (
     "n_subjects_requested",
     "n_subjects_included",
     "n_subjects_excluded",
+)
+PRIMARY_REQUIRED_NUMERIC_FIELDS = (
+    "mean_r2",
+    "mean_delta_r2",
+    "ci_low_delta_r2",
+    "ci_high_delta_r2",
+    "overall_r2",
+    "p_value_delta_r2",
+    *PRIMARY_COUNT_FIELDS,
     "subject_excluded_fraction",
 )
 INTERPRETATION_DIAGNOSTIC_FIELDS = (
@@ -206,6 +210,15 @@ def _claim_tier(
     model_name: str,
 ) -> str:
     if lane == "feature_benchmark" and partition == "primary":
+        if (
+            target_name not in PRIMARY_SIGNATURES
+            or feature_spec not in PRIMARY_BAND_PRESETS
+            or model_name not in FEATURE_MODELS
+        ):
+            raise ValueError(
+                "Study 1 primary results must use prespecified target/feature/model cells; "
+                f"found {target_name}/{feature_spec}/{model_name}."
+            )
         is_primary_gate = (
             target_name == PRIMARY_GATE_TARGET
             and feature_spec == PRIMARY_GATE_FEATURE_SPEC
@@ -417,11 +430,22 @@ def _validate_complete_primary_outputs(
             continue
         for field in PRIMARY_REQUIRED_NUMERIC_FIELDS:
             value = pd.to_numeric(pd.Series([record.get(field)]), errors="coerce").iloc[0]
-            if pd.isna(value):
+            if not np.isfinite(value):
                 raise ValueError(
-                    "Study 1 primary feature report is missing required numeric field "
+                    "Study 1 primary feature report requires a finite numeric field "
                     f"{field!r} for {'/'.join(key)}."
                 )
+            if field in PRIMARY_COUNT_FIELDS and (value < 0 or value != int(value)):
+                raise ValueError(
+                    f"Study 1 primary count {field!r} must be a non-negative integer "
+                    f"for {'/'.join(key)}."
+                )
+            if field in ("p_value_delta_r2", "subject_excluded_fraction"):
+                if not 0.0 <= value <= 1.0:
+                    raise ValueError(
+                        f"Study 1 primary field {field!r} must be in [0, 1] "
+                        f"for {'/'.join(key)}."
+                    )
         if expected_n_perm is not None:
             completed = int(float(record["n_perm_completed"]))
             if completed != int(expected_n_perm):
@@ -491,6 +515,7 @@ def _append_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
     temporal_control_mask = feature_mask & (
         out["analysis_partition"].astype(str) == TEMPORAL_CONTROL_PARTITION
     )
+    exploratory_mask = feature_mask & (out["analysis_partition"].astype(str) == "exploratory")
     try:
         from statsmodels.stats.multitest import multipletests
     except Exception as exc:
@@ -511,13 +536,14 @@ def _append_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
                 adjusted_column=adjusted_column,
                 multipletests_fn=multipletests,
             )
-        _apply_holm_to_mask(
-            out,
-            mask=temporal_control_mask,
-            raw_column=raw_column,
-            adjusted_column=adjusted_column,
-            multipletests_fn=multipletests,
-        )
+        for mask in (temporal_control_mask, exploratory_mask):
+            _apply_holm_to_mask(
+                out,
+                mask=mask,
+                raw_column=raw_column,
+                adjusted_column=adjusted_column,
+                multipletests_fn=multipletests,
+            )
     return out
 
 
@@ -529,13 +555,18 @@ def _apply_holm_to_mask(
     adjusted_column: str,
     multipletests_fn: Any,
 ) -> None:
-    p_values = pd.to_numeric(frame.loc[mask, raw_column], errors="coerce")
-    valid = p_values.notna()
-    if not valid.any():
+    raw_values = frame.loc[mask, raw_column]
+    if raw_values.isna().all():
         return
-    values = p_values.loc[valid].to_numpy(dtype=float)
+    p_values = pd.to_numeric(raw_values, errors="coerce")
+    values = p_values.to_numpy(dtype=float, na_value=np.nan)
+    if not np.all(np.isfinite(values) & (values >= 0.0) & (values <= 1.0)):
+        raise ValueError(
+            f"Study 1 Holm family {raw_column!r} requires finite p-values in [0, 1] "
+            "for every result; incomplete families cannot be corrected."
+        )
     adjusted = multipletests_fn(values, method="holm")[1]
-    frame.loc[p_values.loc[valid].index, adjusted_column] = adjusted
+    frame.loc[p_values.index, adjusted_column] = adjusted
 
 
 def _write_article_tables(

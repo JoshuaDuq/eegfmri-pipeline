@@ -81,11 +81,49 @@ def _subject_targets(
     return frame
 
 
-def test_load_band_tensor_matrix_builds_subject_grouped_tensor(tmp_path) -> None:
+@pytest.mark.parametrize("sfreq,tmin", [(200.0, 0.0), (100.0, 0.01)])
+def test_load_band_tensor_matrix_rejects_different_time_axes(tmp_path, monkeypatch, sfreq, tmin):
+    from studies.pain_study.study1.deep_regression import dataset
+
+    _, events = _epochs_and_events()
+    first = mne.EpochsArray(
+        np.ones((2, 1, 500)), mne.create_info(["Cz"], 100.0, "eeg"), verbose=False
+    )
+    second = mne.EpochsArray(
+        np.ones((2, 1, 500)),
+        mne.create_info(["Cz"], sfreq, "eeg"),
+        tmin=tmin,
+        verbose=False,
+    )
+    monkeypatch.setattr(dataset, "resolve_primary_subjects", lambda **_: ["sub-0001", "sub-0002"])
+    monkeypatch.setattr(
+        dataset,
+        "load_epochs_for_analysis",
+        lambda subject, *_, **__: (first if subject == "0001" else second, events),
+    )
+    monkeypatch.setattr(
+        dataset,
+        "subject_target_rows",
+        lambda subject_id, **_: _subject_targets(subject_id, "NPS"),
+    )
+    with pytest.raises(ValueError, match="time axis.*sub-0002"):
+        dataset.load_band_tensor_matrix(
+            subjects=["0001", "0002"],
+            task="pain",
+            config=_config(tmp_path),
+            target_name="NPS",
+            bands=["alpha"],
+        )
+
+
+@pytest.mark.parametrize("trial_column", ["trial_number", "epoch"])
+def test_load_band_tensor_matrix_builds_subject_grouped_tensor(tmp_path, trial_column) -> None:
     from studies.pain_study.study1.deep_regression.dataset import load_band_tensor_matrix
 
     cfg = _config(tmp_path)
     epochs, events = _epochs_and_events()
+    events = events.rename(columns={"trial_number": trial_column})
+    events[trial_column] = [2, 5]
 
     with (
         patch(
@@ -99,15 +137,15 @@ def test_load_band_tensor_matrix_builds_subject_grouped_tensor(tmp_path) -> None
         patch(
             "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
             side_effect=[
-                _subject_targets("sub-0001", "NPS"),
-                _subject_targets("sub-0002", "NPS"),
+                _subject_targets("sub-0001", "NPS").assign(trial_index=[2, 5]),
+                _subject_targets("sub-0002", "NPS").assign(trial_index=[2, 5]),
             ],
         ),
         patch(
             "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
             side_effect=[
-                np.ones((2, 2, 3, 10), dtype=float),
-                np.full((2, 2, 3, 10), 2.0, dtype=float),
+                (np.ones((2, 2, 3, 10), dtype=float), epochs.times),
+                (np.full((2, 2, 3, 10), 2.0, dtype=float), epochs.times),
             ],
         ),
     ):
@@ -125,9 +163,43 @@ def test_load_band_tensor_matrix_builds_subject_grouped_tensor(tmp_path) -> None
     assert list(groups) == ["sub-0001", "sub-0001", "sub-0002", "sub-0002"]
     assert channels == ["Cz", "Fz", "Pz"]
     assert list(meta["target_name"]) == ["NPS", "NPS", "NPS", "NPS"]
+    assert list(meta["trial_index"]) == [2, 5, 2, 5]
 
 
-def test_load_band_tensor_matrix_carries_target_table_nuisance_columns(tmp_path) -> None:
+def test_load_band_tensor_matrix_accepts_common_cropped_times(tmp_path, monkeypatch):
+    from studies.pain_study.study1.deep_regression import dataset
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["deep_regression"]["time_window"] = [0.2, 1.5]
+    _, events = _epochs_and_events()
+    epochs = {
+        subject: mne.EpochsArray(
+            np.ones((2, 1, 600)),
+            mne.create_info(["Cz"], 100.0, "eeg"),
+            tmin=tmin,
+            verbose=False,
+        )
+        for subject, tmin in [("0001", -1.0), ("0002", -2.0)]
+    }
+    monkeypatch.setattr(dataset, "resolve_primary_subjects", lambda **_: ["sub-0001", "sub-0002"])
+    monkeypatch.setattr(
+        dataset, "load_epochs_for_analysis", lambda subject, *_, **__: (epochs[subject], events)
+    )
+    monkeypatch.setattr(
+        dataset,
+        "subject_target_rows",
+        lambda subject_id, **_: _subject_targets(subject_id, "NPS"),
+    )
+    tensors, _, _, _, _ = dataset.load_band_tensor_matrix(
+        subjects=["0001", "0002"], task="pain", config=cfg, target_name="NPS", bands=["alpha"]
+    )
+    assert tensors.shape == (4, 1, 1, 131)
+
+
+@pytest.mark.parametrize("target_name", ["NPS", "SIIPS1"])
+def test_load_band_tensor_matrix_carries_target_table_nuisance_columns(
+    tmp_path, target_name
+) -> None:
     from studies.pain_study.study1.deep_regression.dataset import load_band_tensor_matrix
 
     cfg = _config(tmp_path)
@@ -145,26 +217,51 @@ def test_load_band_tensor_matrix_carries_target_table_nuisance_columns(tmp_path)
         patch(
             "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
             side_effect=[
-                _subject_targets("sub-0001", "NPS", nuisance=True),
-                _subject_targets("sub-0002", "NPS", nuisance=True),
+                _subject_targets("sub-0001", target_name, nuisance=True).assign(NPS=[1.0, 2.0]),
+                _subject_targets("sub-0002", target_name, nuisance=True).assign(NPS=[3.0, 4.0]),
             ],
         ),
         patch(
             "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
-            return_value=np.ones((2, 1, 3, 10), dtype=float),
+            return_value=(np.ones((2, 1, 3, 10), dtype=float), epochs.times),
         ),
     ):
         _X, _y, _groups, _channels, meta = load_band_tensor_matrix(
             subjects=["0001", "0002"],
             task="pain",
             config=cfg,
-            target_name="NPS",
+            target_name=target_name,
             bands=["alpha"],
             logger=logging.getLogger(__name__),
         )
 
     assert list(meta["pain_binary_coded"]) == [0, 1, 0, 1]
     assert list(meta["stimulus_temp"]) == [44.0, 46.0, 44.0, 46.0]
+    if target_name == "SIIPS1":
+        assert list(meta["NPS"]) == [1.0, 2.0, 3.0, 4.0]
+
+
+@pytest.mark.parametrize("event_onsets", [[101.0, 102.0], [2.0, 1.0], [1.0, np.nan]])
+def test_deep_target_alignment_checks_timing_by_trial_identity(event_onsets) -> None:
+    from studies.pain_study.study1.deep_regression.dataset import _align_subject_targets
+
+    _, events = _epochs_and_events()
+    events["onset"] = event_onsets
+    targets = _subject_targets("sub-0001", "NPS").assign(NPS=[1.0, 1.0])
+    with pytest.raises(ValueError, match="temporal audit"):
+        _align_subject_targets(aligned_events=events, target_rows=targets, target_name="NPS")
+
+
+@pytest.mark.parametrize("column,value", [("run", 1.2), ("trial_number", 1.2)])
+def test_deep_target_alignment_rejects_fractional_identifiers(column, value) -> None:
+    from studies.pain_study.study1.deep_regression.dataset import _align_subject_targets
+
+    _, events = _epochs_and_events()
+    events[column] = events[column].astype(float)
+    events.loc[0, column] = value
+    targets = _subject_targets("sub-0001", "NPS")
+    with pytest.raises(ValueError, match="integer"):
+        _align_subject_targets(aligned_events=events, target_rows=targets, target_name="NPS")
 
 
 def test_deep_target_alignment_rejects_conflicting_duplicate_keys() -> None:
@@ -220,7 +317,7 @@ def test_load_band_tensor_matrix_rejects_non_finite_targets(tmp_path) -> None:
         ),
         patch(
             "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
-            return_value=np.ones((2, 1, 3, 10), dtype=float),
+            return_value=(np.ones((2, 1, 3, 10), dtype=float), epochs.times),
         ),
     ):
         with pytest.raises(ValueError, match="finite"):
@@ -409,7 +506,7 @@ def test_build_band_tensor_crops_to_configured_deep_time_window(tmp_path) -> Non
         }
     )
 
-    tensor = build_band_tensor(
+    tensor, times = build_band_tensor(
         epochs=epochs,
         config=cfg,
         bands=["alpha"],
@@ -418,6 +515,7 @@ def test_build_band_tensor_crops_to_configured_deep_time_window(tmp_path) -> Non
     )
 
     assert tensor.shape == (1, 1, 1, 4)
+    np.testing.assert_allclose(times, [0.2, 0.3, 0.4, 0.5])
 
 
 def test_build_band_tensor_filters_before_cropping_to_configured_time_window(tmp_path) -> None:
@@ -527,15 +625,23 @@ def test_deep_preprocessing_excludes_validation_subjects_and_adjusts_siips1(tmp_
     def run(values, features):
         with patch.object(training, "_fit_regressor", side_effect=capture_fit):
             return training.run_loso_deep_regression(
-                X=features, y=values, groups=groups, meta=meta,
-                target_name="SIIPS1", preset_name="alpha", bands=["alpha"], config=cfg,
+                X=features,
+                y=values,
+                groups=groups,
+                meta=meta,
+                target_name="SIIPS1",
+                preset_name="alpha",
+                bands=["alpha"],
+                config=cfg,
             )
 
     result = run(y, X)
     first_fit = captured[0]
     outer_train = np.flatnonzero(groups != "0")
     fit_local, validation_local = training._validation_indices(
-        groups[outer_train], seed=11, fraction=0.25,
+        groups[outer_train],
+        seed=11,
+        fraction=0.25,
     )
     fit_indices = outer_train[fit_local]
     validation_indices = outer_train[validation_local]
@@ -546,7 +652,9 @@ def test_deep_preprocessing_excludes_validation_subjects_and_adjusts_siips1(tmp_
     np.testing.assert_allclose(first_fit["y_train"], residual[fit_indices])
     np.testing.assert_allclose(first_fit["y_val"], residual[validation_indices])
     np.testing.assert_allclose(first_fit["X_train"], X[fit_indices])
-    np.testing.assert_allclose(result.predictions.loc[groups == "0", "y_true"], residual[groups == "0"])
+    np.testing.assert_allclose(
+        result.predictions.loc[groups == "0", "y_true"], residual[groups == "0"]
+    )
 
     changed_y = y.copy()
     changed_y[validation_indices] += 100.0

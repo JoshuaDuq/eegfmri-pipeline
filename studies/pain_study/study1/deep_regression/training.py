@@ -88,7 +88,7 @@ def _standardize_train_test(
 ) -> tuple[np.ndarray, np.ndarray]:
     mean = X_train.mean(axis=(0, 3), keepdims=True)
     std = X_train.std(axis=(0, 3), keepdims=True)
-    std = np.where(std < 1e-6, 1.0, std)
+    std = np.where(std == 0.0, 1.0, std)
     return (X_train - mean) / std, (X_test - mean) / std
 
 
@@ -202,7 +202,9 @@ def _fit_regressor(
             val_loss = float(loss_fn(model(X_val_tensor), y_val_tensor).item())
         if val_loss < best_val:
             best_val = val_loss
-            best_state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
+            best_state = {
+                key: value.detach().cpu().clone() for key, value in model.state_dict().items()
+            }
             no_improve = 0
         else:
             no_improve += 1

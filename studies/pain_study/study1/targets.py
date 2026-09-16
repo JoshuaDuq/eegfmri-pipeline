@@ -811,6 +811,11 @@ def _compute_convolved_nuisance_columns(
         return events_df
 
     events_df = events_df.copy()
+    timing = events_df[["onset", "duration"]].apply(pd.to_numeric, errors="coerce")
+    if not np.isfinite(timing.to_numpy()).all() or (timing["duration"] <= 0.0).any():
+        raise ValueError(
+            f"Study 1 nuisance timing requires finite onsets and positive durations for sub-{subject}."
+        )
     logger.info(
         "Subject sub-%s: Calculating HRF-convolved continuous nuisance columns: %s",
         subject,
@@ -898,11 +903,10 @@ def _compute_convolved_nuisance_columns(
                             f"for sub-{subject} trial at onset {row['onset']!r}; "
                             "missing physiological artifact metrics are not imputed."
                         )
-                    onset_idx = int(round(float(row["onset"]) / tr))
-                    dur_idx = int(round(float(row["duration"]) / tr))
-                    raw_values[max(0, onset_idx) : min(n_scans, onset_idx + max(1, dur_idx))] = (
-                        float(raw_pow)
-                    )
+                    onset = float(row["onset"])
+                    end = onset + float(row["duration"])
+                    active_frames = (frame_times >= onset) & (frame_times < end)
+                    raw_values[active_frames] = float(raw_pow)
             else:
                 raise ValueError(f"Unsupported convolved continuous column: {col}")
 
@@ -922,10 +926,16 @@ def _compute_convolved_nuisance_columns(
                 )
                 weights = regressors[:, 0].astype(float, copy=False)
                 weight_sum = float(np.sum(weights))
-                if np.isfinite(weight_sum) and weight_sum > 0:
-                    val = float(np.sum(weights * raw_values) / weight_sum)
-                else:
-                    val = 0.0
+                if (
+                    not np.isfinite(weights).all()
+                    or not np.isfinite(weight_sum)
+                    or weight_sum <= 0.0
+                ):
+                    raise ValueError(
+                        f"Study 1 nuisance trial has no usable HRF support for sub-{subject}, "
+                        f"run-{int(run_num):02d}, onset={onset}, duration={duration}."
+                    )
+                val = float(np.sum(weights * raw_values) / weight_sum)
                 events_df.at[idx, col] = val
 
     return events_df
