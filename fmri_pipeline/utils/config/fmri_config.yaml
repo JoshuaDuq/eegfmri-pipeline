@@ -46,6 +46,9 @@ fmri_preprocessing:
     # Output spaces (standard and subject-specific)
     output_spaces:
       - "MNI152NLin2009cAsym"
+      # NPS and SIIPS1 are distributed on SPM/FSL MNI152 grids, so signature
+      # scoring happens here rather than resampling the published weight maps.
+      - "MNI152NLin6Asym"
       - "T1w"
     
     # Optional: ignore specific modalities (e.g., fieldmaps, slicetiming)
@@ -100,7 +103,9 @@ fmri_preprocessing:
     # Validation options
     skip_bids_validation: false
     stop_on_first_crash: false
-    clean_workdir: true
+    # --clean-workdir wipes the nipype cache at startup, so a job killed at the wall
+    # limit restarts from scratch rather than resuming. Keep the cache.
+    clean_workdir: false
     
     # Additional fMRIPrep arguments (parsed with shlex)
     extra_args: null

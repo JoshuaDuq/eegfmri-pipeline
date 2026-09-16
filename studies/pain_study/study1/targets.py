@@ -420,27 +420,62 @@ def nuisance_regression_enabled(config: Any) -> bool:
     return bool(get_config_value(config, "study1.targets.nuisance_regression.enabled", False))
 
 
+#: Modalities a nuisance covariate can be derived from. Study 1 was written as an
+#: inherently multimodal analysis, so covariate lists were flat and every column was
+#: assumed available. An fMRI-only estimand makes that assumption false: EEG-derived
+#: covariates cannot be computed when no EEG is in scope.
+NUISANCE_MODALITIES = ("fmri", "eeg")
+
+
+def active_nuisance_modalities(config: Any) -> tuple[str, ...]:
+    """Modalities whose nuisance covariates this run can actually compute."""
+    events_source = str(
+        get_config_value(config, "study1.targets.events_source", "clean_eeg")
+    ).strip().lower()
+    return ("fmri",) if events_source == "fmri_bids" else NUISANCE_MODALITIES
+
+
+def _resolve_modality_columns(config: Any, field_name: str) -> tuple[str, ...]:
+    """Resolve a nuisance covariate list, honouring per-modality declarations.
+
+    Accepts either a flat list (legacy: every column is required regardless of the
+    modalities in scope) or a mapping keyed by modality, in which case only the
+    modalities this run can compute contribute columns.
+    """
+    raw_columns = get_config_value(config, field_name, [])
+    if isinstance(raw_columns, dict):
+        unknown = sorted(set(raw_columns) - set(NUISANCE_MODALITIES))
+        if unknown:
+            raise ValueError(
+                f"{field_name} declares unknown modality keys {unknown}; "
+                f"expected any of {list(NUISANCE_MODALITIES)}."
+            )
+        active = active_nuisance_modalities(config)
+        columns: list[str] = []
+        for modality in NUISANCE_MODALITIES:
+            if modality not in active:
+                continue
+            columns.extend(
+                _required_string_tuple(
+                    raw_columns.get(modality, []),
+                    field_name=f"{field_name}.{modality}",
+                )
+            )
+        return tuple(columns)
+    return _required_string_tuple(raw_columns, field_name=field_name)
+
+
 def nuisance_continuous_columns(config: Any) -> tuple[str, ...]:
-    raw_columns = get_config_value(
+    return _resolve_modality_columns(
         config,
         "study1.targets.nuisance_regression.continuous_columns",
-        [],
-    )
-    return _required_string_tuple(
-        raw_columns,
-        field_name="study1.targets.nuisance_regression.continuous_columns",
     )
 
 
 def nuisance_categorical_columns(config: Any) -> tuple[str, ...]:
-    raw_columns = get_config_value(
+    return _resolve_modality_columns(
         config,
         "study1.targets.nuisance_regression.categorical_columns",
-        [],
-    )
-    return _required_string_tuple(
-        raw_columns,
-        field_name="study1.targets.nuisance_regression.categorical_columns",
     )
 
 
@@ -941,6 +976,72 @@ def _compute_convolved_nuisance_columns(
     return events_df
 
 
+def _load_fmri_trial_events(
+    *,
+    subject: str,
+    task: str,
+    config: Any,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """Build a trial-level events table from the fMRI BIDS events.
+
+    The clean EEG events table drops trials rejected by EEG artifact cleaning. That
+    is required when fMRI trials must pair with EEG features, but for an fMRI-only
+    estimand it discards sound BOLD data for a reason unrelated to BOLD quality.
+    This source keeps every acquired trial.
+
+    fMRI events are phase-level (fixation, ramp_up/plateau/ramp_down, question,
+    rating). One row per trial is taken at the stimulation ramp-up onset, which is
+    the same instant the clean EEG table anchors on via the thermode trigger.
+    """
+    bids_fmri_root = resolve_fmri_bids_root(config, task_is_rest=False)
+    subject_label = subject if subject.startswith("sub-") else f"sub-{subject}"
+    func_dir = Path(bids_fmri_root) / subject_label / "func"
+    paths = sorted(
+        path
+        for path in func_dir.glob(f"{subject_label}_task-{task}_run-*events.tsv")
+        if not path.name.startswith("._")
+    )
+    if not paths:
+        raise FileNotFoundError(
+            f"No fMRI BIDS events.tsv found for {subject_label}, task-{task}: {func_dir}"
+        )
+
+    frames = [pd.read_csv(path, sep="\t") for path in paths]
+    events_df = pd.concat(frames, ignore_index=True)
+    for column in ("trial_type", "stim_phase", "run_id", "trial_number"):
+        if column not in events_df.columns:
+            raise ValueError(
+                f"fMRI BIDS events for {subject_label} lack required column {column!r}."
+            )
+
+    anchors = events_df.loc[
+        (events_df["trial_type"].astype(str) == "stimulation")
+        & (events_df["stim_phase"].astype(str) == "ramp_up")
+    ].copy()
+    if anchors.empty:
+        raise ValueError(
+            f"No stimulation ramp-up onsets in fMRI BIDS events for {subject_label}; "
+            "cannot anchor trial-level targets."
+        )
+
+    duplicated = anchors.duplicated(subset=["run_id", "trial_number"]).sum()
+    if duplicated:
+        raise ValueError(
+            f"fMRI BIDS events for {subject_label} give {duplicated} duplicate "
+            "run/trial anchors; expected exactly one ramp-up onset per trial."
+        )
+
+    anchors = anchors.sort_values(["run_id", "trial_number"]).reset_index(drop=True)
+    logger.info(
+        "Subject %s: sourcing %d trial-level events from fMRI BIDS (all acquired "
+        "trials; no EEG artifact rejection applied).",
+        subject_label,
+        len(anchors),
+    )
+    return anchors
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -949,10 +1050,24 @@ def _subject_target_rows(
     deriv_root: Path,
     logger: logging.Logger,
 ) -> pd.DataFrame:
-    events_df = load_events_df(subject, task, config=config, prefer_clean=True)
+    events_source = str(
+        get_config_value(config, "study1.targets.events_source", "clean_eeg")
+    ).strip().lower()
+    if events_source not in {"clean_eeg", "fmri_bids"}:
+        raise ValueError(
+            "study1.targets.events_source must be 'clean_eeg' or 'fmri_bids'; "
+            f"got {events_source!r}."
+        )
+
+    if events_source == "fmri_bids":
+        events_df = _load_fmri_trial_events(
+            subject=subject, task=task, config=config, logger=logger
+        )
+    else:
+        events_df = load_events_df(subject, task, config=config, prefer_clean=True)
     if events_df is None or events_df.empty:
         raise FileNotFoundError(
-            f"Clean events.tsv not found (or empty) for sub-{subject}, task-{task}."
+            f"No {events_source} events found (or empty) for sub-{subject}, task-{task}."
         )
     events_df = events_df.reset_index(drop=True)
     events_df = _filter_events_to_configured_contrast(

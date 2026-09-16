@@ -1,0 +1,42 @@
+# Input to studies/pain_study/study1/signature_manifest.py.
+#
+#   python -m studies.pain_study.study1.signature_manifest \
+#     /Volumes/KINGSTON/EEG_fMRI_data/external \
+#     /Volumes/KINGSTON/EEG_fMRI_data/external/signature_manifest.yaml \
+#     --provenance studies/pain_study/study1/config/signature_provenance.yaml
+#
+# Both files are the unmodified CANlab distributions, on SPM/FSL MNI152 grids
+# (NPS 61x73x61 @ 3 mm; SIIPS1 79x95x68 @ 2 mm). They are declared in that native
+# space rather than resampled, and the BOLD data is brought to them by adding
+# MNI152NLin6Asym to the fMRIPrep output spaces. Because space == source_space
+# there is no registration to record: no transform block is present, and none is
+# claimed. The previous manifest declared both maps MNI152NLin2009cAsym with no
+# source_space, an assertion that was never established.
+signatures:
+  - name: NPS
+    path: NPS/weights_NSF_grouppred_cvpcr.nii.gz
+    space: MNI152NLin6Asym
+    source_space: MNI152NLin6Asym
+    spatial_reference: >-
+      CANlab Neuroimaging_Pattern_Masks distribution of the Wager et al. 2013
+      NPS weights, supplied on the SPM/FSL MNI152 grid (ICBM152 6th-generation
+      nonlinear asymmetric, TemplateFlow MNI152NLin6Asym). File delivered
+      unmodified; no resampling or registration has been applied.
+    source_publication: Wager et al. 2013, Neurologic Pain Signature
+    source_repository_or_access_record: >-
+      CANlab Neuroimaging_Pattern_Masks, weights_NSF_grouppred_cvpcr.nii.gz,
+      held locally at KINGSTON/EEG_fMRI_data/external/NPS
+  - name: SIIPS1
+    path: SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz
+    space: MNI152NLin6Asym
+    source_space: MNI152NLin6Asym
+    spatial_reference: >-
+      CANlab Neuroimaging_Pattern_Masks distribution of the Woo et al. 2017
+      SIIPS1 weights, supplied on the SPM/FSL MNI152 grid (ICBM152 6th-generation
+      nonlinear asymmetric, TemplateFlow MNI152NLin6Asym). File delivered
+      unmodified; no resampling or registration has been applied.
+    source_publication: Woo et al. 2017, SIIPS1
+    source_repository_or_access_record: >-
+      CANlab Neuroimaging_Pattern_Masks,
+      nonnoc_v11_4_137subjmap_weighted_mean.nii.gz, held locally at
+      KINGSTON/EEG_fMRI_data/external/SIIPS1

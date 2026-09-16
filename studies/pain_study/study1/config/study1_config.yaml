@@ -38,12 +38,14 @@ study1:
     signature_provenance:
       NPS:
         path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
-        space: "MNI152NLin2009cAsym"
+        space: "MNI152NLin6Asym"
       SIIPS1:
         path: "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
-        space: "MNI152NLin2009cAsym"
+        space: "MNI152NLin6Asym"
     input_source: "fmriprep"
-    fmriprep_space: "MNI152NLin2009cAsym"
+    # The CANlab NPS/SIIPS1 weights are distributed on SPM/FSL MNI152 grids, so
+    # scoring happens in that space and the published maps are used unmodified.
+    fmriprep_space: "MNI152NLin6Asym"
     require_fmriprep: true
     condition_a_column: "pain_binary_coded"
     condition_a_value: "1"
@@ -66,17 +68,24 @@ study1:
     lss_other_regressors: "all"
     nuisance_regression:
       enabled: true
+      # Declared per source modality. A multimodal run (events_source: clean_eeg)
+      # uses both blocks; an fMRI-only run (events_source: fmri_bids) uses the fmri
+      # block alone, because EEG-derived covariates cannot be computed without EEG.
+      # A flat list is still accepted and means "every column, always required".
       continuous_columns:
-        - "run"
-        - "onset"
-        - "within_run_trial"
-        - "hrf_weighted_framewise_displacement"
-        - "hrf_weighted_std_dvars"
-        - "hrf_weighted_fp1_fp2_high_frequency_power"
-        - "residual_ecg_coupling"
+        fmri:
+          - "run"
+          - "onset"
+          - "within_run_trial"
+          - "hrf_weighted_framewise_displacement"
+          - "hrf_weighted_std_dvars"
+        eeg:
+          - "hrf_weighted_fp1_fp2_high_frequency_power"
+          - "residual_ecg_coupling"
       categorical_columns:
-        - "stimulus_temp"
-        - "selected_surface"
+        fmri:
+          - "stimulus_temp"
+          - "selected_surface"
   feature_benchmark:
     n_perm: 5000
     inner_splits: 5

@@ -7,6 +7,10 @@ from studies.pain_study.eeg_coupling.config.eeg_bold_coupling_loader import (
     load_eeg_bold_coupling_config,
 )
 
+from studies.pain_study.study1.targets import (
+    nuisance_categorical_columns,
+    nuisance_continuous_columns,
+)
 from studies.tests.test_support import REPO_ROOT
 
 LEVEL2_CONTINUOUS_COLUMNS = [
@@ -66,5 +70,8 @@ def test_study1_production_target_and_inference_settings_are_prespecified() -> N
     assert targets["confounds_strategy"] == "motion24"
     assert targets["smoothing_fwhm"] == 6.0
     assert int(config["study1"]["feature_benchmark"]["n_perm"]) > 0
-    assert targets["nuisance_regression"]["continuous_columns"] == LEVEL2_CONTINUOUS_COLUMNS
-    assert targets["nuisance_regression"]["categorical_columns"] == LEVEL2_CATEGORICAL_COLUMNS
+    # Nuisance covariates are declared per source modality. Assert the resolved set
+    # rather than the raw shape: the prespecified Level 2 model is what must not
+    # drift, and a multimodal run must still resolve to exactly these columns.
+    assert list(nuisance_continuous_columns(config)) == LEVEL2_CONTINUOUS_COLUMNS
+    assert list(nuisance_categorical_columns(config)) == LEVEL2_CATEGORICAL_COLUMNS

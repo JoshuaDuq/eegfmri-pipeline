@@ -44,4 +44,4 @@ export SIGNATURE_ROOT="${ALLIANCE_PROJECT_ROOT}/external"
 export FMRIPREP_TASK_ID="thermalactive"
 
 # Optional output spaces. Keep these aligned with downstream analysis configs.
-export FMRIPREP_OUTPUT_SPACES="MNI152NLin2009cAsym T1w"
+export FMRIPREP_OUTPUT_SPACES="MNI152NLin2009cAsym MNI152NLin6Asym T1w"
