@@ -12,6 +12,9 @@ def test_study1_workflow_uses_tracked_scripts() -> None:
         "cell_array.sh",
         "report.sh",
         "submit.sh",
+        # fMRI-only targets stage. Deliberately separate from prepare.sh, which also
+        # runs prepare-features and so requires clean EEG epochs for every subject.
+        "prepare_targets_fmri.sh",
     }
 
     assert {path.name for path in STUDY1_ROOT.glob("*.sh")} == expected

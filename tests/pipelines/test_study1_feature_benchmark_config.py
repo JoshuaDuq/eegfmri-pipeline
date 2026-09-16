@@ -9,6 +9,10 @@ from studies.pain_study.study1.feature_benchmark import (
     feature_benchmark_config,
 )
 from studies.pain_study.study1.reporting import PRIMARY_GATE_FEATURE_SPEC
+from studies.pain_study.study1.targets import (
+    nuisance_categorical_columns,
+    nuisance_continuous_columns,
+)
 from studies.pain_study.scanner_contamination import (
     SCANNER_CLEAN_GAMMA_BANDS,
     SCANNER_CLEAN_GAMMA_RANGES_HZ,
@@ -38,8 +42,11 @@ def test_study1_default_residualization_matches_level2_estimand() -> None:
     nuisance = config["study1"]["targets"]["nuisance_regression"]
 
     assert nuisance["enabled"] is True
-    assert nuisance["continuous_columns"] == LEVEL2_CONTINUOUS_COLUMNS
-    assert nuisance["categorical_columns"] == LEVEL2_CATEGORICAL_COLUMNS
+    # Covariates are declared per source modality. Assert the resolved set: the
+    # prespecified Level 2 model is what must not drift, and a multimodal run must
+    # still resolve to exactly these columns.
+    assert list(nuisance_continuous_columns(config)) == LEVEL2_CONTINUOUS_COLUMNS
+    assert list(nuisance_categorical_columns(config)) == LEVEL2_CATEGORICAL_COLUMNS
 
 
 def test_study1_default_subject_minimum_supports_inner_group_kfold() -> None:
